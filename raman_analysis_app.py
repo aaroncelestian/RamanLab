@@ -370,7 +370,7 @@ class RamanAnalysisApp:
 
 
     def update_hey_classification_database(self):
-        """Update Hey Classification for all entries in the database."""
+        """Update Hey Classification and additional metadata for all entries in the database."""
         if not self.raman.database:
             messagebox.showinfo("Database", "The database is empty.")
             return
@@ -389,11 +389,11 @@ class RamanAnalysisApp:
         
         # Create progress window
         progress_window = tk.Toplevel(self.root)
-        progress_window.title("Updating Hey Classification")
+        progress_window.title("Updating Hey Classification and Metadata")
         progress_window.geometry("500x350")
         
         # Create progress bar
-        ttk.Label(progress_window, text="Updating Hey Classification for database entries...").pack(pady=10)
+        ttk.Label(progress_window, text="Updating Hey Classification and metadata for database entries...").pack(pady=10)
         progress = ttk.Progressbar(progress_window, length=400, mode="determinate")
         progress.pack(pady=10)
         
@@ -427,6 +427,16 @@ class RamanAnalysisApp:
         already_had = 0
         not_found = 0
         
+        # Track additional metadata fields for stats
+        metadata_fields_updated = {
+            "HEY CLASSIFICATION": 0,
+            "STRUCTURAL GROUPNAME": 0,
+            "CRYSTAL SYSTEM": 0,
+            "SPACE GROUP": 0,
+            "OLDEST KNOWN AGE (MA)": 0, 
+            "PARAGENETIC MODE": 0
+        }
+        
         # Update function for progress
         def update_progress(current, name, status, log_message=None, tag="info"):
             progress["value"] = current
@@ -456,12 +466,13 @@ class RamanAnalysisApp:
             
             metadata = data['metadata']
             
-            # Check if Hey Classification already exists
+            # Check if Hey Classification already exists - we'll still add other metadata
+            had_hey_class = False
             if 'HEY CLASSIFICATION' in metadata and metadata['HEY CLASSIFICATION']:
+                had_hey_class = True
                 already_had += 1
                 update_progress(i, name, f"Processing {name}", 
-                              f"Skipped {name}: Already has Hey Classification '{metadata['HEY CLASSIFICATION']}'", "info")
-                continue
+                              f"Note: {name} already has Hey Classification '{metadata['HEY CLASSIFICATION']}'", "info")
             
             # Try to find mineral name using different strategies
             mineral_name = None
@@ -492,23 +503,46 @@ class RamanAnalysisApp:
                               f"Skipped {name}: No mineral name in metadata and could not extract from name", "warning")
                 continue
             
-            # Try to match using the new advanced matching function
-            matched_name, hey_class = self.raman.match_mineral_name(mineral_name)
+            # Try to match using the advanced matching function
+            matched_name, matched_metadata = self.raman.match_mineral_name(mineral_name)
             
-            if hey_class:
-                # Update the metadata with Hey Classification
-                metadata['HEY CLASSIFICATION'] = hey_class
-                updated += 1
-                update_progress(i, name, f"Processing {name}", 
-                              f"Updated {name}: Added Hey Classification '{hey_class}' (matched with '{matched_name}')", "success")
+            if matched_metadata:
+                # Track which fields were updated
+                fields_updated = []
+                
+                # Update all available metadata fields
+                for field, value in matched_metadata.items():
+                    # Skip if the field already exists and has a value (except for HEY CLASSIFICATION if updating all)
+                    if field in metadata and metadata[field] and (field != 'HEY CLASSIFICATION' or had_hey_class):
+                        continue
+                        
+                    # Update the field
+                    metadata[field] = value
+                    fields_updated.append(field)
+                    metadata_fields_updated[field] = metadata_fields_updated.get(field, 0) + 1
+                
+                if fields_updated:
+                    updated += 1
+                    update_progress(i, name, f"Processing {name}", 
+                                  f"Updated {name}: Added fields {', '.join(fields_updated)} (matched with '{matched_name}')", 
+                                  "success")
+                else:
+                    update_progress(i, name, f"Processing {name}", 
+                                  f"No new metadata fields to update for {name}", "info")
             else:
                 not_found += 1
                 update_progress(i, name, f"Processing {name}", 
-                              f"Could not find Hey Classification for '{mineral_name}'", "error")
+                              f"Could not find Hey Classification data for '{mineral_name}'", "error")
         
         # Final progress update
         update_progress(total, "", "Complete", 
-                      f"Update complete! Updated: {updated}, Already had: {already_had}, Not found: {not_found}", "info")
+                      f"Update complete! Updated: {updated}, Already had Hey Classification: {already_had}, Not found: {not_found}", "info")
+        
+        # Show breakdown of fields updated
+        log_text.insert(tk.END, "\nMetadata fields updated:\n", "info")
+        for field, count in metadata_fields_updated.items():
+            if count > 0:
+                log_text.insert(tk.END, f"  - {field}: {count} entries\n", "info")
         
         # Save the database
         saved = self.raman.save_database()
@@ -1162,14 +1196,14 @@ class RamanAnalysisApp:
         peak_frame = ttk.LabelFrame(parent, text="Peak-Based Search Filter", padding=10)
         peak_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(peak_frame, text="Search by specific peak positions:").pack(anchor=tk.W)
+        ttk.Label(peak_frame, text="Search by specific peak positions (strict matching):").pack(anchor=tk.W)
         self.var_peak_positions = tk.StringVar()
         ttk.Entry(peak_frame, textvariable=self.var_peak_positions).pack(fill=tk.X, pady=2)
         
         # Fix for the font parameter issue - Create the label first, then pack it separately
         hint_label = ttk.Label(
             peak_frame,
-            text="Format: comma-separated values (e.g., 1050, 1350)",
+            text="Format: comma-separated values (e.g., 1050, 1350). Results must contain ALL specified peaks.",
             font=('TkDefaultFont', 8) # Apply font during creation
         )
         hint_label.pack(anchor=tk.W) # Pack separately
@@ -1177,6 +1211,13 @@ class RamanAnalysisApp:
         ttk.Label(peak_frame, text="Peak Tolerance (cm⁻¹):").pack(anchor=tk.W)
         self.var_peak_tolerance = tk.StringVar(value="10")
         ttk.Entry(peak_frame, textvariable=self.var_peak_tolerance).pack(fill=tk.X, pady=2)
+        
+        tolerance_hint = ttk.Label(
+            peak_frame,
+            text="Tolerance defines how close a database peak must be to match a specified peak position.",
+            font=('TkDefaultFont', 8)
+        )
+        tolerance_hint.pack(anchor=tk.W)
 
         # Category filtering frame
         filter_frame = ttk.LabelFrame(parent, text="Metadata Filter Options", padding=10)
@@ -1196,11 +1237,24 @@ class RamanAnalysisApp:
         # Update both dropdown options
         self.update_metadata_filter_options()
 
+        # Scoring threshold
+        threshold_frame = ttk.Frame(parent)
+        threshold_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(threshold_frame, text="Correlation Threshold:").pack(side=tk.LEFT)
+        self.var_adv_corr_threshold = tk.StringVar(value="0.7")
+        ttk.Entry(threshold_frame, textvariable=self.var_adv_corr_threshold, width=8).pack(side=tk.LEFT, padx=5)
+        
+        threshold_hint = ttk.Label(
+            threshold_frame,
+            text="Used as secondary score after peak matching",
+            font=('TkDefaultFont', 8)
+        )
+        threshold_hint.pack(side=tk.LEFT, padx=5)
+
         # Advanced search button
         ttk.Button(parent, text="Advanced Search", command=self.advanced_search_match).pack(fill=tk.X, pady=5)
-        
-        
-    
+
     def update_metadata_filter_options(self):
         """Update chemical family and Hey Classification combobox options from database metadata."""
         # Chemical Family options
@@ -1332,8 +1386,9 @@ class RamanAnalysisApp:
             self.update_plot()
             self.update_metadata_display()
             
-            # Show success message
-            messagebox.showinfo("Success", "Spectrum imported successfully!")
+            # Update status in title bar instead of showing a dialog
+            filename = os.path.basename(file_path)
+            self.root.title(f"ClaritySpectra: Raman Spectrum Analysis - {filename}")
             
         except Exception as e:
             # Show error message if import fails
@@ -1401,7 +1456,9 @@ class RamanAnalysisApp:
                 messagebox.showerror("Error", "Failed to save spectrum.")
                 return
             
-            messagebox.showinfo("Success", "Spectrum saved successfully.")
+            # Update title bar with success message instead of showing a dialog
+            filename = os.path.basename(file_path)
+            self.root.title(f"ClaritySpectra: Raman Spectrum Analysis - {filename} saved")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save spectrum: {str(e)}")
@@ -1424,10 +1481,16 @@ class RamanAnalysisApp:
             # Subtract background
             corrected, baseline = self.raman.subtract_background(lam=lam, p=p)
 
-            # Update plot
-            self.update_plot(include_background=True, include_peaks=self.var_show_peaks.get()) # Keep peak display status
+            # Ensure background display is off by default
+            self.var_show_background.set(False)
+            
+            # Update plot without showing background, respecting current peak display setting
+            self.update_plot(include_background=False, include_peaks=self.var_show_peaks.get())
 
-            messagebox.showinfo("Success", "Background subtracted successfully.")
+            # Update status in title bar instead of showing a dialog
+            current_title = self.root.title()
+            if " - Background Subtracted" not in current_title:
+                self.root.title(f"{current_title} - Background Subtracted")
 
         except Exception as e:
             messagebox.showerror("Background Subtraction Error", str(e))
@@ -1486,7 +1549,10 @@ class RamanAnalysisApp:
             self.var_show_peaks.set(True)  # Turn on peak display
             self.update_plot(include_background=self.var_show_background.get(), include_peaks=True)
 
-            messagebox.showinfo("Success", f"Found {len(peaks['indices'])} peaks.")
+            # Update title bar with peak count instead of showing dialog
+            current_title = self.root.title()
+            base_title = current_title.split(" - ")[0]  # Get the base title without additional info
+            self.root.title(f"{base_title} - {len(peaks['indices'])} Peaks Detected")
 
         except Exception as e:
             messagebox.showerror("Peak Finding Error", str(e))
@@ -1516,7 +1582,9 @@ class RamanAnalysisApp:
             success = self.raman.add_to_database(name) # metadata is already in self.raman.metadata
 
             if success:
-                messagebox.showinfo("Success", f"'{name}' added/updated in database.")
+                # Update title bar with success message instead of showing dialog
+                self.root.title(f"ClaritySpectra: Raman Spectrum Analysis - '{name}' added to database")
+                
                 # Update database statistics if tab exists
                 if hasattr(self, 'db_stats_text'):
                     self.update_database_stats()
@@ -1976,7 +2044,7 @@ class RamanAnalysisApp:
             try:
                 # Basic params (still used for limiting results)
                 n_matches = int(self.var_n_matches.get())
-                threshold = float(self.var_corr_threshold.get())
+                threshold = float(self.var_adv_corr_threshold.get() if hasattr(self, 'var_adv_corr_threshold') else self.var_corr_threshold.get())
     
                 # Advanced Filters
                 peak_positions = []
@@ -1998,6 +2066,12 @@ class RamanAnalysisApp:
     
                 chemical_family = self.var_chemical_family.get().strip() or None # None if empty
                 hey_classification = self.var_hey_classification.get().strip() or None # None if empty
+    
+                # Show a message to indicate search criteria
+                if peak_positions:
+                    messagebox.showinfo("Search Criteria", 
+                                       f"Searching for spectra that contain ALL specified peaks: {', '.join([str(p) for p in peak_positions])}\n" +
+                                       f"With tolerance: ±{peak_tolerance} cm⁻¹")
     
                 # Perform filtered search
                 matches = self._filtered_search(
@@ -2275,9 +2349,28 @@ class RamanAnalysisApp:
         query_max = np.max(query_spectrum)
         query_norm = (query_spectrum - query_min) / (query_max - query_min) if (query_max > query_min) else query_spectrum
     
+        # If peak positions are provided, check if the query spectrum has peaks detected
+        peak_based_search = len(peak_positions) > 0
+        if peak_based_search:
+            # If doing peak-based search, ensure we have peaks in the query
+            if self.raman.peaks is None or 'wavenumbers' not in self.raman.peaks:
+                try:
+                    self.find_peaks()
+                except:
+                    pass
+                
+            # If we still don't have peaks, inform the user
+            if self.raman.peaks is None or 'wavenumbers' not in self.raman.peaks:
+                messagebox.showinfo("Peak Search", "No peaks found in query spectrum. Using correlation-based search instead.")
+                peak_based_search = False
     
+        # Track matches that meet the criteria for strict peak matching
+        peak_matches = []
+        
         for name, data in self.raman.database.items():
             db_meta = data.get('metadata', {})
+            match_score = 0.0  # Default score
+            peak_match_ratio = 0.0  # For peak-based searches
     
             # 1. Apply Chemical Family Filter
             if chemical_family:
@@ -2285,40 +2378,39 @@ class RamanAnalysisApp:
                 if not db_family or db_family.lower() != chemical_family.lower():
                     continue # Skip if family doesn't match
             
-            # 2. Apply Hey Classification Filter (new)
+            # 2. Apply Hey Classification Filter
             if hey_classification:
                 db_hey_class = db_meta.get('HEY CLASSIFICATION')
                 if not db_hey_class or db_hey_class.lower() != hey_classification.lower():
                     continue # Skip if Hey Classification doesn't match
     
-            # 3. Apply Peak Position Filter
-            if peak_positions:
+            # 3. Apply Peak Position Filter - this is now the primary search criteria when peak_positions are provided
+            if peak_based_search:
                 db_peak_data = data.get('peaks')
                 # Ensure database entry has peaks calculated
                 if not db_peak_data or db_peak_data.get('wavenumbers') is None:
-                    # Option 1: Skip this entry
-                     continue
-                else:
-                    db_peaks_wavenumbers = db_peak_data['wavenumbers']
-                    if not db_peaks_wavenumbers.size:
-                         continue # Skip if no peaks
+                    continue  # Skip this entry if no peaks are available
+                
+                db_peaks_wavenumbers = db_peak_data['wavenumbers']
+                if not db_peaks_wavenumbers.size:
+                    continue  # Skip if no peaks
     
-                # Check if *all* specified query peaks have a match within tolerance
-                all_query_peaks_match = True
+                # Count how many of the specified query peaks have a match within tolerance
+                matched_peaks = 0
                 for query_peak_pos in peak_positions:
-                    has_match = False
                     for db_peak_wn in db_peaks_wavenumbers:
                         if abs(query_peak_pos - db_peak_wn) <= peak_tolerance:
-                            has_match = True
+                            matched_peaks += 1
                             break
-                    if not has_match:
-                        all_query_peaks_match = False
-                        break # No need to check further for this db entry
     
-                if not all_query_peaks_match:
-                    continue # Skip if not all query peaks matched
+                # Calculate peak match ratio (how many specified peaks were found)
+                peak_match_ratio = matched_peaks / len(peak_positions)
+                
+                # Skip if not all peaks match when strict match is required
+                if peak_match_ratio < 1.0:
+                    continue  # Skip if any peak doesn't match
     
-            # 4. Calculate Score (e.g., Correlation) for filtered items
+            # 4. Calculate Correlation Score for filtered items
             # If an entry passes all filters, calculate its similarity score
             db_intensities = data['intensities']
             db_wavenumbers = data['wavenumbers']
@@ -2340,12 +2432,20 @@ class RamanAnalysisApp:
                  if np.isnan(corr_coef): corr_coef = 0.0
             except Exception: corr_coef = 0.0
     
-            # Use the correlation score, potentially combined with filter match quality later
-            # For now, just use correlation if it passes filters
-            if corr_coef >= threshold: # Apply threshold to the score
-                matches.append((name, corr_coef))
+            # For peak-based search, use a combined score that weights peak matching heavily
+            if peak_based_search:
+                # Weight: 80% peak matching, 20% correlation
+                match_score = 0.8 * peak_match_ratio + 0.2 * corr_coef
+            else:
+                # Regular correlation-based score
+                match_score = corr_coef
     
-        # Matches list now contains items that passed all filters AND the similarity threshold
+            # Add to matches if it meets the threshold
+            if match_score >= threshold:
+                matches.append((name, match_score))
+    
+        # Sort matches by score (descending)
+        matches.sort(key=lambda x: x[1], reverse=True)
         return matches
 
     # --- Results Display and Reporting ---
@@ -2384,270 +2484,420 @@ class RamanAnalysisApp:
         
 
     def display_search_results(self, matches):
-        """Display search results in a comprehensive window."""
+        """Display search results with comparison plots and correlation heatmap."""
         if not matches:
             messagebox.showinfo("Search Results", "No matches found.")
             return
 
-        # Create a new window
-        result_window = tk.Toplevel(self.root)
-        result_window.title("Search Results")
-        result_window.geometry("950x700")  # Adjusted size
+        # Create a new window for results
+        results_window = tk.Toplevel(self.root)
+        results_window.title("Search Results")
+        results_window.geometry("1200x800")
 
-        # --- Main Layout ---
-        main_frame = ttk.Frame(result_window, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Create main container
+        main_container = ttk.Frame(results_window)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Paned window for resizable panels
-        paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
+        # Create left panel for results list
+        left_panel = ttk.Frame(main_container)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Left Panel: Match List
-        left_frame = ttk.Frame(paned_window, padding=(0, 0, 5, 0))
-        paned_window.add(left_frame, weight=1)
+        # Create listbox for matches
+        matches_frame = ttk.LabelFrame(left_panel, text="Matches", padding=5)
+        matches_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Right Panel: Visualization/Report Tabs
-        right_frame = ttk.Frame(paned_window, padding=(5, 0, 0, 0))
-        paned_window.add(right_frame, weight=3)
+        # Add scrollbar to matches list
+        scrollbar = ttk.Scrollbar(matches_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # --- Left Panel Content (Match List using Treeview) ---
-        match_frame = ttk.LabelFrame(left_frame, text="Matching Compounds", padding=10)
-        match_frame.pack(fill=tk.BOTH, expand=True)
+        # Changed from MULTIPLE to BROWSE for single selection mode
+        self.matches_listbox = tk.Listbox(matches_frame, yscrollcommand=scrollbar.set, selectmode=tk.BROWSE)
+        self.matches_listbox.pack(fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.matches_listbox.yview)
 
-        match_columns = ('#0', 'rank', 'name', 'score', 'confidence')
-        match_tree = ttk.Treeview(match_frame, columns=match_columns[1:], show='headings', height=20)
+        # Populate listbox with matches
+        for match in matches:
+            if isinstance(match, tuple):
+                # Handle tuple format (name, score)
+                name, score = match
+                self.matches_listbox.insert(tk.END, f"{name} (Score: {score:.2f})")
+            elif isinstance(match, dict):
+                # Handle dictionary format
+                self.matches_listbox.insert(tk.END, f"{match['name']} (Score: {match['score']:.2f})")
+            else:
+                # Handle string format
+                self.matches_listbox.insert(tk.END, str(match))
 
-        # Define headings
-        match_tree.heading('rank', text='Rank')
-        match_tree.heading('name', text='Name/ID')
-        match_tree.heading('score', text='Score')
-        match_tree.heading('confidence', text='Confidence')
-
-        # Configure column widths
-        match_tree.column('rank', width=40, anchor=tk.CENTER, stretch=tk.NO)
-        match_tree.column('name', width=180, anchor=tk.W)
-        match_tree.column('score', width=80, anchor=tk.CENTER)
-        match_tree.column('confidence', width=100, anchor=tk.W)
-
-        # Add scrollbar
-        match_scrollbar = ttk.Scrollbar(match_frame, orient=tk.VERTICAL, command=match_tree.yview)
-        match_tree.configure(yscrollcommand=match_scrollbar.set)
-        match_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        match_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Populate Treeview
-        for i, (name, score) in enumerate(matches):
-            confidence = self.get_confidence_level(score)
-            # Use 'name' (dict key) as the item ID (iid)
-            match_tree.insert('', tk.END, iid=name, values=(i + 1, name, f"{score:.4f}", confidence))
-
-        # --- Right Panel Content (Tabs) ---
-        notebook = ttk.Notebook(right_frame)
-        notebook.pack(fill=tk.BOTH, expand=True)
-
-        # Import necessary modules here rather than at the top level
-        from matplotlib.figure import Figure
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-
-        # Tab 1: Spectral Comparison
-        comparison_tab = ttk.Frame(notebook, padding=5)
-        notebook.add(comparison_tab, text="Spectral Comparison")
-
-        # Create a frame to properly contain the canvas with fixed dimensions
-        canvas_container = ttk.Frame(comparison_tab)
-        canvas_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Create the comparison figure in a way that we'll completely recreate for each plot
-        fig_comp = Figure(figsize=(6, 4), dpi=100)
-        fig_comp._original_dims = (6, 4)  # Store original dimensions
-        canvas_comp = FigureCanvasTkAgg(fig_comp, master=canvas_container)
-        canvas_widget = canvas_comp.get_tk_widget()
-        canvas_widget.pack(fill=tk.BOTH, expand=True)
+        # Create separate listbox for spectra to overlay
+        overlay_frame = ttk.LabelFrame(left_panel, text="Overlay Selection", padding=5)
+        overlay_frame.pack(fill=tk.X, pady=5)
         
-        # Add toolbar for the comparison plot
-        toolbar_frame_comp = ttk.Frame(canvas_container)
-        toolbar_frame_comp.pack(fill=tk.X)
-        toolbar_comp = NavigationToolbar2Tk(canvas_comp, toolbar_frame_comp)
-        toolbar_comp.update()
+        self.overlay_listbox = tk.Listbox(overlay_frame, height=5, selectmode=tk.MULTIPLE)
+        self.overlay_listbox.pack(fill=tk.X, expand=True, side=tk.LEFT)
+        
+        overlay_scrollbar = ttk.Scrollbar(overlay_frame, orient=tk.VERTICAL, command=self.overlay_listbox.yview)
+        overlay_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.overlay_listbox.config(yscrollcommand=overlay_scrollbar.set)
+        
+        # Add buttons for overlay management
+        button_frame = ttk.Frame(left_panel)
+        button_frame.pack(fill=tk.X, pady=5)
+        
+        add_button = ttk.Button(button_frame, text="Add to Overlay", 
+                              command=self.add_selected_to_overlay)
+        add_button.pack(side=tk.LEFT, padx=5)
+        
+        remove_button = ttk.Button(button_frame, text="Remove from Overlay", 
+                                 command=self.remove_from_overlay)
+        remove_button.pack(side=tk.LEFT, padx=5)
+        
+        overlay_button = ttk.Button(button_frame, text="Overlay Selected", 
+                                  command=self.overlay_from_selection)
+        overlay_button.pack(side=tk.RIGHT, padx=5)
 
-        # Tab 2: Correlation Analysis
-        correlation_tab = ttk.Frame(notebook, padding=5)
-        notebook.add(correlation_tab, text="Correlation Analysis")
+        # Add Report Generation Frame
+        report_frame = ttk.LabelFrame(left_panel, text="Reports", padding=5)
+        report_frame.pack(fill=tk.X, pady=5)
         
-        # Correlation heatmap - create Figure directly
-        fig_corr = Figure(figsize=(6, 4))
-        fig_corr._original_dims = (6, 4)  # Store original dimensions
-        canvas_corr = FigureCanvasTkAgg(fig_corr, master=correlation_tab)
-        canvas_corr.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=(0,5))
+        # Create text widget for report preview
+        report_text_frame = ttk.Frame(report_frame)
+        report_text_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Add toolbar for correlation plot
-        toolbar_frame_corr = ttk.Frame(correlation_tab)
-        toolbar_frame_corr.pack(fill=tk.X)
-        toolbar_corr = NavigationToolbar2Tk(canvas_corr, toolbar_frame_corr)
-        toolbar_corr.update()
+        self.report_text = tk.Text(report_text_frame, height=8, width=30, wrap=tk.WORD)
+        report_text_scrollbar = ttk.Scrollbar(report_text_frame, orient=tk.VERTICAL, command=self.report_text.yview)
+        report_text_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.report_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.report_text.config(yscrollcommand=report_text_scrollbar.set, state=tk.DISABLED)
+        
+        # Add report buttons
+        report_buttons_frame = ttk.Frame(report_frame)
+        report_buttons_frame.pack(fill=tk.X, pady=5)
+        
+        # Button to generate the report
+        generate_report_button = ttk.Button(report_buttons_frame, text="Generate Report", 
+                                        command=lambda: self.generate_match_report(matches, self.report_text))
+        generate_report_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Export buttons frame
+        export_frame = ttk.LabelFrame(report_frame, text="Export As", padding=5)
+        export_frame.pack(fill=tk.X, pady=5)
+        
+        # Add export buttons
+        pdf_button = ttk.Button(export_frame, text="PDF", 
+                             command=lambda: self.export_report_as_pdf(self.report_text.get(1.0, tk.END)))
+        pdf_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        txt_button = ttk.Button(export_frame, text="TXT", 
+                             command=lambda: self.export_report_as_txt(self.report_text.get(1.0, tk.END)))
+        txt_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        csv_button = ttk.Button(export_frame, text="CSV", 
+                             command=lambda: self.export_results_as_csv(matches))
+        csv_button.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
-        # Tab 3: Report
-        report_tab = ttk.Frame(notebook, padding=5)
-        notebook.add(report_tab, text="Report")
-        report_text_frame = ttk.Frame(report_tab)
-        report_text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
-        report_text = tk.Text(report_text_frame, wrap=tk.WORD, height=20)
-        report_scrollbar = ttk.Scrollbar(report_text_frame, orient=tk.VERTICAL, command=report_text.yview)
-        report_text.config(yscrollcommand=report_scrollbar.set)
-        report_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        report_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Add export buttons for the report
-        button_frame = ttk.Frame(report_tab)
-        button_frame.pack(fill=tk.X, pady=(5, 0))
-        ttk.Button(button_frame, text="Export as PDF", 
-                  command=lambda: self.export_report_as_pdf(report_text.get(1.0, tk.END))).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Export as Text", 
-                  command=lambda: self.export_report_as_txt(report_text.get(1.0, tk.END))).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Export as CSV", 
-                  command=lambda: self.export_results_as_csv(matches)).pack(side=tk.LEFT, padx=5)
-        
-        
-        def redraw_plots(fig_comp, fig_corr, canvas_comp, canvas_corr):
-            # Store current figure sizes
-            comp_size = fig_comp.get_size_inches()
-            corr_size = fig_corr.get_size_inches()
-            
-            # Temporarily resize (by a small amount) and then resize back
-            # This triggers a complete redraw
-            fig_comp.set_size_inches(comp_size[0] * 1.01, comp_size[1] * 1.01)
-            canvas_comp.draw()
-            fig_comp.set_size_inches(comp_size[0], comp_size[1])
-            canvas_comp.draw()
-            
-            fig_corr.set_size_inches(corr_size[0] * 1.01, corr_size[1] * 1.01)
-            canvas_corr.draw()
-            fig_corr.set_size_inches(corr_size[0], corr_size[1])
-            canvas_corr.draw()
-        
-        
-        # --- Interaction Logic ---
-        def create_comparison_plot(match_data):
-            """Create a comparison plot between the query spectrum and selected match."""
-            nonlocal fig_comp, canvas_comp
-            
-            # Clear the existing figure
-            fig_comp.clear()
-            
-            # Create a fresh subplot
-            ax_comp = fig_comp.add_subplot(111)
-            
-            # Plot data using the helper method
-            self.plot_comparison_data(match_data, fig_comp, ax_comp)
-            
-            # Force a complete redraw
-            redraw_plots(fig_comp, fig_corr, canvas_comp, canvas_corr)
-            
-            # Temporarily resize the container to force a complete refresh
-            current_width = canvas_container.winfo_width()
-            current_height = canvas_container.winfo_height()
-            canvas_container.configure(width=current_width + 1, height=current_height + 1)
-            canvas_container.update_idletasks()
-            canvas_container.configure(width=current_width, height=current_height)
-        
-        def create_correlation_heatmap(match_data):
-            """Create a correlation heatmap for the selected match."""
-            nonlocal fig_corr, canvas_corr
-            
-            # Clear the existing figure
-            fig_corr.clear()
-            
-            # Create a fresh subplot
-            ax_corr = fig_corr.add_subplot(111)
-            
-            # Plot data using the helper method
-            self.plot_correlation_data(match_data, fig_corr, ax_corr)
-            
-            # Force a complete redraw
-            redraw_plots(fig_comp, fig_corr, canvas_comp, canvas_corr)
-            
-            # Temporarily resize the container to force a complete refresh
-            current_width = canvas_container.winfo_width()
-            current_height = canvas_container.winfo_height()
-            canvas_container.configure(width=current_width + 1, height=current_height + 1)
-            canvas_container.update_idletasks()
-            canvas_container.configure(width=current_width, height=current_height)
-        
-        def generate_match_report(match_data):
-            """Generate a report for the selected match."""
-            # Clear existing report
-            report_text.config(state=tk.NORMAL)
-            report_text.delete(1.0, tk.END)
-            
-            # Generate the report for just this match
-            self.generate_match_report([match_data], report_text)
-            
-        def on_match_select(event=None):
-            """Handle the selection of a match from the search results."""
-            # Get selected item from tree
-            selected_items = match_tree.selection()
-            if not selected_items:
-                return
-            
-            # Get the match data
-            item_id = selected_items[0]
-            item_data = match_tree.item(item_id)
-            match_name = item_id  # The item ID is the match name
-            match_score = float(item_data['values'][2])  # Score is the third column
-            
-            # Create match data tuple
-            match_data = (match_name, match_score)
-            
-            # Update the plots and report
-            create_comparison_plot(match_data)
-            create_correlation_heatmap(match_data)
-            generate_match_report(match_data)
-            
-        # Bind the selection event
-        match_tree.bind('<<TreeviewSelect>>', on_match_select)
+        # Create right panel for plots
+        right_panel = ttk.Frame(main_container)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # --- Initial Display ---
-        if matches:
-            first_item_iid = matches[0][0]
-            match_tree.selection_set(first_item_iid)
-            match_tree.focus(first_item_iid)
-            on_match_select()
+        # Create comparison plot
+        comparison_frame = ttk.LabelFrame(right_panel, text="Comparison Plot", padding=5)
+        comparison_frame.pack(fill=tk.BOTH, expand=True)
+
+        fig_comp = plt.figure(figsize=(6, 4))
+        canvas_comp = FigureCanvasTkAgg(fig_comp, master=comparison_frame)
+        canvas_comp.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Create correlation heatmap
+        heatmap_frame = ttk.LabelFrame(right_panel, text="Correlation Heatmap", padding=5)
+        heatmap_frame.pack(fill=tk.BOTH, expand=True)
+
+        fig_corr = plt.figure(figsize=(6, 4))
+        canvas_corr = FigureCanvasTkAgg(fig_corr, master=heatmap_frame)
+        canvas_corr.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Store references to figures and canvases
+        self.results_figures = {
+            'comparison': fig_comp,
+            'correlation': fig_corr,
+            'canvas_comp': canvas_comp,
+            'canvas_corr': canvas_corr
+        }
+
+        # Bind selection event
+        self.matches_listbox.bind('<<ListboxSelect>>', self.on_match_select)
+
+        # Automatically select the first match
+        if self.matches_listbox.size() > 0:
+            self.matches_listbox.selection_set(0)
+            self.matches_listbox.see(0)
+            self.on_match_select()  # Manually trigger the selection event
+            
+            # Generate report automatically for the first time
+            self.generate_match_report(matches, self.report_text)
+
+    def add_selected_to_overlay(self):
+        """Add the selected match to the overlay list."""
+        selected_index = self.matches_listbox.curselection()
+        if not selected_index:
+            return
+        
+        match_text = self.matches_listbox.get(selected_index[0])
+        if match_text not in self.overlay_listbox.get(0, tk.END):
+            self.overlay_listbox.insert(tk.END, match_text)
+    
+    def remove_from_overlay(self):
+        """Remove selected items from the overlay list."""
+        selected_indices = self.overlay_listbox.curselection()
+        if not selected_indices:
+            return
+        
+        # Remove in reverse order to avoid index shifting issues
+        for index in sorted(selected_indices, reverse=True):
+            self.overlay_listbox.delete(index)
+    
+    def overlay_from_selection(self):
+        """Create overlay based on the overlay selection listbox."""
+        if self.overlay_listbox.size() == 0:
+            messagebox.showinfo("Overlay", "Please add spectra to overlay first.")
+            return
+        
+        # Create new figure with all selected spectra
+        if not hasattr(self, 'raman') or self.raman.current_spectra is None:
+            messagebox.showerror("Error", "No spectrum loaded to overlay with.")
+            return
+        
+        # Create overlay window
+        self.create_overlay_window([i for i in range(self.overlay_listbox.size())], from_overlay_list=True)
+        
+    def create_overlay_window(self, selected_indices, from_overlay_list=False):
+        """Create an overlay window with selected spectra."""
+        if not hasattr(self, 'raman') or self.raman.current_spectra is None:
+            messagebox.showerror("Error", "No spectrum loaded to overlay with.")
+            return
+        
+        # Create overlay window
+        overlay_window = tk.Toplevel(self.root)
+        overlay_window.title("Spectra Overlay")
+        overlay_window.geometry("1000x800")
+
+        # Create main container
+        main_container = ttk.Frame(overlay_window)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Create control panel
+        control_frame = ttk.LabelFrame(main_container, text="Controls", padding=5)
+        control_frame.pack(fill=tk.X, pady=5)
+
+        # Add transparency control
+        ttk.Label(control_frame, text="Transparency:").pack(side=tk.LEFT, padx=5)
+        transparency_var = tk.DoubleVar(value=0.7)
+        transparency_scale = ttk.Scale(control_frame, from_=0.1, to=1.0, variable=transparency_var, 
+                                     orient=tk.HORIZONTAL, length=100)
+        transparency_scale.pack(side=tk.LEFT, padx=5)
+
+        # Add normalization checkbox
+        normalize_var = tk.BooleanVar(value=False)
+        normalize_check = ttk.Checkbutton(control_frame, text="Normalize Spectra", 
+                                        variable=normalize_var)
+        normalize_check.pack(side=tk.LEFT, padx=20)
+
+        # Add manual search
+        search_frame = ttk.Frame(control_frame)
+        search_frame.pack(side=tk.LEFT, padx=20)
+        ttk.Label(search_frame, text="Search Database:").pack(side=tk.LEFT)
+        search_entry = ttk.Entry(search_frame, width=30)
+        search_entry.pack(side=tk.LEFT, padx=5)
+        search_button = ttk.Button(search_frame, text="Add", 
+                                 command=lambda: self.add_spectrum_from_search(search_entry.get()))
+        search_button.pack(side=tk.LEFT)
+
+        # Add save button
+        save_button = ttk.Button(control_frame, text="Save Plot", 
+                               command=lambda: self.save_overlay_plot(fig))
+        save_button.pack(side=tk.RIGHT, padx=5)
+
+        # Create plot area
+        plot_frame = ttk.Frame(main_container)
+        plot_frame.pack(fill=tk.BOTH, expand=True)
+
+        fig = plt.figure(figsize=(8, 6))
+        canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Add toolbar
+        toolbar_frame = ttk.Frame(plot_frame)
+        toolbar_frame.pack(fill=tk.X)
+        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+        toolbar.update()
+
+        # Store references
+        self.overlay_fig = fig
+        self.overlay_canvas = canvas
+        self.overlay_transparency = transparency_var
+        self.overlay_normalize = normalize_var
+
+        # Get the list of spectra to overlay
+        if from_overlay_list:
+            # Get spectra from overlay_listbox
+            spectra_to_overlay = [self.overlay_listbox.get(i) for i in selected_indices]
+            # Extract actual indices for update_overlay_plot
+            match_indices = []
+            for spectrum_text in spectra_to_overlay:
+                # Find match in matches_listbox
+                for i in range(self.matches_listbox.size()):
+                    if self.matches_listbox.get(i) == spectrum_text:
+                        match_indices.append(i)
+                        break
+            selected_indices = match_indices
+        
+        # Initial plot
+        self.update_overlay_plot(selected_indices, from_overlay_list)
+
+        # Bind transparency change
+        transparency_scale.configure(command=lambda _: self.update_overlay_plot(selected_indices, from_overlay_list))
+        normalize_check.configure(command=lambda: self.update_overlay_plot(selected_indices, from_overlay_list))
+
+    def add_spectrum_from_search(self, search_term):
+        """Add a spectrum from database search to the overlay."""
+        if not search_term:
+            return
+
+        # Search the database
+        matches = []
+        for name in self.raman.database:
+            if search_term.lower() in name.lower():
+                matches.append(name)
+
+        if not matches:
+            messagebox.showinfo("Search", "No matches found.")
+            return
+
+        # Create selection window
+        select_window = tk.Toplevel(self.root)
+        select_window.title("Select Spectrum")
+        select_window.geometry("400x300")
+
+        # Create listbox
+        listbox = tk.Listbox(select_window, selectmode=tk.MULTIPLE)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Add matches to listbox
+        for match in matches:
+            listbox.insert(tk.END, match)
+
+        # Add select button
+        ttk.Button(select_window, text="Add Selected", 
+                  command=lambda: self.add_selected_spectra(listbox.curselection(), matches)).pack(pady=5)
+
+    def add_selected_spectra(self, indices, matches):
+        """Add selected spectra from search results to the overlay."""
+        if not indices:
+            return
+
+        # Get current selections from main listbox
+        current_selections = self.matches_listbox.curselection()
+        
+        # Add new selections
+        for idx in indices:
+            match_name = matches[idx]
+            if match_name not in [self.matches_listbox.get(i).split(' (Score:')[0] for i in current_selections]:
+                self.matches_listbox.insert(tk.END, f"{match_name} (Score: N/A)")
+
+        # Update the plot
+        self.update_overlay_plot(self.matches_listbox.curselection())
+
+    def update_overlay_plot(self, selected_indices, from_overlay_list=False):
+        """Update the overlay plot with current settings."""
+        if not hasattr(self, 'overlay_fig'):
+            return
+
+        fig = self.overlay_fig
+        fig.clear()
+        ax = fig.add_subplot(111)
+
+        # Get current spectrum
+        if self.raman.processed_spectra is not None:
+            current_intensity = self.raman.processed_spectra
+            current_wavenumbers = self.raman.current_wavenumbers
         else:
-            # Create empty plots for when there are no matches
-            fig_comp.clear()
-            ax_comp = fig_comp.add_subplot(111)
-            ax_comp.text(0.5, 0.5, 'No matches to display.', ha='center', va='center', transform=ax_comp.transAxes)
-            canvas_comp.draw()
-            
-            fig_corr.clear()
-            ax_corr = fig_corr.add_subplot(111)
-            ax_corr.text(0.5, 0.5, 'No matches for correlation.', ha='center', va='center', transform=ax_corr.transAxes)
-            canvas_corr.draw()
-            
-            report_text.config(state=tk.NORMAL)
-            report_text.delete(1.0, tk.END)
-            report_text.insert(tk.END, "No matches found.")
-            report_text.config(state=tk.DISABLED)
-
-        # Make window modal
-        result_window.transient(self.root)
-        result_window.grab_set()
-        self.root.wait_window(result_window)
+            current_intensity = self.raman.current_spectra
+            current_wavenumbers = self.raman.current_wavenumbers
         
-      
-            
-            
-    
-    
-    
+        if current_intensity is None or current_wavenumbers is None:
+            ax.text(0.5, 0.5, 'No spectrum loaded', ha='center', va='center', transform=ax.transAxes)
+            self.overlay_canvas.draw()
+            return
+        
+        # Normalize if requested
+        if self.overlay_normalize.get():
+            current_intensity = current_intensity / np.max(current_intensity)
+
+        # Plot current spectrum
+        ax.plot(current_wavenumbers, current_intensity, 
+                label='Current Spectrum', linewidth=2)
+
+        # Plot selected spectra from database
+        for idx in selected_indices:
+            if from_overlay_list:
+                # Get spectra from overlay_listbox
+                match_text = self.overlay_listbox.get(idx)
+            else:
+                # Get spectra from matches_listbox
+                match_text = self.matches_listbox.get(idx)
+                
+            # Extract name from the listbox text (handle both formats)
+            if ' (Score:' in match_text:
+                match_name = match_text.split(' (Score:')[0]
+            else:
+                match_name = match_text
+
+            if match_name in self.raman.database:
+                db_spectrum = self.raman.database[match_name]
+                if 'intensity' in db_spectrum:
+                    db_intensity = db_spectrum['intensity']
+                    db_wavenumbers = db_spectrum['wavenumber']
+                elif 'intensities' in db_spectrum:
+                    db_intensity = db_spectrum['intensities']
+                    db_wavenumbers = db_spectrum['wavenumbers']
+                else:
+                    continue
+                
+                # Normalize if requested
+                if self.overlay_normalize.get():
+                    db_intensity = db_intensity / np.max(db_intensity)
+                
+                ax.plot(db_wavenumbers, db_intensity, 
+                        label=match_name, alpha=self.overlay_transparency.get())
+
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title('Spectra Overlay')
+        ax.legend()
+        ax.grid(True)
+
+        self.overlay_canvas.draw()
+
+    def save_overlay_plot(self, fig):
+        """Save the overlay plot to a file."""
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"), ("All files", "*.*")]
+        )
+        if file_path:
+            fig.savefig(file_path, dpi=300, bbox_inches='tight')
+            messagebox.showinfo("Save Plot", f"Plot saved successfully to {file_path}")
+
     def plot_correlation_data(self, match_data, fig, ax):
         """Plot correlation heatmap for spectral regions between query and selected match."""
+        # Clear the entire figure first to ensure a clean start
+        fig.clear()
+        # Create a new axes object
+        ax = fig.add_subplot(111)
+        
+        # Check if we have a valid spectrum loaded
         if self.raman.current_spectra is None:
             ax.text(0.5, 0.5, 'No data for correlation heatmap.', ha='center', va='center', transform=ax.transAxes)
             return
-        
-        # Reset figure dimensions
-        self.reset_figure_dimensions(fig)
         
         # Get current spectrum (processed if available)
         if self.raman.processed_spectra is not None:
@@ -2667,8 +2917,18 @@ class RamanAnalysisApp:
             return
         
         match_data = self.raman.database[match_name]
-        match_wavenumbers = match_data['wavenumbers']
-        match_intensities = match_data['intensities']
+        
+        # Get wavenumbers and intensities from match data - handle both formats
+        if 'wavenumbers' in match_data and 'intensities' in match_data:
+            match_wavenumbers = match_data['wavenumbers']
+            match_intensities = match_data['intensities']
+        elif 'wavenumber' in match_data and 'intensity' in match_data:
+            match_wavenumbers = match_data['wavenumber']
+            match_intensities = match_data['intensity']
+        else:
+            ax.text(0.5, 0.5, f'Match data format not recognized.', 
+                   ha='center', va='center', transform=ax.transAxes)
+            return
 
         # Interpolate if needed
         if not np.array_equal(query_wavenumbers, match_wavenumbers):
@@ -2680,13 +2940,27 @@ class RamanAnalysisApp:
         match_max = np.max(match_intensities_interp)
         match_norm = match_intensities_interp / match_max if match_max > 0 else match_intensities_interp
 
-        # Define spectral regions (adjust as needed)
-        regions = [
-            (200, 500, "Fingerprint Low"),
-            (500, 1000, "Fingerprint Mid"),
-            (1000, 1800, "Fingerprint High"),
-            (2800, 3200, "CH Stretch"),
-        ]
+        # Get the current x-axis range from the comparison plot if available
+        x_min, x_max = getattr(self, 'comparison_x_range', (None, None))
+        
+        # Define spectral regions based on x-axis range if available
+        if x_min is not None and x_max is not None:
+            # Calculate region boundaries based on the comparison plot's x-axis range
+            region_width = (x_max - x_min) / 4  # Divide into 4 equal regions
+            regions = [
+                (x_min, x_min + region_width, f"Region 1"),
+                (x_min + region_width, x_min + 2 * region_width, f"Region 2"),
+                (x_min + 2 * region_width, x_min + 3 * region_width, f"Region 3"),
+                (x_min + 3 * region_width, x_max, f"Region 4"),
+            ]
+        else:
+            # Use default regions if x-axis range is not available
+            regions = [
+                (200, 500, "Fingerprint Low"),
+                (500, 1000, "Fingerprint Mid"),
+                (1000, 1800, "Fingerprint High"),
+                (2800, 3200, "CH Stretch"),
+            ]
 
         region_scores = []
         region_labels = []
@@ -2708,7 +2982,7 @@ class RamanAnalysisApp:
                     corr = 0.0  # Handle potential errors
 
                 region_scores.append(corr)
-                region_labels.append(f"{label}\n({start}-{end} cm⁻¹)")
+                region_labels.append(f"{label}\n({int(start)}-{int(end)} cm⁻¹)")
 
         # Plot correlation heatmap
         if region_scores:
@@ -2719,9 +2993,10 @@ class RamanAnalysisApp:
 
             im = ax.imshow(regions_array, cmap=cmap, aspect='auto', vmin=0, vmax=1)  # Correlation typically 0-1
 
-            # Add colorbar
-            cbar = fig.colorbar(im, ax=ax, orientation='vertical', fraction=0.05, pad=0.1)
-            cbar.set_label('Region Correlation Coefficient')
+            # Add colorbar but make it smaller and simpler
+            cbar = fig.colorbar(im, ax=ax, orientation='vertical', fraction=0.03, pad=0.04, ticks=[0, 0.5, 1])
+            # Set only minimal tick labels without a title
+            cbar.ax.set_yticklabels(['0', '0.5', '1'])
 
             # Configure axes
             ax.set_yticks([])  # No Y ticks needed for a single row
@@ -2734,72 +3009,98 @@ class RamanAnalysisApp:
                 text_color = 'black' if 0.3 <= score <= 0.7 else 'white'  # Contrast based on score
                 ax.text(i, 0, f"{score:.2f}", ha='center', va='center', color=text_color, fontweight='bold')
 
-            ax.set_title(f'Spectral Region Correlation: Query vs. {match_name}')
+            # Use a more compact title
+            ax.set_title(f'Region Correlation: {match_name}', fontsize=10)
         else:
-            ax.text(0.5, 0.5, "Insufficient data or regions for correlation analysis",
+            ax.text(0.5, 0.5, "Insufficient data for correlation analysis",
                     ha='center', va='center', transform=ax.transAxes)
 
         # Make sure the figure is properly formatted
         fig.tight_layout()
-    
-    
-    
+        
+        # Return the new axes
+        return ax
 
     def plot_comparison_data(self, match_data, fig, ax):
-        """Plot the comparison data without any existing plot state influence."""
-        if self.raman.current_spectra is None:
-            ax.text(0.5, 0.5, 'Query spectrum not loaded.', ha='center', va='center', transform=ax.transAxes)
-            return
+        """
+        Plot comparison between query spectrum and a match.
         
-        # Reset figure dimensions
-        self.reset_figure_dimensions(fig)
+        Parameters:
+        -----------
+        match_data : tuple
+            Tuple of (name, score) for the match to compare
+        fig : matplotlib.figure.Figure
+            Figure object to plot on
+        ax : matplotlib.axes.Axes
+            Axes object to plot on
+        """
+        match_name, score = match_data
         
-        # Get current spectrum (processed if available)
+        # Clear the previous plot
+        ax.clear()
+        
+        # Get current data (prefer processed spectrum if available)
         if self.raman.processed_spectra is not None:
             current_spectrum = self.raman.processed_spectra
-            query_label = 'Query (Processed)'
         else:
             current_spectrum = self.raman.current_spectra
-            query_label = 'Query (Raw)'
+        
+        # Check if spectrum is available
+        if current_spectrum is None or self.raman.current_wavenumbers is None:
+            ax.text(0.5, 0.5, 'No spectrum data to plot.', ha='center', va='center', transform=ax.transAxes)
+            return
+            
         query_wavenumbers = self.raman.current_wavenumbers
         
-        # Normalize query spectrum (optional, based on GUI setting)
-        normalize = self.var_normalize.get() if hasattr(self, 'var_normalize') else True
-        if normalize:
-            query_max = np.max(current_spectrum)
-            current_norm = current_spectrum / query_max if query_max > 0 else current_spectrum
+        # Check if the match exists in database
+        if match_name not in self.raman.database:
+            ax.text(0.5, 0.5, f'Match {match_name} not found in database.', 
+                   ha='center', va='center', transform=ax.transAxes)
+            return
+            
+        # Get match data
+        match_data = self.raman.database[match_name]
+        
+        # Get wavenumbers and intensities from match data
+        if 'wavenumbers' in match_data and 'intensities' in match_data:
+            match_wavenumbers = match_data['wavenumbers']
+            match_intensities = match_data['intensities']
+        elif 'wavenumber' in match_data and 'intensity' in match_data:
+            match_wavenumbers = match_data['wavenumber']
+            match_intensities = match_data['intensity']
         else:
-            current_norm = current_spectrum
+            ax.text(0.5, 0.5, f'Match data format not recognized.', 
+                   ha='center', va='center', transform=ax.transAxes)
+            return
+        
+        # Determine if normalization is needed
+        normalize = True  # Default for visualization
+        
+        # Normalize current spectrum (0-1 range is better for comparison)
+        current_max = np.max(current_spectrum)
+        current_norm = current_spectrum / current_max if current_max > 0 else current_spectrum
         
         # Plot query spectrum
-        ax.plot(query_wavenumbers, current_norm, 'b-', label=query_label, linewidth=1.5)
+        ax.plot(query_wavenumbers, current_norm, 'b-', 
+                label='Query Spectrum', linewidth=1.5)
         
-        # Get match data
-        match_name, score = match_data
-        if match_name not in self.raman.database:
-            return  # Skip if somehow name is invalid
-        
-        match_data = self.raman.database[match_name]
-        match_wavenumbers = match_data['wavenumbers']
-        match_intensities = match_data['intensities']
-
-        # Interpolate if needed
+        # Interpolate match spectrum if the wavenumbers differ
         if not np.array_equal(query_wavenumbers, match_wavenumbers):
             match_intensities_interp = np.interp(query_wavenumbers, match_wavenumbers, match_intensities)
         else:
             match_intensities_interp = match_intensities
-
+        
         # Normalize match spectrum (optional)
         if normalize:
             match_max = np.max(match_intensities_interp)
             match_norm = match_intensities_interp / match_max if match_max > 0 else match_intensities_interp
         else:
             match_norm = match_intensities_interp
-
+        
         # Plot match spectrum
         ax.plot(query_wavenumbers, match_norm, 'r-', 
                 label=f'{match_name} ({score:.2f})', linewidth=1.0, alpha=0.8)
-
+        
         # Add difference plot if requested
         show_diff = hasattr(self, 'var_show_diff') and self.var_show_diff.get()
         if show_diff:
@@ -2811,29 +3112,7 @@ class RamanAnalysisApp:
             ax2.set_ylabel('Difference', color='k')
             ax2.tick_params(axis='y', labelcolor='k')
             ax2.legend(loc='upper left', fontsize='small')
-
-        # Highlight matching peaks (optional)
-        highlight_peaks = hasattr(self, 'var_highlight_peaks') and self.var_highlight_peaks.get()
-        if highlight_peaks and 'peaks' in match_data and match_data['peaks'] and self.raman.peaks:
-            # Get peaks
-            db_peak_wn = match_data['peaks'].get('wavenumbers', np.array([]))
-            query_peak_wn = self.raman.peaks.get('wavenumbers', np.array([]))
-            tolerance = 10  # Adjust tolerance
-
-            # Find matching peaks
-            for q_wn in query_peak_wn:
-                for db_idx, m_wn in enumerate(db_peak_wn):
-                    if abs(q_wn - m_wn) <= tolerance:
-                        # Find corresponding heights in the *normalized* spectra for plotting
-                        q_plot_idx = np.abs(query_wavenumbers - q_wn).argmin()
-                        m_plot_idx = np.abs(query_wavenumbers - m_wn).argmin()
-                        q_plot_height = current_norm[q_plot_idx]
-                        m_plot_height = match_norm[m_plot_idx]
-
-                        # Mark matching peaks on the plot
-                        ax.plot(m_wn, m_plot_height, 'ro', markersize=5, alpha=0.7)
-                        break  # Match found for this query peak
-
+        
         # Configure plot appearance
         ax.set_xlabel('Wavenumber (cm⁻¹)')
         ax.set_ylabel('Intensity (Normalized)' if normalize else 'Intensity (a.u.)')
@@ -2841,8 +3120,13 @@ class RamanAnalysisApp:
         ax.legend(loc='upper right', fontsize='small')
         ax.grid(True, linestyle=':', alpha=0.6)
         
+        # Store the x-axis limits for correlation plot to use
+        self.comparison_x_range = ax.get_xlim()
+        
         # Make sure the figure is properly formatted
         fig.tight_layout()
+        
+        return ax
 
 
     def generate_match_report(self, matches, text_widget):
@@ -2863,56 +3147,170 @@ class RamanAnalysisApp:
             
             if not matches:
                 text_widget.insert(tk.END, "No matches found.\n")
+                text_widget.config(state=tk.DISABLED)
                 return
             
             # Add header
-            text_widget.insert(tk.END, "Search Match Results\n")
+            text_widget.insert(tk.END, "Raman Spectrum Analysis Report\n")
             text_widget.insert(tk.END, "=" * 50 + "\n\n")
             
             # Add timestamp
             text_widget.insert(tk.END, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             
-            # Add current spectrum info if available
+            # === Sample Information ===
+            text_widget.insert(tk.END, "Sample Information\n")
+            text_widget.insert(tk.END, "-" * 25 + "\n")
             if hasattr(self.raman, 'current_spectra') and self.raman.current_spectra is not None:
-                text_widget.insert(tk.END, "Current Spectrum Information:\n")
-                text_widget.insert(tk.END, "-" * 30 + "\n")
                 if self.raman.metadata:
+                    # Add specific metadata fields if available
+                    if 'NAME' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Sample Name: {self.raman.metadata['NAME']}\n")
+                    
+                    # Add Hey Classification if available
+                    if 'HEY CLASSIFICATION' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Hey Classification: {self.raman.metadata['HEY CLASSIFICATION']}\n")
+                    
+                    # Add structural information
+                    if 'CRYSTAL SYSTEM' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Crystal System: {self.raman.metadata['CRYSTAL SYSTEM']}\n")
+                    if 'SPACE GROUP' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Space Group: {self.raman.metadata['SPACE GROUP']}\n")
+                    
+                    # Add chemical information
+                    if 'CHEMICAL FAMILY' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Chemical Family: {self.raman.metadata['CHEMICAL FAMILY']}\n")
+                    if 'IDEAL CHEMISTRY' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Chemistry: {self.raman.metadata['IDEAL CHEMISTRY']}\n")
+                    
+                    # Add origin information
+                    if 'PARAGENETIC MODE' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Paragenetic Mode: {self.raman.metadata['PARAGENETIC MODE']}\n")
+                    if 'OLDEST KNOWN AGE (MA)' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Oldest Known Age (Ma): {self.raman.metadata['OLDEST KNOWN AGE (MA)']}\n")
+                    
+                    # Add locality
+                    if 'LOCALITY' in self.raman.metadata:
+                        text_widget.insert(tk.END, f"Locality: {self.raman.metadata['LOCALITY']}\n")
+                    
+                    # Add other metadata fields
                     for key, value in self.raman.metadata.items():
-                        text_widget.insert(tk.END, f"{key}: {value}\n")
-                text_widget.insert(tk.END, "\n")
+                        if key not in ['NAME', 'HEY CLASSIFICATION', 'CRYSTAL SYSTEM', 'SPACE GROUP', 
+                                     'CHEMICAL FAMILY', 'IDEAL CHEMISTRY', 'PARAGENETIC MODE', 
+                                     'OLDEST KNOWN AGE (MA)', 'LOCALITY']:
+                            text_widget.insert(tk.END, f"{key}: {value}\n")
+                else:
+                    text_widget.insert(tk.END, "No metadata available for current spectrum.\n")
+            else:
+                text_widget.insert(tk.END, "No current spectrum loaded.\n")
             
-            # Add matches
-            text_widget.insert(tk.END, "Top Matches:\n")
-            text_widget.insert(tk.END, "-" * 30 + "\n")
+            text_widget.insert(tk.END, "\n")
+            
+            # === Processing Information ===
+            text_widget.insert(tk.END, "Processing Information\n")
+            text_widget.insert(tk.END, "-" * 25 + "\n")
+            
+            # Processing details
+            if hasattr(self.raman, 'processed_spectra') and self.raman.processed_spectra is not None:
+                text_widget.insert(tk.END, "Background Subtraction: Applied\n")
+            else:
+                text_widget.insert(tk.END, "Background Subtraction: Not Applied\n")
+            
+            if hasattr(self.raman, 'peaks') and self.raman.peaks is not None:
+                num_peaks = len(self.raman.peaks['wavenumbers'])
+                peak_list = ", ".join([f"{wn:.1f}" for wn in self.raman.peaks['wavenumbers']])
+                text_widget.insert(tk.END, f"Peak Detection: {num_peaks} peaks detected\n")
+                text_widget.insert(tk.END, f"Detected Peaks: {peak_list}\n")
+            else:
+                text_widget.insert(tk.END, "Peak Detection: Not Applied\n")
+            
+            text_widget.insert(tk.END, "\n")
+            
+            # === Match Results ===
+            text_widget.insert(tk.END, "Match Results\n")
+            text_widget.insert(tk.END, "-" * 25 + "\n")
             
             for i, (name, score) in enumerate(matches, 1):
                 confidence = self.get_confidence_level(score)
                 
-                text_widget.insert(tk.END, f"\nMatch #{i}\n")
-                text_widget.insert(tk.END, f"Name: {name}\n")
-                text_widget.insert(tk.END, f"Match Score: {score:.2f}\n")
-                text_widget.insert(tk.END, f"Confidence: {confidence}\n")
+                text_widget.insert(tk.END, f"{i}. {name}\n")
+                text_widget.insert(tk.END, f"   Match Score: {score:.4f} ({confidence} confidence)\n")
                 
                 # Get metadata if available
-                metadata = None
                 if name in self.raman.database:
                     metadata = self.raman.database[name].get('metadata', {})
+                    
+                    if metadata:
+                        text_widget.insert(tk.END, f"   Compound Information:\n")
+                        
+                        # Hey Classification
+                        if 'HEY CLASSIFICATION' in metadata:
+                            text_widget.insert(tk.END, f"   - Hey Classification: {metadata['HEY CLASSIFICATION']}\n")
+                        
+                        # Structural information
+                        if 'CRYSTAL SYSTEM' in metadata:
+                            text_widget.insert(tk.END, f"   - Crystal System: {metadata['CRYSTAL SYSTEM']}\n")
+                        if 'SPACE GROUP' in metadata:
+                            text_widget.insert(tk.END, f"   - Space Group: {metadata['SPACE GROUP']}\n")
+                            
+                        # Chemical information
+                        if 'CHEMICAL FAMILY' in metadata:
+                            text_widget.insert(tk.END, f"   - Chemical Family: {metadata['CHEMICAL FAMILY']}\n")
+                        if 'IDEAL CHEMISTRY' in metadata:
+                            text_widget.insert(tk.END, f"   - Chemistry: {metadata['IDEAL CHEMISTRY']}\n")
+                            
+                        # Origin information
+                        if 'PARAGENETIC MODE' in metadata:
+                            text_widget.insert(tk.END, f"   - Paragenetic Mode: {metadata['PARAGENETIC MODE']}\n")
+                        if 'OLDEST KNOWN AGE (MA)' in metadata:
+                            text_widget.insert(tk.END, f"   - Oldest Known Age (Ma): {metadata['OLDEST KNOWN AGE (MA)']}\n")
+                            
+                        # Locality
+                        if 'LOCALITY' in metadata:
+                            text_widget.insert(tk.END, f"   - Locality: {metadata['LOCALITY']}\n")
                 
-                if metadata:
-                    text_widget.insert(tk.END, "\nMetadata:\n")
-                    for key, value in metadata.items():
-                        text_widget.insert(tk.END, f"  {key}: {value}\n")
-                
-                text_widget.insert(tk.END, "\n" + "-" * 30 + "\n")
+                # Add separator between matches
+                text_widget.insert(tk.END, "\n")
             
-            # Add summary statistics
+            # === Analysis and Recommendations ===
+            text_widget.insert(tk.END, "Analysis and Recommendations\n")
+            text_widget.insert(tk.END, "-" * 25 + "\n")
+            
+            if matches:
+                best_match = matches[0]
+                best_name, best_score = best_match
+                confidence = self.get_confidence_level(best_score)
+                
+                if best_score >= 0.85:
+                    text_widget.insert(tk.END, f"The best match ({best_name}) has a {confidence} confidence level.\n")
+                    text_widget.insert(tk.END, "This indicates a high probability of a correct match.\n")
+                elif best_score >= 0.75:
+                    text_widget.insert(tk.END, f"The best match ({best_name}) has a {confidence} confidence level.\n")
+                    text_widget.insert(tk.END, "Consider additional analysis to confirm this identification.\n")
+                else:
+                    text_widget.insert(tk.END, f"The best match ({best_name}) has a {confidence} confidence level.\n")
+                    text_widget.insert(tk.END, "The match quality is low. Consider additional techniques for identification.\n")
+                
+                # Check for multiple similar matches
+                if len(matches) > 1:
+                    second_best = matches[1]
+                    _, second_score = second_best
+                    score_diff = best_score - second_score
+                    
+                    if score_diff < 0.05:
+                        text_widget.insert(tk.END, "Note: Multiple close matches found. Consider comparing the spectra carefully.\n")
+            
+            # Summary stats
             text_widget.insert(tk.END, "\nSummary Statistics:\n")
-            text_widget.insert(tk.END, "-" * 30 + "\n")
             text_widget.insert(tk.END, f"Total Matches: {len(matches)}\n")
             
             if matches:
                 avg_score = sum(score for _, score in matches) / len(matches)
-                text_widget.insert(tk.END, f"Average Match Score: {avg_score:.2f}\n")
+                text_widget.insert(tk.END, f"Average Match Score: {avg_score:.4f}\n")
+                
+                # Score range
+                min_score = min(score for _, score in matches)
+                max_score = max(score for _, score in matches)
+                text_widget.insert(tk.END, f"Score Range: {min_score:.4f} - {max_score:.4f}\n")
             
             # Disable editing
             text_widget.config(state=tk.DISABLED)
@@ -3133,7 +3531,7 @@ class RamanAnalysisApp:
 
 
     def export_results_as_csv(self, matches):
-        """Export search results (matches) as a CSV file."""
+        """Export search results (matches) as a CSV file with comprehensive metadata."""
         if not matches:
             messagebox.showerror("Export Error", "No matches to export.")
             return
@@ -3149,27 +3547,46 @@ class RamanAnalysisApp:
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
 
-                # Write header
-                writer.writerow(["Rank", "Name", "Score", "Confidence",
-                                 "Ideal Chemistry", "Chemical Family", "Locality"]) # Add more metadata?
+                # Write header with extended metadata fields
+                header = ["Rank", "Name", "Score", "Confidence", 
+                         "Hey Classification", "Chemical Family", "Crystal System", 
+                         "Space Group", "Paragenetic Mode", "Oldest Known Age (Ma)",
+                         "Ideal Chemistry", "Locality"]
+                writer.writerow(header)
 
                 # Write data rows
                 for i, (name, score) in enumerate(matches):
                     confidence = self.get_confidence_level(score)
-                    chemistry = ""
+                    
+                    # Initialize metadata fields with empty values
+                    hey_class = ""
                     family = ""
+                    crystal_system = ""
+                    space_group = ""
+                    paragenetic_mode = ""
+                    oldest_age = ""
+                    chemistry = ""
                     locality = ""
 
                     # Get metadata if available from database
                     if name in self.raman.database:
                         data = self.raman.database[name]
                         if 'metadata' in data and data.get('metadata'):
-                            chemistry = data['metadata'].get('IDEAL CHEMISTRY', '')
-                            family = data['metadata'].get('CHEMICAL FAMILY', '')
-                            locality = data['metadata'].get('LOCALITY', '')
+                            metadata = data['metadata']
+                            hey_class = metadata.get('HEY CLASSIFICATION', '')
+                            family = metadata.get('CHEMICAL FAMILY', '')
+                            crystal_system = metadata.get('CRYSTAL SYSTEM', '')
+                            space_group = metadata.get('SPACE GROUP', '')
+                            paragenetic_mode = metadata.get('PARAGENETIC MODE', '')
+                            oldest_age = metadata.get('OLDEST KNOWN AGE (MA)', '')
+                            chemistry = metadata.get('IDEAL CHEMISTRY', '')
+                            locality = metadata.get('LOCALITY', '')
 
-                    writer.writerow([i + 1, name, f"{score:.4f}", confidence,
-                                     chemistry, family, locality])
+                    # Write row with all metadata fields
+                    row = [i + 1, name, f"{score:.4f}", confidence, 
+                          hey_class, family, crystal_system, space_group, 
+                          paragenetic_mode, oldest_age, chemistry, locality]
+                    writer.writerow(row)
 
             messagebox.showinfo("Export Successful", f"Results exported to {filename}")
 
@@ -3187,76 +3604,40 @@ class RamanAnalysisApp:
         elif score >= 0.65: return "Weak"
         else: return "Poor"
 
-    # def update_plot(self, include_background=False, include_peaks=False):
-    #     """Update the main plot with current/processed spectrum, background, and peaks."""
-    #     if self.raman.current_spectra is None:
-    #         self.ax.clear()
-    #         self.ax.text(0.5, 0.5, 'No Spectrum Loaded', ha='center', va='center', 
-    #                      transform=self.ax.transAxes)
-    #         self.canvas.draw()
-    #         return
-    
-    #     # Clear existing plot
-    #     self.ax.clear()
-    
-    #     # Plot processed spectrum if available, otherwise raw
-    #     spectrum_to_plot = self.raman.current_spectra
-    #     label = 'Raw Spectrum'
-    #     color = 'blue'
-    #     if self.raman.processed_spectra is not None:
-    #         spectrum_to_plot = self.raman.processed_spectra
-    #         label = 'Processed Spectrum'
-    #         color = 'green'
-        
-    #     # Plot the spectrum using the EXISTING axis object
-    #     self.ax.plot(self.raman.current_wavenumbers, spectrum_to_plot, color=color, 
-    #                  label=label, linewidth=1.5)
-        
-    #     # Plot background if requested and available
-    #     if include_background and self.raman.background is not None:
-    #         self.ax.plot(self.raman.current_wavenumbers, self.raman.background, 
-    #                      'r--', label='Background', linewidth=1)
-        
-    #     # # Mark peaks if requested and available
-    #     # if include_peaks and self.raman.peaks is not None:
-    #     #     peak_indices = self.raman.peaks.get('indices')
-    #     #     if peak_indices is not None:
-    #     #         # Use indices to get heights from the plotted spectrum
-    #     #         peak_heights = spectrum_to_plot[peak_indices]
-    #     #         peak_wavenumbers = self.raman.current_wavenumbers[peak_indices]
-    #     #         self.ax.plot(peak_wavenumbers, peak_heights, 'ro', label='Peaks', markersize=4)
-        
-        
-    #     # Mark peaks if requested and available
-    #     if include_peaks and self.raman.peaks is not None:
-    #         peak_indices = self.raman.peaks.get('indices')
-    #         if peak_indices is not None:
-    #             # Use indices to get heights from the plotted spectrum
-    #             peak_heights = spectrum_to_plot[peak_indices]
-    #             peak_wavenumbers = self.raman.current_wavenumbers[peak_indices]
-    #             self.ax.plot(peak_wavenumbers, peak_heights, 'ro', label='Peaks', markersize=4)
-                
-    #             # Add wavenumber annotations for each peak
-    #             for i, (wn, height) in enumerate(zip(peak_wavenumbers, peak_heights)):
-    #                 self.ax.annotate(
-    #                     f"{wn:.1f}",  # Format to 1 decimal place
-    #                     xy=(wn, height),  # Point to annotate
-    #                     xytext=(0, 5),  # Offset text by 5 points above
-    #                     textcoords='offset points',
-    #                     ha='center',  # Horizontally center text
-    #                     fontsize=8,  # Small font to avoid crowding
-    #                 )
-    # # Configure plot appearance
-    #     self.ax.set_xlabel('Wavenumber (cm⁻¹)')
-    #     self.ax.set_ylabel('Intensity (a.u.)')
-    #     self.ax.set_title('Raman Spectrum Analysis')
-    #     self.ax.legend()
-    #     self.ax.grid(True, linestyle=':', alpha=0.6)
-        
-    #     # Update the canvas - this is critical
-    #     self.canvas.draw()
-    
-    
+    def on_match_select(self, event=None):
+        """Handle the selection of a match from the search results."""
+        selected_indices = self.matches_listbox.curselection()
+        if not selected_indices:
+            return
+
+        # Get the first selected match
+        match_text = self.matches_listbox.get(selected_indices[0])
+        if ' (Score:' in match_text:
+            match_name = match_text.split(' (Score:')[0]
+            try:
+                score = float(match_text.split('Score: ')[1].split(')')[0])
+            except:
+                score = 0.0
+        else:
+            match_name = match_text
+            score = 0.0
+
+        if match_name not in self.raman.database:
+            return
+
+        # Update comparison plot
+        fig_comp = self.results_figures['comparison']
+        fig_comp.clear()
+        ax_comp = fig_comp.add_subplot(111)
+        self.plot_comparison_data((match_name, score), fig_comp, ax_comp)
+        self.results_figures['canvas_comp'].draw()
+
+        # Update correlation heatmap
+        fig_corr = self.results_figures['correlation']
+        # The plot_correlation_data method now handles clearing and creating a new subplot
+        ax_corr = self.plot_correlation_data((match_name, score), fig_corr, None)
+        self.results_figures['canvas_corr'].draw_idle()  # Use draw_idle to avoid potential redraw issues
+
     def update_plot(self, include_background=False, include_peaks=False):
         """Update the main plot with current/processed spectrum, background, and peaks."""
         if self.raman.current_spectra is None:
@@ -3265,7 +3646,7 @@ class RamanAnalysisApp:
                          transform=self.ax.transAxes)
             self.canvas.draw()
             return
-        
+
         # Completely clear the figure and create a new axis
         self.fig.clear()
         self.ax = self.fig.add_subplot(111)

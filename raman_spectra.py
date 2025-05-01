@@ -723,7 +723,7 @@ class RamanSpectra:
         str or None
             Hey Classification name if found, None otherwise.
         """
-        if not mineral_name or not isinstance(mineral_name, str):
+        if not mineral_name or not isinstance(mineral_name, str) or not self.hey_classification:
             return None
 
         # Print debug info
@@ -731,15 +731,25 @@ class RamanSpectra:
         
         # Simple exact match
         if mineral_name in self.hey_classification:
-            result = self.hey_classification[mineral_name]
-            print(f"Found exact match: {result}")
-            return result
+            metadata = self.hey_classification[mineral_name]
+            if isinstance(metadata, dict) and 'HEY CLASSIFICATION' in metadata:
+                result = metadata['HEY CLASSIFICATION']
+                print(f"Found exact match: {result}")
+                return result
+            elif isinstance(metadata, str):  # Handle old format for backward compatibility
+                print(f"Found exact match (old format): {metadata}")
+                return metadata
 
         # Try advanced matching
-        matched_name, classification = self.match_mineral_name(mineral_name)
-        if classification:
-            print(f"Found match via matching algorithm: {classification} (matched with '{matched_name}')")
-            return classification
+        matched_name, matched_metadata = self.match_mineral_name(mineral_name)
+        if matched_metadata:
+            if isinstance(matched_metadata, dict) and 'HEY CLASSIFICATION' in matched_metadata:
+                classification = matched_metadata['HEY CLASSIFICATION']
+                print(f"Found match via matching algorithm: {classification} (matched with '{matched_name}')")
+                return classification
+            elif isinstance(matched_metadata, str):  # Handle old format for backward compatibility
+                print(f"Found match via matching algorithm (old format): {matched_metadata} (matched with '{matched_name}')")
+                return matched_metadata
 
         print(f"No Hey Classification found for: '{mineral_name}'")
         return None
@@ -824,10 +834,20 @@ class RamanSpectra:
             if 'NAME' in metadata and metadata['NAME']:
                 mineral_name = metadata['NAME']
                 print(f"Looking up Hey Classification for: {mineral_name}")
-                hey_class = self.get_hey_classification(mineral_name)
-                if hey_class:
-                    print(f"Found Hey Classification: {hey_class}")
-                    metadata['HEY CLASSIFICATION'] = hey_class
+                
+                # Get Hey Classification and other metadata
+                matched_name, matched_metadata = self.match_mineral_name(mineral_name)
+                if matched_metadata:
+                    print(f"Found Hey Classification data for: {mineral_name}")
+                    
+                    # Add all metadata fields we found
+                    if isinstance(matched_metadata, dict):
+                        for key, value in matched_metadata.items():
+                            metadata[key] = value
+                        print(f"Added metadata fields: {list(matched_metadata.keys())}")
+                    elif isinstance(matched_metadata, str):  # Support old format
+                        metadata['HEY CLASSIFICATION'] = matched_metadata
+                        print(f"Added Hey Classification: {matched_metadata}")
                 else:
                     print(f"No Hey Classification found for: {mineral_name}")
                     
@@ -835,10 +855,16 @@ class RamanSpectra:
                     cleaned_name = self._clean_mineral_name(mineral_name)
                     if cleaned_name != mineral_name:
                         print(f"Trying cleaned name: {cleaned_name}")
-                        hey_class = self.get_hey_classification(cleaned_name)
-                        if hey_class:
-                            print(f"Found Hey Classification with cleaned name: {hey_class}")
-                            metadata['HEY CLASSIFICATION'] = hey_class
+                        matched_name, matched_metadata = self.match_mineral_name(cleaned_name)
+                        if matched_metadata:
+                            # Add all metadata fields we found
+                            if isinstance(matched_metadata, dict):
+                                for key, value in matched_metadata.items():
+                                    metadata[key] = value
+                                print(f"Added metadata fields using cleaned name: {list(matched_metadata.keys())}")
+                            elif isinstance(matched_metadata, str):  # Support old format
+                                metadata['HEY CLASSIFICATION'] = matched_metadata
+                                print(f"Found Hey Classification with cleaned name: {matched_metadata}")
             
             # Save metadata for later use
             self.metadata = metadata
@@ -1152,7 +1178,7 @@ class RamanSpectra:
         Returns:
         --------
         dict
-            Dictionary mapping mineral names to their Hey Classifications.
+            Dictionary mapping mineral names to their Hey Classifications and additional metadata.
         """
         try:
             print(f"Loading Hey Classification data from: {csv_path}")
@@ -1183,21 +1209,47 @@ class RamanSpectra:
                         print(f"Possible matches: {possible_columns}")
                     return {}
             
-            # Create dictionary mapping mineral names to classifications
+            # Additional metadata fields to extract
+            additional_fields = [
+                "Structural Groupname",
+                "Crystal System",
+                "Space Group",
+                "Oldest Known Age (Ma)",
+                "Paragenetic Mode"
+            ]
+            
+            # Check which additional fields are actually present in the CSV
+            available_fields = [field for field in additional_fields if field in df.columns]
+            if len(available_fields) < len(additional_fields):
+                missing_fields = set(additional_fields) - set(available_fields)
+                print(f"Note: Some requested metadata fields are not in the CSV: {missing_fields}")
+            
+            # Create dictionary mapping mineral names to classifications and metadata
             hey_classification = {}
             for _, row in df.iterrows():
                 mineral_name = row[mineral_name_col]
                 classification = row[classification_col]
+                
                 if pd.notna(mineral_name) and pd.notna(classification) and classification:
+                    # Create metadata dictionary for this mineral
+                    metadata = {"HEY CLASSIFICATION": classification}
+                    
+                    # Add additional metadata fields if available
+                    for field in available_fields:
+                        if field in df.columns and pd.notna(row[field]):
+                            # Create a normalized field name for consistency
+                            norm_field = field.upper()
+                            metadata[norm_field] = row[field]
+                    
                     # Store both the original name and a cleaned version for better matching
-                    hey_classification[mineral_name] = classification
+                    hey_classification[mineral_name] = metadata
                     
                     # Also add a cleaned version of the name for more flexible matching
                     cleaned_name = self._clean_mineral_name(mineral_name)
                     if cleaned_name != mineral_name:
-                        hey_classification[cleaned_name] = classification
+                        hey_classification[cleaned_name] = metadata
             
-            print(f"Loaded {len(hey_classification)} Hey Classification entries")
+            print(f"Loaded {len(hey_classification)} Hey Classification entries with additional metadata")
             
             # Store the classification data
             self.hey_classification = hey_classification
@@ -1358,7 +1410,8 @@ class RamanSpectra:
         Returns:
         --------
         tuple
-            (best_match_name, hey_classification) or (None, None) if no match found.
+            (best_match_name, metadata_dict) or (None, None) if no match found.
+            metadata_dict contains 'HEY CLASSIFICATION' and other available metadata.
         """
         if not mineral_name or not isinstance(mineral_name, str) or not self.hey_classification:
             return None, None
@@ -1377,9 +1430,9 @@ class RamanSpectra:
             return name_to_match, self.hey_classification[name_to_match]
         
         # 3. Check if the name is contained within any key in the dictionary
-        for db_name, classification in self.hey_classification.items():
+        for db_name, metadata in self.hey_classification.items():
             if name_to_match in db_name.lower():
-                return db_name, classification
+                return db_name, metadata
         
         # 4. Try fuzzy matching as a last resort
         try:
@@ -1388,9 +1441,9 @@ class RamanSpectra:
 
             best_match = None
             best_score = 0
-            best_classification = None
+            best_metadata = None
 
-            for db_name, classification in self.hey_classification.items():
+            for db_name, metadata in self.hey_classification.items():
                 # Calculate similarity ratio
                 ratio = SequenceMatcher(None, name_to_match, db_name.lower()).ratio()
 
@@ -1398,10 +1451,10 @@ class RamanSpectra:
                 if ratio > best_score and ratio >= threshold:
                     best_score = ratio
                     best_match = db_name
-                    best_classification = classification
+                    best_metadata = metadata
 
             if best_match:
-                return best_match, best_classification
+                return best_match, best_metadata
 
         except ImportError:
             print("Warning: difflib module not available for fuzzy matching")
@@ -1439,12 +1492,17 @@ class RamanSpectra:
         if metadata is None and hasattr(self, 'metadata'):
             metadata = self.metadata
         
-        # Add Hey Classification if not already present
+        # Add Hey Classification and other metadata if not already present
         if metadata and 'NAME' in metadata and 'HEY CLASSIFICATION' not in metadata:
-            hey_class = self.get_hey_classification(metadata['NAME'])
-            if hey_class:
-                metadata['HEY CLASSIFICATION'] = hey_class
-        
+            matched_name, matched_metadata = self.match_mineral_name(metadata['NAME'])
+            if matched_metadata:
+                if isinstance(matched_metadata, dict):
+                    # Add all metadata fields we found if they don't already exist
+                    for key, value in matched_metadata.items():
+                        if key not in metadata:
+                            metadata[key] = value
+                elif isinstance(matched_metadata, str):  # Support for old format
+                    metadata['HEY CLASSIFICATION'] = matched_metadata
         
         # Prepare spectrum data for database
         spectrum_data = {
