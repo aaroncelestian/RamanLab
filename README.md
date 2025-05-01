@@ -1,6 +1,6 @@
-# ClariSpectra - Raman Spectrum Analysis Tool
+# ClaritySpectra - Raman Spectrum Analysis Tool
 
-ClariSpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
+ClaritySpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
 ## Features
 
@@ -34,8 +34,8 @@ ClariSpectra is a comprehensive desktop application for analyzing and identifyin
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ClariSpectra.git
-cd ClariSpectra
+git clone https://github.com/yourusername/ClaritySpectra.git
+cd ClaritySpectra
 ```
 
 2. Install dependencies:
@@ -102,7 +102,7 @@ MIT
 
 Aaron Celestian, Ph.D.
 Curator of Mineal Sciences
-Natural History Museum of Los Angeles
+Natural History Museum of Los Angeles County
 
 ## Acknowledgments
 
