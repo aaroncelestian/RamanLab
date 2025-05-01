@@ -47,6 +47,15 @@ pip install -r requirements.txt
 ```bash
 python raman_analysis_app.py
 ```
+## Manual Installation Method
+
+1. Download all the files in this reposity
+2. Put all those files in the same directory on the local computer
+3. Run the dependecy checker from a terminal window (or IDE if you have one)
+   ```python3 check_dependencies.py```
+4. Make sure all the check boxes are checked on the output.  If it is, then you are good to go!  If not, then you need to install these before proceeding.
+5. After all dependecies are installed, you are good to go.
+   ```python3 main.py```
 
 ## Dependencies
 
