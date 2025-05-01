@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dependency Checker for Raman Spectrum Analysis Tool
+Dependency Checker for ClaritySpectra
 This script checks if your Python environment has all required dependencies,
 reports their versions, and provides installation instructions if needed.
 """
@@ -141,7 +141,7 @@ def check_package_versions(package_name, min_version=None):
 def main():
     """Main function to check all dependencies."""
     print("=" * 60)
-    print("Raman Spectrum Analysis Tool - Dependency Checker")
+    print("ClaritySpectra - Dependency Checker")
     print("=" * 60)
     print("\nChecking Python version...")
     python_ok = check_python_version()
