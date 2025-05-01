@@ -1,0 +1,17 @@
+# Core requirements
+numpy>=1.16.0
+matplotlib>=3.0.0
+scipy>=1.2.0
+pandas>=0.25.0
+
+# Optional packages
+reportlab>=3.5.0  # For PDF export
+scikit-learn>=0.21.0  # For ML search functionality
+
+# Packaging tools
+pyinstaller>=5.0.0
+
+# Additional dependencies that might be required
+# Uncomment if needed
+# pillow>=8.0.0  # For image processing
+# openpyxl>=3.0.0  # For Excel file support
