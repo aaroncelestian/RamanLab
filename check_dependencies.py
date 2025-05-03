@@ -67,6 +67,28 @@ def get_reportlab_status():
         print("ℹ️ reportlab: Not installed - PDF export will not be available")
         return False, None
 
+def get_tensorflow_status():
+    """Check if TensorFlow is installed (for deep learning)."""
+    try:
+        import tensorflow as tf
+        version = pkg_resources.get_distribution("tensorflow").version
+        print(f"✅ TensorFlow: Installed (version: {version}) - Deep learning available")
+        return True, version
+    except ImportError:
+        print("ℹ️ TensorFlow: Not installed - Deep learning will not be available")
+        return False, None
+
+def get_keras_status():
+    """Check if Keras is installed (for deep learning)."""
+    try:
+        import keras
+        version = pkg_resources.get_distribution("keras").version
+        print(f"✅ Keras: Installed (version: {version}) - Deep learning available")
+        return True, version
+    except ImportError:
+        print("ℹ️ Keras: Not installed - Deep learning will not be available")
+        return False, None
+
 def get_sklearn_status():
     """Check if scikit-learn is installed (for ML search)."""
     try:
@@ -76,6 +98,17 @@ def get_sklearn_status():
         return True, version
     except ImportError:
         print("ℹ️ scikit-learn: Not installed - ML search will not be available")
+        return False, None
+
+def get_fastdtw_status():
+    """Check if fastdtw is installed (for DTW-based search)."""
+    try:
+        import fastdtw
+        version = pkg_resources.get_distribution("fastdtw").version
+        print(f"✅ fastdtw: Installed (version: {version}) - DTW search available")
+        return True, version
+    except ImportError:
+        print("ℹ️ fastdtw: Not installed - DTW search will not be available")
         return False, None
 
 def suggest_install_command(missing_packages):
@@ -154,7 +187,8 @@ def main():
         ("matplotlib", "3.0.0"), 
         ("scipy", "1.2.0"), 
         ("pandas", "0.25.0"),
-        ("tkinter", None)  # tkinter doesn't follow standard versioning
+        ("tkinter", None),  # tkinter doesn't follow standard versioning
+        ("fastdtw", "0.3.4")  # Added for DTW search
     ]
     
     missing_packages = []
@@ -175,9 +209,21 @@ def main():
     if not reportlab_ok:
         missing_packages.append("reportlab")
     
+    tensorflow_ok, tensorflow_version = get_tensorflow_status()
+    if not tensorflow_ok:
+        missing_packages.append("tensorflow")
+    
+    keras_ok, keras_version = get_keras_status()
+    if not keras_ok:
+        missing_packages.append("keras")
+    
     sklearn_ok, sklearn_version = get_sklearn_status()
     if not sklearn_ok:
         missing_packages.append("scikit-learn")
+    
+    fastdtw_ok, fastdtw_version = get_fastdtw_status()
+    if not fastdtw_ok:
+        missing_packages.append("fastdtw")
     
     # Summary
     print("\n" + "=" * 60)
@@ -216,8 +262,14 @@ def main():
     print("\nAdditional notes:")
     if not reportlab_ok:
         print("- PDF export functionality will not be available")
+    if not tensorflow_ok:
+        print("- Deep learning functionality will not be available")
+    if not keras_ok:
+        print("- Deep learning functionality will not be available")
     if not sklearn_ok:
         print("- Machine learning search functionality will not be available")
+    if not fastdtw_ok:
+        print("- DTW-based search functionality will not be available")
     
     # Check for database files
     print("\nChecking for required data files...")
