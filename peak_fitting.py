@@ -1,0 +1,1364 @@
+#!/usr/bin/env python3
+# Peak Fitting Module for ClaritySpectra
+"""
+Module for peak fitting of Raman spectra with various peak models
+including Gaussian, Lorentzian, and Pseudo-Voigt.
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+import tkinter as tk
+from tkinter import ttk, messagebox
+from scipy.optimize import curve_fit
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
+
+class PeakFittingWindow:
+    """Window for fitting peaks to Raman spectra."""
+    
+    def __init__(self, parent, raman, wavenumbers, spectra):
+        """
+        Initialize the peak fitting window.
+        
+        Parameters:
+        -----------
+        parent : tk.Tk or tk.Toplevel
+            Parent window
+        raman : RamanSpectra
+            Reference to the RamanSpectra instance
+        wavenumbers : numpy.ndarray
+            X-axis data (wavenumbers)
+        spectra : numpy.ndarray
+            Y-axis data (intensity)
+        """
+        self.window = tk.Toplevel(parent)
+        self.window.title("Peak Fitting")
+        self.window.geometry("1300x700")
+        self.window.minsize(1100, 600)
+        
+        # Store references
+        self.parent = parent
+        self.raman = raman
+        self.wavenumbers = wavenumbers
+        self.original_spectra = spectra
+        
+        # Create a copy of the data to work with
+        self.spectra = np.copy(spectra)
+        
+        # Variables for fitted peaks
+        self.peaks = []
+        self.fit_params = []
+        self.fit_result = None
+        self.background = None
+        self.current_model = tk.StringVar(value="Gaussian")
+        self.residuals = None
+        
+        # Flag for manual peak mode
+        self.manual_peak_mode = False
+        
+        # Create GUI
+        self.create_gui()
+        
+        # Initial plot
+        self.update_plot()
+        
+        # Set up window close event
+        self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+    def create_gui(self):
+        """Create the GUI elements."""
+        # Main frame
+        main_frame = ttk.Frame(self.window, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create left panel for controls
+        controls_frame = ttk.LabelFrame(main_frame, text="Fitting Controls", padding=10, width=425)
+        controls_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        controls_frame.pack_propagate(False)  # Prevent shrinking
+        
+        # Create a canvas with scrollbar for the controls
+        control_canvas = tk.Canvas(controls_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(controls_frame, orient=tk.VERTICAL, command=control_canvas.yview)
+        scrollable_frame = ttk.Frame(control_canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: control_canvas.configure(scrollregion=control_canvas.bbox("all"))
+        )
+        
+        control_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        control_canvas.configure(yscrollcommand=scrollbar.set)
+        
+        control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create right panel for visualization
+        viz_frame = ttk.LabelFrame(main_frame, text="Spectrum and Fit", padding=10)
+        viz_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        # -- Create visualization elements --
+        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(8, 6), 
+                                                      gridspec_kw={'height_ratios': [3, 1]})
+        self.canvas = FigureCanvasTkAgg(self.fig, master=viz_frame)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Add toolbar
+        toolbar_frame = ttk.Frame(viz_frame)
+        toolbar_frame.pack(fill=tk.X)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame)
+        self.toolbar.update()
+        
+        # -- Create controls --
+        # Background subtraction frame
+        bg_frame = ttk.LabelFrame(scrollable_frame, text="ALS Background", padding=10)
+        bg_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Compact help text
+        help_text = tk.Text(bg_frame, height=2, width=42, wrap=tk.WORD)
+        help_text.pack(fill=tk.X, pady=(0, 5))
+        help_text.insert(tk.END, "ALS fits a smooth baseline following spectrum's lower envelope. λ=rigidity, p=asymmetry.")
+        help_text.config(state=tk.DISABLED)
+        
+        # Control grid layout for more compact arrangement
+        control_grid = ttk.Frame(bg_frame)
+        control_grid.pack(fill=tk.X, pady=2)
+        
+        # Lambda row - use grid instead of pack
+        ttk.Label(control_grid, text="λ (smoothness):").grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        self.var_lambda = tk.StringVar(value="1e5")
+        lambda_entry = ttk.Entry(control_grid, textvariable=self.var_lambda, width=10)
+        lambda_entry.grid(row=0, column=1, padx=2, pady=2)
+        
+        lambda_buttons = ttk.Frame(control_grid)
+        lambda_buttons.grid(row=0, column=2, padx=2, pady=2, sticky="w")
+        ttk.Button(lambda_buttons, text="1e3", width=4, 
+                  command=lambda: self.var_lambda.set("1e3")).pack(side=tk.LEFT, padx=1)
+        ttk.Button(lambda_buttons, text="1e5", width=4, 
+                  command=lambda: self.var_lambda.set("1e5")).pack(side=tk.LEFT, padx=1)
+        ttk.Button(lambda_buttons, text="1e7", width=4, 
+                  command=lambda: self.var_lambda.set("1e7")).pack(side=tk.LEFT, padx=1)
+        
+        # P row - use grid to align with lambda row
+        ttk.Label(control_grid, text="p (asymmetry):").grid(row=1, column=0, sticky="w", padx=2, pady=2)
+        self.var_p = tk.StringVar(value="0.01")
+        p_entry = ttk.Entry(control_grid, textvariable=self.var_p, width=10)
+        p_entry.grid(row=1, column=1, padx=2, pady=2)
+        
+        p_buttons = ttk.Frame(control_grid)
+        p_buttons.grid(row=1, column=2, padx=2, pady=2, sticky="w")
+        ttk.Button(p_buttons, text="0.001", width=4, 
+                  command=lambda: self.var_p.set("0.001")).pack(side=tk.LEFT, padx=1)
+        ttk.Button(p_buttons, text="0.01", width=4, 
+                  command=lambda: self.var_p.set("0.01")).pack(side=tk.LEFT, padx=1)
+        ttk.Button(p_buttons, text="0.1", width=4, 
+                  command=lambda: self.var_p.set("0.1")).pack(side=tk.LEFT, padx=1)
+        
+        # Iterations row
+        ttk.Label(control_grid, text="Iterations:").grid(row=2, column=0, sticky="w", padx=2, pady=2)
+        self.var_niter = tk.StringVar(value="10")
+        ttk.Entry(control_grid, textvariable=self.var_niter, width=10).grid(row=2, column=1, padx=2, pady=2)
+        
+        # Action buttons in a more compact layout
+        button_frame = ttk.Frame(bg_frame)
+        button_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(button_frame, text="Subtract", 
+                  command=self.subtract_background).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(button_frame, text="Preview", 
+                  command=self.preview_background).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        
+        # Utility buttons in a more compact layout
+        utility_frame = ttk.Frame(bg_frame)
+        utility_frame.pack(fill=tk.X, pady=2)
+        ttk.Button(utility_frame, text="Compare Parameters", 
+                 command=self.compare_background_parameters).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(utility_frame, text="Interactive Tuning", 
+                 command=self.interactive_background_tuning).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        
+        # Peak detection frame
+        peak_frame = ttk.LabelFrame(scrollable_frame, text="Peak Detection", padding=10)
+        peak_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Small help text for peak detection
+        #peak_help = tk.Text(peak_frame, height=1, width=42, wrap=tk.WORD)
+        #peak_help.pack(fill=tk.X, pady=(0, 5))
+        #peak_help.insert(tk.END, "Auto height sets threshold at 5% above background.")
+        #peak_help.config(state=tk.DISABLED)
+        
+        # Use grid for more compact layout
+        peak_grid = ttk.Frame(peak_frame)
+        peak_grid.pack(fill=tk.X)
+        
+        ttk.Label(peak_grid, text="Height:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        self.var_height = tk.StringVar(value="Auto")
+        ttk.Entry(peak_grid, textvariable=self.var_height, width=10).grid(row=0, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(peak_grid, text="Distance:").grid(row=1, column=0, sticky="w", padx=2, pady=2)
+        self.var_distance = tk.StringVar(value="Auto")
+        ttk.Entry(peak_grid, textvariable=self.var_distance, width=10).grid(row=1, column=1, sticky="w", padx=2, pady=2)
+        
+        ttk.Label(peak_grid, text="Prominence:").grid(row=2, column=0, sticky="w", padx=2, pady=2)
+        self.var_prominence = tk.StringVar(value="Auto")
+        ttk.Entry(peak_grid, textvariable=self.var_prominence, width=10).grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        
+        # Button layout with Find and Manual
+        peak_buttons = ttk.Frame(peak_frame)
+        peak_buttons.pack(fill=tk.X, pady=5)
+        ttk.Button(peak_buttons, text="Find Peaks", 
+                  command=self.find_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(peak_buttons, text="Add Peaks Manually", 
+                  command=self.enable_manual_peak_adding).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        
+        # Add clear peaks button
+        ttk.Button(peak_frame, text="Clear Peaks", 
+                  command=self.clear_peaks).pack(fill=tk.X, pady=2)
+        
+        # Peak fitting frame
+        fit_frame = ttk.LabelFrame(scrollable_frame, text="Peak Fitting", padding=10)
+        fit_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Use grid for more compact layout
+        fit_grid = ttk.Frame(fit_frame)
+        fit_grid.pack(fill=tk.X)
+        
+        ttk.Label(fit_grid, text="Model:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
+        self.current_model = tk.StringVar(value="Gaussian")
+        model_combo = ttk.Combobox(fit_grid, textvariable=self.current_model, 
+                                  values=["Gaussian", "Lorentzian", "Pseudo-Voigt"], width=15)
+        model_combo.grid(row=0, column=1, sticky="w", padx=2, pady=2)
+        model_combo.bind("<<ComboboxSelected>>", lambda e: self.update_plot())
+        
+        ttk.Button(fit_frame, text="Fit Peaks", 
+                  command=self.fit_peaks).pack(fill=tk.X, pady=5)
+        
+        # Model info frame with compact info
+        model_info_frame = ttk.LabelFrame(scrollable_frame, text="Model Info", padding=10)
+        model_info_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        model_info_text = tk.Text(model_info_frame, height=3, width=45, wrap=tk.WORD)
+        model_info_text.pack(fill=tk.X)
+        model_info_text.insert(tk.END, 
+            "Gaussian: Symmetric, best for instrumental broadening\n"
+            "Lorentzian: Broader tails, natural line broadening\n"
+            "Pseudo-Voigt: Combination, most flexible for real spectra"
+        )
+        model_info_text.config(state=tk.DISABLED)
+        
+        # Results frame
+        results_frame = ttk.LabelFrame(scrollable_frame, text="Fit Results", padding=10)
+        results_frame.pack(fill=tk.X, pady=(0, 10), expand=True)
+        
+        self.results_text = tk.Text(results_frame, height=7, width=45, wrap=tk.WORD)
+        results_scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, 
+                                        command=self.results_text.yview)
+        self.results_text.config(yscrollcommand=results_scrollbar.set)
+        results_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.results_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Export/Apply buttons in a more compact layout
+        button_frame = ttk.Frame(scrollable_frame)
+        button_frame.pack(fill=tk.X, pady=5)
+        
+        button_grid = ttk.Frame(button_frame)
+        button_grid.pack(fill=tk.X, expand=True)
+        
+        ttk.Button(button_grid, text="Export Results", 
+                  command=self.export_results).grid(row=0, column=0, sticky="we", padx=1, pady=1)
+        ttk.Button(button_grid, text="Close", 
+                  command=self.window.destroy).grid(row=0, column=1, sticky="we", padx=1, pady=1)
+        
+        # Configure the grid to expand properly
+        button_grid.columnconfigure(0, weight=1)
+        button_grid.columnconfigure(1, weight=1)
+        
+    def subtract_background(self):
+        """Subtract the background from the spectrum."""
+        try:
+            lam = float(self.var_lambda.get())
+            p = float(self.var_p.get())
+            niter = int(self.var_niter.get())
+            
+            # Use the baseline_als method from the RamanSpectra class
+            self.background = self.baseline_als(self.original_spectra, lam=lam, p=p, niter=niter)
+            self.spectra = self.original_spectra - self.background
+            
+            self.update_plot()
+            # Update the plot title to show that background was subtracted
+            self.ax1.set_title(f'Raman Spectrum - Background Subtracted (λ={lam:.1e}, p={p:.4f})')
+            self.canvas.draw()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to subtract background: {str(e)}")
+    
+    def preview_background(self):
+        """Preview the background without subtracting it."""
+        try:
+            lam = float(self.var_lambda.get())
+            p = float(self.var_p.get())
+            niter = int(self.var_niter.get())
+            
+            # Calculate the background
+            self.background = self.baseline_als(self.original_spectra, lam=lam, p=p, niter=niter)
+            
+            # Just update the plot without altering the spectrum
+            self.update_plot()
+            
+            # Show parameter values in the title
+            self.ax1.set_title(f'Raman Spectrum with ALS Background (λ={lam}, p={p}, iter={niter})')
+            self.canvas.draw()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to preview background: {str(e)}")
+    
+    def compare_background_parameters(self):
+        """Compare different background parameters in a separate window."""
+        try:
+            # Create a new window
+            compare_window = tk.Toplevel(self.window)
+            compare_window.title("Background Parameter Comparison")
+            compare_window.geometry("1000x750")  # Reduced width and height
+            
+            # Create a canvas with scrollbar for the entire window
+            main_canvas = tk.Canvas(compare_window)
+            scrollbar = ttk.Scrollbar(compare_window, orient=tk.VERTICAL, command=main_canvas.yview)
+            
+            # Configure the canvas with the scrollbar
+            main_canvas.configure(yscrollcommand=scrollbar.set)
+            main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # Create a main frame inside the canvas to hold everything
+            main_frame = ttk.Frame(main_canvas, padding=5)
+            
+            # Create a window in the canvas to display the main_frame
+            canvas_window = main_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+            
+            # Configure the canvas to resize with the frame
+            def on_frame_configure(event):
+                main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+                main_canvas.itemconfig(canvas_window, width=main_canvas.winfo_width())
+            
+            main_frame.bind("<Configure>", on_frame_configure)
+            main_canvas.bind("<Configure>", lambda e: main_canvas.itemconfig(canvas_window, width=e.width))
+            
+            # Upper frame for plots
+            plot_frame = ttk.Frame(main_frame)
+            plot_frame.pack(fill=tk.BOTH, padx=10, pady=10)
+            
+            # Create a figure with subplots for different parameter combinations
+            # Make plots smaller by reducing figsize even more
+            fig, axs = plt.subplots(2, 3, figsize=(8, 5), sharex=True, sharey=True)
+            fig.suptitle("Comparison of Asymmetric Least Squares Background Parameters", fontsize=12)
+            
+            # Flatten the axes array for easier iteration
+            axs = axs.flatten()
+            
+            # Define parameter combinations to compare
+            # Format: (lambda, p, niter, title)
+            param_sets = [
+                (1e3, 0.001, 10, "λ=1e3, p=0.001 (rigid, less peak influence)"),
+                (1e3, 0.1, 10, "λ=1e3, p=0.1 (rigid, more peak influence)"),
+                (1e5, 0.001, 10, "λ=1e5, p=0.001 (medium, less peak influence)"),
+                (1e5, 0.1, 10, "λ=1e5, p=0.1 (medium, more peak influence)"),
+                (1e7, 0.001, 10, "λ=1e7, p=0.001 (smooth, less peak influence)"),
+                (1e7, 0.1, 10, "λ=1e7, p=0.1 (smooth, more peak influence)")
+            ]
+            
+            # Create a variable to store the selected parameter set
+            selected_param = tk.IntVar(value=-1)  # -1 means no selection
+            
+            # Store background data for each parameter set
+            bg_data = []
+            
+            # Plot each parameter set
+            for i, (lam, p, niter, title) in enumerate(param_sets):
+                if i < len(axs):
+                    ax = axs[i]
+                    
+                    # Calculate background for this parameter set
+                    bg = self.baseline_als(self.original_spectra, lam=lam, p=p, niter=niter)
+                    bg_data.append(bg)  # Store for later use
+                    
+                    # Plot original data
+                    ax.plot(self.wavenumbers, self.original_spectra, 'k-', alpha=0.7, label='Original')
+                    
+                    # Plot background
+                    ax.plot(self.wavenumbers, bg, 'r-', alpha=0.9, label='Background')
+                    
+                    # Plot corrected spectrum
+                    ax.plot(self.wavenumbers, self.original_spectra - bg, 'b-', alpha=0.5, label='Corrected')
+                    
+                    # Set title and label with smaller fonts
+                    ax.set_title(f"Set {i+1}: {title}", fontsize=7)
+                    ax.set_xlabel('Wavenumber (cm⁻¹)' if i >= 3 else '', fontsize=7)
+                    ax.set_ylabel('Intensity (a.u.)' if i % 3 == 0 else '', fontsize=7)
+                    ax.tick_params(labelsize=6)  # Make tick labels smaller
+                    
+                    # Only add legend to the first plot
+                    if i == 0:
+                        ax.legend(loc='upper right', fontsize=6)
+            
+            # Adjust layout
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])  # Leave room for suptitle
+            
+            # Create a canvas to display the figure
+            canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, pady=5)
+            
+            # Add toolbar
+            toolbar = NavigationToolbar2Tk(canvas, plot_frame)
+            toolbar.update()
+            
+            # Add selection frame with radio buttons under each plot
+            selection_frame = ttk.LabelFrame(main_frame, text="Select Your Preferred Background", padding=10)
+            selection_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+            
+            # Create a grid for the radio buttons
+            radio_grid = ttk.Frame(selection_frame)
+            radio_grid.pack(fill=tk.X, pady=5)
+            
+            # Create radio buttons for each parameter set
+            for i, (lam, p, niter, title) in enumerate(param_sets):
+                radio_frame = ttk.Frame(radio_grid)
+                radio_frame.grid(row=i//3, column=i%3, padx=10, pady=5, sticky="w")
+                
+                rb = ttk.Radiobutton(
+                    radio_frame, 
+                    text=f"Set {i+1}: λ={lam:.0e}, p={p:.3f}", 
+                    variable=selected_param, 
+                    value=i
+                )
+                rb.pack(side=tk.LEFT)
+                
+                # Add preview button for each set
+                ttk.Button(
+                    radio_frame,
+                    text="Preview",
+                    command=lambda idx=i: preview_selected(idx)
+                ).pack(side=tk.LEFT, padx=5)
+            
+            # Preview function to display a larger version of the selected background
+            def preview_selected(index):
+                preview_window = tk.Toplevel(compare_window)
+                preview_window.title(f"Preview of Parameter Set {index+1}")
+                preview_window.geometry("800x600")
+                
+                # Get parameters
+                lam, p, niter, title = param_sets[index]
+                bg = bg_data[index]
+                
+                # Create figure for preview
+                preview_fig, preview_ax = plt.subplots(figsize=(8, 6))
+                preview_ax.plot(self.wavenumbers, self.original_spectra, 'k-', alpha=0.7, label='Original')
+                preview_ax.plot(self.wavenumbers, bg, 'r-', alpha=0.9, label='Background')
+                preview_ax.plot(self.wavenumbers, self.original_spectra - bg, 'b-', alpha=0.7, label='Corrected')
+                
+                preview_ax.set_title(f"Parameter Set {index+1}: {title}")
+                preview_ax.set_xlabel('Wavenumber (cm⁻¹)')
+                preview_ax.set_ylabel('Intensity (a.u.)')
+                preview_ax.legend(loc='best')
+                
+                # Create canvas
+                preview_canvas = FigureCanvasTkAgg(preview_fig, master=preview_window)
+                preview_canvas.draw()
+                preview_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                
+                # Add toolbar
+                preview_toolbar = NavigationToolbar2Tk(preview_canvas, preview_window)
+                preview_toolbar.update()
+                
+                # Buttons frame
+                buttons_frame = ttk.Frame(preview_window)
+                buttons_frame.pack(fill=tk.X, pady=10, padx=10)
+                
+                # Add apply button
+                ttk.Button(
+                    buttons_frame,
+                    text="Use These Parameters",
+                    command=lambda: apply_param_set(index, preview_window)
+                ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+                
+                # Add close button
+                ttk.Button(
+                    buttons_frame,
+                    text="Close Preview",
+                    command=preview_window.destroy
+                ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            # Add a visual hint panel to highlight the differences
+            hint_frame = ttk.LabelFrame(main_frame, text="Visual Comparison Guide", padding=10)
+            hint_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+            
+            # Create a grid layout for the hints
+            hint_grid = ttk.Frame(hint_frame)
+            hint_grid.pack(fill=tk.X)
+            
+            # Add hints for different lambda values
+            ttk.Label(hint_grid, text="λ (smoothness):", font=("", 10, "bold")).grid(row=0, column=0, sticky="w", padx=5, pady=2)
+            ttk.Label(hint_grid, text="1e3 - More flexible, follows data closely").grid(row=0, column=1, sticky="w", padx=5, pady=2)
+            ttk.Label(hint_grid, text="1e5 - Balanced smoothness").grid(row=0, column=2, sticky="w", padx=5, pady=2)
+            ttk.Label(hint_grid, text="1e7 - Very rigid, may underfit").grid(row=0, column=3, sticky="w", padx=5, pady=2)
+            
+            # Add hints for different p values
+            ttk.Label(hint_grid, text="p (asymmetry):", font=("", 10, "bold")).grid(row=1, column=0, sticky="w", padx=5, pady=2)
+            ttk.Label(hint_grid, text="0.001 - Less influenced by peaks").grid(row=1, column=1, sticky="w", padx=5, pady=2)
+            ttk.Label(hint_grid, text="0.01 - Moderate peak influence").grid(row=1, column=2, sticky="w", padx=5, pady=2)
+            ttk.Label(hint_grid, text="0.1 - More influenced by peaks").grid(row=1, column=3, sticky="w", padx=5, pady=2)
+            
+            # Add button frame
+            button_frame = ttk.Frame(main_frame, padding=10)
+            button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+            
+            # Function to apply selected parameters
+            def apply_param_set(param_set, window_to_close=None):
+                lam, p, niter, _ = param_sets[param_set]
+                self.var_lambda.set(str(lam))
+                self.var_p.set(str(p))
+                self.var_niter.set(str(niter))
+                
+                # Close the optional window if provided
+                if window_to_close:
+                    window_to_close.destroy()
+                    
+                compare_window.destroy()
+                self.preview_background()
+            
+            # Button to apply the selected parameters - more prominent design
+            apply_button = ttk.Button(
+                button_frame, 
+                text="Apply Selected Background", 
+                command=lambda: apply_selected_param(),
+                style="Apply.TButton"  # Custom style for prominence
+            )
+            apply_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            # Create custom style for the apply button
+            style = ttk.Style()
+            style.configure("Apply.TButton", font=("", 10, "bold"))
+            
+            # Function to apply the selected parameters
+            def apply_selected_param():
+                selected = selected_param.get()
+                if selected >= 0:
+                    apply_param_set(selected)
+                else:
+                    messagebox.showinfo("No Selection", "Please select a parameter set first.")
+            
+            # Add a close button
+            ttk.Button(
+                button_frame, 
+                text="Close Without Applying", 
+                command=compare_window.destroy
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to compare background parameters: {str(e)}")
+    
+    def interactive_background_tuning(self):
+        """Create an interactive window with sliders to adjust background parameters."""
+        try:
+            # Create a new window
+            tuning_window = tk.Toplevel(self.window)
+            tuning_window.title("Interactive Background Parameter Tuning")
+            tuning_window.geometry("1000x800")  # Increased height from 700 to 800
+            
+            # Upper frame for plot
+            plot_frame = ttk.Frame(tuning_window, padding=10)
+            plot_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Create a figure for the plot
+            fig, ax = plt.subplots(figsize=(8, 5))
+            canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            # Add toolbar
+            toolbar = NavigationToolbar2Tk(canvas, plot_frame)
+            toolbar.update()
+            
+            # Lower frame for controls
+            control_frame = ttk.LabelFrame(tuning_window, text="Parameter Controls", padding=10)
+            control_frame.pack(fill=tk.X, padx=10, pady=10)
+            
+            # Lambda slider (logarithmic scale)
+            lambda_frame = ttk.Frame(control_frame)
+            lambda_frame.pack(fill=tk.X, pady=5)
+            
+            ttk.Label(lambda_frame, text="λ (smoothness):").pack(side=tk.LEFT, padx=(0, 10))
+            
+            # Lambda value displays
+            lambda_val = tk.StringVar(value="1e5")
+            lambda_display = ttk.Entry(lambda_frame, textvariable=lambda_val, width=10)
+            lambda_display.pack(side=tk.RIGHT)
+            
+            # Lambda slider (using logarithmic scale internally, displayed as power of 10)
+            lambda_slider_var = tk.DoubleVar(value=5.0)  # 10^5 = 1e5
+            lambda_slider = ttk.Scale(
+                control_frame, 
+                from_=2.0, 
+                to=8.0, 
+                orient=tk.HORIZONTAL, 
+                variable=lambda_slider_var,
+                length=400
+            )
+            lambda_slider.pack(fill=tk.X, pady=(0, 10))
+            
+            # P slider (logarithmic scale)
+            p_frame = ttk.Frame(control_frame)
+            p_frame.pack(fill=tk.X, pady=5)
+            
+            ttk.Label(p_frame, text="p (asymmetry):").pack(side=tk.LEFT, padx=(0, 10))
+            
+            # P value displays
+            p_val = tk.StringVar(value="0.01")
+            p_display = ttk.Entry(p_frame, textvariable=p_val, width=10)
+            p_display.pack(side=tk.RIGHT)
+            
+            # P slider (using logarithmic scale)
+            p_slider_var = tk.DoubleVar(value=-2.0)  # 10^-2 = 0.01
+            p_slider = ttk.Scale(
+                control_frame, 
+                from_=-4.0, 
+                to=-0.5, 
+                orient=tk.HORIZONTAL, 
+                variable=p_slider_var,
+                length=400
+            )
+            p_slider.pack(fill=tk.X, pady=(0, 10))
+            
+            # Iteration slider
+            niter_frame = ttk.Frame(control_frame)
+            niter_frame.pack(fill=tk.X, pady=5)
+            
+            ttk.Label(niter_frame, text="Iterations:").pack(side=tk.LEFT, padx=(0, 10))
+            
+            # Iteration value display
+            niter_val = tk.StringVar(value="10")
+            niter_display = ttk.Entry(niter_frame, textvariable=niter_val, width=10)
+            niter_display.pack(side=tk.RIGHT)
+            
+            # Iteration slider
+            niter_slider_var = tk.IntVar(value=10)
+            niter_slider = ttk.Scale(
+                control_frame, 
+                from_=1, 
+                to=50, 
+                orient=tk.HORIZONTAL, 
+                variable=niter_slider_var,
+                length=400
+            )
+            niter_slider.pack(fill=tk.X, pady=(0, 10))
+            
+            # Performance optimization: Cache data and plot objects
+            # Store background trace and corrected trace as line objects
+            lines = {}
+            
+            # Initial plot setup - do this once and then just update the data
+            lines['original'], = ax.plot(self.wavenumbers, self.original_spectra, 'k-', alpha=0.7, label='Original')
+            lines['background'], = ax.plot(self.wavenumbers, np.zeros_like(self.wavenumbers), 'r-', alpha=0.8, label='Background')
+            lines['corrected'], = ax.plot(self.wavenumbers, np.zeros_like(self.wavenumbers), 'b-', label='Corrected')
+            
+            # Set labels and title - do this once
+            ax.set_xlabel('Wavenumber (cm⁻¹)')
+            ax.set_ylabel('Intensity (a.u.)')
+            ax.set_title('ALS Background')
+            ax.legend(loc='upper right')
+            
+            # Set initial y-limits to avoid auto-scaling on every update
+            ax.set_ylim(np.min(self.original_spectra) * 0.9, np.max(self.original_spectra) * 1.1)
+            
+            # Throttling mechanism for slider events
+            update_pending = False
+            last_update_time = 0
+            MIN_UPDATE_INTERVAL = 200  # milliseconds
+            
+            # Function to update the plot
+            def update_plot(throttled=False):
+                nonlocal update_pending, last_update_time
+                
+                current_time = int(tuning_window.winfo_toplevel().winfo_id())  # Use as millisecond counter
+                
+                # If this is a throttled update or too soon after the last update, schedule for later
+                if not throttled and current_time - last_update_time < MIN_UPDATE_INTERVAL:
+                    if not update_pending:
+                        update_pending = True
+                        tuning_window.after(MIN_UPDATE_INTERVAL, lambda: update_plot(True))
+                    return
+                
+                # Reset flags
+                update_pending = False
+                last_update_time = current_time
+                
+                # Get slider values and convert to actual parameters
+                lam = 10 ** lambda_slider_var.get()
+                p = 10 ** p_slider_var.get()
+                niter = niter_slider_var.get()
+                
+                # Update entry displays without triggering callbacks
+                lambda_val.set(f"{lam:.1e}")
+                p_val.set(f"{p:.4f}")
+                niter_val.set(str(niter))
+                
+                # Calculate background
+                background = self.baseline_als(self.original_spectra, lam=lam, p=p, niter=niter)
+                corrected = self.original_spectra - background
+                
+                # Update data without recreating the plot objects
+                lines['background'].set_ydata(background)
+                lines['corrected'].set_ydata(corrected)
+                
+                # Update title with current parameters
+                ax.set_title(f'ALS Background (λ={lam:.1e}, p={p:.4f}, iter={niter})')
+                
+                # Draw only what needs to be updated
+                canvas.draw_idle()
+            
+            # Bind sliders to update function with throttling
+            def on_slider_change(*args):
+                update_plot(False)
+            
+            # Bind slider release events for immediate update
+            lambda_slider.bind("<ButtonRelease-1>", on_slider_change)
+            p_slider.bind("<ButtonRelease-1>", on_slider_change)
+            niter_slider.bind("<ButtonRelease-1>", on_slider_change)
+            
+            # Also bind slider motion, but this will be throttled
+            lambda_slider.bind("<B1-Motion>", on_slider_change)
+            p_slider.bind("<B1-Motion>", on_slider_change)
+            niter_slider.bind("<B1-Motion>", on_slider_change)
+            
+            # Function to apply parameters to main window
+            def apply_parameters():
+                lam = 10 ** lambda_slider_var.get()
+                p = 10 ** p_slider_var.get()
+                niter = niter_slider_var.get()
+                
+                self.var_lambda.set(f"{lam:.1e}")
+                self.var_p.set(f"{p:.4f}")
+                self.var_niter.set(str(niter))
+                
+                tuning_window.destroy()
+                self.preview_background()
+            
+            # Function to handle numeric entry changes
+            def on_lambda_entry_change(*args):
+                try:
+                    value = float(lambda_val.get().replace('e', 'E'))
+                    log_value = np.log10(value)
+                    if 2.0 <= log_value <= 8.0:  # Ensure within slider range
+                        lambda_slider_var.set(log_value)
+                        update_plot()
+                except (ValueError, TypeError):
+                    pass  # Invalid input, ignore
+            
+            def on_p_entry_change(*args):
+                try:
+                    value = float(p_val.get().replace('e', 'E'))
+                    log_value = np.log10(value)
+                    if -4.0 <= log_value <= -0.5:  # Ensure within slider range
+                        p_slider_var.set(log_value)
+                        update_plot()
+                except (ValueError, TypeError):
+                    pass  # Invalid input, ignore
+            
+            def on_niter_entry_change(*args):
+                try:
+                    value = int(niter_val.get())
+                    if 1 <= value <= 50:  # Ensure within slider range
+                        niter_slider_var.set(value)
+                        update_plot()
+                except (ValueError, TypeError):
+                    pass  # Invalid input, ignore
+            
+            # Bind entry fields to update function
+            lambda_val.trace_add("write", on_lambda_entry_change)
+            p_val.trace_add("write", on_p_entry_change)
+            niter_val.trace_add("write", on_niter_entry_change)
+            
+            # Add buttons
+            button_frame = ttk.Frame(tuning_window, padding=10)
+            button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+            
+            ttk.Button(
+                button_frame, 
+                text="Apply Parameters", 
+                command=apply_parameters
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            ttk.Button(
+                button_frame, 
+                text="Reset to Default", 
+                command=lambda: [
+                    lambda_slider_var.set(5.0),
+                    p_slider_var.set(-2.0),
+                    niter_slider_var.set(10),
+                    update_plot(True)
+                ]
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            ttk.Button(
+                button_frame, 
+                text="Close", 
+                command=tuning_window.destroy
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            
+            # Status bar for user feedback
+            status_var = tk.StringVar(value="Ready. Move sliders to adjust parameters.")
+            status_bar = ttk.Label(tuning_window, textvariable=status_var, relief=tk.SUNKEN, anchor=tk.W)
+            status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=5)
+            
+            # Initial plot
+            update_plot(True)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create interactive tuning window: {str(e)}")
+    
+    def baseline_als(self, y, lam=1e5, p=0.01, niter=10):
+        """
+        Asymmetric Least Squares Smoothing.
+        Baseline correction algorithm that is useful for spectra with broad peaks.
+        
+        Parameters:
+        -----------
+        y : array_like
+            Input data (intensity values)
+        lam : float, optional
+            Smoothness parameter. Higher values make the baseline more rigid.
+        p : float, optional
+            Asymmetry parameter. Values between 0.001 and 0.1 are good for baseline fitting.
+        niter : int, optional
+            Number of iterations to perform.
+            
+        Returns:
+        --------
+        array_like
+            Fitted baseline.
+        """
+        L = len(y)
+        D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+        D = lam * D.dot(D.transpose())
+        w = np.ones(L)
+        W = sparse.spdiags(w, 0, L, L)
+        
+        for i in range(niter):
+            W.setdiag(w)
+            Z = W + D
+            z = spsolve(Z, w * y)
+            w = p * (y > z) + (1-p) * (y <= z)
+            
+        return z
+    
+    def find_peaks(self):
+        """Find peaks in the spectrum."""
+        try:
+            # Initialize peaks list if it doesn't exist
+            if self.peaks is None:
+                self.peaks = []
+                
+            # Get parameters
+            height_str = self.var_height.get().strip()
+            distance_str = self.var_distance.get().strip()
+            prominence_str = self.var_prominence.get().strip()
+            
+            # Determine spectrum for peak finding
+            spectrum_to_use = self.spectra
+            
+            # Set auto height to 5% above background if background is available
+            if height_str == "Auto":
+                if self.background is not None:
+                    # Calculate 5% of the intensity range above background
+                    intensity_range = np.max(spectrum_to_use) - np.min(spectrum_to_use)
+                    height = np.min(spectrum_to_use) + (0.05 * intensity_range)
+                else:
+                    # Without background, use 5% of max intensity
+                    height = 0.05 * np.max(spectrum_to_use)
+            else:
+                try:
+                    # Handle numeric input
+                    height = float(height_str)
+                except ValueError:
+                    # Default if input is invalid
+                    height = 0.05 * np.max(spectrum_to_use)
+            
+            # Handle other parameters
+            distance = None if distance_str == "Auto" else int(distance_str)
+            prominence = None if prominence_str == "Auto" else float(prominence_str)
+            
+            # Find peaks using scipy
+            from scipy.signal import find_peaks
+            peak_indices, peak_props = find_peaks(
+                spectrum_to_use, 
+                height=height,
+                distance=distance,
+                prominence=prominence
+            )
+            
+            # Store peak data
+            self.peaks = []
+            for i in peak_indices:
+                self.peaks.append({
+                    'position': self.wavenumbers[i],
+                    'intensity': spectrum_to_use[i],
+                    'index': i
+                })
+                
+            # Update the plot with newly found peaks
+            self.update_plot()
+            
+            # Update title to show the number of peaks found
+            self.ax1.set_title(f'Raman Spectrum - {len(self.peaks)} Peaks Found')
+            self.canvas.draw()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}")
+    
+    def gaussian(self, x, amp, cen, wid):
+        """Gaussian peak function."""
+        return amp * np.exp(-(x - cen)**2 / (2 * wid**2))
+    
+    def lorentzian(self, x, amp, cen, wid):
+        """Lorentzian peak function."""
+        return amp * wid**2 / ((x - cen)**2 + wid**2)
+    
+    def pseudo_voigt(self, x, amp, cen, wid, eta=0.5):
+        """Pseudo-Voigt peak function (linear combination of Gaussian and Lorentzian)."""
+        return amp * (eta * self.gaussian(x, 1, cen, wid) + 
+                    (1-eta) * self.lorentzian(x, 1, cen, wid))
+    
+    def multi_peak_model(self, x, *params):
+        """
+        Model for multiple peaks.
+        
+        Parameters:
+        -----------
+        x : array_like
+            X values (wavenumbers)
+        *params : tuple
+            Parameters for all peaks. For n peaks:
+            - If Gaussian or Lorentzian: 3n parameters (amp, cen, wid) * n
+            - If Pseudo-Voigt: 4n parameters (amp, cen, wid, eta) * n
+        
+        Returns:
+        --------
+        array_like
+            Sum of all peaks.
+        """
+        model = np.zeros_like(x)
+        
+        # Get peak model type
+        model_type = self.current_model.get()
+        
+        # Calculate number of parameters per peak
+        params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+        
+        # Calculate number of peaks
+        n_peaks = len(params) // params_per_peak
+        
+        # Generate combined model from all peaks
+        for i in range(n_peaks):
+            start_idx = i * params_per_peak
+            
+            if model_type == "Gaussian":
+                amp, cen, wid = params[start_idx:start_idx+3]
+                model += self.gaussian(x, amp, cen, wid)
+            
+            elif model_type == "Lorentzian":
+                amp, cen, wid = params[start_idx:start_idx+3]
+                model += self.lorentzian(x, amp, cen, wid)
+            
+            elif model_type == "Pseudo-Voigt":
+                amp, cen, wid, eta = params[start_idx:start_idx+4]
+                model += self.pseudo_voigt(x, amp, cen, wid, eta)
+        
+        return model
+    
+    def fit_peaks(self):
+        """Fit peaks to the spectrum."""
+        if not self.peaks:
+            messagebox.showerror("No Peaks", "No peaks detected. Please find peaks first.")
+            return
+            
+        try:
+            # Get model type
+            model_type = self.current_model.get()
+            
+            # Initial parameter guess for each peak
+            initial_params = []
+            param_bounds = ([], [])  # Lower and upper bounds
+            
+            for peak in self.peaks:
+                # Amplitude, center, width
+                initial_params.extend([
+                    peak['intensity'],  # amplitude guess
+                    peak['position'],   # center position
+                    10.0                # width guess (reasonable for Raman)
+                ])
+                
+                # Add bounds for each parameter (amp, cen, wid)
+                param_bounds[0].extend([0, peak['position']-50, 0.1])  # Lower bounds
+                param_bounds[1].extend([peak['intensity']*2, peak['position']+50, 50])  # Upper bounds
+                
+                # Add eta parameter for Pseudo-Voigt
+                if model_type == "Pseudo-Voigt":
+                    initial_params.append(0.5)  # eta parameter (mix ratio)
+                    param_bounds[0].append(0.0)  # Lower bound for eta
+                    param_bounds[1].append(1.0)  # Upper bound for eta
+            
+            # Perform the curve fit
+            params, covariance = curve_fit(
+                self.multi_peak_model, 
+                self.wavenumbers, 
+                self.spectra,
+                p0=initial_params,
+                bounds=param_bounds,
+                maxfev=50000
+            )
+            
+            # Store fit result
+            self.fit_params = params
+            
+            # Calculate fit curve
+            self.fit_result = self.multi_peak_model(self.wavenumbers, *params)
+            
+            # Calculate residuals
+            self.residuals = self.spectra - self.fit_result
+            
+            # Update the plot
+            self.update_plot()
+            
+            # Calculate goodness of fit (R-squared)
+            ss_tot = np.sum((self.spectra - np.mean(self.spectra))**2)
+            ss_res = np.sum(self.residuals**2)
+            r_squared = 1 - (ss_res / ss_tot)
+            
+            # Update the plot title
+            self.ax1.set_title(f'Raman Spectrum - Peak Fit ({model_type}, R²={r_squared:.4f})')
+            self.canvas.draw()
+            
+            # Display fit results
+            self.display_fit_results(params, covariance)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to fit peaks: {str(e)}")
+    
+    def display_fit_results(self, params, covariance):
+        """
+        Display the fit results in the results text box.
+        
+        Parameters:
+        -----------
+        params : array_like
+            Fitted parameters
+        covariance : array_like
+            Covariance matrix of the fit
+        """
+        # Clear the text box
+        self.results_text.delete(1.0, tk.END)
+        
+        # Get model type
+        model_type = self.current_model.get()
+        params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+        
+        # Calculate number of peaks
+        n_peaks = len(params) // params_per_peak
+        
+        # Calculate parameter errors (standard deviations)
+        errors = np.sqrt(np.diag(covariance))
+        
+        # Calculate goodness of fit (R-squared)
+        ss_tot = np.sum((self.spectra - np.mean(self.spectra))**2)
+        ss_res = np.sum(self.residuals**2)
+        r_squared = 1 - (ss_res / ss_tot)
+        
+        # Header for the results
+        self.results_text.insert(tk.END, f"Model: {model_type}\n")
+        self.results_text.insert(tk.END, f"Number of peaks: {n_peaks}\n")
+        self.results_text.insert(tk.END, f"R-squared: {r_squared:.4f}\n\n")
+        self.results_text.insert(tk.END, "Peak Parameters:\n")
+        
+        # Display parameters for each peak
+        for i in range(n_peaks):
+            self.results_text.insert(tk.END, f"Peak {i+1}:\n")
+            
+            start_idx = i * params_per_peak
+            
+            # Common parameters for all models
+            amp = params[start_idx]
+            amp_err = errors[start_idx]
+            cen = params[start_idx+1]
+            cen_err = errors[start_idx+1]
+            wid = params[start_idx+2]
+            wid_err = errors[start_idx+2]
+            
+            self.results_text.insert(tk.END, f"  Position: {cen:.2f} ± {cen_err:.2f} cm⁻¹\n")
+            self.results_text.insert(tk.END, f"  Amplitude: {amp:.2f} ± {amp_err:.2f}\n")
+            self.results_text.insert(tk.END, f"  Width: {wid:.2f} ± {wid_err:.2f} cm⁻¹\n")
+            
+            # Add eta parameter for Pseudo-Voigt
+            if model_type == "Pseudo-Voigt":
+                eta = params[start_idx+3]
+                eta_err = errors[start_idx+3]
+                self.results_text.insert(tk.END, f"  Eta (mix ratio): {eta:.2f} ± {eta_err:.2f}\n")
+            
+            self.results_text.insert(tk.END, "\n")
+    
+    def update_plot(self):
+        """Update the plot with current data and fit."""
+        # Clear the axes
+        self.ax1.clear()
+        self.ax2.clear()
+        
+        # Plot original data
+        self.ax1.plot(self.wavenumbers, self.original_spectra, 'k-', label='Original Data', alpha=0.5)
+        
+        # Plot background if available
+        if self.background is not None:
+            self.ax1.plot(self.wavenumbers, self.background, 'r--', label='Background', alpha=0.5)
+        
+        # Plot processed data
+        self.ax1.plot(self.wavenumbers, self.spectra, 'b-', label='Processed Data')
+        
+        # Plot peaks
+        if self.peaks:
+            peak_positions = [peak['position'] for peak in self.peaks]
+            peak_intensities = [peak['intensity'] for peak in self.peaks]
+            self.ax1.plot(peak_positions, peak_intensities, 'ro', label='Peak')
+        
+        # Plot fit if available
+        if self.fit_result is not None:
+            self.ax1.plot(self.wavenumbers, self.fit_result, 'g-', label='Combined Fit')
+            
+            # Plot individual peaks without adding to legend
+            model_type = self.current_model.get()
+            params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+            n_peaks = len(self.fit_params) // params_per_peak
+            
+            for i in range(n_peaks):
+                start_idx = i * params_per_peak
+                
+                if model_type == "Gaussian":
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                    peak = self.gaussian(self.wavenumbers, amp, cen, wid)
+                    self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.5)
+                    # Add text annotation for peak position
+                    self.ax1.annotate(f'{cen:.1f}', 
+                                     xy=(cen, amp), 
+                                     xytext=(0, 10),
+                                     textcoords='offset points',
+                                     ha='center',
+                                     fontsize=8,
+                                     bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                
+                elif model_type == "Lorentzian":
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                    peak = self.lorentzian(self.wavenumbers, amp, cen, wid)
+                    self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.5)
+                    # Add text annotation for peak position
+                    self.ax1.annotate(f'{cen:.1f}', 
+                                     xy=(cen, amp), 
+                                     xytext=(0, 10),
+                                     textcoords='offset points',
+                                     ha='center',
+                                     fontsize=8,
+                                     bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                
+                elif model_type == "Pseudo-Voigt":
+                    amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
+                    peak = self.pseudo_voigt(self.wavenumbers, amp, cen, wid, eta)
+                    self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.5)
+                    # Add text annotation for peak position
+                    self.ax1.annotate(f'{cen:.1f}', 
+                                     xy=(cen, amp), 
+                                     xytext=(0, 10),
+                                     textcoords='offset points',
+                                     ha='center',
+                                     fontsize=8,
+                                     bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                    
+            # Plot residuals
+            self.ax2.plot(self.wavenumbers, self.residuals, 'r-', label='Residuals')
+            self.ax2.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+        
+        # Configure axes
+        self.ax1.set_title('Raman Spectrum and Peak Fit')
+        self.ax1.set_ylabel('Intensity (a.u.)')
+        self.ax1.legend(loc='best', fontsize='small')
+        
+        self.ax2.set_xlabel('Wavenumber (cm⁻¹)')
+        self.ax2.set_ylabel('Residuals')
+        
+        # Update the figure
+        self.fig.tight_layout()
+        self.canvas.draw()
+    
+    def export_results(self):
+        """Export the fit results to a CSV file."""
+        if self.fit_params is None or len(self.fit_params) == 0:
+            messagebox.showerror("No Results", "No fit results available to export.")
+            return
+        
+        try:
+            from tkinter import filedialog
+            import csv
+            
+            # Ask for file location
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV Files", "*.csv"), ("Text Files", "*.txt"), ("All Files", "*.*")],
+                title="Save Fit Results"
+            )
+            
+            if not file_path:
+                return  # User cancelled
+            
+            # Get model type
+            model_type = self.current_model.get()
+            params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+            n_peaks = len(self.fit_params) // params_per_peak
+            
+            # Write to CSV
+            with open(file_path, 'w', newline='') as csvfile:
+                writer = csv.writer(csvfile)
+                
+                # Write header
+                if model_type == "Pseudo-Voigt":
+                    writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Width (cm⁻¹)', 'Eta'])
+                else:
+                    writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Width (cm⁻¹)'])
+                
+                # Write parameters for each peak
+                for i in range(n_peaks):
+                    start_idx = i * params_per_peak
+                    
+                    if model_type == "Pseudo-Voigt":
+                        amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
+                        writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid:.2f}", f"{eta:.2f}"])
+                    else:
+                        amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                        writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid:.2f}"])
+                
+                # Write R-squared
+                ss_tot = np.sum((self.spectra - np.mean(self.spectra))**2)
+                ss_res = np.sum(self.residuals**2)
+                r_squared = 1 - (ss_res / ss_tot)
+                writer.writerow([])
+                writer.writerow(['R-squared', f"{r_squared:.4f}"])
+            
+            messagebox.showinfo("Export Complete", f"Fit results saved to {file_path}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export results: {str(e)}")
+    
+    def enable_manual_peak_adding(self):
+        """Enable manual peak addition mode where user can click on the plot to add peaks."""
+        try:
+            # Ensure peaks list is initialized
+            if self.peaks is None:
+                self.peaks = []
+                
+            # Change cursor to indicate interactive mode
+            self.canvas.get_tk_widget().config(cursor="plus")
+            
+            # Update the plot title to show instructions
+            self.ax1.set_title("Click on the plot to add peaks - Press ESC to exit selection mode")
+            self.canvas.draw()
+            
+            # Store original toolbar state
+            self.original_toolbar = getattr(self.toolbar, '_active', None)
+            
+            # Disable toolbar to prevent interaction conflicts
+            if hasattr(self.toolbar, 'mode'):
+                self.toolbar.mode = ''
+            self.toolbar._active = None
+            
+            # Connect the click event handler
+            self.click_cid = self.canvas.mpl_connect('button_press_event', self.on_plot_click)
+            
+            # Connect key press event to exit peak selection mode with ESC
+            self.key_cid = self.canvas.mpl_connect('key_press_event', self.on_key_press)
+            
+            # Flag to indicate manual peak addition mode is active
+            self.manual_peak_mode = True
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to enable manual peak selection: {str(e)}")
+            # Ensure we're not in a broken state
+            self.manual_peak_mode = False
+            self.canvas.get_tk_widget().config(cursor="arrow")
+    
+    def on_plot_click(self, event):
+        """Handle click on the plot to add a peak."""
+        if not hasattr(self, 'manual_peak_mode') or not self.manual_peak_mode:
+            return
+            
+        # Check if click is within the main plot area
+        if event.inaxes == self.ax1:
+            x, y = event.xdata, event.ydata
+            
+            # Initialize peaks list if needed
+            if self.peaks is None:
+                self.peaks = []
+            
+            # Find the closest index in the wavenumbers array
+            idx = np.abs(self.wavenumbers - x).argmin()
+            
+            # Add the peak
+            self.peaks.append({
+                'position': self.wavenumbers[idx],
+                'intensity': self.spectra[idx],
+                'index': idx
+            })
+            
+            # Update the plot
+            self.update_plot()
+            
+            # Update title to show the number of peaks
+            self.ax1.set_title(f'Manual Peak Selection Mode - {len(self.peaks)} Peaks Added')
+            self.canvas.draw()
+    
+    def on_key_press(self, event):
+        """Handle key press to exit manual peak selection mode."""
+        if event.key == 'escape':
+            self.disable_manual_peak_adding()
+    
+    def disable_manual_peak_adding(self):
+        """Disable manual peak addition mode."""
+        # Restore cursor
+        self.canvas.get_tk_widget().config(cursor="arrow")
+        
+        # Disconnect event handlers
+        if hasattr(self, 'click_cid'):
+            self.canvas.mpl_disconnect(self.click_cid)
+        if hasattr(self, 'key_cid'):
+            self.canvas.mpl_disconnect(self.key_cid)
+        
+        # Restore toolbar
+        self.toolbar._active = self.original_toolbar
+        
+        # Reset flag
+        self.manual_peak_mode = False
+        
+        # Update title to show number of peaks
+        if self.peaks:
+            self.ax1.set_title(f'Raman Spectrum - {len(self.peaks)} Peaks')
+        else:
+            self.ax1.set_title('Raman Spectrum')
+        
+        self.canvas.draw()
+    
+    def clear_peaks(self):
+        """Clear all peaks."""
+        self.peaks = []
+        self.update_plot()
+        self.ax1.set_title('Raman Spectrum - Peaks Cleared')
+        self.canvas.draw()
+    
+    def on_closing(self):
+        """Handle window closing event."""
+        # Clean up event handlers if manual peak mode is active
+        if hasattr(self, 'manual_peak_mode') and self.manual_peak_mode:
+            self.disable_manual_peak_adding()
+        
+        # Close the window
+        self.window.destroy() 

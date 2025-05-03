@@ -28,6 +28,10 @@ class RamanSpectra:
         self.db_path = "raman_database.pkl"
         self.hey_classification = {}  # dictionary to store Hey Classification data
         
+        # Peak fitting attributes
+        self.fitted_peaks = None  # List of fitted peak data
+        self.peak_fit_result = None  # Dictionary containing fit results
+        
         # Try to load existing database if it exists
         if os.path.exists(self.db_path):
             self.load_database()
@@ -140,19 +144,19 @@ class RamanSpectra:
         from tkinter import ttk, messagebox
         import os
         
-        if not self.raman.database:
+        if not self.database:
             messagebox.showinfo("Database", "The database is empty.")
             return
         
         # Check if Hey Classification data is loaded
-        if not hasattr(self.raman, 'hey_classification') or not self.raman.hey_classification:
+        if not hasattr(self, 'hey_classification') or not self.hey_classification:
             # Try to load Hey Classification data if not already loaded
             hey_csv_path = "RRUFF_Export_with_Hey_Classification.csv"
             if os.path.exists(hey_csv_path):
-                self.raman.hey_classification = self.raman.load_hey_classification(hey_csv_path)
+                self.hey_classification = self.load_hey_classification(hey_csv_path)
             
             # Check again if data was loaded
-            if not hasattr(self.raman, 'hey_classification') or not self.raman.hey_classification:
+            if not hasattr(self, 'hey_classification') or not self.hey_classification:
                 messagebox.showerror("Error", "Hey Classification data could not be loaded.")
                 return
         
@@ -187,7 +191,7 @@ class RamanSpectra:
         log_text.tag_configure("info", foreground="blue")
         
         # Get database items and update progress bar maximum
-        db_items = list(self.raman.database.items())
+        db_items = list(self.database.items())
         progress["maximum"] = len(db_items)
         
         # Statistics counters
@@ -262,7 +266,7 @@ class RamanSpectra:
                 continue
             
             # Try to add Hey Classification using the mineral name
-            hey_class = self.raman.get_hey_classification(mineral_name)
+            hey_class = self.get_hey_classification(mineral_name)
             
             if hey_class:
                 # Update the metadata with Hey Classification
@@ -282,9 +286,9 @@ class RamanSpectra:
                 updated += 1
             else:
                 # Try with cleaned name
-                cleaned_name = self.raman._clean_mineral_name(mineral_name)
+                cleaned_name = self._clean_mineral_name(mineral_name)
                 if cleaned_name and cleaned_name != mineral_name:
-                    hey_class = self.raman.get_hey_classification(cleaned_name)
+                    hey_class = self.get_hey_classification(cleaned_name)
                     
                     if hey_class:
                         # Update the metadata with Hey Classification
@@ -304,9 +308,9 @@ class RamanSpectra:
                         continue
                 
                 # Try with more aggressive cleaning
-                very_clean_name = self.raman.extract_base_mineral_name(mineral_name)
+                very_clean_name = self.extract_base_mineral_name(mineral_name)
                 if very_clean_name and very_clean_name != mineral_name and very_clean_name != cleaned_name:
-                    hey_class = self.raman.get_hey_classification(very_clean_name)
+                    hey_class = self.get_hey_classification(very_clean_name)
                     
                     if hey_class:
                         # Update the metadata with Hey Classification
@@ -335,9 +339,9 @@ class RamanSpectra:
                       f"Update complete! Updated: {updated}, Already had: {already_had}, Not found: {not_found}", "info")
         
         # Save the database
-        saved = self.raman.save_database()
+        saved = self.save_database()
         if saved:
-            log_text.insert(tk.END, f"Database saved successfully to {self.raman.db_path}\n", "success")
+            log_text.insert(tk.END, f"Database saved successfully to {self.db_path}\n", "success")
         else:
             log_text.insert(tk.END, "Warning: Could not save database\n", "error")
         log_text.see(tk.END)
@@ -363,9 +367,9 @@ class RamanSpectra:
     def post_process_database_entries(self):
         """Run post-processing on database entries to update Hey Classification and Chemical Family."""
         updated = 0
-        total_entries = len(self.raman.database)
+        total_entries = len(self.database)
         
-        for name, data in self.raman.database.items():
+        for name, data in self.database.items():
             if 'metadata' in data and data['metadata']:
                 metadata = data['metadata']
                 
@@ -382,13 +386,13 @@ class RamanSpectra:
                     mineral_name = metadata['NAME']
                     
                     # First try with the name as is
-                    hey_class = self.raman.get_hey_classification(mineral_name)
+                    hey_class = self.get_hey_classification(mineral_name)
                     
                     # If that fails, try with a cleaned name
                     if not hey_class:
-                        cleaned_name = self.raman.extract_base_mineral_name(mineral_name)
+                        cleaned_name = self.extract_base_mineral_name(mineral_name)
                         if cleaned_name and cleaned_name != mineral_name:
-                            hey_class = self.raman.get_hey_classification(cleaned_name)
+                            hey_class = self.get_hey_classification(cleaned_name)
                     
                     # Update metadata if Hey Classification was found
                     if hey_class:
@@ -413,7 +417,7 @@ class RamanSpectra:
         import os
         import re
         
-        if not self.raman.database:
+        if not self.database:
             messagebox.showinfo("Database", "The database is empty.")
             return
         
@@ -423,14 +427,14 @@ class RamanSpectra:
             return
         
         # Check if Hey Classification data is loaded
-        if not hasattr(self.raman, 'hey_classification') or not self.raman.hey_classification:
+        if not hasattr(self, 'hey_classification') or not self.hey_classification:
             # Try to load Hey Classification data if not already loaded
             hey_csv_path = "RRUFF_Export_with_Hey_Classification.csv"
             if os.path.exists(hey_csv_path):
-                self.raman.hey_classification = self.raman.load_hey_classification(hey_csv_path)
+                self.hey_classification = self.load_hey_classification(hey_csv_path)
             
             # Check again if data was loaded
-            if not hasattr(self.raman, 'hey_classification') or not self.raman.hey_classification:
+            if not hasattr(self, 'hey_classification') or not self.hey_classification:
                 messagebox.showerror("Error", "Hey Classification data could not be loaded.")
                 return
         
@@ -465,7 +469,7 @@ class RamanSpectra:
         log_text.tag_configure("info", foreground="blue")
         
         # Get database items and update progress bar maximum
-        db_items = list(self.raman.database.items())
+        db_items = list(self.database.items())
         progress["maximum"] = len(db_items)
         
         # Statistics counters
@@ -608,7 +612,7 @@ class RamanSpectra:
                           f"Extracted mineral name '{mineral_name}' from file {os.path.basename(spectra_file)}", "info")
             
             # Try to add Hey Classification using the mineral name
-            hey_class = self.raman.get_hey_classification(mineral_name)
+            hey_class = self.get_hey_classification(mineral_name)
             
             if hey_class:
                 # Update the metadata with Hey Classification
@@ -628,9 +632,9 @@ class RamanSpectra:
                 updated += 1
             else:
                 # Try with cleaned name
-                cleaned_name = self.raman._clean_mineral_name(mineral_name)
+                cleaned_name = self._clean_mineral_name(mineral_name)
                 if cleaned_name and cleaned_name != mineral_name:
-                    hey_class = self.raman.get_hey_classification(cleaned_name)
+                    hey_class = self.get_hey_classification(cleaned_name)
                     
                     if hey_class:
                         # Update the metadata with Hey Classification
@@ -650,9 +654,9 @@ class RamanSpectra:
                         continue
                 
                 # Try with more aggressive cleaning
-                very_clean_name = self.raman.extract_base_mineral_name(mineral_name)
+                very_clean_name = self.extract_base_mineral_name(mineral_name)
                 if very_clean_name and very_clean_name != mineral_name and very_clean_name != cleaned_name:
-                    hey_class = self.raman.get_hey_classification(very_clean_name)
+                    hey_class = self.get_hey_classification(very_clean_name)
                     
                     if hey_class:
                         # Update the metadata with Hey Classification
@@ -681,9 +685,9 @@ class RamanSpectra:
                       f"Update complete! Updated: {updated}, Already had: {already_had}, Not found: {not_found}, Files not found: {file_not_found}", "info")
         
         # Save the database
-        saved = self.raman.save_database()
+        saved = self.save_database()
         if saved:
-            log_text.insert(tk.END, f"Database saved successfully to {self.raman.db_path}\n", "success")
+            log_text.insert(tk.END, f"Database saved successfully to {self.db_path}\n", "success")
         else:
             log_text.insert(tk.END, "Warning: Could not save database\n", "error")
         log_text.see(tk.END)
@@ -1466,56 +1470,62 @@ class RamanSpectra:
     
     def add_to_database(self, name, metadata=None):
         """
-        Add the current processed spectrum to the database.
+        Add current spectrum to the database.
         
         Parameters:
         -----------
         name : str
-            Name/identifier for the spectrum.
-        metadata : dict or None
-            Additional metadata for the spectrum.
-            
+            Name of the spectrum to add.
+        metadata : dict, optional
+            Metadata dictionary for the spectrum. If None, use current metadata.
+        
         Returns:
         --------
         bool
-            True if successful.
+            True if successful, False otherwise.
         """
-        if self.processed_spectra is None:
-            if self.current_spectra is None:
-                raise ValueError("No spectrum loaded. Import a spectrum first.")
-            # Use the raw spectrum if no processed spectrum is available
-            spectrum_to_add = self.current_spectra
-        else:
-            spectrum_to_add = self.processed_spectra
+        if self.current_spectra is None or self.current_wavenumbers is None:
+            return False
         
-        # Use existing metadata if available and none provided
-        if metadata is None and hasattr(self, 'metadata'):
-            metadata = self.metadata
+        # Use passed metadata or current metadata
+        meta = metadata if metadata is not None else self.metadata
         
-        # Add Hey Classification and other metadata if not already present
-        if metadata and 'NAME' in metadata and 'HEY CLASSIFICATION' not in metadata:
-            matched_name, matched_metadata = self.match_mineral_name(metadata['NAME'])
-            if matched_metadata:
-                if isinstance(matched_metadata, dict):
-                    # Add all metadata fields we found if they don't already exist
-                    for key, value in matched_metadata.items():
-                        if key not in metadata:
-                            metadata[key] = value
-                elif isinstance(matched_metadata, str):  # Support for old format
-                    metadata['HEY CLASSIFICATION'] = matched_metadata
-        
-        # Prepare spectrum data for database
-        spectrum_data = {
+        # Create entry
+        entry = {
             'wavenumbers': self.current_wavenumbers,
-            'intensities': spectrum_to_add,
-            'peaks': self.peaks,
-            'metadata': metadata if metadata else {}
+            'intensities': self.current_spectra,
+            'metadata': meta
         }
         
-        # Add to database
-        self.database[name] = spectrum_data
+        # Add processed spectrum if available
+        if self.processed_spectra is not None:
+            entry['processed'] = self.processed_spectra
         
-        # Save the updated database
+        # Add background if available
+        if self.background is not None:
+            entry['background'] = self.background
+        
+        # Add peak data if available
+        if self.peaks is not None:
+            entry['peaks'] = self.peaks
+            
+        # Add peak fitting data if available
+        if hasattr(self, 'fitted_peaks') and self.fitted_peaks is not None:
+            entry['fitted_peaks'] = self.fitted_peaks
+            
+        if hasattr(self, 'peak_fit_result') and self.peak_fit_result is not None:
+            # Store peak fitting result (excluding potentially large arrays)
+            fit_result_to_store = {
+                'model': self.peak_fit_result.get('model', ''),
+                'r_squared': self.peak_fit_result.get('r_squared', 0),
+                'parameters': self.peak_fit_result.get('parameters', [])
+            }
+            entry['peak_fit_result'] = fit_result_to_store
+        
+        # Add to database
+        self.database[name] = entry
+        
+        # Save database
         self.save_database()
         
         return True
@@ -1596,6 +1606,10 @@ class RamanSpectra:
         list
             List of tuples (name, score) of matching spectra.
         """
+        # Store the search parameters for reporting
+        self.last_search_algorithm = "Combined (Correlation + MSE + Peak Matching)"
+        self.last_search_threshold = correlation_threshold
+        
         if self.processed_spectra is None:
             if self.current_spectra is None:
                 raise ValueError("No spectrum loaded. Import a spectrum first.")
@@ -1727,3 +1741,115 @@ class RamanSpectra:
         ax.legend()
         
         return fig, ax
+        
+    def save_spectrum(self, filepath):
+        """
+        Save the current spectrum to a file with metadata in the header.
+        
+        Parameters:
+        -----------
+        filepath : str
+            Path to save the spectrum file.
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise.
+        """
+        try:
+            if self.current_spectra is None or self.current_wavenumbers is None:
+                return False
+                
+            # Determine which spectrum to save (processed if available, otherwise raw)
+            spectra_to_save = self.processed_spectra if self.processed_spectra is not None else self.current_spectra
+            
+            # Get file extension to determine format
+            _, ext = os.path.splitext(filepath)
+            ext = ext.lower()
+            
+            if ext == '.csv':
+                # CSV format with metadata in header as comments
+                with open(filepath, 'w', newline='') as f:
+                    # Write metadata as comments
+                    if hasattr(self, 'metadata') and self.metadata:
+                        f.write("# === METADATA ===\n")
+                        for key, value in self.metadata.items():
+                            f.write(f"# {key}: {value}\n")
+                        f.write("# =================\n")
+                    
+                    # Add peak information if available
+                    if hasattr(self, 'peaks') and self.peaks is not None:
+                        f.write("# === PEAKS ===\n")
+                        f.write(f"# Number of peaks: {len(self.peaks['wavenumbers'])}\n")
+                        for i, (pos, height) in enumerate(zip(self.peaks['wavenumbers'], self.peaks['heights'])):
+                            f.write(f"# Peak {i+1}: {pos:.2f} cm⁻¹ (height: {height:.2f})\n")
+                        f.write("# =================\n")
+                    
+                    # Add peak fitting results if available
+                    if hasattr(self, 'peak_fit_result') and self.peak_fit_result is not None:
+                        f.write("# === PEAK FIT ===\n")
+                        f.write(f"# Model: {self.peak_fit_result.get('model', 'Unknown')}\n")
+                        f.write(f"# R-squared: {self.peak_fit_result.get('r_squared', 0):.4f}\n")
+                        f.write("# =================\n")
+                    
+                    # Write column headers
+                    f.write("Wavenumber (cm⁻¹),Intensity (a.u.)\n")
+                    
+                    # Write data
+                    for wn, intensity in zip(self.current_wavenumbers, spectra_to_save):
+                        f.write(f"{wn:.4f},{intensity:.6f}\n")
+            
+            elif ext == '.txt':
+                # Text format with metadata in header
+                with open(filepath, 'w') as f:
+                    # Write metadata as comments
+                    if hasattr(self, 'metadata') and self.metadata:
+                        f.write("### METADATA ###\n")
+                        for key, value in self.metadata.items():
+                            f.write(f"{key}: {value}\n")
+                        f.write("###############\n\n")
+                    
+                    # Add peak information if available
+                    if hasattr(self, 'peaks') and self.peaks is not None:
+                        f.write("### PEAKS ###\n")
+                        f.write(f"Number of peaks: {len(self.peaks['wavenumbers'])}\n")
+                        for i, (pos, height) in enumerate(zip(self.peaks['wavenumbers'], self.peaks['heights'])):
+                            f.write(f"Peak {i+1}: {pos:.2f} cm⁻¹ (height: {height:.2f})\n")
+                        f.write("##############\n\n")
+                    
+                    # Add peak fitting results if available
+                    if hasattr(self, 'peak_fit_result') and self.peak_fit_result is not None:
+                        f.write("### PEAK FIT ###\n")
+                        f.write(f"Model: {self.peak_fit_result.get('model', 'Unknown')}\n")
+                        f.write(f"R-squared: {self.peak_fit_result.get('r_squared', 0):.4f}\n")
+                        f.write("###############\n\n")
+                    
+                    # Write column headers
+                    f.write("Wavenumber (cm⁻¹)\tIntensity (a.u.)\n")
+                    
+                    # Write data
+                    for wn, intensity in zip(self.current_wavenumbers, spectra_to_save):
+                        f.write(f"{wn:.4f}\t{intensity:.6f}\n")
+            
+            else:
+                # Default to tab-separated text format
+                with open(filepath, 'w') as f:
+                    # Write metadata as comments
+                    if hasattr(self, 'metadata') and self.metadata:
+                        f.write("### METADATA ###\n")
+                        for key, value in self.metadata.items():
+                            f.write(f"{key}: {value}\n")
+                        f.write("###############\n\n")
+                    
+                    # Write column headers
+                    f.write("Wavenumber (cm⁻¹)\tIntensity (a.u.)\n")
+                    
+                    # Write data
+                    for wn, intensity in zip(self.current_wavenumbers, spectra_to_save):
+                        f.write(f"{wn:.4f}\t{intensity:.6f}\n")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error saving spectrum: {str(e)}")
+            return False

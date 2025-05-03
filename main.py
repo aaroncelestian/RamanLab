@@ -30,10 +30,10 @@ def main():
     try:
         style = ttk.Style(root)
         available_themes = style.theme_names()
-        if 'aqua' in available_themes:
-             style.theme_use('aqua')
-        elif 'clam' in available_themes:
+        if 'clam' in available_themes:
              style.theme_use('clam')
+        elif 'aqua' in available_themes:
+             style.theme_use('aqua')
     except Exception as e:
         print(f"Could not set theme: {e}")
     
