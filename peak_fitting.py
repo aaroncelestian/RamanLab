@@ -53,6 +53,8 @@ class PeakFittingWindow:
         self.background = None
         self.current_model = tk.StringVar(value="Gaussian")
         self.residuals = None
+        self.show_fitted_peaks = tk.BooleanVar(value=True)  # Add checkbox variable
+        self.show_individual_peaks = tk.BooleanVar(value=True)
         
         # Flag for manual peak mode
         self.manual_peak_mode = False
@@ -92,6 +94,14 @@ class PeakFittingWindow:
         
         control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Add checkbox for showing fitted peaks
+        ttk.Checkbutton(
+            scrollable_frame,
+            text="Show Fitted Peaks",
+            variable=self.show_fitted_peaks,
+            command=self.update_plot
+        ).pack(pady=5)
         
         # Create right panel for visualization
         viz_frame = ttk.LabelFrame(main_frame, text="Spectrum and Fit", padding=10)
@@ -210,9 +220,14 @@ class PeakFittingWindow:
         ttk.Button(peak_buttons, text="Add Peaks Manually", 
                   command=self.enable_manual_peak_adding).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         
-        # Add clear peaks button
-        ttk.Button(peak_frame, text="Clear Peaks", 
-                  command=self.clear_peaks).pack(fill=tk.X, pady=2)
+        # Add clear and delete peaks buttons in a frame
+        peak_management_frame = ttk.Frame(peak_frame)
+        peak_management_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Button(peak_management_frame, text="Clear Peaks", 
+                  command=self.clear_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(peak_management_frame, text="Delete Peak", 
+                  command=self.delete_selected_peak).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         
         # Peak fitting frame
         fit_frame = ttk.LabelFrame(scrollable_frame, text="Peak Fitting", padding=10)
@@ -225,23 +240,40 @@ class PeakFittingWindow:
         ttk.Label(fit_grid, text="Model:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
         self.current_model = tk.StringVar(value="Gaussian")
         model_combo = ttk.Combobox(fit_grid, textvariable=self.current_model, 
-                                  values=["Gaussian", "Lorentzian", "Pseudo-Voigt"], width=15)
+                                  values=["Gaussian", "Lorentzian", "Pseudo-Voigt", "Asymmetric Voigt"], width=15)
         model_combo.grid(row=0, column=1, sticky="w", padx=2, pady=2)
         model_combo.bind("<<ComboboxSelected>>", lambda e: self.update_plot())
         
-        ttk.Button(fit_frame, text="Fit Peaks", 
-                  command=self.fit_peaks).pack(fill=tk.X, pady=5)
+        # Create a frame for the fit button and checkbox
+        fit_button_frame = ttk.Frame(fit_frame)
+        fit_button_frame.pack(fill=tk.X, pady=5)
+        
+        # Add checkbox for showing individual peaks
+        ttk.Checkbutton(
+            fit_button_frame,
+            text="Show Individual Peaks",
+            variable=self.show_individual_peaks,
+            command=self.update_plot
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Add fit peaks button
+        ttk.Button(
+            fit_button_frame,
+            text="Fit Peaks",
+            command=self.fit_peaks
+        ).pack(side=tk.LEFT)
         
         # Model info frame with compact info
         model_info_frame = ttk.LabelFrame(scrollable_frame, text="Model Info", padding=10)
         model_info_frame.pack(fill=tk.X, pady=(0, 10))
         
-        model_info_text = tk.Text(model_info_frame, height=3, width=45, wrap=tk.WORD)
+        model_info_text = tk.Text(model_info_frame, height=4, width=45, wrap=tk.WORD)
         model_info_text.pack(fill=tk.X)
         model_info_text.insert(tk.END, 
             "Gaussian: Symmetric, best for instrumental broadening\n"
             "Lorentzian: Broader tails, natural line broadening\n"
-            "Pseudo-Voigt: Combination, most flexible for real spectra"
+            "Pseudo-Voigt: Combination, most flexible for real spectra\n"
+            "Asymmetric Voigt: Handles asymmetric peaks with different widths"
         )
         model_info_text.config(state=tk.DISABLED)
         
@@ -563,8 +595,31 @@ class PeakFittingWindow:
             tuning_window.title("Interactive Background Parameter Tuning")
             tuning_window.geometry("1000x800")  # Increased height from 700 to 800
             
+            # Create a canvas with scrollbar for the entire window
+            main_canvas = tk.Canvas(tuning_window)
+            scrollbar = ttk.Scrollbar(tuning_window, orient=tk.VERTICAL, command=main_canvas.yview)
+            
+            # Configure the canvas with the scrollbar
+            main_canvas.configure(yscrollcommand=scrollbar.set)
+            main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # Create a main frame inside the canvas to hold everything
+            main_frame = ttk.Frame(main_canvas, padding=5)
+            
+            # Create a window in the canvas to display the main_frame
+            canvas_window = main_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+            
+            # Configure the canvas to resize with the frame
+            def on_frame_configure(event):
+                main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+                main_canvas.itemconfig(canvas_window, width=main_canvas.winfo_width())
+            
+            main_frame.bind("<Configure>", on_frame_configure)
+            main_canvas.bind("<Configure>", lambda e: main_canvas.itemconfig(canvas_window, width=e.width))
+            
             # Upper frame for plot
-            plot_frame = ttk.Frame(tuning_window, padding=10)
+            plot_frame = ttk.Frame(main_frame, padding=10)
             plot_frame.pack(fill=tk.BOTH, expand=True)
             
             # Create a figure for the plot
@@ -578,7 +633,7 @@ class PeakFittingWindow:
             toolbar.update()
             
             # Lower frame for controls
-            control_frame = ttk.LabelFrame(tuning_window, text="Parameter Controls", padding=10)
+            control_frame = ttk.LabelFrame(main_frame, text="Parameter Controls", padding=10)
             control_frame.pack(fill=tk.X, padx=10, pady=10)
             
             # Lambda slider (logarithmic scale)
@@ -777,7 +832,7 @@ class PeakFittingWindow:
             niter_val.trace_add("write", on_niter_entry_change)
             
             # Add buttons
-            button_frame = ttk.Frame(tuning_window, padding=10)
+            button_frame = ttk.Frame(main_frame, padding=10)
             button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
             
             ttk.Button(
@@ -805,7 +860,7 @@ class PeakFittingWindow:
             
             # Status bar for user feedback
             status_var = tk.StringVar(value="Ready. Move sliders to adjust parameters.")
-            status_bar = ttk.Label(tuning_window, textvariable=status_var, relief=tk.SUNKEN, anchor=tk.W)
+            status_bar = ttk.Label(main_frame, textvariable=status_var, relief=tk.SUNKEN, anchor=tk.W)
             status_bar.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=5)
             
             # Initial plot
@@ -926,139 +981,177 @@ class PeakFittingWindow:
         return amp * (eta * self.gaussian(x, 1, cen, wid) + 
                     (1-eta) * self.lorentzian(x, 1, cen, wid))
     
-    def multi_peak_model(self, x, *params):
+    def asymmetric_voigt(self, x, amp, cen, wid_left, wid_right, eta=0.5):
         """
-        Model for multiple peaks.
+        Asymmetric Voigt function combining Gaussian and Lorentzian components
+        with different widths on each side of the peak.
         
         Parameters:
         -----------
-        x : array_like
-            X values (wavenumbers)
-        *params : tuple
-            Parameters for all peaks. For n peaks:
-            - If Gaussian or Lorentzian: 3n parameters (amp, cen, wid) * n
-            - If Pseudo-Voigt: 4n parameters (amp, cen, wid, eta) * n
-        
+        x : array-like
+            Wavenumber values
+        amp : float
+            Peak amplitude
+        cen : float
+            Peak center position
+        wid_left : float
+            Width parameter for the left side of the peak
+        wid_right : float
+            Width parameter for the right side of the peak
+        eta : float, optional
+            Mixing parameter between Gaussian and Lorentzian (0-1)
+            Default is 0.5 (equal mix)
+            
         Returns:
         --------
-        array_like
-            Sum of all peaks.
+        array-like
+            The asymmetric Voigt function evaluated at x
         """
-        model = np.zeros_like(x)
+        # Create separate arrays for left and right sides
+        left_mask = x <= cen
+        right_mask = ~left_mask
         
-        # Get peak model type
-        model_type = self.current_model.get()
+        # Initialize result array
+        result = np.zeros_like(x)
         
-        # Calculate number of parameters per peak
-        params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+        # Calculate Gaussian and Lorentzian components for left side
+        g_left = np.exp(-((x[left_mask] - cen) / wid_left) ** 2)
+        l_left = 1 / (1 + ((x[left_mask] - cen) / wid_left) ** 2)
         
-        # Calculate number of peaks
-        n_peaks = len(params) // params_per_peak
+        # Calculate Gaussian and Lorentzian components for right side
+        g_right = np.exp(-((x[right_mask] - cen) / wid_right) ** 2)
+        l_right = 1 / (1 + ((x[right_mask] - cen) / wid_right) ** 2)
         
-        # Generate combined model from all peaks
-        for i in range(n_peaks):
-            start_idx = i * params_per_peak
+        # Combine components using eta parameter
+        result[left_mask] = amp * (eta * g_left + (1 - eta) * l_left)
+        result[right_mask] = amp * (eta * g_right + (1 - eta) * l_right)
+        
+        return result
+
+    def multi_peak_model(self, x, *params):
+        """
+        Multi-peak model combining multiple peak functions.
+        
+        Parameters:
+        -----------
+        x : array-like
+            Wavenumber values
+        *params : float
+            Peak parameters in the format [amp1, cen1, wid1, ...]
             
-            if model_type == "Gaussian":
-                amp, cen, wid = params[start_idx:start_idx+3]
-                model += self.gaussian(x, amp, cen, wid)
-            
-            elif model_type == "Lorentzian":
-                amp, cen, wid = params[start_idx:start_idx+3]
-                model += self.lorentzian(x, amp, cen, wid)
-            
-            elif model_type == "Pseudo-Voigt":
-                amp, cen, wid, eta = params[start_idx:start_idx+4]
-                model += self.pseudo_voigt(x, amp, cen, wid, eta)
-        
-        return model
-    
-    def fit_peaks(self):
-        """Fit peaks to the spectrum."""
+        Returns:
+        --------
+        array-like
+            The sum of all peak functions evaluated at x
+        """
         if not self.peaks:
-            messagebox.showerror("No Peaks", "No peaks detected. Please find peaks first.")
+            return np.zeros_like(x)
+            
+        model = self.current_model.get()
+        n_peaks = len(self.peaks)
+        
+        if model == "Gaussian":
+            n_params = 3
+            peak_func = self.gaussian
+        elif model == "Lorentzian":
+            n_params = 3
+            peak_func = self.lorentzian
+        elif model == "Pseudo-Voigt":
+            n_params = 4
+            peak_func = self.pseudo_voigt
+        elif model == "Asymmetric Voigt":
+            n_params = 5
+            peak_func = self.asymmetric_voigt
+        else:
+            raise ValueError(f"Unknown peak model: {model}")
+            
+        # Ensure we have the right number of parameters
+        if len(params) != n_peaks * n_params:
+            raise ValueError(f"Expected {n_peaks * n_params} parameters, got {len(params)}")
+            
+        # Calculate the sum of all peaks
+        result = np.zeros_like(x)
+        for i in range(n_peaks):
+            start_idx = i * n_params
+            end_idx = start_idx + n_params
+            if end_idx > len(params):
+                break
+            result += peak_func(x, *params[start_idx:end_idx])
+                
+        return result
+
+    def fit_peaks(self):
+        """Fit the selected peaks to the spectrum."""
+        if not self.peaks:
+            messagebox.showwarning("No Peaks", "Please add peaks before fitting.")
             return
             
+        # Get the current model
+        model = self.current_model.get()
+        
+        # Prepare initial parameters
+        initial_params = []
+        bounds_lower = []
+        bounds_upper = []
+        
+        for peak in self.peaks:
+            if model == "Gaussian" or model == "Lorentzian":
+                # [amplitude, center, width]
+                initial_params.extend([peak['intensity'], peak['position'], 10.0])
+                bounds_lower.extend([0, peak['position'] - 10, 1])
+                bounds_upper.extend([np.inf, peak['position'] + 10, 100])
+            elif model == "Pseudo-Voigt":
+                # [amplitude, center, width, eta]
+                initial_params.extend([peak['intensity'], peak['position'], 10.0, 0.5])
+                bounds_lower.extend([0, peak['position'] - 10, 1, 0])
+                bounds_upper.extend([np.inf, peak['position'] + 10, 100, 1])
+            elif model == "Asymmetric Voigt":
+                # [amplitude, center, width_left, width_right, eta]
+                # Use a default width of 10.0 for both left and right sides
+                initial_params.extend([peak['intensity'], peak['position'], 10.0, 10.0, 0.5])
+                bounds_lower.extend([0, peak['position'] - 10, 1, 1, 0])
+                bounds_upper.extend([np.inf, peak['position'] + 10, 100, 100, 1])
+        
         try:
-            # Get model type
-            model_type = self.current_model.get()
-            
-            # Initial parameter guess for each peak
-            initial_params = []
-            param_bounds = ([], [])  # Lower and upper bounds
-            
-            for peak in self.peaks:
-                # Amplitude, center, width
-                initial_params.extend([
-                    peak['intensity'],  # amplitude guess
-                    peak['position'],   # center position
-                    10.0                # width guess (reasonable for Raman)
-                ])
-                
-                # Add bounds for each parameter (amp, cen, wid)
-                param_bounds[0].extend([0, peak['position']-50, 0.1])  # Lower bounds
-                param_bounds[1].extend([peak['intensity']*2, peak['position']+50, 50])  # Upper bounds
-                
-                # Add eta parameter for Pseudo-Voigt
-                if model_type == "Pseudo-Voigt":
-                    initial_params.append(0.5)  # eta parameter (mix ratio)
-                    param_bounds[0].append(0.0)  # Lower bound for eta
-                    param_bounds[1].append(1.0)  # Upper bound for eta
-            
-            # Perform the curve fit
-            params, covariance = curve_fit(
-                self.multi_peak_model, 
-                self.wavenumbers, 
+            # Perform the fit
+            popt, pcov = curve_fit(
+                self.multi_peak_model,
+                self.wavenumbers,
                 self.spectra,
                 p0=initial_params,
-                bounds=param_bounds,
-                maxfev=50000
+                bounds=(bounds_lower, bounds_upper),
+                maxfev=10000
             )
             
-            # Store fit result
-            self.fit_params = params
-            
-            # Calculate fit curve
-            self.fit_result = self.multi_peak_model(self.wavenumbers, *params)
-            
-            # Calculate residuals
+            # Store the results
+            self.fit_params = popt
+            self.fit_result = self.multi_peak_model(self.wavenumbers, *popt)
             self.residuals = self.spectra - self.fit_result
+            
+            # Display the results
+            self.display_fit_results(popt, pcov)
             
             # Update the plot
             self.update_plot()
             
-            # Calculate goodness of fit (R-squared)
-            ss_tot = np.sum((self.spectra - np.mean(self.spectra))**2)
-            ss_res = np.sum(self.residuals**2)
-            r_squared = 1 - (ss_res / ss_tot)
-            
-            # Update the plot title
-            self.ax1.set_title(f'Raman Spectrum - Peak Fit ({model_type}, R²={r_squared:.4f})')
-            self.canvas.draw()
-            
-            # Display fit results
-            self.display_fit_results(params, covariance)
-            
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to fit peaks: {str(e)}")
-    
+            messagebox.showerror("Fit Error", f"Error during peak fitting: {str(e)}")
+            
     def display_fit_results(self, params, covariance):
-        """
-        Display the fit results in the results text box.
-        
-        Parameters:
-        -----------
-        params : array_like
-            Fitted parameters
-        covariance : array_like
-            Covariance matrix of the fit
-        """
+        """Display the fit results in a new window."""
         # Clear the text box
         self.results_text.delete(1.0, tk.END)
         
         # Get model type
         model_type = self.current_model.get()
-        params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+        if model_type == "Gaussian" or model_type == "Lorentzian":
+            params_per_peak = 3
+        elif model_type == "Pseudo-Voigt":
+            params_per_peak = 4
+        elif model_type == "Asymmetric Voigt":
+            params_per_peak = 5
+        else:
+            params_per_peak = 3  # Default case
         
         # Calculate number of peaks
         n_peaks = len(params) // params_per_peak
@@ -1082,23 +1175,46 @@ class PeakFittingWindow:
             self.results_text.insert(tk.END, f"Peak {i+1}:\n")
             
             start_idx = i * params_per_peak
+            end_idx = start_idx + params_per_peak
             
             # Common parameters for all models
             amp = params[start_idx]
             amp_err = errors[start_idx]
             cen = params[start_idx+1]
             cen_err = errors[start_idx+1]
-            wid = params[start_idx+2]
-            wid_err = errors[start_idx+2]
             
             self.results_text.insert(tk.END, f"  Position: {cen:.2f} ± {cen_err:.2f} cm⁻¹\n")
             self.results_text.insert(tk.END, f"  Amplitude: {amp:.2f} ± {amp_err:.2f}\n")
-            self.results_text.insert(tk.END, f"  Width: {wid:.2f} ± {wid_err:.2f} cm⁻¹\n")
             
-            # Add eta parameter for Pseudo-Voigt
-            if model_type == "Pseudo-Voigt":
+            if model_type == "Gaussian" or model_type == "Lorentzian":
+                wid = params[start_idx+2]
+                wid_err = errors[start_idx+2]
+                self.results_text.insert(tk.END, f"  Width: {wid:.2f} ± {wid_err:.2f} cm⁻¹\n")
+            
+            elif model_type == "Pseudo-Voigt":
+                wid = params[start_idx+2]
+                wid_err = errors[start_idx+2]
                 eta = params[start_idx+3]
                 eta_err = errors[start_idx+3]
+                self.results_text.insert(tk.END, f"  Width: {wid:.2f} ± {wid_err:.2f} cm⁻¹\n")
+                self.results_text.insert(tk.END, f"  Eta (mix ratio): {eta:.2f} ± {eta_err:.2f}\n")
+            
+            elif model_type == "Asymmetric Voigt":
+                wid_left = params[start_idx+2]
+                wid_left_err = errors[start_idx+2]
+                wid_right = params[start_idx+3]
+                wid_right_err = errors[start_idx+3]
+                eta = params[start_idx+4]
+                eta_err = errors[start_idx+4]
+                
+                # Calculate asymmetry and its error
+                asymmetry = wid_right / wid_left
+                # Error propagation for asymmetry
+                asymmetry_err = asymmetry * np.sqrt((wid_right_err/wid_right)**2 + (wid_left_err/wid_left)**2)
+                
+                self.results_text.insert(tk.END, f"  Left Width: {wid_left:.2f} ± {wid_left_err:.2f} cm⁻¹\n")
+                self.results_text.insert(tk.END, f"  Right Width: {wid_right:.2f} ± {wid_right_err:.2f} cm⁻¹\n")
+                self.results_text.insert(tk.END, f"  Asymmetry (right/left): {asymmetry:.2f} ± {asymmetry_err:.2f}\n")
                 self.results_text.insert(tk.END, f"  Eta (mix ratio): {eta:.2f} ± {eta_err:.2f}\n")
             
             self.results_text.insert(tk.END, "\n")
@@ -1110,80 +1226,104 @@ class PeakFittingWindow:
         self.ax2.clear()
         
         # Plot original data
-        self.ax1.plot(self.wavenumbers, self.original_spectra, 'k-', label='Original Data', alpha=0.5)
+        self.ax1.plot(self.wavenumbers, self.original_spectra, 'k-', alpha=0.5)
         
         # Plot background if available
         if self.background is not None:
-            self.ax1.plot(self.wavenumbers, self.background, 'r--', label='Background', alpha=0.5)
+            self.ax1.plot(self.wavenumbers, self.background, 'r--', alpha=0.5)
         
         # Plot processed data
-        self.ax1.plot(self.wavenumbers, self.spectra, 'b-', label='Processed Data')
+        self.ax1.plot(self.wavenumbers, self.spectra, 'b-')
         
         # Plot peaks
         if self.peaks:
             peak_positions = [peak['position'] for peak in self.peaks]
             peak_intensities = [peak['intensity'] for peak in self.peaks]
-            self.ax1.plot(peak_positions, peak_intensities, 'ro', label='Peak')
+            self.ax1.plot(peak_positions, peak_intensities, 'ro')
         
         # Plot fit if available
         if self.fit_result is not None:
-            self.ax1.plot(self.wavenumbers, self.fit_result, 'g-', label='Combined Fit')
+            # Always plot the combined fit
+            self.ax1.plot(self.wavenumbers, self.fit_result, 'g-')
             
-            # Plot individual peaks without adding to legend
-            model_type = self.current_model.get()
-            params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
-            n_peaks = len(self.fit_params) // params_per_peak
-            
-            for i in range(n_peaks):
-                start_idx = i * params_per_peak
-                
-                if model_type == "Gaussian":
-                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                    peak = self.gaussian(self.wavenumbers, amp, cen, wid)
-                    self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.5)
-                    # Add text annotation for peak position
-                    self.ax1.annotate(f'{cen:.1f}', 
-                                     xy=(cen, amp), 
-                                     xytext=(0, 10),
-                                     textcoords='offset points',
-                                     ha='center',
-                                     fontsize=8,
-                                     bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
-                
-                elif model_type == "Lorentzian":
-                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                    peak = self.lorentzian(self.wavenumbers, amp, cen, wid)
-                    self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.5)
-                    # Add text annotation for peak position
-                    self.ax1.annotate(f'{cen:.1f}', 
-                                     xy=(cen, amp), 
-                                     xytext=(0, 10),
-                                     textcoords='offset points',
-                                     ha='center',
-                                     fontsize=8,
-                                     bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
-                
+            # Plot individual peaks if checkbox is checked
+            if self.show_individual_peaks.get():
+                model_type = self.current_model.get()
+                if model_type == "Gaussian" or model_type == "Lorentzian":
+                    params_per_peak = 3
                 elif model_type == "Pseudo-Voigt":
-                    amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
-                    peak = self.pseudo_voigt(self.wavenumbers, amp, cen, wid, eta)
-                    self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.5)
-                    # Add text annotation for peak position
-                    self.ax1.annotate(f'{cen:.1f}', 
-                                     xy=(cen, amp), 
-                                     xytext=(0, 10),
-                                     textcoords='offset points',
-                                     ha='center',
-                                     fontsize=8,
-                                     bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                    params_per_peak = 4
+                elif model_type == "Asymmetric Voigt":
+                    params_per_peak = 5
+                else:
+                    params_per_peak = 3  # Default case
+                n_peaks = len(self.fit_params) // params_per_peak
+                
+                # Create a color cycle for individual peaks
+                colors = plt.cm.viridis(np.linspace(0, 1, n_peaks))
+                
+                for i in range(n_peaks):
+                    start_idx = i * params_per_peak
                     
-            # Plot residuals
-            self.ax2.plot(self.wavenumbers, self.residuals, 'r-', label='Residuals')
-            self.ax2.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+                    if model_type == "Gaussian":
+                        amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                        peak = self.gaussian(self.wavenumbers, amp, cen, wid)
+                        self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.7, color=colors[i])
+                        # Add text annotation for peak position
+                        self.ax1.annotate(f'{cen:.1f}', 
+                                         xy=(cen, amp), 
+                                         xytext=(0, 10),
+                                         textcoords='offset points',
+                                         ha='center',
+                                         fontsize=8,
+                                         bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                    
+                    elif model_type == "Lorentzian":
+                        amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                        peak = self.lorentzian(self.wavenumbers, amp, cen, wid)
+                        self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.7, color=colors[i])
+                        # Add text annotation for peak position
+                        self.ax1.annotate(f'{cen:.1f}', 
+                                         xy=(cen, amp), 
+                                         xytext=(0, 10),
+                                         textcoords='offset points',
+                                         ha='center',
+                                         fontsize=8,
+                                         bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                    
+                    elif model_type == "Pseudo-Voigt":
+                        amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
+                        peak = self.pseudo_voigt(self.wavenumbers, amp, cen, wid, eta)
+                        self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.7, color=colors[i])
+                        # Add text annotation for peak position
+                        self.ax1.annotate(f'{cen:.1f}', 
+                                         xy=(cen, amp), 
+                                         xytext=(0, 10),
+                                         textcoords='offset points',
+                                         ha='center',
+                                         fontsize=8,
+                                         bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                        
+                    elif model_type == "Asymmetric Voigt":
+                        amp, cen, wid_left, wid_right, eta = self.fit_params[start_idx:start_idx+5]
+                        peak = self.asymmetric_voigt(self.wavenumbers, amp, cen, wid_left, wid_right, eta)
+                        self.ax1.plot(self.wavenumbers, peak, '--', alpha=0.7, color=colors[i])
+                        # Add text annotation for peak position
+                        self.ax1.annotate(f'{cen:.1f}', 
+                                         xy=(cen, amp), 
+                                         xytext=(0, 10),
+                                         textcoords='offset points',
+                                         ha='center',
+                                         fontsize=8,
+                                         bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+                
+                # Plot residuals
+                self.ax2.plot(self.wavenumbers, self.residuals, 'r-')
+                self.ax2.axhline(y=0, color='k', linestyle='-', alpha=0.3)
         
         # Configure axes
         self.ax1.set_title('Raman Spectrum and Peak Fit')
         self.ax1.set_ylabel('Intensity (a.u.)')
-        self.ax1.legend(loc='best', fontsize='small')
         
         self.ax2.set_xlabel('Wavenumber (cm⁻¹)')
         self.ax2.set_ylabel('Residuals')
@@ -1214,7 +1354,14 @@ class PeakFittingWindow:
             
             # Get model type
             model_type = self.current_model.get()
-            params_per_peak = 4 if model_type == "Pseudo-Voigt" else 3
+            if model_type == "Gaussian" or model_type == "Lorentzian":
+                params_per_peak = 3
+            elif model_type == "Pseudo-Voigt":
+                params_per_peak = 4
+            elif model_type == "Asymmetric Voigt":
+                params_per_peak = 5
+            else:
+                params_per_peak = 3  # Default case
             n_peaks = len(self.fit_params) // params_per_peak
             
             # Write to CSV
@@ -1224,6 +1371,8 @@ class PeakFittingWindow:
                 # Write header
                 if model_type == "Pseudo-Voigt":
                     writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Width (cm⁻¹)', 'Eta'])
+                elif model_type == "Asymmetric Voigt":
+                    writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Left Width (cm⁻¹)', 'Right Width (cm⁻¹)', 'Asymmetry', 'Eta'])
                 else:
                     writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Width (cm⁻¹)'])
                 
@@ -1234,6 +1383,10 @@ class PeakFittingWindow:
                     if model_type == "Pseudo-Voigt":
                         amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
                         writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid:.2f}", f"{eta:.2f}"])
+                    elif model_type == "Asymmetric Voigt":
+                        amp, cen, wid_left, wid_right, eta = self.fit_params[start_idx:start_idx+5]
+                        asymmetry = wid_right / wid_left
+                        writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid_left:.2f}", f"{wid_right:.2f}", f"{asymmetry:.2f}", f"{eta:.2f}"])
                     else:
                         amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                         writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid:.2f}"])
@@ -1353,6 +1506,91 @@ class PeakFittingWindow:
         self.update_plot()
         self.ax1.set_title('Raman Spectrum - Peaks Cleared')
         self.canvas.draw()
+    
+    def delete_selected_peak(self):
+        """Delete the currently selected peak."""
+        if not self.peaks:
+            messagebox.showinfo("No Peaks", "No peaks to delete.")
+            return
+            
+        # Create a new window for peak selection
+        delete_window = tk.Toplevel(self.window)
+        delete_window.title("Delete Peak")
+        delete_window.geometry("300x400")
+        
+        # Create a listbox to display peaks
+        listbox = tk.Listbox(delete_window, selectmode=tk.MULTIPLE)
+        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Sort peaks by position
+        sorted_peaks = sorted(self.peaks, key=lambda x: x['position'])
+        
+        # Add peaks to the listbox
+        for i, peak in enumerate(sorted_peaks):
+            listbox.insert(tk.END, f"Peak {i+1}: {peak['position']:.1f} cm⁻¹")
+        
+        # Store the original peak colors
+        original_colors = {}
+        for line in self.ax1.lines:
+            if line.get_label() == 'Peak':
+                original_colors[line] = line.get_color()
+        
+        # Function to highlight selected peaks
+        def highlight_peaks(event=None):
+            # Reset all peak colors to original
+            for line in self.ax1.lines:
+                if line.get_label() == 'Peak':
+                    line.set_color(original_colors[line])
+            
+            # Get selected indices
+            selected_indices = listbox.curselection()
+            
+            # Highlight selected peaks in grey
+            for idx in selected_indices:
+                peak = sorted_peaks[idx]
+                for line in self.ax1.lines:
+                    if line.get_label() == 'Peak':
+                        xdata = line.get_xdata()
+                        if abs(xdata[0] - peak['position']) < 0.1:  # Match peak position
+                            line.set_color('grey')
+            
+            self.canvas.draw()
+        
+        # Bind selection change to highlight function
+        listbox.bind('<<ListboxSelect>>', highlight_peaks)
+        
+        # Function to handle peak deletion
+        def delete_peaks():
+            selected = listbox.curselection()
+            if not selected:
+                messagebox.showwarning("No Selection", "Please select at least one peak to delete.")
+                return
+            
+            # Get the positions of peaks to delete
+            positions_to_delete = [sorted_peaks[idx]['position'] for idx in selected]
+            
+            # Remove peaks with matching positions
+            self.peaks = [peak for peak in self.peaks if peak['position'] not in positions_to_delete]
+            
+            # Update the plot
+            self.update_plot()
+            
+            # Close the window
+            delete_window.destroy()
+            
+            # Show confirmation
+            messagebox.showinfo("Success", f"{len(selected)} peak(s) deleted successfully.")
+        
+        # Add delete button
+        delete_button = ttk.Button(delete_window, text="Delete Selected Peaks", command=delete_peaks)
+        delete_button.pack(pady=10)
+        
+        # Add close button
+        close_button = ttk.Button(delete_window, text="Cancel", command=delete_window.destroy)
+        close_button.pack(pady=5)
+        
+        # Initial highlight of any pre-selected peaks
+        highlight_peaks()
     
     def on_closing(self):
         """Handle window closing event."""
