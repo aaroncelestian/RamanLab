@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use('Agg')  # Set backend to Agg to prevent blank figure window
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, savgol_filter
 import pandas as pd
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -22,6 +22,7 @@ from pathlib import Path
 import csv
 from datetime import datetime
 from io import BytesIO
+#from cnn_model import RamanCNN  # Import the RamanCNN class
 # from search_functions import plot_match_comparison, generate_correlation_heatmap, generate_match_report
 # import types
 
@@ -71,7 +72,7 @@ class RamanAnalysisApp:
         """
         self.root = root
         self.root.title("ClaritySpectra: Raman Spectrum Analysis")
-        self.root.geometry("1400x800")
+        self.root.geometry("1400x950")  # Increased height from 800 to 950
 
         # Set minimum window size
         self.root.minsize(900, 600)
@@ -298,19 +299,37 @@ class RamanAnalysisApp:
 
         ttk.Button(bg_frame, text="Subtract Background", command=self.subtract_background).pack(fill=tk.X, pady=5)
 
+        # Savitzky-Golay smoothing frame
+        sg_frame = ttk.LabelFrame(self.tab_process, text="Savitzky-Golay Smoothing", padding=10)
+        sg_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(sg_frame, text="Window Length (odd, >= 5):").pack(anchor=tk.W)
+        self.var_sg_window = tk.StringVar(value="11")
+        ttk.Entry(sg_frame, textvariable=self.var_sg_window).pack(fill=tk.X, pady=2)
+
+        ttk.Label(sg_frame, text="Polynomial Order (>= 2):").pack(anchor=tk.W)
+        self.var_sg_poly = tk.StringVar(value="3")
+        ttk.Entry(sg_frame, textvariable=self.var_sg_poly).pack(fill=tk.X, pady=2)
+
+        # Button frame for Apply and Preview
+        sg_button_frame = ttk.Frame(sg_frame)
+        sg_button_frame.pack(fill=tk.X, pady=2)
+        ttk.Button(sg_button_frame, text="Apply Smoothing", command=self.apply_savgol_smoothing).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        ttk.Button(sg_button_frame, text="Preview Smoothing", command=self.preview_savgol_smoothing).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         # Peak finding frame
         peak_frame = ttk.LabelFrame(self.tab_process, text="Peak Finding", padding=10)
         peak_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(peak_frame, text="Peak Height Threshold: [0.1 - 1]").pack(anchor=tk.W)
+        ttk.Label(peak_frame, text="Peak Height Threshold:").pack(anchor=tk.W)
         self.var_height = tk.StringVar(value="Auto")
         ttk.Entry(peak_frame, textvariable=self.var_height).pack(fill=tk.X, pady=2)
 
-        ttk.Label(peak_frame, text="Min. Peak Distance: [ca. 1 - 20]").pack(anchor=tk.W)
+        ttk.Label(peak_frame, text="Min. Peak Distance:").pack(anchor=tk.W)
         self.var_distance = tk.StringVar(value="Auto")
         ttk.Entry(peak_frame, textvariable=self.var_distance).pack(fill=tk.X, pady=2)
 
-        ttk.Label(peak_frame, text="Peak Prominence: [0.5 - 5]").pack(anchor=tk.W)
+        ttk.Label(peak_frame, text="Peak Prominence:").pack(anchor=tk.W)
         self.var_prominence = tk.StringVar(value="Auto")
         ttk.Entry(peak_frame, textvariable=self.var_prominence).pack(fill=tk.X, pady=2)
 
@@ -1203,7 +1222,7 @@ class RamanAnalysisApp:
             ("Peak Matching", "peak"),
         ]
         if SKLEARN_AVAILABLE:
-            algorithms.append(("Machine Learning (PCA)", "ml"))
+            algorithms.append(("Machine Learning (DTW)", "ml"))
 
         for text, value in algorithms:
             ttk.Radiobutton(
@@ -2210,22 +2229,25 @@ class RamanAnalysisApp:
     def search_match(self):
         """Perform search using the basic parameters and selected algorithm."""
         if self._validate_search_conditions():
-             try:
-                 n_matches = int(self.var_n_matches.get())
-                 correlation_threshold = float(self.var_corr_threshold.get())
-                 algorithm = self.var_algorithm.get()
-                 
-                 # Store search parameters for reporting
-                 self.raman.last_search_algorithm = algorithm
-                 self.raman.last_search_threshold = correlation_threshold
-
-                 matches = self._perform_search(algorithm, n_matches, correlation_threshold)
-                 self._process_and_display_matches(matches)
-
-             except ValueError:
-                 messagebox.showerror("Input Error", "Number of matches must be an integer and threshold must be a number.")
-             except Exception as e:
-                 messagebox.showerror("Search Error", f"An error occurred during search: {str(e)}")
+            try:
+                try:
+                    n_matches = int(self.var_n_matches.get().strip())
+                except Exception as e:
+                    messagebox.showerror("Input Error", f"Number of matches must be an integer. Value: '{self.var_n_matches.get()}'\nError: {e}")
+                    return
+                try:
+                    correlation_threshold = float(self.var_corr_threshold.get().strip())
+                except Exception as e:
+                    messagebox.showerror("Input Error", f"Similarity threshold must be a number. Value: '{self.var_corr_threshold.get()}'\nError: {e}")
+                    return
+                algorithm = self.var_algorithm.get()
+                # Store search parameters for reporting
+                self.raman.last_search_algorithm = algorithm
+                self.raman.last_search_threshold = correlation_threshold
+                matches = self._perform_search(algorithm, n_matches, correlation_threshold)
+                self._process_and_display_matches(matches)
+            except Exception as e:
+                messagebox.showerror("Search Error", f"An error occurred during search: {str(e)}")
 
 
 
@@ -2233,14 +2255,20 @@ class RamanAnalysisApp:
         """Perform search using advanced filters (peaks, chemical family, Hey Classification)."""
         if self._validate_search_conditions():
             try:
-                # Basic params (still used for limiting results)
-                n_matches = int(self.var_n_matches.get())
-                threshold = float(self.var_adv_corr_threshold.get() if hasattr(self, 'var_adv_corr_threshold') else self.var_corr_threshold.get())
-    
+                try:
+                    n_matches = int(self.var_n_matches.get().strip())
+                except Exception as e:
+                    messagebox.showerror("Input Error", f"Number of matches must be an integer. Value: '{self.var_n_matches.get()}'\nError: {e}")
+                    return
+                try:
+                    threshold = float(self.var_adv_corr_threshold.get().strip() if hasattr(self, 'var_adv_corr_threshold') else self.var_corr_threshold.get().strip())
+                except Exception as e:
+                    val = self.var_adv_corr_threshold.get() if hasattr(self, 'var_adv_corr_threshold') else self.var_corr_threshold.get()
+                    messagebox.showerror("Input Error", f"Similarity threshold must be a number. Value: '{val}'\nError: {e}")
+                    return
                 # Store search parameters for reporting
                 self.raman.last_search_algorithm = "Advanced (Filtered)"
                 self.raman.last_search_threshold = threshold
-    
                 # Advanced Filters
                 peak_positions = []
                 peak_str = self.var_peak_positions.get().strip()
@@ -2453,94 +2481,61 @@ class RamanAnalysisApp:
         return matches[:n_matches]
 
     def ml_based_search(self, n_matches, threshold):
-        """Perform machine learning based search using PCA and cosine similarity."""
-        # Update the search algorithm name for more detail
-        self.raman.last_search_algorithm = "ML-based (PCA/Cosine)"
+        """Perform machine learning based search using DTW (fastdtw) similarity."""
+        from scipy.spatial.distance import cdist
+        self.raman.last_search_algorithm = "DTW-based (fastdtw)"
         self.raman.last_search_threshold = threshold
-        
-        if not SKLEARN_AVAILABLE:
-             raise ImportError("scikit-learn library is required for ML-based search.")
 
         if self.raman.processed_spectra is not None:
             query_spectrum = self.raman.processed_spectra
         elif self.raman.current_spectra is not None:
-             query_spectrum = self.raman.current_spectra
+            query_spectrum = self.raman.current_spectra
         else:
-             raise ValueError("No spectrum data available for search.")
+            raise ValueError("No spectrum data available for search.")
 
         query_wavenumbers = self.raman.current_wavenumbers
-
-        # Prepare database spectra
-        db_spectra_interp = []
+        matches = []
         db_names = []
-        min_len = len(query_wavenumbers) # Use query length as reference
+        db_spectra_interp = []
 
         for name, data in self.raman.database.items():
             db_intensities = data['intensities']
             db_wavenumbers = data['wavenumbers']
-
             # Interpolate to match query wavenumbers
             if not np.array_equal(query_wavenumbers, db_wavenumbers):
                 db_interp = np.interp(query_wavenumbers, db_wavenumbers, db_intensities)
             else:
                 db_interp = db_intensities
-
-            # Normalize (Max intensity to 1) - common preprocessing for PCA/similarity
-            db_max = np.max(db_interp)
-            if db_max > 0:
-                db_norm = db_interp / db_max
-            else:
-                db_norm = db_interp # Avoid division by zero
-
-            db_spectra_interp.append(db_norm)
+            db_spectra_interp.append(db_interp)
             db_names.append(name)
 
-        if not db_spectra_interp:
-            return []
-
-        # Normalize query spectrum similarly
+        # Normalize query spectrum
         query_max = np.max(query_spectrum)
         query_norm = query_spectrum / query_max if query_max > 0 else query_spectrum
+        query_norm = np.asarray(query_norm).flatten()  # Ensure 1-D
 
-        # Combine query and database spectra for PCA fitting
-        all_spectra = np.vstack(db_spectra_interp + [query_norm])
+        # Compute distances for each database spectrum
+        distances = []
+        for i, db_spec in enumerate(db_spectra_interp):
+            db_max = np.max(db_spec)
+            db_norm = db_spec / db_max if db_max > 0 else db_spec
+            db_norm = np.asarray(db_norm).flatten()  # Ensure 1-D
+            
+            # Reshape arrays for cdist (needs 2D arrays)
+            query_2d = query_norm.reshape(1, -1)
+            db_2d = db_norm.reshape(1, -1)
+            
+            # Compute Euclidean distance
+            distance = cdist(query_2d, db_2d, 'euclidean')[0][0]
+            distances.append((db_names[i], distance))
 
-        # Data standardization (important for PCA)
-        scaler = StandardScaler()
-        spectra_scaled = scaler.fit_transform(all_spectra)
+        # Normalize distances to [0, 1] range
+        max_distance = max(dist for _, dist in distances)
+        normalized_distances = [(name, dist/max_distance) for name, dist in distances]
 
-        # Apply PCA
-        # Choose number of components (e.g., explain 95% variance or fixed number)
-        n_components = min(10, spectra_scaled.shape[0], spectra_scaled.shape[1]) # Limit components
-        if n_components < 1: # Handle cases with very few spectra/data points
-             messagebox.showerror("ML Search Error", "Not enough data points or spectra for PCA.")
-             return []
-
-        pca = PCA(n_components=n_components)
-        try:
-            spectra_pca = pca.fit_transform(spectra_scaled)
-        except ValueError as e:
-             messagebox.showerror("PCA Error", f"Error during PCA calculation: {e}")
-             return []
-
-
-        # Separate query and database PCA components
-        query_pca = spectra_pca[-1].reshape(1, -1)
-        db_pca = spectra_pca[:-1]
-
-        # Calculate cosine similarity in PCA space
-        similarities = cosine_similarity(query_pca, db_pca)[0]
-
-        # Filter by threshold and create matches list
-        matches = []
-        for i, similarity in enumerate(similarities):
-            # Cosine similarity ranges from -1 to 1. Map to 0-1 if needed, or adjust threshold.
-            # Assuming threshold is for 0-1 range, let's scale similarity: (sim + 1) / 2
-            scaled_similarity = (similarity + 1) / 2
-            if scaled_similarity >= threshold:
-                matches.append((db_names[i], scaled_similarity))
-
-        # Sort matches by similarity score (descending)
+        # Convert normalized distance to similarity using a more gradual transformation
+        # Using exp(-x) gives a smoother falloff than 1/(1+x)
+        matches = [(name, np.exp(-dist)) for name, dist in normalized_distances if np.exp(-dist) >= threshold]
         matches.sort(key=lambda x: x[1], reverse=True)
         return matches[:n_matches]
 
@@ -5129,6 +5124,66 @@ class RamanAnalysisApp:
                 ax.set_ylim(ylim)
 
         self.overlay_canvas.draw()
+
+    def apply_savgol_smoothing(self):
+        """Apply Savitzky-Golay smoothing to the current spectrum."""
+        if self.raman.current_spectra is None:
+            messagebox.showerror("Error", "No spectrum loaded.")
+            return
+        try:
+            window_length = int(self.var_sg_window.get())
+            polyorder = int(self.var_sg_poly.get())
+            # Ensure window_length is odd and >= 5
+            if window_length < 5 or window_length % 2 == 0:
+                messagebox.showerror("Error", "Window length must be an odd integer >= 5.")
+                return
+            if polyorder < 2 or polyorder >= window_length:
+                messagebox.showerror("Error", "Polynomial order must be >= 2 and less than window length.")
+                return
+            # Apply smoothing to the processed spectrum if it exists, else to the raw spectrum
+            if self.raman.processed_spectra is not None:
+                smoothed = savgol_filter(self.raman.processed_spectra, window_length, polyorder)
+                self.raman.processed_spectra = smoothed
+            else:
+                smoothed = savgol_filter(self.raman.current_spectra, window_length, polyorder)
+                self.raman.processed_spectra = smoothed
+            self.update_plot(include_background=self.var_show_background.get(), include_peaks=self.var_show_peaks.get())
+            messagebox.showinfo("Smoothing Applied", "Savitzky-Golay smoothing applied successfully.")
+        except Exception as e:
+            messagebox.showerror("Smoothing Error", f"Failed to apply smoothing: {str(e)}")
+
+    def preview_savgol_smoothing(self):
+        """Preview Savitzky-Golay smoothing on the plot without modifying the data."""
+        if self.raman.current_spectra is None:
+            messagebox.showerror("Error", "No spectrum loaded.")
+            return
+        try:
+            window_length = int(self.var_sg_window.get())
+            polyorder = int(self.var_sg_poly.get())
+            if window_length < 5 or window_length % 2 == 0:
+                messagebox.showerror("Error", "Window length must be an odd integer >= 5.")
+                return
+            if polyorder < 2 or polyorder >= window_length:
+                messagebox.showerror("Error", "Polynomial order must be >= 2 and less than window length.")
+                return
+            # Use processed spectrum if it exists, else raw
+            if self.raman.processed_spectra is not None:
+                spectrum = self.raman.processed_spectra
+            else:
+                spectrum = self.raman.current_spectra
+            smoothed = savgol_filter(spectrum, window_length, polyorder)
+            # Plot preview: overlay smoothed spectrum in orange
+            self.ax.clear()
+            self.ax.plot(self.raman.current_wavenumbers, spectrum, color='blue', label='Original', linewidth=1.5)
+            self.ax.plot(self.raman.current_wavenumbers, smoothed, color='orange', label='S-G Preview', linewidth=1.5, linestyle='--')
+            self.ax.set_xlabel('Wavenumber (cm⁻¹)')
+            self.ax.set_ylabel('Intensity (a.u.)')
+            self.ax.set_title('Savitzky-Golay Smoothing Preview')
+            self.ax.legend()
+            self.ax.grid(True, linestyle=':', alpha=0.6)
+            self.canvas.draw()
+        except Exception as e:
+            messagebox.showerror("Smoothing Preview Error", f"Failed to preview smoothing: {str(e)}")
 
 # --- Main Execution ---
 def main():
