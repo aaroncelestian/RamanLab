@@ -17,12 +17,24 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - View and search database contents
 
 - **Search and Matching**
-  - Multiple search algorithms:
-    - Correlation-based matching
-    - Peak-based matching
-    - Machine learning-based matching
-  - Advanced filtering options
-  - Confidence scoring for matches  
+	- Multiple search algorithms:
+			- Correlation-based matching
+			- Peak-based matching
+			- Machine learning-based matching
+	- Advanced filtering options
+	- Confidence scoring for matches
+	- Heatmap of best fit to molecular vibrational groups
+
+-  **Peak Fitting**
+	- Advanced background modeling: 
+			- Manual modeling
+			- Software suggested models that are user selectable
+			- Interactive background modeling
+	-    Algorytmically identify peaks, or add user selected
+	-    Peak modeling:
+			- Gaussian, Lorentzian, or Pseudo-Voigt
+			- No need to define regions for fitting, no need to spectral smoothing
+			- Report generation
 
 - **Export and Reporting**
   - Generate detailed match reports
