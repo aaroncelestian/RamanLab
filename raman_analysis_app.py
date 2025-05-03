@@ -4,6 +4,7 @@
 """
 @author: AaronCelestian
 ClaritySpectra
+version 2.0
 """
 
 import os
@@ -1219,7 +1220,7 @@ class RamanAnalysisApp:
         visualization_frame = ttk.LabelFrame(parent, text="Visualization Options", padding=10)
         visualization_frame.pack(fill=tk.X, pady=5)
 
-        self.var_show_diff = tk.BooleanVar(value=False)
+        self.var_show_diff = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             visualization_frame,
             text="Show Difference Plot",
