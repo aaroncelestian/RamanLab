@@ -234,30 +234,27 @@ class RamanAnalysisApp:
 
 
     def create_control_panel(self):
-        """Create the control panel with tabbed interface."""
-        # Define frame width to ensure controls don't take too much space
-        control_width = 300
-
-        # Create notebook (tabbed panel)
-        self.notebook = ttk.Notebook(self.frame_right, width=control_width)
+        """Create the control panel with tabs for different functions."""
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Create tabs
-        self.tab_file = ttk.Frame(self.notebook, padding=5)
-        self.tab_process = ttk.Frame(self.notebook, padding=5)
-        self.tab_search = ttk.Frame(self.notebook, padding=5)
-        self.tab_database = ttk.Frame(self.notebook, padding=5)
+        self.tab_file = ttk.Frame(self.notebook)
+        self.tab_process = ttk.Frame(self.notebook)
+        self.tab_search = ttk.Frame(self.notebook)
+        self.tab_database = ttk.Frame(self.notebook)
 
         # Add tabs to notebook
         self.notebook.add(self.tab_file, text="File")
-        self.notebook.add(self.tab_process, text="Processing")
-        self.notebook.add(self.tab_search, text="Search-Match")
+        self.notebook.add(self.tab_process, text="Process")
+        self.notebook.add(self.tab_search, text="Search")
         self.notebook.add(self.tab_database, text="Database")
 
         # Create content for each tab
         self.create_file_tab()
         self.create_process_tab()
-        self.create_search_tab()
+        self.create_search_tab(self.tab_search)  # Pass the parent tab as argument
         self.create_database_tab()
 
     def create_file_tab(self):
@@ -335,12 +332,6 @@ class RamanAnalysisApp:
 
         ttk.Button(peak_frame, text="Find Peaks", command=self.find_peaks).pack(fill=tk.X, pady=5)
 
-        # Peak fitting frame
-        fit_frame = ttk.LabelFrame(self.tab_process, text="Peak Fitting", padding=10)
-        fit_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Button(fit_frame, text="Open Peak Fitting Window", command=self.open_peak_fitting).pack(fill=tk.X, pady=5)
-
         # Display options frame
         display_frame = ttk.LabelFrame(self.tab_process, text="Display Options", padding=10)
         display_frame.pack(fill=tk.X, pady=5)
@@ -363,24 +354,33 @@ class RamanAnalysisApp:
                                             include_peaks=self.var_show_peaks.get())
         ).pack(anchor=tk.W, pady=2)
 
-    def create_search_tab(self):
+        # Peak fitting button at the bottom
+        style = ttk.Style()
+        style.configure("PeakFitting.TButton", background="#4a7a96", foreground="white")
+        ttk.Button(
+            self.tab_process,
+            text="Open Peak Fitting Window",
+            command=self.open_peak_fitting,
+            style="PeakFitting.TButton"
+        ).pack(fill=tk.X, pady=10, padx=5)
+
+    def create_search_tab(self, parent):
         """Create content for the search-match tab."""
         # Create notebook for search options
-        search_notebook = ttk.Notebook(self.tab_search)
-        search_notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+        search_notebook = ttk.Notebook(parent)
+        search_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Create tabs for basic and advanced search
-        basic_search_tab = ttk.Frame(search_notebook)
-        advanced_search_tab = ttk.Frame(search_notebook)
+        # Create tabs for different search methods
+        self.tab_basic_search = ttk.Frame(search_notebook)
+        self.tab_advanced_search = ttk.Frame(search_notebook)
 
-        search_notebook.add(basic_search_tab, text="Basic Search")
-        search_notebook.add(advanced_search_tab, text="Advanced Search")
+        # Add tabs to notebook
+        search_notebook.add(self.tab_basic_search, text="Basic Search")
+        search_notebook.add(self.tab_advanced_search, text="Advanced Search")
 
-        # Basic search tab
-        self.create_basic_search_tab(basic_search_tab)
-
-        # Advanced search tab
-        self.create_advanced_search_tab(advanced_search_tab)
+        # Create content for each search tab
+        self.create_basic_search_tab(self.tab_basic_search)
+        self.create_advanced_search_tab(self.tab_advanced_search)
 
         # Results display (common to both tabs)
         results_frame = ttk.LabelFrame(self.tab_search, text="Results Summary", padding=10)
@@ -2762,14 +2762,14 @@ class RamanAnalysisApp:
                 text_widget.insert(tk.END, "No matches found.\n")
                 text_widget.config(state=tk.DISABLED)
                 return
-            
+
             # Add header
             text_widget.insert(tk.END, "Raman Spectrum Analysis Report\n")
             text_widget.insert(tk.END, "=" * 50 + "\n\n")
             
             # Add timestamp
             text_widget.insert(tk.END, f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-            
+
             # === Sample Information ===
             text_widget.insert(tk.END, "Sample Information\n")
             text_widget.insert(tk.END, "-" * 25 + "\n")
@@ -2817,7 +2817,7 @@ class RamanAnalysisApp:
                 text_widget.insert(tk.END, "No current spectrum loaded.\n")
             
             text_widget.insert(tk.END, "\n")
-            
+
             # === Processing Information ===
             text_widget.insert(tk.END, "Processing Information\n")
             text_widget.insert(tk.END, "-" * 25 + "\n")
@@ -2840,7 +2840,7 @@ class RamanAnalysisApp:
             text_widget.insert(tk.END, f"Search Algorithm: {self.raman.last_search_algorithm if hasattr(self.raman, 'last_search_algorithm') else 'Unknown'}\n")
             text_widget.insert(tk.END, f"Match Threshold: {self.raman.last_search_threshold if hasattr(self.raman, 'last_search_threshold') else 'Unknown'}\n")
             text_widget.insert(tk.END, "\n")
-            
+
             # === Match Results ===
             text_widget.insert(tk.END, "Match Results\n")
             text_widget.insert(tk.END, "-" * 25 + "\n")
@@ -2893,7 +2893,7 @@ class RamanAnalysisApp:
                 
                 # Add separator between matches
                 text_widget.insert(tk.END, "\n")
-            
+
             # === Analysis and Recommendations ===
             text_widget.insert(tk.END, "Analysis and Recommendations\n")
             text_widget.insert(tk.END, "-" * 25 + "\n")
@@ -4051,7 +4051,7 @@ class RamanAnalysisApp:
             x_min = min(query_wavenumbers)
             x_max = max(query_wavenumbers)
             x_range = x_max - x_min
-            x_min = max(0, x_min - 0.02 * x_range)
+            x_min = max(0, x_min - 0.15 * x_range)  # Ensure no negative wavenumbers
             x_max = x_max + 0.02 * x_range
         
         # Stretch the x-axis more to the right by extending the x_max
@@ -4071,6 +4071,12 @@ class RamanAnalysisApp:
             if group not in groups:
                 groups[group] = []
             groups[group].append(item)
+        
+        # Calculate average correlation for each group
+        group_averages = {}
+        for group_name, group_items in groups.items():
+            correlations = [item[4] for item in group_items]  # Get correlation values
+            group_averages[group_name] = np.mean(correlations) if correlations else 0.0
         
         # Define y-positions for each group - adjusted to accommodate more groups
         group_positions = {
@@ -4096,9 +4102,11 @@ class RamanAnalysisApp:
         # Plot each vibration region as a vertical bar and add group labels
         for group_name, group_items in groups.items():
             y_pos = group_positions.get(group_name, 0.5)
+            avg_corr = group_averages[group_name]
             
-            # Add group name directly on the left side of the plot
-            ax.text(x_min + 5, y_pos, group_name, fontsize=7, ha='left', va='center',
+            # Add group name with average correlation on the left side of the plot
+            group_label = f"{group_name} (Avg: {avg_corr:.2f})"
+            ax.text(x_min - 0.05 * (x_max - x_min), y_pos, group_label, fontsize=7, ha='left', va='center',
                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
             
             # Plot each bar in the group
@@ -4149,7 +4157,7 @@ class RamanAnalysisApp:
         
         # Set labels and title
         ax.set_xlabel('Wavenumber (cm⁻¹)')
-        ax.set_ylabel('Mineral Groups')
+        ax.set_ylabel('Mineral Groups', labelpad=20)  # Added labelpad to move label further left
         ax.set_title(f'Mineral Vibration Correlation: Query vs. {mineral_name}')
         
         # Remove y-axis ticks as they're not needed
@@ -4430,6 +4438,12 @@ class RamanAnalysisApp:
         fig_comp = plt.figure(figsize=(6, 5))  # Taller figure for comparison plot
         canvas_comp = FigureCanvasTkAgg(fig_comp, master=comparison_frame)
         canvas_comp.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Add toolbar for comparison plot
+        toolbar_frame = ttk.Frame(comparison_frame)
+        toolbar_frame.pack(fill=tk.X)
+        toolbar = NavigationToolbar2Tk(canvas_comp, toolbar_frame)
+        toolbar.update()
 
         # Create mineral vibrations analysis pane with more padding
         mineral_frame = ttk.LabelFrame(right_panel, text="Mineral Vibrations Analysis", padding=10)  # Increased padding
@@ -5148,7 +5162,6 @@ class RamanAnalysisApp:
                 smoothed = savgol_filter(self.raman.current_spectra, window_length, polyorder)
                 self.raman.processed_spectra = smoothed
             self.update_plot(include_background=self.var_show_background.get(), include_peaks=self.var_show_peaks.get())
-            messagebox.showinfo("Smoothing Applied", "Savitzky-Golay smoothing applied successfully.")
         except Exception as e:
             messagebox.showerror("Smoothing Error", f"Failed to apply smoothing: {str(e)}")
 
