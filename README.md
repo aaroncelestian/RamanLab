@@ -65,7 +65,7 @@ pip install -r requirements.txt
 ```
 
 3. Download the database and metadata correlation file:
-  - https://drive.google.com/drive/folders/1U1Wk9N82M9zt0PawAxlwHxPIHrpYpzkW?usp=drive_link (soon to move to figshare)
+  - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6 
 
 6. Run the application:
 ```bash
