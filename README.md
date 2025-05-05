@@ -105,11 +105,16 @@ python raman_analysis_app.py
    - Choose search algorithm
    - Set matching parameters
    - View and export results
+  
+5. **Single and Batch Processing and Analysis**
+   - Fit peaks
+   - Auto subtract/refine background
+   - View and export results
 
 ## Project Structure
 
 All files should be in the same directory
-- 'main.py' - just run this from terminal: python3 main.py
+- `main.py` - just run this from terminal: python3 main.py
 - `raman_analysis_app.py` - Main application GUI
 - `raman_spectra.py` - Core spectrum processing functionality
 - `check_dependencies.py` - Dependency verification
@@ -117,7 +122,7 @@ All files should be in the same directory
 - `peak_fitting.py` - Peak fitting
 - `batch_peak_fitting.py` - Batch fitting
 - `raman_database.pkl` - Database of Raman spectra https://drive.google.com/drive/folders/1U1Wk9N82M9zt0PawAxlwHxPIHrpYpzkW?usp=drive_link
-- `RRUFF_Export_with_Hey_Classifcation.csv` - this is needed for adding new entries to teh database so everything is mapped propertly. 
+- `RRUFF_Export_with_Hey_Classifcation.csv` - this is needed for adding new entries to the database so everything is mapped propertly. 
 
 ## License
 
