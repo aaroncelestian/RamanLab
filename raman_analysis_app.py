@@ -22,6 +22,7 @@ from pathlib import Path
 import csv
 from datetime import datetime
 from io import BytesIO
+from version import __version__, __author__, __copyright__
 #from cnn_model import RamanCNN  # Import the RamanCNN class
 # from search_functions import plot_match_comparison, generate_correlation_heatmap, generate_match_report
 # import types
@@ -193,13 +194,13 @@ class RamanAnalysisApp:
         # Version info
         ttk.Label(
             about_window, 
-            text="Version 1.0"
+            text=f"Version {__version__}"
         ).pack(pady=2)
         
         # Author info
         ttk.Label(
             about_window,
-            text="Created by Aaron Celestian, Ph.D. \n"
+            text=f"Created by {__author__} \n"
                  "Natural History Museum of Los Angeles County \n"
                  "Department of Mineral Sciences",
         ).pack(pady=2)
@@ -217,7 +218,7 @@ class RamanAnalysisApp:
         # Copyright info
         ttk.Label(
             about_window,
-            text="© 2025 Aaron Celestian. All rights reserved\n"
+            text=f"{__copyright__}\n"
                  "RRUFF data use for minerals\n"
                  "https://www.rruff.info \n"
                  "Plastic data from SLOPP and SLOPP-E \n"
@@ -244,18 +245,21 @@ class RamanAnalysisApp:
         self.tab_process = ttk.Frame(self.notebook)
         self.tab_search = ttk.Frame(self.notebook)
         self.tab_database = ttk.Frame(self.notebook)
+        self.tab_peak_fitting = ttk.Frame(self.notebook)  # New tab for peak fitting
 
         # Add tabs to notebook
         self.notebook.add(self.tab_file, text="File")
         self.notebook.add(self.tab_process, text="Process")
         self.notebook.add(self.tab_search, text="Search")
         self.notebook.add(self.tab_database, text="Database")
+        self.notebook.add(self.tab_peak_fitting, text="Peak Fitting")  # Add the new tab
 
         # Create content for each tab
         self.create_file_tab()
         self.create_process_tab()
         self.create_search_tab(self.tab_search)  # Pass the parent tab as argument
         self.create_database_tab()
+        self.create_peak_fitting_tab()  # Create content for the new tab
 
     def create_file_tab(self):
         """Create content for the file operations tab."""
@@ -354,16 +358,6 @@ class RamanAnalysisApp:
                                             include_peaks=self.var_show_peaks.get())
         ).pack(anchor=tk.W, pady=2)
 
-        # Peak fitting button at the bottom
-        style = ttk.Style()
-        style.configure("PeakFitting.TButton", background="#4a7a96", foreground="white")
-        ttk.Button(
-            self.tab_process,
-            text="Open Peak Fitting Window",
-            command=self.open_peak_fitting,
-            style="PeakFitting.TButton"
-        ).pack(fill=tk.X, pady=10, padx=5)
-
     def create_search_tab(self, parent):
         """Create content for the search-match tab."""
         # Create notebook for search options
@@ -413,7 +407,7 @@ class RamanAnalysisApp:
                 self.raman.hey_classification = self.raman.load_hey_classification(hey_csv_path)
             
             # Check again if data was loaded
-            if not hasattr(self.ram, 'hey_classification') or not self.raman.hey_classification:
+            if not hasattr(self.raman, 'hey_classification') or not self.raman.hey_classification:
                 messagebox.showerror("Error", "Hey Classification data could not be loaded.")
                 return
         
@@ -702,7 +696,7 @@ class RamanAnalysisApp:
             if not classification:
                 continue
             
-            # Extract classification parts (assuming format like "X. Silicates - Tectosilicates")
+            # Extract classification parts (assuming format like "X. Silicate - TectoSilicate")
             parts = classification.split(' - ')
             main_class = parts[0].strip()
             subclass = parts[1].strip() if len(parts) > 1 else ""
@@ -973,18 +967,19 @@ class RamanAnalysisApp:
             common_fields = [
                 'NAME',
                 'HEY CLASSIFICATION',
-                'RRUFFID', 
+                'RRUFFIDS', 
                 'IDEAL CHEMISTRY',
                 'CHEMICAL FAMILY',
-                'CRYSTAL SYSTEM',
-                'SPACE GROUP',
+                'CRYSTAL SYSTEMS',
+                'SPACE GROUPS',
                 'LOCALITY',
                 'DESCRIPTION',
                 'URL',
-                'PARAGENETIC MODE',
+                'PARAGENETIC MODES',
                 'MINERAL FAMILY',
                 'CHEMICAL FORMULA',
-                'NOTES'
+                'NOTES',
+                'AGE'
             ]
             
             # Add Hey Classification dropdown at the top
@@ -1309,6 +1304,25 @@ class RamanAnalysisApp:
         self.hey_classification_combo = ttk.Combobox(filter_frame, textvariable=self.var_hey_classification, state="readonly")
         self.hey_classification_combo.pack(fill=tk.X, pady=2)
         
+        # Add Chemistry Elements filter
+        elements_frame = ttk.LabelFrame(filter_frame, text="Filter by Chemistry Elements", padding=5)
+        elements_frame.pack(fill=tk.X, pady=5)
+        
+        # Only these elements
+        ttk.Label(elements_frame, text="Only these elements (comma-separated):").pack(anchor=tk.W)
+        self.var_only_elements = tk.StringVar()
+        ttk.Entry(elements_frame, textvariable=self.var_only_elements).pack(fill=tk.X, pady=2)
+        
+        # Required elements
+        ttk.Label(elements_frame, text="Required elements (comma-separated):").pack(anchor=tk.W)
+        self.var_required_elements = tk.StringVar()
+        ttk.Entry(elements_frame, textvariable=self.var_required_elements).pack(fill=tk.X, pady=2)
+        
+        # Exclude elements
+        ttk.Label(elements_frame, text="Exclude elements (comma-separated):").pack(anchor=tk.W)
+        self.var_exclude_elements = tk.StringVar()
+        ttk.Entry(elements_frame, textvariable=self.var_exclude_elements).pack(fill=tk.X, pady=2)
+        
         # Update both dropdown options
         self.update_metadata_filter_options()
 
@@ -1502,7 +1516,7 @@ class RamanAnalysisApp:
 
         if meta_to_display:
             # Order of important metadata fields
-            important_fields = ['NAME', 'RRUFFID', 'IDEAL CHEMISTRY', 'CHEMICAL FAMILY', 'LOCALITY', 'DESCRIPTION', 'URL']
+            important_fields = ['NAME', 'RRUFF ID', 'IDEAL CHEMISTRY', 'CHEMICAL FAMILY', 'LOCALITY', 'DESCRIPTION', 'URL']
 
             # Display important fields first in order
             displayed_keys = set()
@@ -2011,7 +2025,7 @@ class RamanAnalysisApp:
         # Create a new window
         db_window = tk.Toplevel(self.root)
         db_window.title("Raman Spectra Database")
-        db_window.geometry("800x600")
+        db_window.geometry("1300x800")  # Slightly increased width for paragenetic modes column
 
         # --- GUI Elements ---
         main_frame = ttk.Frame(db_window, padding=10)
@@ -2029,31 +2043,55 @@ class RamanAnalysisApp:
         list_frame = ttk.LabelFrame(main_frame, text="Database Entries", padding=10)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Treeview Columns
-        columns = ('#0', 'name', 'points', 'family', 'hey_class')  # Added hey_class column
+        # Treeview Columns - Added paragenetic modes column
+        columns = ('#0', 'name', 'points', 'mineral_name', 'rruff_id', 'ima_number', 'hey_class', 'chemical_family', 
+                  'ideal_chemistry', 'crystal_system', 'space_groups', 'locality', 'paragenetic_modes', 'chemistry_elements', 'description')
         tree = ttk.Treeview(list_frame, columns=columns[1:], show='headings', height=15)
 
         # Define headings
         tree.heading('name', text='Name/ID')
         tree.heading('points', text='Data Points')
-        tree.heading('family', text='Chemical Family')
-        tree.heading('hey_class', text='Hey Classification')  
+        tree.heading('mineral_name', text='Mineral Name')
+        tree.heading('rruff_id', text='RRUFF ID')
+        tree.heading('ima_number', text='IMA Number')
+        tree.heading('hey_class', text='Hey Classification')
+        tree.heading('chemical_family', text='Chemical Family')
+        tree.heading('ideal_chemistry', text='Ideal Chemistry')
+        tree.heading('crystal_system', text='Crystal System')
+        tree.heading('space_groups', text='Space Groups')
+        tree.heading('locality', text='Locality')
+        tree.heading('paragenetic_modes', text='Paragenetic Modes')
+        tree.heading('chemistry_elements', text='Chemistry Elements')
+        tree.heading('description', text='Description')
 
+        # Configure column widths
+        tree.column('name', width=150, anchor=tk.W)
+        tree.column('points', width=80, anchor=tk.CENTER)
+        tree.column('mineral_name', width=150, anchor=tk.W)
+        tree.column('rruff_id', width=100, anchor=tk.W)
+        tree.column('ima_number', width=100, anchor=tk.W)
+        tree.column('hey_class', width=150, anchor=tk.W)
+        tree.column('chemical_family', width=150, anchor=tk.W)
+        tree.column('ideal_chemistry', width=150, anchor=tk.W)
+        tree.column('crystal_system', width=120, anchor=tk.W)
+        tree.column('space_groups', width=120, anchor=tk.W)
+        tree.column('locality', width=150, anchor=tk.W)
+        tree.column('paragenetic_modes', width=150, anchor=tk.W)
+        tree.column('chemistry_elements', width=150, anchor=tk.W)
+        tree.column('description', width=200, anchor=tk.W)
 
-        # Configure column widths (adjust as needed)
-        tree.column('name', width=250, anchor=tk.W)
-        tree.column('points', width=100, anchor=tk.CENTER)
-        tree.column('family', width=200, anchor=tk.W)
-        tree.column('hey_class', width=180, anchor=tk.W) 
+        # Add scrollbars
+        yscrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=tree.yview)
+        xscrollbar = ttk.Scrollbar(list_frame, orient=tk.HORIZONTAL, command=tree.xview)
+        tree.configure(yscrollcommand=yscrollbar.set, xscrollcommand=xscrollbar.set)
 
-        # Add scrollbar
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Pack scrollbars and tree
+        yscrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        xscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # --- Populate and Filter Logic ---
-        db_items = list(self.raman.database.items()) # Get a list view
+        db_items = list(self.raman.database.items())
 
         def populate_treeview(search_term=""):
             # Clear existing items
@@ -2064,67 +2102,88 @@ class RamanAnalysisApp:
         
             # Filter and insert entries
             for name, data in db_items:
-                family = data.get('metadata', {}).get('CHEMICAL FAMILY', 'N/A')
-                hey_class = data.get('metadata', {}).get('HEY CLASSIFICATION', 'N/A')  # Get Hey Classification
+                metadata = data.get('metadata', {})
+                
+                # Extract all metadata fields using exact keys
+                mineral_name = metadata.get('NAME', 'N/A')
+                rruff_id = metadata.get('RRUFF ID', 'N/A')
+                ima_number = metadata.get('IMA NUMBER', 'N/A')
+                hey_class = metadata.get('HEY CLASSIFICATION', 'N/A')
+                chemical_family = metadata.get('CHEMICAL FAMILY', 'N/A')
+                ideal_chemistry = metadata.get('IDEAL CHEMISTRY', 'N/A')
+                crystal_system = metadata.get('CRYSTAL SYSTEM', 'N/A')
+                space_groups = metadata.get('SPACE GROUPS', 'N/A')
+                locality = metadata.get('LOCALITY', 'N/A')
+                paragenetic_modes = metadata.get('PARAGENETIC MODES', 'N/A')
+                chemistry_elements = metadata.get('CHEMISTRY ELEMENTS', 'N/A')
+                description = metadata.get('DESCRIPTION', 'N/A')
+                
                 points = len(data.get('wavenumbers', []))
-                display_name = name # Use the key as the display name
+                display_name = name
         
-                # Check if search term matches name, family, or Hey Classification
-                matches_search = True # Assume match if no search term
+                # Check if search term matches any field
+                matches_search = True
                 if search_lower:
                     matches_search = (search_lower in display_name.lower() or
-                                   search_lower in family.lower() or
-                                   search_lower in hey_class.lower())  # Include Hey Classification in search
+                                    search_lower in mineral_name.lower() or
+                                    search_lower in str(rruff_id).lower() or
+                                    search_lower in str(ima_number).lower() or
+                                    search_lower in hey_class.lower() or
+                                    search_lower in chemical_family.lower() or
+                                    search_lower in ideal_chemistry.lower() or
+                                    search_lower in crystal_system.lower() or
+                                    search_lower in space_groups.lower() or
+                                    search_lower in locality.lower() or
+                                    search_lower in paragenetic_modes.lower() or
+                                    search_lower in chemistry_elements.lower() or
+                                    search_lower in description.lower())
         
                 if matches_search:
-                    # Use 'name' (the actual dict key) as the item ID (iid) for later retrieval
-                    tree.insert('', tk.END, iid=name, values=(display_name, points, family, hey_class))  # Added hey_class
+                    tree.insert('', tk.END, iid=name, values=(
+                        display_name, points, mineral_name, rruff_id, ima_number, hey_class,
+                        chemical_family, ideal_chemistry, crystal_system,
+                        space_groups, locality, paragenetic_modes, chemistry_elements, description
+                    ))
 
         # Search function
-        def perform_search(event=None): # Added event for binding
+        def perform_search(event=None):
             populate_treeview(search_var.get())
 
-        search_entry.bind('<Return>', perform_search) # Bind Enter key
+        search_entry.bind('<Return>', perform_search)
         ttk.Button(search_frame, text="Search", command=perform_search).pack(side=tk.LEFT, padx=5)
         ttk.Button(search_frame, text="Clear", command=lambda: [search_var.set(""), populate_treeview()]).pack(side=tk.LEFT, padx=5)
-
 
         # --- Button Actions ---
         button_frame = ttk.Frame(main_frame, padding=(0, 5, 0, 0))
         button_frame.pack(fill=tk.X)
 
         def get_selected_name():
-             selected_items = tree.selection()
-             if not selected_items:
-                 messagebox.showwarning("Selection Required", "Please select a spectrum from the list.")
-                 return None
-             # Use the item ID (iid), which we set as the dictionary key 'name'
-             return selected_items[0]
+            selected_items = tree.selection()
+            if not selected_items:
+                messagebox.showwarning("Selection Required", "Please select a spectrum from the list.")
+                return None
+            return selected_items[0]
 
         def view_selected():
             name = get_selected_name()
             if name:
-                self.view_database_item(name) # Pass the actual key
+                self.view_database_item(name)
 
         def remove_selected():
             name = get_selected_name()
             if name:
-                self.remove_database_item(name, lambda: populate_treeview(search_var.get())) # Pass callback
+                self.remove_database_item(name, lambda: populate_treeview(search_var.get()))
                 
         def edit_selected():
             name = get_selected_name()
             if name:
-                # Call the metadata editor with the selected spectrum name
                 self.edit_metadata(name)
-                # Update treeview after editing
                 populate_treeview(search_var.get())
-
 
         ttk.Button(button_frame, text="View in Main Plot", command=view_selected).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Edit Metadata", command=edit_selected).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Remove Selected", command=remove_selected).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Close", command=db_window.destroy).pack(side=tk.RIGHT, padx=5)
-
 
         # --- Initial Population ---
         populate_treeview()
@@ -2290,6 +2349,26 @@ class RamanAnalysisApp:
                 chemical_family = self.var_chemical_family.get().strip() or None # None if empty
                 hey_classification = self.var_hey_classification.get().strip() or None # None if empty
     
+                # Get chemistry elements filters
+                only_elements = None
+                required_elements = None
+                exclude_elements = None
+                
+                # Process "only these elements" filter
+                only_elements_str = self.var_only_elements.get().strip()
+                if only_elements_str:
+                    only_elements = [elem.strip().upper() for elem in only_elements_str.split(',')]
+                
+                # Process "required elements" filter
+                required_elements_str = self.var_required_elements.get().strip()
+                if required_elements_str:
+                    required_elements = [elem.strip().upper() for elem in required_elements_str.split(',')]
+                
+                # Process "exclude elements" filter
+                exclude_elements_str = self.var_exclude_elements.get().strip()
+                if exclude_elements_str:
+                    exclude_elements = [elem.strip().upper() for elem in exclude_elements_str.split(',')]
+    
                 # Show a message to indicate search criteria
                 if peak_positions:
                     messagebox.showinfo("Search Criteria", 
@@ -2302,7 +2381,10 @@ class RamanAnalysisApp:
                     peak_tolerance=peak_tolerance,
                     chemical_family=chemical_family,
                     threshold=threshold,
-                    hey_classification=hey_classification # Pass Hey Classification filter
+                    hey_classification=hey_classification,
+                    only_elements=only_elements,
+                    required_elements=required_elements,
+                    exclude_elements=exclude_elements
                 )
     
                 # Sort and limit results
@@ -2541,39 +2623,31 @@ class RamanAnalysisApp:
 
 
 
-    def _filtered_search(self, peak_positions, peak_tolerance, chemical_family, threshold, hey_classification=None):
+    def _filtered_search(self, peak_positions, peak_tolerance, chemical_family, threshold, hey_classification=None, only_elements=None, required_elements=None, exclude_elements=None):
         """Perform a filtered search using peak positions, chemical family, and/or Hey Classification.
         
-        Parameters:
-        -----------
-        peak_positions : list
-            List of peak positions to search for (floats).
-        peak_tolerance : float
-            Tolerance (in cm^-1) for peak matching.
-        chemical_family : str
-            Chemical family to filter by.
-        threshold : float
-            Minimum correlation to consider a match.
-        hey_classification : str
-            Hey Classification to filter by.
-            
+        Args:
+            peak_positions : list
+                List of peak positions to search for.
+            peak_tolerance : float
+                Tolerance for peak matching in cm⁻¹.
+            chemical_family : str
+                Chemical family to filter by.
+            threshold : float
+                Correlation threshold for matching.
+            hey_classification : str
+                Hey Classification to filter by.
+            only_elements : list
+                List of elements to include in the search.
+            required_elements : list
+                List of elements to require in the search.
+            exclude_elements : list
+                List of elements to exclude from the search.
+                
         Returns:
-        --------
-        list
-            List of (name, score) tuples for matching spectra.
+            list: List of (name, score) tuples for matching spectra.
         """
-        # Update search information for reporting
-        search_filters = []
-        if peak_positions:
-            search_filters.append("Peaks")
-        if chemical_family:
-            search_filters.append("Chemical Family")
-        if hey_classification:
-            search_filters.append("Hey Classification")
-            
-        filter_str = ", ".join(search_filters) if search_filters else "No filters"
-        self.raman.last_search_algorithm = f"Filtered Search ({filter_str})"
-        self.raman.last_search_threshold = threshold
+        matches = []
         
         # Get the query spectrum
         if self.raman.processed_spectra is not None:
@@ -2584,129 +2658,111 @@ class RamanAnalysisApp:
             raise ValueError("No spectrum data available for search.")
 
         query_wavenumbers = self.raman.current_wavenumbers
-        matches = []
         
         # Normalize query spectrum once (for correlation calculation)
         query_min = np.min(query_spectrum)
         query_max = np.max(query_spectrum)
         query_norm = (query_spectrum - query_min) / (query_max - query_min) if (query_max > query_min) else query_spectrum
-    
-        # If peak positions are provided, check if the query spectrum has peaks detected
-        peak_based_search = len(peak_positions) > 0
-        if peak_based_search:
-            # If doing peak-based search, ensure we have peaks in the query
-            if self.raman.peaks is None or 'wavenumbers' not in self.raman.peaks:
-                try:
-                    self.find_peaks()
-                except:
-                    pass
-                
-            # If we still don't have peaks, inform the user
-            if self.raman.peaks is None or 'wavenumbers' not in self.raman.peaks:
-                messagebox.showinfo("Peak Search", "No peaks found in query spectrum. Using correlation-based search instead.")
-                peak_based_search = False
-    
-        # Track matches that meet the criteria for strict peak matching
-        peak_matches = []
         
+        # Iterate through all database entries
         for name, data in self.raman.database.items():
             db_meta = data.get('metadata', {})
-            match_score = 0.0  # Default score
-            peak_match_ratio = 0.0  # For peak-based searches
-    
-            # 1. Apply Chemical Family Filter
-            if chemical_family:
-                db_family = db_meta.get('CHEMICAL FAMILY')
-                
-                # More robust family matching
-                match_found = False
-                if db_family and isinstance(db_family, str):
-                    # Direct case-insensitive match
-                    if db_family.lower() == chemical_family.lower():
-                        match_found = True
-                    # Check if the chemical family is a substring (for partial matches)
-                    elif chemical_family.lower() in db_family.lower():
-                        match_found = True
-                
-                # If no direct match, try extracting from Hey Classification
-                if not match_found:
-                    db_hey = db_meta.get('HEY CLASSIFICATION')
-                    if db_hey and isinstance(db_hey, str) and ' - ' in db_hey:
-                        # Extract family part from Hey Classification (format is usually "Family - Group")
-                        hey_family = db_hey.split(' - ')[0].strip()
-                        if hey_family.lower() == chemical_family.lower() or chemical_family.lower() in hey_family.lower():
-                            match_found = True
-                
-                # Skip if no match found after checking all possibilities
-                if not match_found:
-                    continue # Skip if family doesn't match
+            match_score = 0.0
             
-            # 2. Apply Hey Classification Filter
+            # Apply chemical family filter
+            if chemical_family:
+                db_family = db_meta.get('chemical_family')
+                if not db_family or db_family.lower() != chemical_family.lower():
+                    continue
+                    
+            # Apply Hey Classification filter
             if hey_classification:
-                db_hey_class = db_meta.get('HEY CLASSIFICATION')
+                db_hey_class = db_meta.get('hey_classification')
                 if not db_hey_class or db_hey_class.lower() != hey_classification.lower():
-                    continue # Skip if Hey Classification doesn't match
-    
-            # 3. Apply Peak Position Filter - this is now the primary search criteria when peak_positions are provided
-            if peak_based_search:
+                    continue
+                    
+            # Apply chemistry elements filters
+            chemistry_elements = db_meta.get('CHEMISTRY ELEMENTS', '')  # Note: Using uppercase field name
+            if chemistry_elements:
+                # Convert to uppercase and split, then strip whitespace
+                elements = [elem.strip().upper() for elem in chemistry_elements.split(',')]
+                
+                # Check "only these elements" filter
+                if only_elements:
+                    # Convert both lists to sets for comparison
+                    db_elements_set = set(elements)
+                    required_set = set(only_elements)
+                    if db_elements_set != required_set:
+                        continue
+                    
+                # Check "required elements" filter
+                if required_elements:
+                    # Convert both lists to sets for comparison
+                    db_elements_set = set(elements)
+                    required_set = set(required_elements)
+                    if not required_set.issubset(db_elements_set):
+                        continue
+                    
+                # Check "exclude elements" filter
+                if exclude_elements:
+                    # Convert both lists to sets for comparison
+                    db_elements_set = set(elements)
+                    exclude_set = set(exclude_elements)
+                    if db_elements_set.intersection(exclude_set):
+                        continue
+            
+            # If peak positions are specified, check if the spectrum contains all of them
+            if peak_positions:
                 db_peak_data = data.get('peaks')
-                # Ensure database entry has peaks calculated
                 if not db_peak_data or db_peak_data.get('wavenumbers') is None:
-                    continue  # Skip this entry if no peaks are available
-                
-                db_peaks_wavenumbers = db_peak_data['wavenumbers']
-                if not db_peaks_wavenumbers.size:
-                    continue  # Skip if no peaks
-    
-                # Count how many of the specified query peaks have a match within tolerance
-                matched_peaks = 0
-                for query_peak_pos in peak_positions:
-                    for db_peak_wn in db_peaks_wavenumbers:
-                        if abs(query_peak_pos - db_peak_wn) <= peak_tolerance:
-                            matched_peaks += 1
+                    continue
+                    
+                db_peaks = db_peak_data['wavenumbers']
+                if not db_peaks.size:
+                    continue
+                    
+                # Check if all specified peaks are present within tolerance
+                all_peaks_found = True
+                for target_peak in peak_positions:
+                    peak_found = False
+                    for peak in db_peaks:
+                        if abs(peak - target_peak) <= peak_tolerance:
+                            peak_found = True
                             break
-    
-                # Calculate peak match ratio (how many specified peaks were found)
-                peak_match_ratio = matched_peaks / len(peak_positions)
-                
-                # Skip if not all peaks match when strict match is required
-                if peak_match_ratio < 1.0:
-                    continue  # Skip if any peak doesn't match
-    
-            # 4. Calculate Correlation Score for filtered items
-            # If an entry passes all filters, calculate its similarity score
+                    if not peak_found:
+                        all_peaks_found = False
+                        break
+                        
+                if not all_peaks_found:
+                    continue
+            
+            # Calculate correlation score
             db_intensities = data['intensities']
             db_wavenumbers = data['wavenumbers']
-    
+            
             if not np.array_equal(query_wavenumbers, db_wavenumbers):
                 db_intensities_interp = np.interp(query_wavenumbers, db_wavenumbers, db_intensities)
             else:
                 db_intensities_interp = db_intensities
-    
+                
             db_min = np.min(db_intensities_interp)
             db_max = np.max(db_intensities_interp)
             db_norm = (db_intensities_interp - db_min) / (db_max - db_min) if (db_max > db_min) else db_intensities_interp
-    
+            
             try:
-                 if np.all(query_norm == query_norm[0]) or np.all(db_norm == db_norm[0]):
-                      corr_coef = 0.0
-                 else:
-                      corr_coef = np.corrcoef(query_norm, db_norm)[0, 1]
-                 if np.isnan(corr_coef): corr_coef = 0.0
+                if np.all(query_norm == query_norm[0]) or np.all(db_norm == db_norm[0]):
+                    corr_coef = 0.0
+                else:
+                    corr_coef = np.corrcoef(query_norm, db_norm)[0, 1]
+                if np.isnan(corr_coef): corr_coef = 0.0
             except Exception: corr_coef = 0.0
-    
-            # For peak-based search, use a combined score that weights peak matching heavily
-            if peak_based_search:
-                # Weight: 80% peak matching, 20% correlation
-                match_score = 0.8 * peak_match_ratio + 0.2 * corr_coef
-            else:
-                # Regular correlation-based score
-                match_score = corr_coef
-    
+            
+            match_score = corr_coef
+            
             # Add to matches if it meets the threshold
             if match_score >= threshold:
                 matches.append((name, match_score))
-    
+                
         # Sort matches by score (descending)
         matches.sort(key=lambda x: x[1], reverse=True)
         return matches
@@ -3167,7 +3223,7 @@ class RamanAnalysisApp:
                             family = metadata.get('CHEMICAL FAMILY', '')
                             crystal_system = metadata.get('CRYSTAL SYSTEM', '')
                             space_group = metadata.get('SPACE GROUP', '')
-                            paragenetic_mode = metadata.get('PARAGENETIC MODE', '')
+                            paragenetic_mode = metadata.get('PARAGENETIC MODES', '')
                             oldest_age = metadata.get('OLDEST KNOWN AGE (MA)', '')
                             chemistry = metadata.get('IDEAL CHEMISTRY', '')
                             locality = metadata.get('LOCALITY', '')
@@ -3260,7 +3316,7 @@ class RamanAnalysisApp:
             ax_mineral.xaxis.set_major_formatter(ax_comp.xaxis.get_major_formatter())
             
             # Apply any additional x-axis styling (grid, minor ticks, etc.)
-            ax_mineral.grid(True, axis='x', linestyle=':', alpha=0.6)  # Match the grid style
+            ax_mineral.grid(True, axis='x', linestyle=':', color='gray', alpha=0.6)  # Match the grid style
             
             # Ensure exact x-axis alignment by matching the figure dimension ratios
             if hasattr(self, 'comparison_fig_position'):
@@ -3448,7 +3504,7 @@ class RamanAnalysisApp:
         self.ax.set_ylabel('Intensity (a.u.)')
         self.ax.set_title('Raman Spectrum Analysis')
         self.ax.legend()
-        self.ax.grid(True, linestyle=':', alpha=0.6)
+        self.ax.grid(True, linestyle=':', color='gray', alpha=0.6)
         
         # Update the canvas
         self.canvas.draw()
@@ -3725,7 +3781,7 @@ class RamanAnalysisApp:
         ax.set_ylabel('Intensity (Normalized)' if normalize else 'Intensity (a.u.)')
         ax.set_title(f'Query vs. {mineral_name}')
         ax.legend(loc='upper right', fontsize='small')
-        ax.grid(True, linestyle=':', alpha=0.6)
+        ax.grid(True, linestyle=':', color='gray', alpha=0.6)
         
         # Store the x-axis range for alignment with the mineral vibrations plot
         self.comparison_x_range = ax.get_xlim()
@@ -3962,51 +4018,51 @@ class RamanAnalysisApp:
         # Extended with new mineral groups
         mineral_regions = [
             # Silicate vibrations
-            ("Silicates", 440, 480, "Si-O-Si Bend"),
-            ("Silicates", 600, 680, "Si-O-Si"),
-            ("Silicates", 850, 950, "Si-O Stretch"),
-            ("Silicates", 1000, 1100, "Si-O-Si Stretch"),
-            ("Silicates", 1040, 1100, "3-member rings"),
+            ("Silicate", 440, 480, "Si-O-Si Bend"),
+            ("Silicate", 600, 680, "Si-O-Si"),
+            ("Silicate", 850, 950, "Si-O Stretch"),
+            ("Silicate", 1000, 1100, "Si-O-Si Stretch"),
+            ("Silicate", 1040, 1100, "3-member rings"),
             
             # Carbonate vibrations
-            ("Carbonates", 700, 740, "CO3 Bend"),
-            ("Carbonates", 1080, 1120, "CO3 Stretch"),
+            ("Carbonate", 700, 740, "CO3 Bend"),
+            ("Carbonate", 1080, 1120, "CO3 Stretch"),
             
             # Phosphate vibrations
-            ("Phosphates", 550, 600, "PO4 Bend"),
-            ("Phosphates", 950, 980, "PO4 Stretch"),
-            ("Phosphates", 1030, 1080, "PO4 Asym"),
+            ("Phosphate", 550, 600, "PO4 Bend"),
+            ("Phosphate", 950, 980, "PO4 Stretch"),
+            ("Phosphate", 1030, 1080, "PO4 Asym"),
             
             # Arsenate vibrations
-            ("Arsenates", 420, 460, "AsO4 Bend"),
-            ("Arsenates", 810, 855, "AsO4 Stretch"),
-            ("Arsenates", 780, 810, "AsO3 Stretch"),
+            ("Arsenate", 420, 460, "AsO4 Bend"),
+            ("Arsenate", 810, 855, "AsO4 Stretch"),
+            ("Arsenate", 780, 810, "AsO3 Stretch"),
             
             # Sulfate vibrations
-            ("Sulfates", 450, 500, "SO4 Bend"),
-            ("Sulfates", 975, 1010, "SO4 Stretch"),
-            ("Sulfates", 1100, 1150, "SO4 Asym"),
+            ("Sulfate", 450, 500, "SO4 Bend"),
+            ("Sulfate", 975, 1010, "SO4 Stretch"),
+            ("Sulfate", 1100, 1150, "SO4 Asym"),
             
             # Sulfide vibrations
             ("Sulfides", 300, 420, "Metal-S Stretch"),
             ("Sulfides", 200, 280, "S-S Stretch"),
             
             # Sulphosalt vibrations
-            ("Sulphosalts", 300, 360, "Sb-S Stretch"),
-            ("Sulphosalts", 330, 380, "As-S Stretch"),
+            ("Sulphosalt", 300, 360, "Sb-S Stretch"),
+            ("Sulphosalt", 330, 380, "As-S Stretch"),
             
             # Borate vibrations
-            ("Borates", 650, 700, "BO3 Bend"),
-            ("Borates", 880, 950, "BO3 Stretch"),
-            ("Borates", 1300, 1400, "BO3 Asym"),
+            ("Borate", 650, 700, "BO3 Bend"),
+            ("Borate", 880, 950, "BO3 Stretch"),
+            ("Borate", 1300, 1400, "BO3 Asym"),
             
             # Oxalate vibrations
-            ("Oxalates", 1430, 1490, "COO Stretch"),
-            ("Oxalates", 890, 930, "C-C Stretch"),
+            ("Oxalate", 1430, 1490, "COO Stretch"),
+            ("Oxalate", 890, 930, "C-C Stretch"),
             
             # Citrate vibrations
-            ("Citrates", 950, 980, "C-COO Stretch"),
-            ("Citrates", 1380, 1420, "COO Asym"),
+            ("Citrate", 950, 980, "C-COO Stretch"),
+            ("Citrate", 1380, 1420, "COO Asym"),
             
             # Hydroxyl and water vibrations
             ("OH/H2O", 3100, 3200, "H2O Stretch"),
@@ -4062,7 +4118,7 @@ class RamanAnalysisApp:
         ax.set_ylim(0, 1)  # Correlation values range from 0 to 1
         
         # Add gray dotted vertical grid lines
-        ax.grid(True, axis='x', linestyle=':', color='gray', alpha=0.5)
+        ax.grid(True, axis='x', linestyle=':', color='gray', alpha=0.6)
         
         # Group by mineral types for better visualization
         groups = {}
@@ -4080,16 +4136,16 @@ class RamanAnalysisApp:
         
         # Define y-positions for each group - adjusted to accommodate more groups
         group_positions = {
-            "Silicates": 0.94,
-            "Carbonates": 0.88,
-            "Phosphates": 0.82,
-            "Arsenates": 0.76,
-            "Sulfates": 0.70,
+            "Silicate": 0.94,
+            "Carbonate": 0.88,
+            "Phosphate": 0.82,
+            "Arsenate": 0.76,
+            "Sulfate": 0.70,
             "Sulfides": 0.64,
-            "Sulphosalts": 0.58,
-            "Borates": 0.52,
-            "Oxalates": 0.46,
-            "Citrates": 0.40,
+            "Sulphosalt": 0.58,
+            "Borate": 0.52,
+            "Oxalate": 0.46,
+            "Citrate": 0.40,
             "OH/H2O": 0.34
         }
         
@@ -4157,7 +4213,7 @@ class RamanAnalysisApp:
         
         # Set labels and title
         ax.set_xlabel('Wavenumber (cm⁻¹)')
-        ax.set_ylabel('Mineral Groups', labelpad=20)  # Added labelpad to move label further left
+        #ax.set_ylabel('Mineral Groups', labelpad=20)  # Added labelpad to move label further left
         ax.set_title(f'Mineral Vibration Correlation: Query vs. {mineral_name}')
         
         # Remove y-axis ticks as they're not needed
@@ -4297,7 +4353,7 @@ class RamanAnalysisApp:
         overlay_frame = ttk.LabelFrame(left_panel, text="Overlay Selection", padding=5)
         overlay_frame.pack(fill=tk.X, pady=5)
         
-        self.overlay_listbox = tk.Listbox(overlay_frame, height=4, selectmode=tk.MULTIPLE)
+        self.overlay_listbox = tk.Listbox(overlay_frame, height=8, selectmode=tk.MULTIPLE)
         self.overlay_listbox.pack(fill=tk.X, expand=True, side=tk.LEFT)
         
         overlay_scrollbar = ttk.Scrollbar(overlay_frame, orient=tk.VERTICAL, command=self.overlay_listbox.yview)
@@ -4554,9 +4610,10 @@ class RamanAnalysisApp:
                 self.metadata_text.insert(tk.END, "-" * 40 + "\n\n")
                 
                 # Order of important metadata fields
-                important_fields = ['NAME', 'RRUFFID', 'HEY CLASSIFICATION', 'IDEAL CHEMISTRY', 
-                                   'CHEMICAL FAMILY', 'CRYSTAL SYSTEM', 'SPACE GROUP', 
-                                   'LOCALITY', 'DESCRIPTION', 'URL']
+                important_fields = ['NAME', 'RRUFFIDS', 'HEY CLASSIFICATION', 'IDEAL CHEMISTRY', 
+                                   'CHEMICAL FAMILY', 'CRYSTAL SYSTEMS', 'SPACE GROUPS', 
+                                   'LOCALITY', 'DESCRIPTION', 'URL', 'PARAGENETIC MODES', 'AGE', 'CHEMICAL FORMULA',
+                                   'NOTES']
                 
                 # Display important fields first in order
                 displayed_keys = set()
@@ -4989,14 +5046,23 @@ class RamanAnalysisApp:
         ylim = None
         if hasattr(self, 'overlay_fig') and self.overlay_fig.axes:
             try:
-                xlim = self.overlay_fig.axes[0].get_xlim()
-                ylim = self.overlay_fig.axes[0].get_ylim()
+                current_ax = self.overlay_fig.axes[0]
+                xlim = current_ax.get_xlim()
+                ylim = current_ax.get_ylim()
             except Exception:
                 pass
 
+        # Instead of clearing the figure, just clear the axes
         fig = self.overlay_fig
-        fig.clear()
-        ax = fig.add_subplot(111)
+        if fig.axes:
+            ax = fig.axes[0]
+            ax.clear()
+        else:
+            ax = fig.add_subplot(111)
+        
+        # Store initial axis limits if not already stored
+        if not hasattr(self, '_initial_axis_limits'):
+            self._initial_axis_limits = None
         
         # Track if any items have been plotted for legend
         has_items_to_display = False
@@ -5065,34 +5131,33 @@ class RamanAnalysisApp:
             else:
                 file_name = match_name
 
+            # Get spectrum data from database
             if file_name in self.raman.database:
-                db_spectrum = self.raman.database[file_name]
+                db_data = self.raman.database[file_name]
                 
-                # Handle both data formats (for backward compatibility)
-                if 'wavenumbers' in db_spectrum and 'intensities' in db_spectrum:
-                    db_intensity = db_spectrum['intensities']
-                    db_wavenumbers = db_spectrum['wavenumbers']
-                elif 'wavenumber' in db_spectrum and 'intensity' in db_spectrum:
-                    db_intensity = db_spectrum['intensity']
-                    db_wavenumbers = db_spectrum['wavenumber']
+                # Handle both old and new data formats
+                if 'spectrum' in db_data:
+                    # New format
+                    db_wavenumbers = db_data['spectrum']['wavenumbers']
+                    db_intensity = db_data['spectrum']['intensity']
                 else:
-                    continue
-                
-                # Get mineral name from metadata if available
-                display_name = match_name  # Use match_name (may be mineral name already) as default
-                if 'metadata' in db_spectrum:
-                    metadata = db_spectrum.get('metadata', {})
-                    if 'NAME' in metadata and metadata['NAME']:
-                        display_name = metadata['NAME']
+                    # Old format
+                    db_wavenumbers = db_data['wavenumbers']
+                    db_intensity = db_data['intensities']
                 
                 # Normalize if requested
                 if self.overlay_normalize.get():
                     db_max = np.max(db_intensity)
                     db_intensity = db_intensity / db_max if db_max > 0 else db_intensity
                 
-                # Get color and transparency for this spectrum
-                color = None
-                alpha = 0.7  # Default
+                # Get display name from metadata if available
+                display_name = match_name
+                if 'metadata' in db_data and 'NAME' in db_data['metadata']:
+                    display_name = db_data['metadata']['NAME']
+                
+                # Get transparency and color settings
+                alpha = 1.0  # Default
+                color = None  # Default
                 
                 if hasattr(self, 'overlay_transparency_vars') and match_text in self.overlay_transparency_vars:
                     # Get transparency from slider
@@ -5128,16 +5193,46 @@ class RamanAnalysisApp:
         if has_items_to_display:
             ax.legend()
             
-        ax.grid(True)
+        ax.grid(True, linestyle=':', color='gray', alpha=0.6)
         
-        # Restore previous axis limits if we had them
-        if xlim is not None and ylim is not None:
-            # Only restore if we have spectra to display
-            if has_items_to_display:
-                ax.set_xlim(xlim)
-                ax.set_ylim(ylim)
-
+        # Draw the canvas first to establish the default view
         self.overlay_canvas.draw()
+        
+        # Store initial axis limits if not already stored
+        if self._initial_axis_limits is None:
+            self._initial_axis_limits = (ax.get_xlim(), ax.get_ylim())
+        
+        # Restore previous limits if they exist
+        if xlim is not None and ylim is not None:
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+            self.overlay_canvas.draw()
+        
+        # Set up event handling for home button
+        def on_limits_changed(event):
+            if event.name == 'xlim_changed' or event.name == 'ylim_changed':
+                # Get current limits
+                current_xlim = ax.get_xlim()
+                current_ylim = ax.get_ylim()
+                
+                # Get initial limits
+                init_xlim, init_ylim = self._initial_axis_limits
+                
+                # Check if this is a home button press (limits match initial)
+                if (np.allclose(current_xlim, init_xlim) and 
+                    np.allclose(current_ylim, init_ylim)):
+                    # Use the larger range for each axis
+                    x_range = max(current_xlim[1] - current_xlim[0], init_xlim[1] - init_xlim[0])
+                    y_range = max(current_ylim[1] - current_ylim[0], init_ylim[1] - init_ylim[0])
+                    
+                    # Set new limits
+                    ax.set_xlim(init_xlim[0], init_xlim[0] + x_range)
+                    ax.set_ylim(init_ylim[0], init_ylim[0] + y_range)
+                    self.overlay_canvas.draw()
+        
+        # Connect the event handlers
+        ax.callbacks.connect('xlim_changed', on_limits_changed)
+        ax.callbacks.connect('ylim_changed', on_limits_changed)
 
     def apply_savgol_smoothing(self):
         """Apply Savitzky-Golay smoothing to the current spectrum."""
@@ -5193,10 +5288,81 @@ class RamanAnalysisApp:
             self.ax.set_ylabel('Intensity (a.u.)')
             self.ax.set_title('Savitzky-Golay Smoothing Preview')
             self.ax.legend()
-            self.ax.grid(True, linestyle=':', alpha=0.6)
+            self.ax.grid(True, linestyle=':', color='gray', alpha=0.6)
             self.canvas.draw()
         except Exception as e:
             messagebox.showerror("Smoothing Preview Error", f"Failed to preview smoothing: {str(e)}")
+
+    def create_peak_fitting_tab(self):
+        """Create content for the peak fitting tab."""
+        # Peak fitting button with styling
+        style = ttk.Style()
+        style.configure("PeakFitting.TButton", background="#4a7a96", foreground="white")
+        ttk.Button(
+            self.tab_peak_fitting,
+            text="Open Peak Fitting Window",
+            command=self.open_peak_fitting,
+            style="PeakFitting.TButton"
+        ).pack(fill=tk.X, pady=10, padx=5)
+
+        
+
+        # Add some descriptive text about peak fitting
+        info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
+        info_text.pack(fill=tk.X, pady=5, padx=5)
+        info_text.insert(tk.END, 
+            "Peak Fitting Tool Features:\n\n"
+            "• Interactive peak detection and fitting\n"
+            "• Multiple peak models (Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt)\n"
+            "• Manual and automatic peak detection\n"
+            "• A new 'suggested peak model' window\n"
+            "• Background subtraction with ALS algorithm\n"
+            "• Detailed fit results and statistics\n"
+            "• Visualization of of peak profiles\n"
+            "• Fit quality metrics\n"
+            "• Export capabilities for analysis results\n"
+            "• Publication ready fit results and graphs\n"
+            "\n"
+            "\nClick the button above to open the peak fitting window."
+        )
+        info_text.config(state=tk.DISABLED)
+
+        # Batch peak fitting button
+        ttk.Button(
+            self.tab_peak_fitting,
+            text="Open Batch Peak Fitting",
+            command=self.open_batch_peak_fitting,
+            style="PeakFitting.TButton"
+        ).pack(fill=tk.X, pady=10, padx=5)
+
+
+                # Add some descriptive text about peak fitting
+        info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
+        info_text.pack(fill=tk.X, pady=5, padx=5)
+        info_text.insert(tk.END, 
+            "Batch Fitting Tool Features:\n\n"
+            "• Interactive peak detection and fitting\n"
+            "• Multiple peak models (Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt)\n"
+            "• Manual and automatic peak detection\n"
+            "• Background subtraction with ALS algorithm\n"
+            "• Robust background batch fitting using ALS algorithm\n"
+            "• Detailed fit results and statistics\n"
+            "• CSV export capabilities for analysis results\n"
+            "• Generated graphs for immediate analysis of results\n"
+            "• Batch processing of multiple spectra\n"
+            "• Publication ready fit results and graphs\n"
+            "\n"
+            "\nClick the button above to start batch fitting."
+        )
+        info_text.config(state=tk.DISABLED)
+
+    def open_batch_peak_fitting(self):
+        """Open the batch peak fitting window."""
+        try:
+            from batch_peak_fitting import BatchPeakFittingWindow
+            BatchPeakFittingWindow(self.root, self)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open batch peak fitting window: {str(e)}")
 
 # --- Main Execution ---
 def main():
