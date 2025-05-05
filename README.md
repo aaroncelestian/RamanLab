@@ -9,6 +9,7 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Background subtraction
   - Peak detection and analysis
   - Interactive plotting and zooming
+  - Spectral comparison
 
 - **Database Management**
   - Store and organize Raman spectra
@@ -20,21 +21,29 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
 	- Multiple search algorithms:
 			- Correlation-based matching
 			- Peak-based matching
-			- Machine learning-based matching
-	- Advanced filtering options
+   			- Correlation + Peak
+			- Machine learning-based matching (dynamic time warping)
+	- Advanced filtering options (peak regions, Hey index, element limiting)
 	- Confidence scoring for matches
-	- Heatmap of best fit to molecular vibrational groups
+	- Experimental: Heatmap of best fit to molecular vibrational groups with chemical scoring
 
 -  **Peak Fitting**
 	- Advanced background modeling: 
 			- Manual modeling
 			- Software suggested models that are user selectable
 			- Interactive background modeling
-	-    Algorytmically identify peaks, or add user selected
+	-    Algorytmically identify peaks, or add user selected/deleted
 	-    Peak modeling:
-			- Gaussian, Lorentzian, or Pseudo-Voigt
-			- No need to define regions for fitting, no need to spectral smoothing
-			- Report generation
+			- Gaussian, Lorentzian, Pseudo-Voigt, and Aysmmetric Voigt
+			- No need to define regions for fitting, no need to spectral smoothing (although it is an option)
+			- Report generation and export of pubilication quality graphics
+
+- **Batch Processing**
+	- Import any number of spectra that your system can handle
+	- Same background and peak shapes as in Peak Fitting
+	- AUTOMATIC background refinement
+	- User selective region fitting to speed fitting times
+	- Graphics analysis with 95% confidence intervals plotted (better than error bars)
 
 - **Export and Reporting**
   - Generate detailed match reports
@@ -55,9 +64,12 @@ cd ClaritySpectra
 pip install -r requirements.txt
 ```
 
-3. Run the application:
+3. Download the database and metadata correlation file:
+  - https://drive.google.com/drive/folders/1U1Wk9N82M9zt0PawAxlwHxPIHrpYpzkW?usp=drive_link (soon to move to figshare)
+
+6. Run the application:
 ```bash
-python raman_analysis_app.py
+python3 main.py
 ```
 ## Manual Installation Method
 
