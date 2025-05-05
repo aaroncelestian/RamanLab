@@ -9,6 +9,7 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Background subtraction
   - Peak detection and analysis
   - Interactive plotting and zooming
+  - Spectral comparison
 
 - **Database Management**
   - Store and organize Raman spectra
@@ -20,21 +21,29 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
 	- Multiple search algorithms:
 			- Correlation-based matching
 			- Peak-based matching
-			- Machine learning-based matching
-	- Advanced filtering options
+   			- Correlation + Peak
+			- Machine learning-based matching (dynamic time warping)
+	- Advanced filtering options (peak regions, Hey index, element limiting)
 	- Confidence scoring for matches
-	- Heatmap of best fit to molecular vibrational groups
+	- Experimental: Heatmap of best fit to molecular vibrational groups with chemical scoring
 
 -  **Peak Fitting**
 	- Advanced background modeling: 
 			- Manual modeling
 			- Software suggested models that are user selectable
 			- Interactive background modeling
-	-    Algorytmically identify peaks, or add user selected
+	-    Algorytmically identify peaks, or add user selected/deleted
 	-    Peak modeling:
-			- Gaussian, Lorentzian, or Pseudo-Voigt
-			- No need to define regions for fitting, no need to spectral smoothing
-			- Report generation
+			- Gaussian, Lorentzian, Pseudo-Voigt, and Aysmmetric Voigt
+			- No need to define regions for fitting, no need to spectral smoothing (although it is an option)
+			- Report generation and export of pubilication quality graphics
+
+- **Batch Processing**
+	- Import any number of spectra that your system can handle
+	- Same background and peak shapes as in Peak Fitting
+	- AUTOMATIC background refinement
+	- User selective region fitting to speed fitting times
+	- Graphics analysis with 95% confidence intervals plotted (better than error bars)
 
 - **Export and Reporting**
   - Generate detailed match reports
@@ -55,9 +64,12 @@ cd ClaritySpectra
 pip install -r requirements.txt
 ```
 
-3. Run the application:
+3. Download the database and metadata correlation file:
+  - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6 
+
+6. Run the application:
 ```bash
-python raman_analysis_app.py
+python3 main.py
 ```
 ## Manual Installation Method
 
@@ -105,18 +117,24 @@ python raman_analysis_app.py
    - Choose search algorithm
    - Set matching parameters
    - View and export results
+  
+5. **Single and Batch Processing and Analysis**
+   - Fit peaks
+   - Auto subtract/refine background
+   - View and export results
 
 ## Project Structure
 
+All files should be in the same directory
+- `main.py` - just run this from terminal: python3 main.py
 - `raman_analysis_app.py` - Main application GUI
 - `raman_spectra.py` - Core spectrum processing functionality
 - `check_dependencies.py` - Dependency verification
 - `requirements.txt` - Project dependencies
-- `raman_database.pkl` - Database of Raman spectra
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- `peak_fitting.py` - Peak fitting
+- `batch_peak_fitting.py` - Batch fitting
+- `raman_database.pkl` - Database of Raman spectra https://drive.google.com/drive/folders/1U1Wk9N82M9zt0PawAxlwHxPIHrpYpzkW?usp=drive_link
+- `RRUFF_Export_with_Hey_Classifcation.csv` - this is needed for adding new entries to the database so everything is mapped propertly. 
 
 ## License
 
