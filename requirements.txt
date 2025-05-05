@@ -4,16 +4,12 @@ matplotlib>=3.0.0
 scipy>=1.2.0
 pandas>=0.25.0
 
-# Search functionality packages
+# Optional packages
+reportlab>=3.5.0  # For PDF export
 scikit-learn>=0.21.0  # For ML search functionality
-fastdtw>=0.3.4  # For DTW-based spectral matching
-
-# Deep learning packages
 tensorflow>=2.12.0  # For deep learning functionality
 keras>=2.12.0  # For deep learning models
-
-# Export functionality
-reportlab>=3.5.0  # For PDF export
+fastdtw>=0.3.4  # For DTW-based spectral matching
 
 # Packaging tools
 pyinstaller>=5.0.0
@@ -22,5 +18,3 @@ pyinstaller>=5.0.0
 # Uncomment if needed
 # pillow>=8.0.0  # For image processing
 # openpyxl>=3.0.0  # For Excel file support
-
-# Note: Python 3.6+ is required for this application

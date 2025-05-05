@@ -100,17 +100,6 @@ def get_sklearn_status():
         print("ℹ️ scikit-learn: Not installed - ML search will not be available")
         return False, None
 
-def get_fastdtw_status():
-    """Check if fastdtw is installed (for DTW-based search)."""
-    try:
-        import fastdtw
-        version = pkg_resources.get_distribution("fastdtw").version
-        print(f"✅ fastdtw: Installed (version: {version}) - DTW search available")
-        return True, version
-    except ImportError:
-        print("ℹ️ fastdtw: Not installed - DTW search will not be available")
-        return False, None
-
 def suggest_install_command(missing_packages):
     """Suggest pip install command for missing packages."""
     if missing_packages:
@@ -187,8 +176,7 @@ def main():
         ("matplotlib", "3.0.0"), 
         ("scipy", "1.2.0"), 
         ("pandas", "0.25.0"),
-        ("tkinter", None),  # tkinter doesn't follow standard versioning
-        ("fastdtw", "0.3.4")  # Added for DTW search
+        ("tkinter", None)  # tkinter doesn't follow standard versioning
     ]
     
     missing_packages = []
@@ -220,10 +208,6 @@ def main():
     sklearn_ok, sklearn_version = get_sklearn_status()
     if not sklearn_ok:
         missing_packages.append("scikit-learn")
-    
-    fastdtw_ok, fastdtw_version = get_fastdtw_status()
-    if not fastdtw_ok:
-        missing_packages.append("fastdtw")
     
     # Summary
     print("\n" + "=" * 60)
@@ -268,8 +252,6 @@ def main():
         print("- Deep learning functionality will not be available")
     if not sklearn_ok:
         print("- Machine learning search functionality will not be available")
-    if not fastdtw_ok:
-        print("- DTW-based search functionality will not be available")
     
     # Check for database files
     print("\nChecking for required data files...")

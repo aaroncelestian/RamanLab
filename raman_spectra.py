@@ -11,6 +11,7 @@ from scipy.sparse.linalg import spsolve
 from scipy.spatial.distance import correlation
 import pandas as pd
 import pickle
+from datetime import datetime
 
 
 class RamanSpectra:
@@ -143,6 +144,7 @@ class RamanSpectra:
         import tkinter as tk
         from tkinter import ttk, messagebox
         import os
+        import time
         
         if not self.database:
             messagebox.showinfo("Database", "The database is empty.")
@@ -160,35 +162,92 @@ class RamanSpectra:
                 messagebox.showerror("Error", "Hey Classification data could not be loaded.")
                 return
         
-        # Create progress window
+        # Create progress window with improved layout
         progress_window = tk.Toplevel(self.root)
         progress_window.title("Updating Hey Classification")
-        progress_window.geometry("500x350")
+        progress_window.geometry("800x600")
+        progress_window.resizable(True, True)
         
-        # Create progress bar
-        ttk.Label(progress_window, text="Updating Hey Classification for database entries...").pack(pady=10)
-        progress = ttk.Progressbar(progress_window, length=400, mode="determinate")
-        progress.pack(pady=10)
+        # Make sure the window stays on top
+        progress_window.lift()
+        progress_window.attributes('-topmost', True)
         
-        # Create status label
+        # Create main frame with padding
+        main_frame = ttk.Frame(progress_window, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create header with title and description
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Label(header_frame, text="Updating Hey Classification Database", 
+                 font=("TkDefaultFont", 12, "bold")).pack(anchor=tk.W)
+        ttk.Label(header_frame, text="Processing database entries and updating metadata...",
+                 font=("TkDefaultFont", 9)).pack(anchor=tk.W)
+        
+        # Create progress section
+        progress_section = ttk.LabelFrame(main_frame, text="Progress", padding=10)
+        progress_section.pack(fill=tk.X, pady=(0, 10))
+        
+        # Overall progress bar with improved styling
+        progress_frame = ttk.Frame(progress_section)
+        progress_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(progress_frame, text="Overall Progress:").pack(anchor=tk.W)
+        progress = ttk.Progressbar(progress_frame, length=400, mode="determinate", 
+                                 style="green.Horizontal.TProgressbar")
+        progress.pack(fill=tk.X, pady=(0, 5))
+        
+        # Create a custom style for the progress bar
+        style = ttk.Style()
+        style.configure("green.Horizontal.TProgressbar", 
+                       background='green', 
+                       troughcolor='lightgray')
+        
+        # Status label with percentage
         status_var = tk.StringVar(value="Starting update...")
-        status_label = ttk.Label(progress_window, textvariable=status_var)
-        status_label.pack(pady=5)
+        status_label = ttk.Label(progress_section, textvariable=status_var)
+        status_label.pack(anchor=tk.W)
         
-        # Create log text area
-        log_frame = ttk.Frame(progress_window)
-        log_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-        log_text = tk.Text(log_frame, height=10, width=50, wrap=tk.WORD)
+        # Statistics frame
+        stats_frame = ttk.Frame(progress_section)
+        stats_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        # Create statistics labels
+        stats_vars = {
+            "Total": tk.StringVar(value="0"),
+            "Updated": tk.StringVar(value="0"),
+            "Already Had": tk.StringVar(value="0"),
+            "Not Found": tk.StringVar(value="0")
+        }
+        
+        for label, var in stats_vars.items():
+            frame = ttk.Frame(stats_frame)
+            frame.pack(side=tk.LEFT, padx=5)
+            ttk.Label(frame, text=f"{label}:", font=("TkDefaultFont", 9, "bold")).pack(anchor=tk.W)
+            ttk.Label(frame, textvariable=var, font=("TkDefaultFont", 9)).pack(anchor=tk.W)
+        
+        # Create log section with improved styling
+        log_section = ttk.LabelFrame(main_frame, text="Update Log", padding=10)
+        log_section.pack(fill=tk.BOTH, expand=True)
+        
+        # Create log text area with improved styling
+        log_frame = ttk.Frame(log_section)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        
+        log_text = tk.Text(log_frame, height=15, width=80, wrap=tk.WORD, 
+                         font=("Courier", 9), bg="white", fg="black")
         log_scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=log_text.yview)
         log_text.config(yscrollcommand=log_scrollbar.set)
+        
         log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Configure tags for log text
-        log_text.tag_configure("success", foreground="green")
-        log_text.tag_configure("warning", foreground="orange")
-        log_text.tag_configure("error", foreground="red")
-        log_text.tag_configure("info", foreground="blue")
+        # Configure tags for log text with improved colors
+        log_text.tag_configure("success", foreground="green", font=("Courier", 9, "bold"))
+        log_text.tag_configure("warning", foreground="orange", font=("Courier", 9, "bold"))
+        log_text.tag_configure("error", foreground="red", font=("Courier", 9, "bold"))
+        log_text.tag_configure("info", foreground="blue", font=("Courier", 9))
         
         # Get database items and update progress bar maximum
         db_items = list(self.database.items())
@@ -200,17 +259,32 @@ class RamanSpectra:
         already_had = 0
         not_found = 0
         
-        # Update function for progress
+        # Update function for progress with improved formatting and forced updates
         def update_progress(current, name, status, log_message=None, tag="info"):
+            # Update progress bar
             progress["value"] = current
             percentage = int((current / total) * 100) if total > 0 else 0
+            
+            # Update status with more detailed information
             status_var.set(f"{status} - {percentage}% complete ({current}/{total})")
             
+            # Update statistics
+            stats_vars["Total"].set(str(total))
+            stats_vars["Updated"].set(str(updated))
+            stats_vars["Already Had"].set(str(already_had))
+            stats_vars["Not Found"].set(str(not_found))
+            
+            # Add log message with timestamp if provided
             if log_message:
-                log_text.insert(tk.END, log_message + "\n", tag)
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                formatted_message = f"[{timestamp}] {log_message}"
+                log_text.insert(tk.END, formatted_message + "\n", tag)
                 log_text.see(tk.END)
             
+            # Force window updates
             progress_window.update_idletasks()
+            progress_window.update()
+            time.sleep(0.01)  # Small delay to ensure updates are visible
         
         # Function to extract mineral name from database entry name
         def extract_mineral_name(entry_name):
@@ -347,7 +421,7 @@ class RamanSpectra:
         log_text.see(tk.END)
         
         # Add close button
-        ttk.Button(progress_window, text="Close", command=progress_window.destroy).pack(pady=10)
+        ttk.Button(main_frame, text="Close", command=progress_window.destroy).pack(pady=10)
         
         # Update main GUI database statistics
         if hasattr(self, 'update_database_stats'):
@@ -789,7 +863,7 @@ class RamanSpectra:
                 'CHEMICAL FAMILY': ['CHEMICAL FAMILY', 'FAMILY', 'CHEMICAL CLASS', 'CLASSIFICATION', 
                                    'MINERAL FAMILY', 'MINERAL CLASS', 'MINERAL TYPE', 'CHEMISTRY'],
                 # Map various ID fields
-                'RRUFFID': ['RRUFFID', 'RRUFF ID', 'ID', 'SAMPLE ID', 'REFERENCE ID'],
+                'RRUFFID': ['RRUFFID', 'RRUFF ID', 'RRUFF IDs', 'ID', 'SAMPLE ID', 'REFERENCE ID'],
                 # Map chemistry fields
                 'IDEAL CHEMISTRY': ['IDEAL CHEMISTRY', 'CHEMISTRY', 'FORMULA', 'CHEMICAL FORMULA'],
                 # Map locality fields
@@ -986,47 +1060,29 @@ class RamanSpectra:
     def _process_metadata_line(self, line, metadata, field_lookup):
         """
         Process a single metadata line and extract key-value pairs.
-        
-        Parameters:
-        -----------
-        line : str
-            Line of text to process
-        metadata : dict
-            Dictionary to store metadata
-        field_lookup : dict
-            Dictionary mapping field name variations to standard keys
+        Strips leading '#' from keys.
         """
         # Try to parse as key-value pair with colon
         if ':' in line:
             key, value = line.split(':', 1)
-            key = key.strip().upper()
+            key = key.lstrip('#').strip().upper()
             value = value.strip()
-            
             # Map to standard key if known variant
             if key in field_lookup:
                 standard_key = field_lookup[key]
                 metadata[standard_key] = value
             else:
-                # Use original key if no mapping exists
                 metadata[key] = value
-                
-        # Alternative format: key=value
         elif '=' in line:
             key, value = line.split('=', 1)
-            key = key.strip().upper()
+            key = key.lstrip('#').strip().upper()
             value = value.strip()
-            
-            # Map to standard key if known variant
             if key in field_lookup:
                 standard_key = field_lookup[key]
                 metadata[standard_key] = value
             else:
-                # Use original key if no mapping exists
                 metadata[key] = value
-        
-        # Just store as a note if no separator is found
         elif line.strip():
-            # Use an incremental key for notes without explicit key-value pairs
             note_key = f"NOTE_{len([k for k in metadata.keys() if k.startswith('NOTE_')])}"
             metadata[note_key] = line.strip()
 
@@ -1215,11 +1271,14 @@ class RamanSpectra:
             
             # Additional metadata fields to extract
             additional_fields = [
+                "IMA Number",
+                "RRUFF ID",
                 "Structural Groupname",
                 "Crystal System",
-                "Space Group",
+                "Space Groups",
                 "Oldest Known Age (Ma)",
-                "Paragenetic Mode"
+                "Paragenetic Modes",
+                "Chemistry Elements"
             ]
             
             # Check which additional fields are actually present in the CSV
