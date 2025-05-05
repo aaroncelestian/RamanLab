@@ -4,7 +4,6 @@
 """
 @author: AaronCelestian
 ClaritySpectra
-version 2.0
 """
 
 import os
@@ -72,19 +71,17 @@ class RamanAnalysisApp:
             Root Tkinter window.
         """
         self.root = root
-        self.root.title("ClaritySpectra: Raman Spectrum Analysis")
-        self.root.geometry("1400x950")  # Increased height from 800 to 950
-
-        # Set minimum window size
-        self.root.minsize(900, 600)
+        self.root.title("ClaritySpectra")
+        self.root.geometry("1200x800")
+        self.root.minsize(1000, 700)
         
-        # Create menu bar
-        self.create_menu_bar()
-
-        # Create Raman spectra instance
+        # Initialize RamanSpectra instance
         self.raman = RamanSpectra()
-
-        # Create GUI elements - this initializes all the UI components
+        
+        # Initialize selected match
+        self.selected_match = tk.StringVar()
+        
+        # Create GUI
         self.create_gui()
         
         # Create instance variable for db_stats_text as a backup precaution
@@ -3038,13 +3035,27 @@ class RamanAnalysisApp:
             lines = report_text.split('\n')
             in_match_section = False
 
-            # Use the first match from the provided matches list if available
+            # Get the selected match from the matches list
             match_name = None
             match_score = 0
             
             if matches and len(matches) > 0:
-                # Extract the first match
-                match_name, match_score = matches[0]
+                # Get the selected match from the matches list
+                selected_match = None
+                selected_match_name = self.selected_match.get()
+                
+                if selected_match_name:
+                    # Find the selected match in the matches list
+                    for name, score in matches:
+                        if name == selected_match_name:
+                            selected_match = (name, score)
+                            break
+                
+                if selected_match:
+                    match_name, match_score = selected_match
+                else:
+                    # Fallback to first match if no selection found
+                    match_name, match_score = matches[0]
             else:
                 # Try to extract match information from report text as fallback
                 for j, l in enumerate(lines):
