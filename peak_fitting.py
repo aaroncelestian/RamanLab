@@ -1094,23 +1094,26 @@ class PeakFittingWindow:
         bounds_lower = []
         bounds_upper = []
         
+        # Get the range of the spectrum for setting bounds
+        x_min, x_max = np.min(self.wavenumbers), np.max(self.wavenumbers)
+        y_min, y_max = np.min(self.spectra), np.max(self.spectra)
+        
         for peak in self.peaks:
             if model == "Gaussian" or model == "Lorentzian":
                 # [amplitude, center, width]
                 initial_params.extend([peak['intensity'], peak['position'], 10.0])
-                bounds_lower.extend([0, peak['position'] - 10, 1])
-                bounds_upper.extend([np.inf, peak['position'] + 10, 100])
+                bounds_lower.extend([0, max(x_min, peak['position'] - 20), 1])
+                bounds_upper.extend([y_max * 2, min(x_max, peak['position'] + 20), 100])
             elif model == "Pseudo-Voigt":
                 # [amplitude, center, width, eta]
                 initial_params.extend([peak['intensity'], peak['position'], 10.0, 0.5])
-                bounds_lower.extend([0, peak['position'] - 10, 1, 0])
-                bounds_upper.extend([np.inf, peak['position'] + 10, 100, 1])
+                bounds_lower.extend([0, max(x_min, peak['position'] - 20), 1, 0])
+                bounds_upper.extend([y_max * 2, min(x_max, peak['position'] + 20), 100, 1])
             elif model == "Asymmetric Voigt":
                 # [amplitude, center, width_left, width_right, eta]
-                # Use a default width of 10.0 for both left and right sides
                 initial_params.extend([peak['intensity'], peak['position'], 10.0, 10.0, 0.5])
-                bounds_lower.extend([0, peak['position'] - 10, 1, 1, 0])
-                bounds_upper.extend([np.inf, peak['position'] + 10, 100, 100, 1])
+                bounds_lower.extend([0, max(x_min, peak['position'] - 20), 1, 1, 0])
+                bounds_upper.extend([y_max * 2, min(x_max, peak['position'] + 20), 100, 100, 1])
         
         try:
             # Perform the fit
@@ -1276,6 +1279,7 @@ class PeakFittingWindow:
                                          textcoords='offset points',
                                          ha='center',
                                          fontsize=8,
+                                         rotation=65,
                                          bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
                     
                     elif model_type == "Lorentzian":
@@ -1289,6 +1293,7 @@ class PeakFittingWindow:
                                          textcoords='offset points',
                                          ha='center',
                                          fontsize=8,
+                                         rotation=65,
                                          bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
                     
                     elif model_type == "Pseudo-Voigt":
@@ -1302,6 +1307,7 @@ class PeakFittingWindow:
                                          textcoords='offset points',
                                          ha='center',
                                          fontsize=8,
+                                         rotation=65,
                                          bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
                         
                     elif model_type == "Asymmetric Voigt":
@@ -1315,6 +1321,7 @@ class PeakFittingWindow:
                                          textcoords='offset points',
                                          ha='center',
                                          fontsize=8,
+                                         rotation=65,
                                          bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
                 
                 # Plot residuals
@@ -1404,38 +1411,52 @@ class PeakFittingWindow:
             messagebox.showerror("Error", f"Failed to export results: {str(e)}")
     
     def enable_manual_peak_adding(self):
-        """Enable manual peak addition mode where user can click on the plot to add peaks."""
+        """Enable/disable manual peak addition mode where user can click on the plot to add peaks."""
         try:
-            # Ensure peaks list is initialized
-            if self.peaks is None:
-                self.peaks = []
+            # Toggle the manual peak mode
+            self.manual_peak_mode = not self.manual_peak_mode
+            
+            if self.manual_peak_mode:
+                # Enable manual peak mode
+                # Ensure peaks list is initialized
+                if self.peaks is None:
+                    self.peaks = []
+                    
+                # Change cursor to indicate interactive mode
+                self.canvas.get_tk_widget().config(cursor="plus")
                 
-            # Change cursor to indicate interactive mode
-            self.canvas.get_tk_widget().config(cursor="plus")
-            
-            # Update the plot title to show instructions
-            self.ax1.set_title("Click on the plot to add peaks - Press ESC to exit selection mode")
-            self.canvas.draw()
-            
-            # Store original toolbar state
-            self.original_toolbar = getattr(self.toolbar, '_active', None)
-            
-            # Disable toolbar to prevent interaction conflicts
-            if hasattr(self.toolbar, 'mode'):
-                self.toolbar.mode = ''
-            self.toolbar._active = None
-            
-            # Connect the click event handler
-            self.click_cid = self.canvas.mpl_connect('button_press_event', self.on_plot_click)
-            
-            # Connect key press event to exit peak selection mode with ESC
-            self.key_cid = self.canvas.mpl_connect('key_press_event', self.on_key_press)
-            
-            # Flag to indicate manual peak addition mode is active
-            self.manual_peak_mode = True
-            
+                # Update the plot title to show instructions
+                self.ax1.set_title("Click on the plot to add peaks - Press ESC or click button again to exit")
+                self.canvas.draw()
+                
+                # Store original toolbar state
+                self.original_toolbar = getattr(self.toolbar, '_active', None)
+                
+                # Disable toolbar to prevent interaction conflicts
+                if hasattr(self.toolbar, 'mode'):
+                    self.toolbar.mode = ''
+                self.toolbar._active = None
+                
+                # Connect the click event handler
+                self.click_cid = self.canvas.mpl_connect('button_press_event', self.on_plot_click)
+                
+                # Connect key press event to exit peak selection mode with ESC
+                self.key_cid = self.canvas.mpl_connect('key_press_event', self.on_key_press)
+                
+                # Update button text
+                for widget in self.window.winfo_children():
+                    if isinstance(widget, ttk.Frame):
+                        for child in widget.winfo_children():
+                            if isinstance(child, ttk.Frame):
+                                for button in child.winfo_children():
+                                    if isinstance(button, ttk.Button) and button.cget('text') == "Add Peaks Manually":
+                                        button.configure(text="Stop Adding Peaks")
+            else:
+                # Disable manual peak mode
+                self.disable_manual_peak_adding()
+                
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to enable manual peak selection: {str(e)}")
+            messagebox.showerror("Error", f"Failed to toggle manual peak selection: {str(e)}")
             # Ensure we're not in a broken state
             self.manual_peak_mode = False
             self.canvas.get_tk_widget().config(cursor="arrow")
@@ -1498,13 +1519,36 @@ class PeakFittingWindow:
         else:
             self.ax1.set_title('Raman Spectrum')
         
+        # Update button text
+        for widget in self.window.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Frame):
+                        for button in child.winfo_children():
+                            if isinstance(button, ttk.Button) and button.cget('text') == "Stop Adding Peaks":
+                                button.configure(text="Add Peaks Manually")
+        
         self.canvas.draw()
     
     def clear_peaks(self):
-        """Clear all peaks."""
+        """Clear all peaks and fitting results."""
+        # Clear peaks list
         self.peaks = []
+        
+        # Clear fitting results
+        self.fit_params = []
+        self.fit_result = None
+        self.residuals = None
+        
+        # Clear the results text
+        if hasattr(self, 'results_text'):
+            self.results_text.delete(1.0, tk.END)
+        
+        # Update the plot
         self.update_plot()
-        self.ax1.set_title('Raman Spectrum - Peaks Cleared')
+        
+        # Update title
+        self.ax1.set_title('Raman Spectrum - All Peaks and Fits Cleared')
         self.canvas.draw()
     
     def delete_selected_peak(self):
