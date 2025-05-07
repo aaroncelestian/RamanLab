@@ -5319,24 +5319,24 @@ class RamanAnalysisApp:
         
 
         # Add some descriptive text about peak fitting
-        info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
-        info_text.pack(fill=tk.X, pady=5, padx=5)
-        info_text.insert(tk.END, 
-            "Peak Fitting Tool Features:\n\n"
-            "• Interactive peak detection and fitting\n"
-            "• Multiple peak models (Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt)\n"
-            "• Manual and automatic peak detection\n"
-            "• A new 'suggested peak model' window\n"
-            "• Background subtraction with ALS algorithm\n"
-            "• Detailed fit results and statistics\n"
-            "• Visualization of of peak profiles\n"
-            "• Fit quality metrics\n"
-            "• Export capabilities for analysis results\n"
-            "• Publication ready fit results and graphs\n"
-            "\n"
-            "\nClick the button above to open the peak fitting window."
-        )
-        info_text.config(state=tk.DISABLED)
+        # info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
+        # info_text.pack(fill=tk.X, pady=5, padx=5)
+        # info_text.insert(tk.END, 
+        #     "Peak Fitting Tool Features:\n\n"
+        #     "• Interactive peak detection and fitting\n"
+        #     "• Multiple peak models (Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt)\n"
+        #     "• Manual and automatic peak detection\n"
+        #     "• A new 'suggested peak model' window\n"
+        #     "• Background subtraction with ALS algorithm\n"
+        #     "• Detailed fit results and statistics\n"
+        #     "• Visualization of of peak profiles\n"
+        #     "• Fit quality metrics\n"
+        #     "• Export capabilities for analysis results\n"
+        #     "• Publication ready fit results and graphs\n"
+        #     "\n"
+        #     "\nClick the button above to open the peak fitting window."
+        # )
+        # info_text.config(state=tk.DISABLED)
 
         # Batch peak fitting button
         ttk.Button(
@@ -5348,24 +5348,24 @@ class RamanAnalysisApp:
 
 
                 # Add some descriptive text about peak fitting
-        info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
-        info_text.pack(fill=tk.X, pady=5, padx=5)
-        info_text.insert(tk.END, 
-            "Batch Fitting Tool Features:\n\n"
-            "• Interactive peak detection and fitting\n"
-            "• Multiple peak models (Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt)\n"
-            "• Manual and automatic peak detection\n"
-            "• Background subtraction with ALS algorithm\n"
-            "• Robust background batch fitting using ALS algorithm\n"
-            "• Detailed fit results and statistics\n"
-            "• CSV export capabilities for analysis results\n"
-            "• Generated graphs for immediate analysis of results\n"
-            "• Batch processing of multiple spectra\n"
-            "• Publication ready fit results and graphs\n"
-            "\n"
-            "\nClick the button above to start batch fitting."
-        )
-        info_text.config(state=tk.DISABLED)
+        # info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
+        # info_text.pack(fill=tk.X, pady=5, padx=5)
+        # info_text.insert(tk.END, 
+        #     "Batch Fitting Tool Features:\n\n"
+        #     "• Interactive peak detection and fitting\n"
+        #     "• Multiple peak models (Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt)\n"
+        #     "• Manual and automatic peak detection\n"
+        #     "• Background subtraction with ALS algorithm\n"
+        #     "• Robust background batch fitting using ALS algorithm\n"
+        #     "• Detailed fit results and statistics\n"
+        #     "• CSV export capabilities for analysis results\n"
+        #     "• Generated graphs for immediate analysis of results\n"
+        #     "• Batch processing of multiple spectra\n"
+        #     "• Publication ready fit results and graphs\n"
+        #     "\n"
+        #     "\nClick the button above to start batch fitting."
+        # )
+        # info_text.config(state=tk.DISABLED)
 
     def open_batch_peak_fitting(self):
         """Open the batch peak fitting window."""
