@@ -16,6 +16,8 @@ from scipy.optimize import curve_fit
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 import os
+from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.patches as mpatches
 
 class BatchPeakFittingWindow:
     """Window for batch processing of Raman spectra with peak fitting."""
@@ -185,6 +187,8 @@ class BatchPeakFittingWindow:
 
         visibility_frame = ttk.LabelFrame(visibility_tab, text="Peak Visibility Controls", padding=10)
         visibility_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Add explanatory label
+        ttk.Label(visibility_frame, text="(These controls affect only the Fit Results and Fit Stats tabs)", font=("", 9, "italic"), foreground="gray").pack(anchor=tk.W, pady=(0, 8))
 
         # Create a frame for peak visibility checkboxes
         self.peak_visibility_frame = ttk.Frame(visibility_frame)
@@ -205,20 +209,26 @@ class BatchPeakFittingWindow:
         ttk.Checkbutton(visibility_frame, text="Show 95% Boundary", variable=self.show_95_boundary, command=self.update_trends_plot).pack(anchor=tk.W, pady=2)
         ttk.Checkbutton(visibility_frame, text="Show Grid Lines", variable=self.show_fit_grid, command=self.update_trends_plot).pack(anchor=tk.W, pady=2)
         
-        # Add export buttons for Fit Stats
-        export_frame = ttk.LabelFrame(visibility_frame, text="Export Fit Stats", padding=5)
-        export_frame.pack(fill=tk.X, pady=5)
-        
-        ttk.Button(export_frame, text="Save Individual Plots", 
-                  command=self.export_individual_fit_stats).pack(fill=tk.X, pady=2)
-        ttk.Button(export_frame, text="Save All Plots", 
-                  command=self.export_fit_stats_plot).pack(fill=tk.X, pady=2)
+
         
         # Four separate preview buttons
-        ttk.Button(visibility_frame, text="Preview Position Plot", command=lambda: self.preview_trends_subplot('position')).pack(anchor=tk.W, pady=2)
-        ttk.Button(visibility_frame, text="Preview Amplitude Plot", command=lambda: self.preview_trends_subplot('amplitude')).pack(anchor=tk.W, pady=2)
-        ttk.Button(visibility_frame, text="Preview Width Plot", command=lambda: self.preview_trends_subplot('width')).pack(anchor=tk.W, pady=2)
-        ttk.Button(visibility_frame, text="Preview Eta Plot", command=lambda: self.preview_trends_subplot('eta')).pack(anchor=tk.W, pady=2)
+        button_width = 22
+        ttk.Button(visibility_frame, text="Preview Position Plot", command=lambda: self.preview_trends_subplot('position'), width=button_width).pack(anchor=tk.W, pady=2)
+        ttk.Button(visibility_frame, text="Preview Amplitude Plot", command=lambda: self.preview_trends_subplot('amplitude'), width=button_width).pack(anchor=tk.W, pady=2)
+        ttk.Button(visibility_frame, text="Preview Width Plot", command=lambda: self.preview_trends_subplot('width'), width=button_width).pack(anchor=tk.W, pady=2)
+        ttk.Button(visibility_frame, text="Preview Eta Plot", command=lambda: self.preview_trends_subplot('eta'), width=button_width).pack(anchor=tk.W, pady=2)
+
+        # Add export buttons for Fit Stats
+        export_frame = ttk.LabelFrame(visibility_frame, text="Export Fit Stats", padding=5)
+        export_frame.pack(fill=tk.X, pady=40)
+        
+        ttk.Button(export_frame, text="Save Individual Stats Plots", 
+                  command=self.export_individual_fit_stats).pack(fill=tk.X, pady=2)
+        ttk.Button(export_frame, text="Save All Stats Plots", 
+                  command=self.export_fit_stats_plot).pack(fill=tk.X, pady=2)
+
+
+
 
         # --- RIGHT PANEL: Visualization ---
         right_panel = ttk.Frame(main_container)
@@ -258,30 +268,71 @@ class BatchPeakFittingWindow:
         waterfall_controls = ttk.Frame(waterfall_frame)
         waterfall_controls.pack(fill=tk.X, pady=5)
         
-        ttk.Label(waterfall_controls, text="Skip every N spectra:").pack(side=tk.LEFT, padx=5)
-        self.waterfall_skip = ttk.Spinbox(waterfall_controls, from_=1, to=100, width=5)
+        # Create a frame for basic controls
+        basic_controls = ttk.Frame(waterfall_controls)
+        basic_controls.pack(fill=tk.X, pady=2)
+        
+        # Skip and color controls on one line
+        ttk.Label(basic_controls, text="Skip:").pack(side=tk.LEFT, padx=5)
+        self.waterfall_skip = ttk.Spinbox(basic_controls, from_=1, to=100, width=5)
         self.waterfall_skip.set(1)
         self.waterfall_skip.pack(side=tk.LEFT, padx=5)
         
-        # Add color gradient dropdown
-        ttk.Label(waterfall_controls, text="Color Gradient:").pack(side=tk.LEFT, padx=5)
-        self.waterfall_cmap = ttk.Combobox(waterfall_controls, values=[
-            'all_black', 'black_to_darkgrey', 'darkgrey_to_black', 'viridis', 'plasma', 'inferno', 'magma', 'cividis', 'tab10', 'RdBu_r'
+        ttk.Label(basic_controls, text="Color:").pack(side=tk.LEFT, padx=5)
+        self.waterfall_cmap = ttk.Combobox(basic_controls, values=[
+            # Perceptually uniform sequential
+            'viridis', 'plasma', 'inferno', 'magma', 'cividis',
+            # Sequential
+            'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+            'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
+            'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn',
+            # Diverging
+            'coolwarm', 'RdBu_r', 'seismic', 'bwr', 'BrBG', 'PuOr',
+            'RdGy', 'RdBu', 'RdYlBu', 'RdYlGn', 'Spectral',
+            # Cyclic
+            'twilight', 'twilight_shifted', 'hsv',
+            # Qualitative
+            'tab10', 'tab20', 'tab20b', 'tab20c',
+            'Set1', 'Set2', 'Set3', 'Paired', 'Accent', 'Dark2',
+            # Custom options
+            'all_black', 'black_to_darkgrey', 'darkgrey_to_black'
         ], state="readonly")
         self.waterfall_cmap.set('all_black')
         self.waterfall_cmap.pack(side=tk.LEFT, padx=5)
         
-        # Add legend, grid, and line thickness controls
-        self.waterfall_show_legend = tk.BooleanVar(value=True)
-        self.waterfall_show_grid = tk.BooleanVar(value=True)
+        ttk.Label(basic_controls, text="Line Width:").pack(side=tk.LEFT, padx=5)
         self.waterfall_linewidth = tk.DoubleVar(value=1.5)
-        ttk.Checkbutton(waterfall_controls, text="Show Legend", variable=self.waterfall_show_legend, command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
-        ttk.Checkbutton(waterfall_controls, text="Show Grid", variable=self.waterfall_show_grid, command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
-        ttk.Label(waterfall_controls, text="Line Thickness:").pack(side=tk.LEFT, padx=5)
-        self.waterfall_linewidth_spin = ttk.Spinbox(waterfall_controls, from_=0.5, to=5.0, increment=0.1, textvariable=self.waterfall_linewidth, width=4, command=self.update_waterfall_plot)
+        self.waterfall_linewidth_spin = ttk.Spinbox(basic_controls, from_=0.5, to=5.0, increment=0.1, 
+                                                  textvariable=self.waterfall_linewidth, width=4)
         self.waterfall_linewidth_spin.pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(waterfall_controls, text="Update Plot", command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
+        # Add checkboxes for legend and grid
+        self.waterfall_show_legend = tk.BooleanVar(value=True)
+        self.waterfall_show_grid = tk.BooleanVar(value=True)
+        ttk.Checkbutton(basic_controls, text="Legend", variable=self.waterfall_show_legend, 
+                       command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(basic_controls, text="Grid", variable=self.waterfall_show_grid, 
+                       command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
+        
+        # Create a frame for X-axis range controls
+        range_controls = ttk.LabelFrame(waterfall_controls, text="X-axis Range (cm⁻¹)", padding=5)
+        range_controls.pack(fill=tk.X, pady=2)
+        
+        range_frame = ttk.Frame(range_controls)
+        range_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(range_frame, text="Min:").pack(side=tk.LEFT, padx=5)
+        self.waterfall_xmin = ttk.Entry(range_frame, width=8)
+        self.waterfall_xmin.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(range_frame, text="Max:").pack(side=tk.LEFT, padx=5)
+        self.waterfall_xmax = ttk.Entry(range_frame, width=8)
+        self.waterfall_xmax.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(range_frame, text="Reset Range", 
+                  command=lambda: self.reset_waterfall_range()).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(range_frame, text="Update Plot", command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
         
         # Waterfall plot
         self.fig_waterfall, self.ax_waterfall = plt.subplots(figsize=(8, 6))
@@ -301,12 +352,75 @@ class BatchPeakFittingWindow:
         heatmap_controls = ttk.Frame(heatmap_frame)
         heatmap_controls.pack(fill=tk.X, pady=5)
         
-        ttk.Label(heatmap_controls, text="Colormap:").pack(side=tk.LEFT, padx=5)
-        self.heatmap_cmap = ttk.Combobox(heatmap_controls, values=['viridis', 'plasma', 'inferno', 'magma', 'cividis', 'coolwarm', 'RdBu_r', 'seismic'])
+        # Create a frame for basic controls and color adjustments
+        basic_controls = ttk.Frame(heatmap_controls)
+        basic_controls.pack(fill=tk.X, pady=2)
+        
+        # Colormap and color adjustments on one line
+        ttk.Label(basic_controls, text="Colormap:").pack(side=tk.LEFT, padx=5)
+        self.heatmap_cmap = ttk.Combobox(basic_controls, values=[
+            # Perceptually uniform sequential
+            'viridis', 'plasma', 'inferno', 'magma', 'cividis',
+            # Sequential
+            'Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+            'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
+            'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn',
+            # Diverging
+            'coolwarm', 'RdBu_r', 'seismic', 'bwr', 'BrBG', 'PuOr',
+            'RdGy', 'RdBu', 'RdYlBu', 'RdYlGn', 'Spectral',
+            # Cyclic
+            'twilight', 'twilight_shifted', 'hsv',
+            # Qualitative
+            'tab10', 'tab20', 'tab20b', 'tab20c',
+            'Set1', 'Set2', 'Set3', 'Paired', 'Accent', 'Dark2'
+        ])
         self.heatmap_cmap.set('viridis')
         self.heatmap_cmap.pack(side=tk.LEFT, padx=5)
         
-        ttk.Button(heatmap_controls, text="Update Plot", command=self.update_heatmap_plot).pack(side=tk.LEFT, padx=5)
+        # Contrast control
+        ttk.Label(basic_controls, text="Contrast:").pack(side=tk.LEFT, padx=5)
+        self.heatmap_contrast = ttk.Scale(basic_controls, from_=0.1, to=2.0, orient=tk.HORIZONTAL, length=80)
+        self.heatmap_contrast.set(1.0)
+        self.heatmap_contrast.pack(side=tk.LEFT, padx=5)
+        self.heatmap_contrast.bind("<Motion>", lambda e: self.update_heatmap_plot())
+        
+        # Brightness control
+        ttk.Label(basic_controls, text="Bright:").pack(side=tk.LEFT, padx=5)
+        self.heatmap_brightness = ttk.Scale(basic_controls, from_=0.0, to=2.0, orient=tk.HORIZONTAL, length=80)
+        self.heatmap_brightness.set(1.0)
+        self.heatmap_brightness.pack(side=tk.LEFT, padx=5)
+        self.heatmap_brightness.bind("<Motion>", lambda e: self.update_heatmap_plot())
+        
+        # Gamma control
+        ttk.Label(basic_controls, text="Gamma:").pack(side=tk.LEFT, padx=5)
+        self.heatmap_gamma = ttk.Scale(basic_controls, from_=0.1, to=2.0, orient=tk.HORIZONTAL, length=80)
+        self.heatmap_gamma.set(1.0)
+        self.heatmap_gamma.pack(side=tk.LEFT, padx=5)
+        self.heatmap_gamma.bind("<Motion>", lambda e: self.update_heatmap_plot())
+        
+        # Add reset button for color adjustments
+        ttk.Button(basic_controls, text="Reset Colors", 
+                  command=lambda: self.reset_heatmap_adjustments()).pack(side=tk.LEFT, padx=5)
+        
+        # Create a frame for X-axis range controls
+        range_controls = ttk.LabelFrame(heatmap_controls, text="X-axis Range (cm⁻¹)", padding=5)
+        range_controls.pack(fill=tk.X, pady=2)
+        
+        range_frame = ttk.Frame(range_controls)
+        range_frame.pack(fill=tk.X, pady=2)
+        
+        ttk.Label(range_frame, text="Min:").pack(side=tk.LEFT, padx=5)
+        self.heatmap_xmin = ttk.Entry(range_frame, width=8)
+        self.heatmap_xmin.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(range_frame, text="Max:").pack(side=tk.LEFT, padx=5)
+        self.heatmap_xmax = ttk.Entry(range_frame, width=8)
+        self.heatmap_xmax.pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(range_frame, text="Reset Range", 
+                  command=lambda: self.reset_heatmap_range()).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(range_frame, text="Update Plot", command=self.update_heatmap_plot).pack(side=tk.LEFT, padx=5)
         
         # Heatmap plot
         self.fig_heatmap, self.ax_heatmap = plt.subplots(figsize=(8, 6))
@@ -392,6 +506,10 @@ class BatchPeakFittingWindow:
                 self.load_spectrum(self.current_spectrum_index)
             else:
                 self.clear_plot()
+        
+        # Update waterfall and heatmap plots
+        self.update_waterfall_plot()
+        self.update_heatmap_plot()
     
     def navigate_spectrum(self, direction):
         """Navigate to the next or previous spectrum."""
@@ -752,7 +870,7 @@ class BatchPeakFittingWindow:
                 yerr_left = np.array(uncertainties[peak_idx]['wid_left'])
                 yerr_right = np.array(uncertainties[peak_idx]['wid_right'])
                 axes[2].plot(x, y_left, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
-                axes[2].plot(x, y_right, 'o', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
+                axes[2].plot(x, y_right, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
                 if show_95:
                     axes[2].fill_between(x, y_left - yerr_left, y_left + yerr_left, color=color, alpha=0.2)
                     axes[2].fill_between(x, y_right - yerr_right, y_right + yerr_right, color=color, alpha=0.2)
@@ -836,7 +954,7 @@ class BatchPeakFittingWindow:
                     yerr_left = np.array(uncertainties[peak_idx]['wid_left'])
                     yerr_right = np.array(uncertainties[peak_idx]['wid_right'])
                     ax.plot(x, y_left, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
-                    ax.plot(x, y_right, 'o', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
+                    ax.plot(x, y_right, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
                     if show_95:
                         ax.fill_between(x, y_left - yerr_left, y_left + yerr_left, color=color, alpha=0.2)
                         ax.fill_between(x, y_right - yerr_right, y_right + yerr_right, color=color, alpha=0.2)
@@ -1188,20 +1306,38 @@ class BatchPeakFittingWindow:
             try:
                 popt, pcov = curve_fit(combined_model, x_fit, y_fit,
                                      p0=initial_params,
-                                     bounds=(bounds_lower, bounds_upper))
-                # Robust check for Asymmetric Voigt
-                if model_type == "Asymmetric Voigt" and len(popt) % 5 != 0:
-                    messagebox.showerror("Fit Error", f"Fit failed: number of fit parameters ({len(popt)}) is not a multiple of 5. Try reducing the number of peaks or adjusting initial guesses.")
+                                     bounds=(bounds_lower, bounds_upper),
+                                     maxfev=2000)
+            except Exception as e1:
+                # Retry with higher maxfev
+                try:
+                    popt, pcov = curve_fit(combined_model, x_fit, y_fit,
+                                         p0=initial_params,
+                                         bounds=(bounds_lower, bounds_upper),
+                                         maxfev=20000)
+                except Exception as e2:
+                    # Fallback: use initial guess, no covariance, flag as failed
+                    popt = np.array(initial_params)
+                    pcov = None
+                    self.fit_params = popt
+                    self.fit_cov = pcov
+                    self.fit_result = combined_model(self.wavenumbers, *popt)
+                    self.residuals = self.spectra - self.fit_result
+                    self.fit_failed = True
+                    messagebox.showwarning("Fit Failed", f"Failed to fit peaks after two attempts. Using initial guess for this spectrum.\n\nFirst error: {str(e1)}\nSecond error: {str(e2)}")
+                    self.update_plot()
+                    self.update_peak_visibility_controls()
                     return
-            except Exception as e:
-                messagebox.showerror("Fit Error", f"Failed to fit peaks: {str(e)}")
+            # Robust check for Asymmetric Voigt
+            if model_type == "Asymmetric Voigt" and len(popt) % 5 != 0:
+                messagebox.showerror("Fit Error", f"Fit failed: number of fit parameters ({len(popt)}) is not a multiple of 5. Try reducing the number of peaks or adjusting initial guesses.")
                 return
-            
             # Store results
             self.fit_params = popt
             self.fit_cov = pcov
             self.fit_result = combined_model(self.wavenumbers, *popt)
             self.residuals = self.spectra - self.fit_result
+            self.fit_failed = False
             
             # Update plot
             self.update_plot()
@@ -1246,7 +1382,6 @@ class BatchPeakFittingWindow:
         
         # Plot fitted peaks if available
         if self.fit_result is not None:
-            print(f"fit_params: {self.fit_params}")
             model_type = self.current_model.get()
             if model_type == "Gaussian" or model_type == "Lorentzian":
                 params_per_peak = 3
@@ -1256,34 +1391,35 @@ class BatchPeakFittingWindow:
                 params_per_peak = 5
             else:
                 params_per_peak = 3
-            print(f"params_per_peak: {params_per_peak}, len(fit_params): {len(self.fit_params)}")
-            if model_type == "Asymmetric Voigt" and len(self.fit_params) % 5 != 0:
-                print(f"Warning: fit_params length {len(self.fit_params)} is not a multiple of 5. Skipping plotting.")
-                return
             
             self.ax1_current.plot(self.wavenumbers, self.fit_result, 'r-', label='Fit')
             
+            # Calculate R² values for each peak
+            peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, self.fit_params, model_type)
+            
             # Plot individual peaks if requested
             if self.show_individual_peaks.get():
-                if model_type == "Gaussian":
-                    peak = self.gaussian(self.wavenumbers, *self.fit_params[0:3])
-                elif model_type == "Lorentzian":
-                    peak = self.lorentzian(self.wavenumbers, *self.fit_params[0:3])
-                elif model_type == "Pseudo-Voigt":
-                    peak = self.pseudo_voigt(self.wavenumbers, *self.fit_params[0:4])
-                elif model_type == "Asymmetric Voigt":
-                    params = self.fit_params[0:5]
-                    if len(params) == 5:
-                        # Debug print
-                        print(f"Asymmetric Voigt params: {params}")
-                        peak = self.asymmetric_voigt(self.wavenumbers, *params)
+                for i in range(0, len(self.fit_params), params_per_peak):
+                    peak_params = self.fit_params[i:i+params_per_peak]
+                    if model_type == "Gaussian":
+                        peak = self.gaussian(self.wavenumbers, *peak_params)
+                    elif model_type == "Lorentzian":
+                        peak = self.lorentzian(self.wavenumbers, *peak_params)
+                    elif model_type == "Pseudo-Voigt":
+                        peak = self.pseudo_voigt(self.wavenumbers, *peak_params)
+                    elif model_type == "Asymmetric Voigt":
+                        peak = self.asymmetric_voigt(self.wavenumbers, *peak_params)
                     else:
-                        print(f"Skipping Asymmetric Voigt peak at i={0}, params={params}")
-                        return
-                else:
-                    peak = self.gaussian(self.wavenumbers, *self.fit_params[0:3])
-                
-                self.ax1_current.plot(self.wavenumbers, peak, 'g--', alpha=0.5)
+                        peak = self.gaussian(self.wavenumbers, *peak_params)
+                    
+                    # Get R² value for this peak
+                    peak_idx = i // params_per_peak
+                    r2 = peak_r_squared[peak_idx]
+                    
+                    # Plot peak with label including R² value
+                    label = f'Peak {peak_idx+1} (R²={r2:.3f})'
+                    color = 'red' if r2 < 0.95 else 'g'
+                    self.ax1_current.plot(self.wavenumbers, peak, '--', color=color, alpha=0.5, label=label)
         
         # Plot peak positions if available
         if self.peaks:
@@ -1438,35 +1574,60 @@ class BatchPeakFittingWindow:
 
     def update_waterfall_plot(self):
         """Update the waterfall plot."""
-        results = self.batch_results if self.batch_results else [{'file': f} for f in self.spectra_files]
-        if not results:
+        # Get current files from listbox
+        current_files = []
+        for i in range(self.file_listbox.size()):
+            filename = self.file_listbox.get(i)
+            # Find the full path in spectra_files
+            for full_path in self.spectra_files:
+                if os.path.basename(full_path) == filename:
+                    current_files.append(full_path)
+                    break
+        
+        if not current_files:
+            self.fig_waterfall.clf()
+            self.ax_waterfall = self.fig_waterfall.add_subplot(111)
+            self.ax_waterfall.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_waterfall.transAxes)
+            self.canvas_waterfall.draw()
             return
+
         try:
-            self.ax_waterfall.clear()
+            # Clear the figure and recreate axes to prevent shrinking
+            self.fig_waterfall.clf()
+            self.ax_waterfall = self.fig_waterfall.add_subplot(111)
+            
             skip = int(self.waterfall_skip.get())
             all_spectra = []
             all_wavenumbers = None
-            for result in results[::skip]:
-                data = np.loadtxt(result['file'])
+            for file_path in current_files[::skip]:
+                data = np.loadtxt(file_path)
                 wavenumbers = data[:, 0]
                 spectrum = data[:, 1]
                 if all_wavenumbers is None:
                     all_wavenumbers = wavenumbers
                 all_spectra.append(spectrum)
-            if not all_spectra:
-                self.ax_waterfall.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_waterfall.transAxes)
-                self.canvas_waterfall.draw()
-                return
+            
+            # Get X-axis range
+            try:
+                xmin = float(self.waterfall_xmin.get()) if self.waterfall_xmin.get() else all_wavenumbers[0]
+                xmax = float(self.waterfall_xmax.get()) if self.waterfall_xmax.get() else all_wavenumbers[-1]
+            except ValueError:
+                xmin = all_wavenumbers[0]
+                xmax = all_wavenumbers[-1]
+            
+            # Create mask for X-axis range
+            mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
+            wavenumbers_masked = all_wavenumbers[mask]
+            all_spectra_masked = [spectrum[mask] for spectrum in all_spectra]
+
             # Determine color gradient
             cmap_name = self.waterfall_cmap.get() if hasattr(self, 'waterfall_cmap') else 'all_black'
-            n_lines = len(all_spectra)
+            n_lines = len(all_spectra_masked)
             if cmap_name == 'all_black':
                 colors = ['black'] * n_lines
             elif cmap_name == 'black_to_darkgrey':
-                # Black to dark grey (0,0,0) to (0.3,0.3,0.3)
                 colors = [(i/(n_lines-1)*0.3, i/(n_lines-1)*0.3, i/(n_lines-1)*0.3) for i in range(n_lines)]
             elif cmap_name == 'darkgrey_to_black':
-                # Dark grey (0.3,0.3,0.3) to black (0,0,0)
                 colors = [((1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3) for i in range(n_lines)]
             elif cmap_name in ['viridis', 'plasma', 'inferno', 'magma', 'cividis', 'tab10', 'RdBu_r']:
                 cmap = plt.get_cmap(cmap_name)
@@ -1474,9 +1635,24 @@ class BatchPeakFittingWindow:
             else:
                 colors = ['black'] * n_lines
             linewidth = float(self.waterfall_linewidth.get()) if hasattr(self, 'waterfall_linewidth') else 1.5
-            for i, (spectrum, color) in enumerate(zip(all_spectra, colors)):
-                offset = i * 0.1 * np.max(spectrum)
-                self.ax_waterfall.plot(all_wavenumbers, spectrum + offset, label=f'Spectrum {i*skip + 1}', color=color, linewidth=linewidth)
+            
+            # Calculate the maximum intensity for proper scaling
+            max_intensity = max(np.max(spectrum) for spectrum in all_spectra_masked)
+            offset_step = 0.1 * max_intensity
+            
+            for i, (spectrum, color) in enumerate(zip(all_spectra_masked, colors)):
+                offset = i * offset_step
+                self.ax_waterfall.plot(wavenumbers_masked, spectrum + offset, 
+                                     label=f'Spectrum {i*skip + 1}', 
+                                     color=color, 
+                                     linewidth=linewidth)
+            
+            # Set tight limits for x and y axes
+            self.ax_waterfall.set_xlim(wavenumbers_masked[0], wavenumbers_masked[-1])
+            y_min = min(np.min(spectrum) for spectrum in all_spectra_masked)
+            y_max = max(np.max(spectrum) + (len(all_spectra_masked) - 1) * offset_step for spectrum in all_spectra_masked)
+            self.ax_waterfall.set_ylim(y_min, y_max)
+            
             self.ax_waterfall.set_xlabel('Wavenumber (cm⁻¹)')
             self.ax_waterfall.set_ylabel('Intensity (a.u.)')
             self.ax_waterfall.set_title('Waterfall Plot')
@@ -1486,16 +1662,39 @@ class BatchPeakFittingWindow:
                 self.ax_waterfall.grid(False)
             if self.waterfall_show_legend.get():
                 self.ax_waterfall.legend(loc='upper right', fontsize=8, frameon=True)
+            
+            # Ensure tight layout and maintain aspect ratio
             self.fig_waterfall.tight_layout()
             self.canvas_waterfall.draw()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to update waterfall plot: {str(e)}")
 
+    def reset_heatmap_adjustments(self):
+        """Reset all heatmap color adjustments to default values."""
+        self.heatmap_contrast.set(1.0)
+        self.heatmap_brightness.set(1.0)
+        self.heatmap_gamma.set(1.0)
+        self.update_heatmap_plot()
+
     def update_heatmap_plot(self):
         """Update the heatmap plot."""
-        results = self.batch_results if self.batch_results else [{'file': f} for f in self.spectra_files]
-        if not results:
+        # Get current files from listbox
+        current_files = []
+        for i in range(self.file_listbox.size()):
+            filename = self.file_listbox.get(i)
+            # Find the full path in spectra_files
+            for full_path in self.spectra_files:
+                if os.path.basename(full_path) == filename:
+                    current_files.append(full_path)
+                    break
+        
+        if not current_files:
+            self.fig_heatmap.clf()
+            self.ax_heatmap = self.fig_heatmap.add_subplot(111)
+            self.ax_heatmap.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_heatmap.transAxes)
+            self.canvas_heatmap.draw()
             return
+
         try:
             # Clear the figure and recreate axes to prevent shrinking
             self.fig_heatmap.clf()
@@ -1503,31 +1702,76 @@ class BatchPeakFittingWindow:
             self._heatmap_colorbar = None
             all_spectra = []
             all_wavenumbers = None
-            for result in results:
-                data = np.loadtxt(result['file'])
+            for file_path in current_files:
+                data = np.loadtxt(file_path)
                 wavenumbers = data[:, 0]
                 spectrum = data[:, 1]
                 if all_wavenumbers is None:
                     all_wavenumbers = wavenumbers
                 all_spectra.append(spectrum)
-            if not all_spectra:
-                self.ax_heatmap.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_heatmap.transAxes)
-                self.canvas_heatmap.draw()
-                return
+            
+            # Get X-axis range
+            try:
+                xmin = float(self.heatmap_xmin.get()) if self.heatmap_xmin.get() else all_wavenumbers[0]
+                xmax = float(self.heatmap_xmax.get()) if self.heatmap_xmax.get() else all_wavenumbers[-1]
+            except ValueError:
+                xmin = all_wavenumbers[0]
+                xmax = all_wavenumbers[-1]
+            
+            # Create mask for X-axis range
+            mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
+            wavenumbers_masked = all_wavenumbers[mask]
             spectra_array = np.array(all_spectra)
+            
+            # Apply color adjustments
+            contrast = self.heatmap_contrast.get()
+            brightness = self.heatmap_brightness.get()
+            gamma = self.heatmap_gamma.get()
+            
+            # Normalize the data
+            vmin, vmax = np.percentile(spectra_array, (2, 98))  # Use 2nd and 98th percentiles for better contrast
+            normalized_data = (spectra_array - vmin) / (vmax - vmin)
+            
+            # Apply gamma correction
+            normalized_data = np.power(normalized_data, 1/gamma)
+            
+            # Apply contrast
+            normalized_data = (normalized_data - 0.5) * contrast + 0.5
+            
+            # Apply brightness
+            normalized_data = normalized_data * brightness
+            
+            # Clip values to valid range
+            normalized_data = np.clip(normalized_data, 0, 1)
+            
+            # Create custom colormap
+            base_cmap = plt.get_cmap(self.heatmap_cmap.get())
+            custom_cmap = LinearSegmentedColormap.from_list('custom_cmap', base_cmap(np.linspace(0, 1, 256)))
+            
+            # Create the heatmap
             im = self.ax_heatmap.imshow(
-                spectra_array,
+                normalized_data,
                 aspect='auto',
-                extent=[all_wavenumbers[0], all_wavenumbers[-1], len(all_spectra), 0],
-                cmap=self.heatmap_cmap.get()
+                extent=[wavenumbers_masked[0], wavenumbers_masked[-1], len(all_spectra), 0],
+                cmap=custom_cmap,
+                vmin=0,
+                vmax=1
             )
+            
+            # Add colorbar
+            if self._heatmap_colorbar is not None:
+                self._heatmap_colorbar.remove()
             self._heatmap_colorbar = self.fig_heatmap.colorbar(im, ax=self.ax_heatmap)
             self._heatmap_colorbar.set_label('Intensity (a.u.)')
+            
             self.ax_heatmap.set_xlabel('Wavenumber (cm⁻¹)')
             self.ax_heatmap.set_ylabel('Spectrum Number')
             self.ax_heatmap.set_title('Heatmap Plot')
+            
+            # Ensure tight layout and maintain aspect ratio
             self.fig_heatmap.tight_layout()
             self.canvas_heatmap.draw()
+            
         except Exception as e:
             messagebox.showerror("Error", f"Failed to update heatmap plot: {str(e)}")
 
@@ -1641,20 +1885,41 @@ class BatchPeakFittingWindow:
                     peak_params = result['fit_params'][j:j+params_per_peak]
                     if model_type == "Gaussian":
                         peak_y = self.gaussian(wavenumbers, *peak_params)
+                        center = peak_params[1]
+                        width = peak_params[2]
+                        fwhm = 2.3548 * width  # FWHM for Gaussian
                     elif model_type == "Lorentzian":
                         peak_y = self.lorentzian(wavenumbers, *peak_params)
+                        center = peak_params[1]
+                        width = peak_params[2]
+                        fwhm = 2 * width  # FWHM for Lorentzian
                     elif model_type == "Pseudo-Voigt":
                         peak_y = self.pseudo_voigt(wavenumbers, *peak_params)
+                        center = peak_params[1]
+                        width = peak_params[2]
+                        fwhm = 2 * width  # Approximate FWHM for Pseudo-Voigt
                     elif model_type == "Asymmetric Voigt":
                         peak_y = self.asymmetric_voigt(wavenumbers, *peak_params)
+                        center = peak_params[1]
+                        width_left = peak_params[2]
+                        width_right = peak_params[3]
+                        fwhm = (2 * width_left + 2 * width_right) / 2  # Average FWHM
                     else:
                         peak_y = self.gaussian(wavenumbers, *peak_params)
-                    
-                    # Apply ROI mask to peak_y
-                    if roi_ranges:
-                        peak_y = peak_y[mask]
-                    
-                    r2 = self.calculate_r_squared(y_fit, peak_y)
+                        center = peak_params[1]
+                        width = peak_params[2]
+                        fwhm = 2.3548 * width
+                    # Mask for ±FWHM around center
+                    mask_peak = (wavenumbers >= center - fwhm) & (wavenumbers <= center + fwhm)
+                    if np.sum(mask_peak) < 3:
+                        # If too few points, expand window
+                        mask_peak = (wavenumbers >= center - 2*fwhm) & (wavenumbers <= center + 2*fwhm)
+                    y_true_peak = spectrum[mask_peak]
+                    y_pred_peak = peak_y[mask_peak]
+                    if len(y_true_peak) > 1:
+                        r2 = self.calculate_r_squared(y_true_peak, y_pred_peak)
+                    else:
+                        r2 = np.nan
                     peak_r2.append(r2)
                 
                 fit_qualities.append({
@@ -1674,38 +1939,61 @@ class BatchPeakFittingWindow:
         # Sort by overall R-squared (best to worst)
         fit_qualities.sort(key=lambda x: x['overall_r2'], reverse=True)
 
-        # Clear all subplots
+        # Select indices for best, median, and worst fits
+        n_total = len(fit_qualities)
+        n_plots = min(9, n_total)
+        best_indices = list(range(min(3, n_total)))
+        worst_indices = list(range(max(0, n_total-3), n_total))
+        # For median, pick 3 evenly spaced in the middle
+        if n_total >= 7:
+            median_indices = [n_total//2 - 1, n_total//2, n_total//2 + 1]
+        elif n_total > 3:
+            # If not enough for 3 medians, pick what we can
+            median_indices = list(range(3, min(6, n_total)))
+        else:
+            median_indices = []
+        # Combine for plotting order: best, median, worst
+        plot_indices = best_indices + median_indices + worst_indices
+        # Remove duplicates and keep order
+        seen = set()
+        plot_indices_unique = []
+        for idx in plot_indices:
+            if idx not in seen and idx < n_total:
+                plot_indices_unique.append(idx)
+                seen.add(idx)
+        # Pad with remaining fits if less than 9
+        for idx in range(n_total):
+            if len(plot_indices_unique) >= 9:
+                break
+            if idx not in seen:
+                plot_indices_unique.append(idx)
+                seen.add(idx)
+        # Now plot in 3x3 grid
         for ax in self.ax_stats.flatten():
             ax.clear()
-
-        # Plot top 9 fits (or fewer if less than 9)
-        n_plots = min(9, len(fit_qualities))
-        for i in range(n_plots):
+        # Add overall title
+        self.fig_stats.suptitle("Fit Quality Overview (Best, Median, Worst)", fontsize=14, y=0.98)
+        row_labels = ["Top 3 Fits", "Median 3 Fits", "Worst 3 Fits"]
+        for i, idx in enumerate(plot_indices_unique[:9]):
             row = i // 3
             col = i % 3
             ax = self.ax_stats[row, col]
-            
-            fit_data = fit_qualities[i]
+            fit_data = fit_qualities[idx]
             wavenumbers = fit_data['wavenumbers']
             spectrum = fit_data['spectrum']
             fit_result = fit_data['fit_result']
-            
             # Plot original spectrum and fit
             ax.plot(wavenumbers, spectrum, 'k-', label='Spectrum', alpha=0.7, linewidth=1)
             ax.plot(wavenumbers, fit_result, 'r-', label='Fit', alpha=0.7, linewidth=1)
-            
             # Plot background if available
             if fit_data['background'] is not None:
                 ax.plot(wavenumbers, fit_data['background'], 'b--', label='Background', alpha=0.5, linewidth=0.8)
-            
             # Highlight ROI regions
             for min_w, max_w in fit_data['roi_ranges']:
                 ax.axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
-            
             # Plot individual peaks
             model_type = self.current_model.get()
             params_per_peak = 3 if model_type in ["Gaussian", "Lorentzian"] else 4 if model_type == "Pseudo-Voigt" else 5
-            
             for j in range(0, len(fit_data['fit_params']), params_per_peak):
                 peak_params = fit_data['fit_params'][j:j+params_per_peak]
                 if model_type == "Gaussian":
@@ -1719,33 +2007,30 @@ class BatchPeakFittingWindow:
                 else:
                     peak_y = self.gaussian(wavenumbers, *peak_params)
                 ax.plot(wavenumbers, peak_y, 'g--', alpha=0.5, linewidth=0.8)
-            
             # Add R-squared values to plot with cleaner formatting
             ax.set_title(f"Spectrum {fit_data['spectrum_number']}\nR² = {fit_data['overall_r2']:.4f}", fontsize=9, pad=5)
-            
             # Add peak R-squared values with cleaner formatting
-            peak_r2_text = "\n".join([f"P{j+1}: {r2:.4f}" 
-                                    for j, r2 in enumerate(fit_data['peak_r2'])])
+            peak_r2_text = "\n".join([f"P{j+1}: {r2:.4f}" for j, r2 in enumerate(fit_data['peak_r2'])])
             ax.text(0.02, 0.98, peak_r2_text,
                    transform=ax.transAxes,
                    verticalalignment='top',
                    fontsize=8,
                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.3'))
-            
             # Clean up axes
             ax.grid(True, linestyle=':', color='gray', alpha=0.4)
             ax.tick_params(axis='both', which='major', labelsize=8)
             if i == 0:  # Only add legend to first plot
-                ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
-            
+                handles, labels = ax.get_legend_handles_labels()
+                if handles:
+                    ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
             # Add axis labels only to left and bottom plots
             if col == 0:
-                ax.set_ylabel('Intensity', fontsize=8)
+                # Add vertical row label for first column, rotated 90 degrees ccw
+                ax.set_ylabel(row_labels[row], fontsize=11, labelpad=30, rotation=90, va='center')
             if row == 2:
                 ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=8)
-        
         # Hide unused subplots
-        for i in range(n_plots, 9):
+        for i in range(len(plot_indices_unique), 9):
             row = i // 3
             col = i % 3
             self.ax_stats[row, col].axis('off')
@@ -1761,19 +2046,7 @@ class BatchPeakFittingWindow:
                 text="Save Individual Plots",
                 command=self.export_individual_fit_stats
             )
-            self.export_individual_button.pack(side=tk.LEFT, padx=5)
-            
-            # Button for saving the entire grid
-            self.export_grid_button = ttk.Button(
-                self.export_stats_buttons_frame,
-                text="Save All Plots",
-                command=self.export_fit_stats_plot
-            )
-            self.export_grid_button.pack(side=tk.LEFT, padx=5)
-        
-        self.fig_stats.tight_layout()
-        self.canvas_stats.draw()
-
+    
     def export_individual_fit_stats(self):
         """Export individual Fit Stats plots to image files."""
         if not self.batch_results:
@@ -1820,13 +2093,14 @@ class BatchPeakFittingWindow:
                     
                     # Copy background patches (ROI regions)
                     for patch in ax.patches:
-                        new_ax.add_patch(plt.Rectangle(
-                            patch.get_xy(),
-                            patch.get_width(),
-                            patch.get_height(),
-                            color=patch.get_facecolor(),
-                            alpha=patch.get_alpha()
-                        ))
+                        if isinstance(patch, mpatches.Rectangle):
+                            new_ax.add_patch(plt.Rectangle(
+                                patch.get_xy(),
+                                patch.get_width(),
+                                patch.get_height(),
+                                color=patch.get_facecolor(),
+                                alpha=patch.get_alpha()
+                            ))
                     
                     # Copy text elements with consistent positioning
                     for text in ax.texts:
@@ -1915,13 +2189,14 @@ class BatchPeakFittingWindow:
                     
                     # Copy background patches (ROI regions)
                     for patch in ax.patches:
-                        axes.flatten()[i].add_patch(plt.Rectangle(
-                            patch.get_xy(),
-                            patch.get_width(),
-                            patch.get_height(),
-                            color=patch.get_facecolor(),
-                            alpha=patch.get_alpha()
-                        ))
+                        if isinstance(patch, mpatches.Rectangle):
+                            axes.flatten()[i].add_patch(plt.Rectangle(
+                                patch.get_xy(),
+                                patch.get_width(),
+                                patch.get_height(),
+                                color=patch.get_facecolor(),
+                                alpha=patch.get_alpha()
+                            ))
                     
                     # Copy text elements with consistent positioning
                     for text in ax.texts:
@@ -1979,3 +2254,21 @@ class BatchPeakFittingWindow:
                 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to export plot: {str(e)}")
+
+    def reset_heatmap_range(self):
+        """Reset the X-axis range to full range."""
+        if hasattr(self, 'wavenumbers') and self.wavenumbers is not None:
+            self.heatmap_xmin.delete(0, tk.END)
+            self.heatmap_xmax.delete(0, tk.END)
+            self.heatmap_xmin.insert(0, f"{self.wavenumbers[0]:.1f}")
+            self.heatmap_xmax.insert(0, f"{self.wavenumbers[-1]:.1f}")
+            self.update_heatmap_plot()
+
+    def reset_waterfall_range(self):
+        """Reset the X-axis range to full range."""
+        if hasattr(self, 'wavenumbers') and self.wavenumbers is not None:
+            self.waterfall_xmin.delete(0, tk.END)
+            self.waterfall_xmax.delete(0, tk.END)
+            self.waterfall_xmin.insert(0, f"{self.wavenumbers[0]:.1f}")
+            self.waterfall_xmax.insert(0, f"{self.wavenumbers[-1]:.1f}")
+            self.update_waterfall_plot()
