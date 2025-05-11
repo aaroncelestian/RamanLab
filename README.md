@@ -45,11 +45,14 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
 	- User selective region fitting to speed fitting times
 	- Graphics analysis with 95% confidence intervals plotted (better than error bars)
 
-- **Export and Reporting**
-  - Generate detailed match reports
-  - Export results to PDF, TXT, and CSV formats
-  - Create correlation heatmaps
-  - Save processed spectra
+- **2D Raman Map Analysis** (New!)
+  - Import and visualize 2D Raman mapping data
+  - Create heatmaps for integrated intensity, peak position, template coefficients
+  - Advanced template analysis for component identification
+  - Cosmic ray filtering for improved data quality
+  - Machine learning analysis with PCA, NMF, and Random Forest classification
+  - Export analysis results and publication-quality visualizations
+  - Class distribution visualization and sample identification
 
 ## Installation
 
@@ -92,10 +95,11 @@ python3 main.py
   - matplotlib >= 3.0.0
   - scipy >= 1.2.0
   - pandas >= 0.25.0
+  - scikit-learn >= 0.21.0 (for ML search functionality)
+  - dask (for large dataset processing)
 
 - Optional packages:
   - reportlab >= 3.5.0 (for PDF export)
-  - scikit-learn >= 0.21.0 (for ML search functionality)
 
 ## Usage
 
@@ -123,6 +127,14 @@ python3 main.py
    - Auto subtract/refine background
    - View and export results
 
+6. **2D Map Analysis** (New!)
+   - Import Raman mapping data from directory
+   - Create heatmaps for various spectral features
+   - Apply template matching for component identification
+   - Filter cosmic rays automatically
+   - Use machine learning for classification and clustering
+   - Export analysis results and publication-quality images
+
 ## Project Structure
 
 All files should be in the same directory
@@ -133,6 +145,8 @@ All files should be in the same directory
 - `requirements.txt` - Project dependencies
 - `peak_fitting.py` - Peak fitting
 - `batch_peak_fitting.py` - Batch fitting
+- `map_analysis_2d.py` - 2D Raman map analysis
+- `ml_raman_map/` - Machine learning modules for map analysis
 - `raman_database.pkl` - Database of Raman spectra https://drive.google.com/drive/folders/1U1Wk9N82M9zt0PawAxlwHxPIHrpYpzkW?usp=drive_link
 - `RRUFF_Export_with_Hey_Classifcation.csv` - this is needed for adding new entries to the database so everything is mapped propertly. 
 

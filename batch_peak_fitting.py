@@ -35,15 +35,16 @@ class BatchPeakFittingWindow:
         """
         self.window = tk.Toplevel(parent)
         self.window.title("Batch Peak Fitting")
-        self.window.geometry("1400x800")
-        self.window.minsize(1200, 700)
+        self.window.geometry("1250x800")
         
         # Store references
         self.parent = parent
         self.raman = raman
         
+        # Initialize file mapping structure
+        self.spectra_files = []  # Maintains one-to-one correspondence with listbox indices
+        
         # Initialize data storage
-        self.spectra_files = []
         self.current_spectrum_index = 0
         self.batch_results = []
         self.reference_peaks = None
@@ -85,16 +86,20 @@ class BatchPeakFittingWindow:
         file_tab = ttk.Frame(self.left_notebook)
         self.left_notebook.add(file_tab, text="File Selection")
 
-        file_frame = ttk.LabelFrame(file_tab, text="File Selection", padding=10)
+        file_frame = ttk.LabelFrame(file_tab, text="File Selection: double click to display", padding=10)
         file_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         list_frame = ttk.Frame(file_frame)
         list_frame.pack(fill=tk.BOTH, expand=True)
-        self.file_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE)
+        self.file_listbox = tk.Listbox(list_frame, selectmode=tk.MULTIPLE, exportselection=False)
         self.file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.file_listbox.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.file_listbox.config(yscrollcommand=scrollbar.set)
+        
+        # Add multiple event bindings for selection
+        self.file_listbox.bind('<<ListboxSelect>>', self.on_file_select)
+        self.file_listbox.bind('<Double-1>', self.on_file_select)
         button_frame = ttk.Frame(file_frame)
         button_frame.pack(fill=tk.X, pady=5)
         ttk.Button(button_frame, text="Add Files", command=self.add_files).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
@@ -272,7 +277,7 @@ class BatchPeakFittingWindow:
         basic_controls = ttk.Frame(waterfall_controls)
         basic_controls.pack(fill=tk.X, pady=2)
         
-        # Skip and color controls on one line
+        # First row: Skip, Color, Colormap Min, Max
         ttk.Label(basic_controls, text="Skip:").pack(side=tk.LEFT, padx=5)
         self.waterfall_skip = ttk.Spinbox(basic_controls, from_=1, to=100, width=5)
         self.waterfall_skip.set(1)
@@ -300,18 +305,32 @@ class BatchPeakFittingWindow:
         self.waterfall_cmap.set('all_black')
         self.waterfall_cmap.pack(side=tk.LEFT, padx=5)
         
-        ttk.Label(basic_controls, text="Line Width:").pack(side=tk.LEFT, padx=5)
-        self.waterfall_linewidth = tk.DoubleVar(value=1.5)
-        self.waterfall_linewidth_spin = ttk.Spinbox(basic_controls, from_=0.5, to=5.0, increment=0.1, 
+        ttk.Label(basic_controls, text="Colormap Min:").pack(side=tk.LEFT, padx=2)
+        self.waterfall_cmap_min = tk.DoubleVar(value=0.0)
+        self.waterfall_cmap_min_entry = ttk.Entry(basic_controls, textvariable=self.waterfall_cmap_min, width=4)
+        self.waterfall_cmap_min_entry.pack(side=tk.LEFT, padx=2)
+        ttk.Label(basic_controls, text="Max:").pack(side=tk.LEFT, padx=2)
+        self.waterfall_cmap_max = tk.DoubleVar(value=0.85)
+        self.waterfall_cmap_max_entry = ttk.Entry(basic_controls, textvariable=self.waterfall_cmap_max, width=4)
+        self.waterfall_cmap_max_entry.pack(side=tk.LEFT, padx=2)
+
+        # Second row: Line Width, Y Offset, Legend, Grid
+        secondary_controls = ttk.Frame(waterfall_controls)
+        secondary_controls.pack(fill=tk.X, pady=2)
+        ttk.Label(secondary_controls, text="Line Width:").pack(side=tk.LEFT, padx=5)
+        self.waterfall_linewidth = tk.DoubleVar(value=1.0)
+        self.waterfall_linewidth_spin = ttk.Spinbox(secondary_controls, from_=0.5, to=5.0, increment=0.1, 
                                                   textvariable=self.waterfall_linewidth, width=4)
         self.waterfall_linewidth_spin.pack(side=tk.LEFT, padx=5)
-        
-        # Add checkboxes for legend and grid
+        ttk.Label(secondary_controls, text="Y Offset (a.u.):").pack(side=tk.LEFT, padx=5)
+        self.waterfall_yoffset = tk.DoubleVar(value=100)  # Default value (absolute units)
+        self.waterfall_yoffset_entry = ttk.Entry(secondary_controls, textvariable=self.waterfall_yoffset, width=6)
+        self.waterfall_yoffset_entry.pack(side=tk.LEFT, padx=5)
         self.waterfall_show_legend = tk.BooleanVar(value=True)
         self.waterfall_show_grid = tk.BooleanVar(value=True)
-        ttk.Checkbutton(basic_controls, text="Legend", variable=self.waterfall_show_legend, 
+        ttk.Checkbutton(secondary_controls, text="Legend", variable=self.waterfall_show_legend, 
                        command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
-        ttk.Checkbutton(basic_controls, text="Grid", variable=self.waterfall_show_grid, 
+        ttk.Checkbutton(secondary_controls, text="Grid", variable=self.waterfall_show_grid, 
                        command=self.update_waterfall_plot).pack(side=tk.LEFT, padx=5)
         
         # Create a frame for X-axis range controls
@@ -488,8 +507,10 @@ class BatchPeakFittingWindow:
                 if file not in self.spectra_files:
                     self.spectra_files.append(file)
                     self.file_listbox.insert(tk.END, os.path.basename(file))
-            # Automatically load and plot the first file if this is the first time files are added
+            
+            # If this is the first time adding files, select and load the first file
             if was_empty and self.spectra_files:
+                self.file_listbox.selection_set(0)
                 self.load_spectrum(0)
     
     def remove_selected_files(self):
@@ -516,21 +537,35 @@ class BatchPeakFittingWindow:
         if not self.spectra_files:
             return
         
+        # Get current selection
+        selection = self.file_listbox.curselection()
+        if not selection:
+            # If no selection, start from the beginning
+            current_index = 0
+        else:
+            current_index = selection[0]
+        
         if direction == 0:  # First
             new_index = 0
         elif direction == -1:  # Previous
-            new_index = max(0, self.current_spectrum_index - 1)
+            new_index = max(0, current_index - 1)
         elif direction == 1:  # Next
-            new_index = min(len(self.spectra_files) - 1, self.current_spectrum_index + 1)
+            new_index = min(len(self.spectra_files) - 1, current_index + 1)
         else:  # Last
             new_index = len(self.spectra_files) - 1
         
-        if new_index != self.current_spectrum_index:
+        if new_index != current_index:
+            # Update selection in listbox
+            self.file_listbox.selection_clear(0, tk.END)
+            self.file_listbox.selection_set(new_index)
+            self.file_listbox.see(new_index)
+            # Load the spectrum
             self.load_spectrum(new_index)
     
     def load_spectrum(self, index):
         """Load a spectrum from the list."""
         if not self.spectra_files or index < 0 or index >= len(self.spectra_files):
+            self.clear_plot()
             return
             
         try:
@@ -545,18 +580,24 @@ class BatchPeakFittingWindow:
             self.current_spectrum_index = index
             self.current_spectrum_label.config(text=f"Current: {os.path.basename(file_path)}")
             
-            # Initialize peak fitting variables
-            self.peaks = []
-            self.fit_params = []
-            self.fit_result = None
-            self.background = None
-            self.residuals = None
+            # Initialize peak fitting variables if they don't exist
+            if not hasattr(self, 'peaks'):
+                self.peaks = []
+            if not hasattr(self, 'fit_params'):
+                self.fit_params = []
+            if not hasattr(self, 'fit_result'):
+                self.fit_result = None
+            if not hasattr(self, 'background'):
+                self.background = None
+            if not hasattr(self, 'residuals'):
+                self.residuals = None
             
             # Update the plot
             self.update_plot()
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load spectrum: {str(e)}")
+            self.clear_plot()
     
     def set_reference(self):
         """Set the current spectrum as the reference for batch processing."""
@@ -1360,19 +1401,6 @@ class BatchPeakFittingWindow:
             filename = os.path.basename(self.spectra_files[self.current_spectrum_index])
             self.ax1_current.set_title(f"Current Spectrum: {filename}")
         
-        # --- Highlight fit regions ---
-        fit_ranges_str = getattr(self, 'var_fit_ranges', None)
-        if fit_ranges_str is not None:
-            fit_ranges_str = fit_ranges_str.get().strip()
-            if fit_ranges_str:
-                for part in fit_ranges_str.split(','):
-                    if '-' in part:
-                        try:
-                            min_w, max_w = map(float, part.split('-'))
-                            self.ax1_current.axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
-                        except Exception:
-                            pass
-        
         # Plot spectrum
         self.ax1_current.plot(self.wavenumbers, self.spectra, 'k-', label='Spectrum')
         
@@ -1382,23 +1410,23 @@ class BatchPeakFittingWindow:
         
         # Plot fitted peaks if available
         if self.fit_result is not None:
-            model_type = self.current_model.get()
-            if model_type == "Gaussian" or model_type == "Lorentzian":
-                params_per_peak = 3
-            elif model_type == "Pseudo-Voigt":
-                params_per_peak = 4
-            elif model_type == "Asymmetric Voigt":
-                params_per_peak = 5
-            else:
-                params_per_peak = 3
-            
             self.ax1_current.plot(self.wavenumbers, self.fit_result, 'r-', label='Fit')
-            
-            # Calculate R² values for each peak
-            peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, self.fit_params, model_type)
             
             # Plot individual peaks if requested
             if self.show_individual_peaks.get():
+                model_type = self.current_model.get()
+                if model_type == "Gaussian" or model_type == "Lorentzian":
+                    params_per_peak = 3
+                elif model_type == "Pseudo-Voigt":
+                    params_per_peak = 4
+                elif model_type == "Asymmetric Voigt":
+                    params_per_peak = 5
+                else:
+                    params_per_peak = 3
+                
+                # Calculate R² values for each peak
+                peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, self.fit_params, model_type)
+                
                 for i in range(0, len(self.fit_params), params_per_peak):
                     peak_params = self.fit_params[i:i+params_per_peak]
                     if model_type == "Gaussian":
@@ -1439,9 +1467,21 @@ class BatchPeakFittingWindow:
         self.ax1_current.grid(True, linestyle=':', color='gray', alpha=0.6)
         self.ax2_current.grid(True, linestyle=':', color='gray', alpha=0.6)
         
+        # Plot fit ranges (ROI) as grey regions if specified
+        fit_ranges_str = self.var_fit_ranges.get().strip() if hasattr(self, 'var_fit_ranges') else ''
+        roi_ranges = []
+        if fit_ranges_str:
+            try:
+                for part in fit_ranges_str.split(','):
+                    if '-' in part:
+                        min_w, max_w = map(float, part.split('-'))
+                        roi_ranges.append((min_w, max_w))
+            except Exception:
+                pass
+        for min_w, max_w in roi_ranges:
+            self.ax1_current.axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
         # Add legend
         self.ax1_current.legend()
-        
         # Draw canvas
         self.canvas_current.draw()
     
@@ -1454,6 +1494,7 @@ class BatchPeakFittingWindow:
         self.ax1_current.set_ylabel('Intensity')
         self.ax2_current.set_xlabel('Wavenumber (cm⁻¹)')
         self.ax2_current.set_ylabel('Residuals')
+        self.current_spectrum_label.config(text="No spectrum loaded")
         self.canvas_current.draw()
     
     def clear_peaks(self):
@@ -1629,16 +1670,32 @@ class BatchPeakFittingWindow:
                 colors = [(i/(n_lines-1)*0.3, i/(n_lines-1)*0.3, i/(n_lines-1)*0.3) for i in range(n_lines)]
             elif cmap_name == 'darkgrey_to_black':
                 colors = [((1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3) for i in range(n_lines)]
-            elif cmap_name in ['viridis', 'plasma', 'inferno', 'magma', 'cividis', 'tab10', 'RdBu_r']:
-                cmap = plt.get_cmap(cmap_name)
-                colors = [cmap(i / (n_lines - 1)) for i in range(n_lines)]
             else:
-                colors = ['black'] * n_lines
+                try:
+                    cmap = plt.get_cmap(cmap_name)
+                    # Get user-defined colormap min/max
+                    try:
+                        color_min = float(self.waterfall_cmap_min.get())
+                        color_max = float(self.waterfall_cmap_max.get())
+                        # Clamp to [0, 1]
+                        color_min = max(0.0, min(1.0, color_min))
+                        color_max = max(0.0, min(1.0, color_max))
+                        if color_max <= color_min:
+                            color_max = color_min + 0.01  # Ensure at least a small range
+                    except Exception:
+                        color_min, color_max = 0.0, 0.85
+                    colors = [cmap(color_min + (color_max - color_min) * (i / (n_lines - 1))) for i in range(n_lines)]
+                except Exception:
+                    colors = ['black'] * n_lines
             linewidth = float(self.waterfall_linewidth.get()) if hasattr(self, 'waterfall_linewidth') else 1.5
             
             # Calculate the maximum intensity for proper scaling
             max_intensity = max(np.max(spectrum) for spectrum in all_spectra_masked)
-            offset_step = 0.1 * max_intensity
+            # Get Y offset from entry (absolute units)
+            try:
+                offset_step = float(self.waterfall_yoffset.get())
+            except ValueError:
+                offset_step = 100  # Default if invalid value
             
             for i, (spectrum, color) in enumerate(zip(all_spectra_masked, colors)):
                 offset = i * offset_step
@@ -2271,4 +2328,23 @@ class BatchPeakFittingWindow:
             self.waterfall_xmax.delete(0, tk.END)
             self.waterfall_xmin.insert(0, f"{self.wavenumbers[0]:.1f}")
             self.waterfall_xmax.insert(0, f"{self.wavenumbers[-1]:.1f}")
+            # Reset Y offset to default (absolute units)
+            self.waterfall_yoffset.set(100)
             self.update_waterfall_plot()
+
+    def on_file_select(self, event):
+        """Handle file selection in the listbox."""
+        try:
+            # Get the index of the clicked item
+            index = self.file_listbox.index(f"@{event.x},{event.y}")
+            # Load and display the selected spectrum
+            self.load_spectrum(index)
+            # Make sure this item is selected
+            self.file_listbox.selection_set(index)
+        except Exception as e:
+            # If we can't get the index from the event, use the first selected item
+            selection = self.file_listbox.curselection()
+            if selection:
+                self.load_spectrum(selection[0])
+            else:
+                self.clear_plot()

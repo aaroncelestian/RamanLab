@@ -5346,8 +5346,15 @@ class RamanAnalysisApp:
             style="PeakFitting.TButton"
         ).pack(fill=tk.X, pady=10, padx=5)
 
+        # Add 2D Map Analysis button
+        ttk.Button(
+            self.tab_peak_fitting,
+            text="2D Map Analysis",
+            command=self.open_2d_map_analysis,
+            style="PeakFitting.TButton"
+        ).pack(fill=tk.X, pady=10, padx=5)
 
-                # Add some descriptive text about peak fitting
+        # Add some descriptive text about peak fitting
         # info_text = tk.Text(self.tab_peak_fitting, height=17, width=45, wrap=tk.WORD)
         # info_text.pack(fill=tk.X, pady=5, padx=5)
         # info_text.insert(tk.END, 
@@ -5374,6 +5381,14 @@ class RamanAnalysisApp:
             BatchPeakFittingWindow(self.root, self)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open batch peak fitting window: {str(e)}")
+
+    def open_2d_map_analysis(self):
+        """Open the 2D Map Analysis window."""
+        try:
+            from map_analysis_2d import TwoDMapAnalysisWindow
+            TwoDMapAnalysisWindow(self.root, self)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open 2D Map Analysis window: {str(e)}")
 
 # --- Main Execution ---
 def main():
