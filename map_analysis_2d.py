@@ -406,7 +406,8 @@ class RamanMapData:
         return resampled
     
     def detect_cosmic_rays(self, wavenumbers: np.ndarray, intensities: np.ndarray, 
-                          threshold_factor: float = 5.0, window_size: int = 5) -> Tuple[bool, np.ndarray]:
+                          threshold_factor: float = 5.0, window_size: int = 5,
+                          min_width_ratio: float = 0.1, max_fwhm: float = 5.0) -> Tuple[bool, np.ndarray]:
         """
         Detect cosmic ray spikes in spectrum.
         
@@ -420,6 +421,10 @@ class RamanMapData:
             Factor to multiply standard deviation for threshold
         window_size : int
             Size of window for local deviation calculation
+        min_width_ratio : float
+            Minimum width ratio (FWHM/height) for a real peak (cosmic rays have smaller ratios)
+        max_fwhm : float
+            Maximum FWHM (in data points) for a peak to be considered a cosmic ray
             
         Returns:
         --------
@@ -429,8 +434,14 @@ class RamanMapData:
         # Make a copy of intensities to avoid modifying the original
         cleaned_intensities = np.copy(intensities)
         
-        # Calculate derivative to find sharp changes
-        derivative = np.diff(intensities)
+        # Calculate first and second derivatives to analyze peak shape
+        first_derivative = np.diff(intensities)
+        # Use padding to maintain array size for easier indexing
+        first_derivative = np.append(first_derivative, first_derivative[-1])
+        
+        # Second derivative helps identify sharp peaks (high negative values at peaks)
+        second_derivative = np.diff(first_derivative)
+        second_derivative = np.append(second_derivative, second_derivative[-1])
         
         # Calculate median and standard deviation
         median_intensity = np.median(intensities)
@@ -452,25 +463,71 @@ class RamanMapData:
             # Local threshold
             local_threshold = local_median + threshold_factor * local_std
             
-            # Current value much higher than neighbors and high derivative
-            if (intensities[i] > local_threshold and 
-                intensities[i] > global_threshold and
-                (i > 0 and abs(derivative[i-1]) > threshold_factor * np.median(abs(derivative)))):
+            # Current value much higher than neighbors
+            if intensities[i] > local_threshold and intensities[i] > global_threshold:
+                # Check for high derivative - cosmic rays have very steep slopes
+                steep_rise = (i > 0 and abs(first_derivative[i-1]) > threshold_factor * np.median(abs(first_derivative)))
+                steep_fall = (i < len(first_derivative)-1 and abs(first_derivative[i]) > threshold_factor * np.median(abs(first_derivative)))
                 
-                # Mark as cosmic ray
-                has_cosmic_ray = True
+                # Check for spike-like features (delta function characteristics)
+                is_spike = steep_rise and steep_fall
                 
-                # Replace with interpolated value
-                left_values = intensities[max(0, i-window_size):i]
-                right_values = intensities[i+1:min(len(intensities), i+window_size+1)]
-                
-                if len(left_values) > 0 and len(right_values) > 0:
-                    # Replace with average of neighbors
-                    cleaned_intensities[i] = (np.median(left_values) + np.median(right_values)) / 2
-                elif len(left_values) > 0:
-                    cleaned_intensities[i] = np.median(left_values)
-                elif len(right_values) > 0:
-                    cleaned_intensities[i] = np.median(right_values)
+                # Calculate peak symmetry (cosmic rays typically have high asymmetry)
+                peak_height = intensities[i] - local_median
+                if peak_height > 0:
+                    # Find indices where the intensity drops to half of the peak height
+                    half_height = local_median + peak_height / 2
+                    
+                    # Find left and right half-maximum points
+                    left_idx = i
+                    right_idx = i
+                    
+                    # Look for left half-maximum point
+                    for j in range(i-1, max(0, i-window_size), -1):
+                        if intensities[j] <= half_height:
+                            left_idx = j
+                            break
+                            
+                    # Look for right half-maximum point
+                    for j in range(i+1, min(len(intensities), i+window_size+1)):
+                        if intensities[j] <= half_height:
+                            right_idx = j
+                            break
+                    
+                    # Calculate FWHM in data points
+                    fwhm = right_idx - left_idx
+                    
+                    # Calculate FWHM/height ratio - cosmic rays have very low values
+                    width_ratio = fwhm / peak_height if peak_height > 0 else float('inf')
+                    
+                    # Calculate peak asymmetry
+                    left_width = i - left_idx
+                    right_width = right_idx - i
+                    # Asymmetry factor (1 is symmetric, >1 or <1 is asymmetric)
+                    asymmetry = max(left_width, right_width) / (min(left_width, right_width) if min(left_width, right_width) > 0 else 1)
+                    
+                    # Check if it's a delta-like spike (very narrow FWHM and high asymmetry)
+                    delta_like = fwhm <= max_fwhm and width_ratio < min_width_ratio
+                    
+                    # Strong second derivative at peak indicates sharpness
+                    sharp_peak = abs(second_derivative[i]) > threshold_factor * np.median(abs(second_derivative))
+                    
+                    # Combined criteria for cosmic ray detection
+                    if is_spike and (delta_like or sharp_peak):
+                        # Mark as cosmic ray
+                        has_cosmic_ray = True
+                        
+                        # Replace with interpolated value
+                        left_values = intensities[max(0, i-window_size):i]
+                        right_values = intensities[i+1:min(len(intensities), i+window_size+1)]
+                        
+                        if len(left_values) > 0 and len(right_values) > 0:
+                            # Replace with average of neighbors
+                            cleaned_intensities[i] = (np.median(left_values) + np.median(right_values)) / 2
+                        elif len(left_values) > 0:
+                            cleaned_intensities[i] = np.median(left_values)
+                        elif len(right_values) > 0:
+                            cleaned_intensities[i] = np.median(right_values)
         
         return has_cosmic_ray, cleaned_intensities
     
@@ -494,8 +551,21 @@ class RamanMapData:
             wavenumbers = data[:, 0]
             intensities = data[:, 1]
             
+            # Use custom parameters for cosmic ray detection if they're set
+            threshold_factor = getattr(self, '_cre_threshold_factor', 5.0)
+            window_size = getattr(self, '_cre_window_size', 5)
+            min_width_ratio = getattr(self, '_cre_min_width_ratio', 0.1)
+            max_fwhm = getattr(self, '_cre_max_fwhm', 5.0)
+            
             # Detect and remove cosmic rays
-            has_cosmic_ray, cleaned_intensities = self.detect_cosmic_rays(wavenumbers, intensities)
+            has_cosmic_ray, cleaned_intensities = self.detect_cosmic_rays(
+                wavenumbers, 
+                intensities,
+                threshold_factor=threshold_factor,
+                window_size=window_size,
+                min_width_ratio=min_width_ratio,
+                max_fwhm=max_fwhm
+            )
             
             # Use cleaned intensities for further processing
             processed_intensities = self._preprocess_spectrum(wavenumbers, cleaned_intensities)
@@ -701,39 +771,57 @@ class RamanMapData:
         
         return instance
     
-    def fit_templates_to_map(self, method: str = 'nnls', use_baseline: bool = True, filter_cosmic_rays: bool = True) -> bool:
+    def fit_templates_to_map(self, method: str = 'nnls', use_baseline: bool = True, 
+                        filter_cosmic_rays: bool = True, threshold_factor: float = 5.0,
+                        window_size: int = 5, min_width_ratio: float = 0.1, 
+                        max_fwhm: float = 5.0) -> bool:
         """
-        Fit template spectra to all map points.
+        Fit template spectra to all map spectra.
         
         Parameters:
         -----------
         method : str
-            Fitting method ('nnls' or 'lsq')
+            Fitting method ('nnls' or 'lsq_linear')
         use_baseline : bool
-            Whether to include a constant baseline in the fitting
+            Include baseline in fitting
         filter_cosmic_rays : bool
-            Whether to filter cosmic rays during fitting
+            Whether to filter cosmic rays before fitting
+        threshold_factor : float
+            Factor to multiply standard deviation for cosmic ray threshold
+        window_size : int
+            Size of window for local deviation calculation in cosmic ray detection
+        min_width_ratio : float
+            Minimum width ratio (FWHM/height) for a real peak (cosmic rays have smaller ratios)
+        max_fwhm : float
+            Maximum FWHM (in data points) for a peak to be considered a cosmic ray
             
         Returns:
         --------
         bool
             True if successful, False otherwise
         """
-        if not self.spectra or self.template_manager.get_template_count() == 0:
+        if not self.spectra:
             return False
-        
+            
+        if not hasattr(self, 'template_manager') or self.template_manager.get_template_count() == 0:
+            return False
+            
         try:
-            # Clear previous results
+            # Initialize dictionaries to store results
             self.template_coefficients = {}
             self.template_residuals = {}
             
-            # Track filtered points
+            # Track cosmic ray filtering statistics
+            self._filtered_cosmic_rays_count = 0
+            self._total_spectra_count = 0
+            
+            # Calculate total points for progress tracking
+            total_points = len(self.spectra)
             filtered_points = 0
-            total_points = 0
             
             # Process each spectrum
             for (x, y), spectrum in self.spectra.items():
-                total_points += 1
+                self._total_spectra_count += 1
                 
                 # Filter cosmic rays if requested
                 if filter_cosmic_rays and hasattr(spectrum, 'has_cosmic_ray') and spectrum.has_cosmic_ray:
@@ -743,8 +831,15 @@ class RamanMapData:
                         wavenumbers = np.copy(spectrum.wavenumbers)
                         intensities = np.copy(spectrum.intensities)
                         
-                        # Detect and remove cosmic rays
-                        _, cleaned_intensities = self.detect_cosmic_rays(wavenumbers, intensities)
+                        # Detect and remove cosmic rays with the specified parameters
+                        _, cleaned_intensities = self.detect_cosmic_rays(
+                            wavenumbers, 
+                            intensities,
+                            threshold_factor=threshold_factor,
+                            window_size=window_size,
+                            min_width_ratio=min_width_ratio,
+                            max_fwhm=max_fwhm
+                        )
                         
                         # Preprocess the cleaned spectrum
                         processed = self._preprocess_spectrum(wavenumbers, cleaned_intensities)
@@ -752,6 +847,7 @@ class RamanMapData:
                         # Use the processed cleaned spectrum instead
                         intensities_for_fitting = processed
                         filtered_points += 1
+                        self._filtered_cosmic_rays_count += 1
                     else:
                         # Use processed intensities (already filtered during loading)
                         intensities_for_fitting = spectrum.processed_intensities
@@ -909,6 +1005,12 @@ class TwoDMapAnalysisWindow:
         self.use_baseline = tk.BooleanVar(value=True)
         self.normalize_coefficients = tk.BooleanVar(value=True)
         self.filter_cosmic_rays = tk.BooleanVar(value=True)  # Add cosmic ray filtering option
+        
+        # Cosmic ray detection parameters
+        self.cre_threshold_factor = tk.DoubleVar(value=5.0)
+        self.cre_window_size = tk.IntVar(value=5)
+        self.cre_min_width_ratio = tk.DoubleVar(value=0.1)
+        self.cre_max_fwhm = tk.DoubleVar(value=5.0)
         
         # Track colorbar
         self.colorbar = None
@@ -1291,67 +1393,111 @@ class TwoDMapAnalysisWindow:
     
     def fit_templates_to_map(self):
         """Fit templates to map spectra."""
-        if not self.map_data:
+        if self.map_data is None:
             messagebox.showerror("Error", "Please load map data first.")
             return
-        
-        if self.map_data.template_manager.get_template_count() == 0:
-            messagebox.showerror("Error", "Please load at least one template spectrum first.")
+            
+        if not hasattr(self.map_data, 'template_manager') or self.map_data.template_manager.get_template_count() == 0:
+            messagebox.showerror("Error", "Please load at least one template first.")
             return
-        
-        # Show progress indicator
-        self.window.config(cursor="wait")
-        self.window.update()
-        
-        # Get fitting parameters
+            
+        # Get fitting options
         method = self.template_fitting_method.get()
         use_baseline = self.use_baseline.get()
-        filter_cosmic_rays = self.filter_cosmic_rays.get()  # Get cosmic ray filtering option
+        filter_cosmic_rays = self.filter_cosmic_rays.get()
         
-        # Perform the fitting
-        success = self.map_data.fit_templates_to_map(
-            method=method, 
-            use_baseline=use_baseline,
-            filter_cosmic_rays=filter_cosmic_rays  # Pass filtering option to fitting method
-        )
+        # Get cosmic ray filter parameters
+        threshold_factor = self.cre_threshold_factor.get()
+        window_size = self.cre_window_size.get()
+        min_width_ratio = self.cre_min_width_ratio.get()
+        max_fwhm = self.cre_max_fwhm.get()
         
-        # Reset cursor
-        self.window.config(cursor="")
+        # Configure map data with these parameters for cosmic ray detection
+        self.map_data._cre_threshold_factor = threshold_factor
+        self.map_data._cre_window_size = window_size
+        self.map_data._cre_min_width_ratio = min_width_ratio
+        self.map_data._cre_max_fwhm = max_fwhm
         
-        if success:
-            # Create success message with info about cosmic ray filtering if enabled
-            message = "Templates fitted to map successfully."
+        # Show progress dialog
+        progress_window = tk.Toplevel(self.window)
+        progress_window.title("Fitting Templates")
+        progress_window.geometry("300x150")
+        progress_window.transient(self.window)
+        progress_window.grab_set()
+        
+        # Center in parent window
+        x = self.window.winfo_x() + (self.window.winfo_width() // 2) - (300 // 2)
+        y = self.window.winfo_y() + (self.window.winfo_height() // 2) - (150 // 2)
+        progress_window.geometry(f"300x150+{x}+{y}")
+        
+        # Add progress bar
+        ttk.Label(progress_window, text="Fitting templates to map data...").pack(pady=10)
+        progress = ttk.Progressbar(progress_window, orient=tk.HORIZONTAL, length=250, mode='indeterminate')
+        progress.pack(pady=10, padx=20)
+        progress.start()
+        
+        # Add status label
+        status_var = tk.StringVar(value="Initializing...")
+        status_label = ttk.Label(progress_window, textvariable=status_var)
+        status_label.pack(pady=10)
+        
+        progress_window.update()
+        
+        # Run fitting in a separate thread
+        def fit_thread():
+            success = self.map_data.fit_templates_to_map(
+                method=method, 
+                use_baseline=use_baseline, 
+                filter_cosmic_rays=filter_cosmic_rays,
+                threshold_factor=threshold_factor,
+                window_size=window_size,
+                min_width_ratio=min_width_ratio,
+                max_fwhm=max_fwhm
+            )
             
-            # Add cosmic ray filtering statistics if available
-            if filter_cosmic_rays and hasattr(self.map_data, '_filtered_cosmic_rays_count'):
-                filtered = self.map_data._filtered_cosmic_rays_count
-                total = self.map_data._total_spectra_count
-                percentage = 0 if total == 0 else (filtered / total * 100)
+            # Close progress window
+            self.window.after(0, progress_window.destroy)
+            
+            if success:
+                # Create success message with info about cosmic ray filtering if enabled
+                message = "Templates fitted to map successfully."
                 
-                message += f"\n\nCosmic ray filtering stats:\n"
-                message += f"• Filtered: {filtered} of {total} spectra ({percentage:.1f}%)"
-            
-            messagebox.showinfo("Success", message)
-            
-            # Get reference to the combobox to update its values if needed
-            feature_combo = None
-            for widget in self.window.winfo_children():
-                if isinstance(widget, ttk.Combobox) and widget.cget("textvariable") == str(self.current_feature):
-                    feature_combo = widget
-                    break
-            
-            # Update feature combo to include template features
-            if feature_combo:
-                current_values = feature_combo['values']
-                if "Template Coefficient" not in current_values:
-                    new_values = list(current_values) + ["Template Coefficient", "Template Residual", "Dominant Template"]
-                    feature_combo['values'] = new_values
-            
-            # Switch to template coefficient view
-            self.current_feature.set("Template Coefficient")
-            self.on_feature_selected()
-        else:
-            messagebox.showerror("Error", "Failed to fit templates to map.")
+                # Add cosmic ray filtering statistics if available
+                if filter_cosmic_rays and hasattr(self.map_data, '_filtered_cosmic_rays_count'):
+                    filtered = self.map_data._filtered_cosmic_rays_count
+                    total = self.map_data._total_spectra_count
+                    percentage = 0 if total == 0 else (filtered / total * 100)
+                    
+                    message += f"\n\nCosmic ray filtering stats:\n"
+                    message += f"• Filtered: {filtered} of {total} spectra ({percentage:.1f}%)"
+                
+                messagebox.showinfo("Success", message)
+                
+                # Get reference to the combobox to update its values if needed
+                feature_combo = None
+                for widget in self.window.winfo_children():
+                    if isinstance(widget, ttk.Combobox) and widget.cget("textvariable") == str(self.current_feature):
+                        feature_combo = widget
+                        break
+                
+                # Update feature combo to include template features
+                if feature_combo:
+                    current_values = feature_combo['values']
+                    if "Template Coefficient" not in current_values:
+                        new_values = list(current_values) + ["Template Coefficient", "Template Residual", "Dominant Template"]
+                        feature_combo['values'] = new_values
+                
+                # Switch to template coefficient view
+                self.current_feature.set("Template Coefficient")
+                self.on_feature_selected()
+            else:
+                messagebox.showerror("Error", "Failed to fit templates to map.")
+        
+        # Start the thread
+        import threading
+        thread = threading.Thread(target=fit_thread)
+        thread.daemon = True
+        thread.start()
     
     def load_map_data(self):
         """Load map data from files."""
@@ -2056,7 +2202,13 @@ class TwoDMapAnalysisWindow:
                                     orig_intensities = spectrum.intensities
                                     # Detect and get cleaned version
                                     _, cleaned = self.map_data.detect_cosmic_rays(
-                                        spectrum.wavenumbers, orig_intensities)
+                                        spectrum.wavenumbers, 
+                                        orig_intensities,
+                                        threshold_factor=self.cre_threshold_factor.get(),
+                                        window_size=self.cre_window_size.get(),
+                                        min_width_ratio=self.cre_min_width_ratio.get(),
+                                        max_fwhm=self.cre_max_fwhm.get()
+                                    )
                                     
                                     # Calculate the maximum difference as a percentage of the original
                                     max_orig = np.max(orig_intensities)
@@ -2862,7 +3014,14 @@ class TwoDMapAnalysisWindow:
                 intensities = data[:, 1]
                 
                 # Detect cosmic rays
-                has_cosmic_ray, cleaned_intensities = self.map_data.detect_cosmic_rays(wavenumbers, intensities)
+                has_cosmic_ray, cleaned_intensities = self.map_data.detect_cosmic_rays(
+                    wavenumbers, 
+                    intensities,
+                    threshold_factor=self.cre_threshold_factor.get(),
+                    window_size=self.cre_window_size.get(),
+                    min_width_ratio=self.cre_min_width_ratio.get(),
+                    max_fwhm=self.cre_max_fwhm.get()
+                )
                 
                 # Count cosmic rays
                 total_spectra += 1
@@ -4001,92 +4160,140 @@ class TwoDMapAnalysisWindow:
                 messagebox.showerror("Error", f"Failed to open CSV: {str(e)}")
     
     def create_template_analysis_tab(self):
-        """Create tab for template spectra analysis."""
-        # Create the tab
-        self.template_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(self.template_tab, text="Template Analysis")
+        """Create template analysis tab."""
+        template_tab = ttk.Frame(self.notebook)
+        self.notebook.add(template_tab, text="Template Analysis")
         
-        # Split the tab into left and right panels
-        panel_frame = ttk.Frame(self.template_tab)
-        panel_frame.pack(fill=tk.BOTH, expand=True)
+        # Create main split for controls and plot
+        paned = ttk.PanedWindow(template_tab, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Left panel for controls
-        controls_frame = ttk.LabelFrame(panel_frame, text="Controls", padding=10, width=300)
-        controls_frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5), pady=5)
+        # Create control frame on the left
+        control_frame = ttk.Frame(paned, width=250)
+        paned.add(control_frame, weight=1)
         
-        # Point selection frame
-        point_frame = ttk.LabelFrame(controls_frame, text="Point Selection", padding=5)
-        point_frame.pack(fill=tk.X, pady=5)
+        # Create plot frame on the right
+        plot_frame = ttk.Frame(paned, width=850)
+        paned.add(plot_frame, weight=4)
         
-        # X position
-        x_frame = ttk.Frame(point_frame)
-        x_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(x_frame, text="X Position:").pack(side=tk.LEFT)
-        self.template_x_pos = tk.StringVar()
-        x_entry = ttk.Entry(x_frame, textvariable=self.template_x_pos, width=8)
-        x_entry.pack(side=tk.RIGHT)
+        # Create template controls
+        ttk.Label(control_frame, text="Template Controls", font=('Arial', 12, 'bold')).pack(pady=5, anchor=tk.W)
         
-        # Y position
-        y_frame = ttk.Frame(point_frame)
-        y_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(y_frame, text="Y Position:").pack(side=tk.LEFT)
-        self.template_y_pos = tk.StringVar()
-        y_entry = ttk.Entry(y_frame, textvariable=self.template_y_pos, width=8)
-        y_entry.pack(side=tk.RIGHT)
+        # Template fitting section
+        fitting_frame = ttk.LabelFrame(control_frame, text="Template Fitting", padding=5)
+        fitting_frame.pack(fill=tk.X, pady=5)
         
-        # Update button
-        ttk.Button(point_frame, text="Show Spectrum",
-                  command=self.show_template_analysis).pack(fill=tk.X, pady=5)
+        # Method selection
+        ttk.Label(fitting_frame, text="Fitting Method:").pack(anchor=tk.W)
+        method_combo = ttk.Combobox(fitting_frame, textvariable=self.template_fitting_method, 
+                                   values=["nnls", "lsq_linear"], state="readonly")
+        method_combo.pack(fill=tk.X, pady=2)
         
-        # Fit options frame
-        fit_frame = ttk.LabelFrame(controls_frame, text="Fit Options", padding=5)
-        fit_frame.pack(fill=tk.X, pady=5)
+        # Baseline option
+        baseline_check = ttk.Checkbutton(fitting_frame, text="Include Baseline", variable=self.use_baseline)
+        baseline_check.pack(anchor=tk.W, pady=2)
         
-        # Fitting method
-        method_frame = ttk.Frame(fit_frame)
-        method_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(method_frame, text="Method:").pack(side=tk.LEFT)
-        ttk.Combobox(method_frame, textvariable=self.template_fitting_method,
-                   values=["nnls", "lsq"]).pack(side=tk.RIGHT)
+        # Normalization option
+        norm_check = ttk.Checkbutton(fitting_frame, text="Normalize Coefficients", 
+                                    variable=self.normalize_coefficients)
+        norm_check.pack(anchor=tk.W, pady=2)
         
-        # Use baseline checkbox
-        ttk.Checkbutton(fit_frame, text="Use Baseline",
-                       variable=self.use_baseline).pack(anchor=tk.W, pady=2)
+        # Add cosmic ray filter option
+        cosmic_check = ttk.Checkbutton(fitting_frame, text="Filter Cosmic Rays", 
+                                      variable=self.filter_cosmic_rays)
+        cosmic_check.pack(anchor=tk.W, pady=2)
         
-        # Template visibility frame
-        visibility_frame = ttk.LabelFrame(controls_frame, text="Template Visibility", padding=5)
-        visibility_frame.pack(fill=tk.X, pady=5, expand=True)
+        # Add cosmic ray settings frame
+        cosmic_settings_frame = ttk.LabelFrame(control_frame, text="Cosmic Ray Filter Settings", padding=5)
+        cosmic_settings_frame.pack(fill=tk.X, pady=5)
         
-        # Template visibility controls will be created dynamically
-        self.template_visibility_frame = ttk.Frame(visibility_frame)
-        self.template_visibility_frame.pack(fill=tk.BOTH, expand=True)
+        # Threshold factor
+        thresh_frame = ttk.Frame(cosmic_settings_frame)
+        thresh_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(thresh_frame, text="Threshold Factor:").pack(side=tk.LEFT)
+        thresh_entry = ttk.Entry(thresh_frame, textvariable=self.cre_threshold_factor, width=8)
+        thresh_entry.pack(side=tk.RIGHT)
         
-        # Export frame
-        export_frame = ttk.LabelFrame(controls_frame, text="Export", padding=5)
-        export_frame.pack(fill=tk.X, pady=5)
+        # Window size
+        window_frame = ttk.Frame(cosmic_settings_frame)
+        window_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(window_frame, text="Window Size:").pack(side=tk.LEFT)
+        window_entry = ttk.Entry(window_frame, textvariable=self.cre_window_size, width=8)
+        window_entry.pack(side=tk.RIGHT)
+        
+        # Width ratio
+        width_frame = ttk.Frame(cosmic_settings_frame)
+        width_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(width_frame, text="Min Width Ratio:").pack(side=tk.LEFT)
+        width_entry = ttk.Entry(width_frame, textvariable=self.cre_min_width_ratio, width=8)
+        width_entry.pack(side=tk.RIGHT)
+        
+        # FWHM threshold
+        fwhm_frame = ttk.Frame(cosmic_settings_frame)
+        fwhm_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(fwhm_frame, text="Max FWHM:").pack(side=tk.LEFT)
+        fwhm_entry = ttk.Entry(fwhm_frame, textvariable=self.cre_max_fwhm, width=8)
+        fwhm_entry.pack(side=tk.RIGHT)
+        
+        # Info label about cosmic ray detection
+        ttk.Label(cosmic_settings_frame, text="Note: Higher threshold = less filtering", 
+                 font=('Arial', 8, 'italic')).pack(anchor=tk.W, pady=2)
+        
+        # Action buttons
+        ttk.Button(control_frame, text="Fit Templates to Map", 
+                  command=self.fit_templates_to_map).pack(fill=tk.X, pady=5)
+                  
+        # Template selection listbox frame
+        template_list_frame = ttk.LabelFrame(control_frame, text="Available Templates", padding=5)
+        template_list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Create listbox with scrollbar
+        template_scrollbar = ttk.Scrollbar(template_list_frame, orient=tk.VERTICAL)
+        self.template_listbox = tk.Listbox(template_list_frame, height=10, 
+                                         yscrollcommand=template_scrollbar.set,
+                                         exportselection=False)
+        template_scrollbar.config(command=self.template_listbox.yview)
+        
+        self.template_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        template_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.template_listbox.bind('<<ListboxSelect>>', self.on_template_selected)
+        
+        # Template management buttons
+        template_btn_frame = ttk.Frame(control_frame)
+        template_btn_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(template_btn_frame, text="Load Template", 
+                  command=self.load_template).pack(side=tk.LEFT, padx=2)
+        ttk.Button(template_btn_frame, text="Load Directory", 
+                  command=self.load_template_directory).pack(side=tk.LEFT, padx=2)
+        ttk.Button(template_btn_frame, text="Remove", 
+                  command=self.remove_template).pack(side=tk.LEFT, padx=2)
         
         # Export buttons
-        ttk.Button(export_frame, text="Export Analysis",
+        export_frame = ttk.Frame(control_frame)
+        export_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(export_frame, text="Export Analysis", 
                   command=self.export_template_analysis).pack(fill=tk.X, pady=2)
         
-        # Right panel for visualization
-        viz_frame = ttk.LabelFrame(panel_frame, text="Visualization", padding=10)
-        viz_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0), pady=5)
-        
-        # Create figure and canvas for template analysis
-        self.template_fig = plt.figure(figsize=(10, 8))
-        self.template_ax = self.template_fig.add_subplot(111)
-        
-        # Set up the canvas
-        self.template_canvas = FigureCanvasTkAgg(self.template_fig, master=viz_frame)
-        self.template_canvas.draw()
+        # Create plot in right frame
+        self.template_fig = plt.Figure(figsize=(10, 6), dpi=72)
+        self.template_canvas = FigureCanvasTkAgg(self.template_fig, plot_frame)
         self.template_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Add toolbar
-        toolbar_frame = ttk.Frame(viz_frame)
-        toolbar_frame.pack(fill=tk.X)
-        self.template_toolbar = NavigationToolbar2Tk(self.template_canvas, toolbar_frame)
-        self.template_toolbar.update()
+        # Create toolbar
+        toolbar = NavigationToolbar2Tk(self.template_canvas, plot_frame)
+        toolbar.update()
+        
+        # Create template plot axes
+        self.template_ax = self.template_fig.add_subplot(111)
+        self.template_ax.set_xlabel('Wavenumber (cm⁻¹)')
+        self.template_ax.set_ylabel('Intensity (a.u.)')
+        self.template_ax.set_title('Template Analysis')
+        
+        # Initialize template plot
+        self.template_canvas.draw()
     
     def update_template_visibility_controls(self):
         """Update template visibility controls in the template analysis tab."""
