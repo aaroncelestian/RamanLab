@@ -1633,6 +1633,34 @@ class TwoDMapAnalysisWindow:
         # Bind the colormap combo box to update both maps when changed
         colormap_combo.bind("<<ComboboxSelected>>", self.on_visualization_changed)
         
+        # Add brightness and contrast controls
+        # Create frame for brightness (vmin)
+        brightness_frame = ttk.Frame(colormap_frame)
+        brightness_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(brightness_frame, text="Min Value:").pack(side=tk.LEFT)
+        self.vmin_var = tk.DoubleVar(value=0.0)
+        vmin_entry = ttk.Entry(brightness_frame, textvariable=self.vmin_var, width=8)
+        vmin_entry.pack(side=tk.RIGHT)
+        vmin_entry.bind("<Return>", self.on_visualization_changed)
+        vmin_entry.bind("<FocusOut>", self.on_visualization_changed)
+        
+        # Create frame for contrast (vmax)
+        contrast_frame = ttk.Frame(colormap_frame)
+        contrast_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(contrast_frame, text="Max Value:").pack(side=tk.LEFT)
+        self.vmax_var = tk.DoubleVar(value=1.0)
+        vmax_entry = ttk.Entry(contrast_frame, textvariable=self.vmax_var, width=8)
+        vmax_entry.pack(side=tk.RIGHT)
+        vmax_entry.bind("<Return>", self.on_visualization_changed)
+        vmax_entry.bind("<FocusOut>", self.on_visualization_changed)
+        
+        # Add auto-range checkbox
+        self.auto_range_var = tk.BooleanVar(value=True)
+        auto_range_check = ttk.Checkbutton(colormap_frame, text="Auto Range", 
+                                          variable=self.auto_range_var,
+                                          command=self.on_auto_range_changed)
+        auto_range_check.pack(anchor=tk.W, pady=2)
+        
         # Add update button
         update_button = ttk.Button(colormap_frame, text="Update Map", command=self.update_map)
         update_button.pack(fill=tk.X, pady=5)
@@ -2842,9 +2870,15 @@ class TwoDMapAnalysisWindow:
                     self.canvas.draw()
                     return
                 
+                # If auto range is enabled, update the min/max fields
+                if self.auto_range_var.get():
+                    self.update_data_range(map_data)
+                
                 # Create the image plot
                 im = self.ax.imshow(map_data, origin='lower', aspect='auto', 
-                                  cmap=colormap, interpolation=interpolation)
+                                  cmap=colormap, interpolation=interpolation,
+                                  vmin=None if self.auto_range_var.get() else self.vmin_var.get(),
+                                  vmax=None if self.auto_range_var.get() else self.vmax_var.get())
 
             # Remove existing colorbar if present
             if hasattr(self, 'colorbar') and self.colorbar is not None:
@@ -5174,6 +5208,10 @@ class TwoDMapAnalysisWindow:
         # Create meshgrid for plotting
         X, Y = np.meshgrid(x_positions, y_positions)
         
+        # If auto range is enabled, update the min/max fields
+        if self.auto_range_var.get():
+            self.update_data_range(template_map)
+            
         # Plot the coefficient map
         cmap = self.colormap_var.get() if hasattr(self, 'colormap_var') else 'viridis'
         interpolation = self.interpolation_method.get() if hasattr(self, 'interpolation_method') else 'bilinear'
@@ -5183,7 +5221,9 @@ class TwoDMapAnalysisWindow:
             cmap=cmap,
             interpolation=interpolation,
             extent=[min(x_positions)-0.5, max(x_positions)+0.5, min(y_positions)-0.5, max(y_positions)+0.5],
-            origin='lower'
+            origin='lower',
+            vmin=None if self.auto_range_var.get() else self.vmin_var.get(),
+            vmax=None if self.auto_range_var.get() else self.vmax_var.get()
         )
         
         # Remove old colorbar if it exists
@@ -5218,3 +5258,55 @@ class TwoDMapAnalysisWindow:
         # Update the template coefficient map if it exists
         if hasattr(self, 'template_map_ax'):
             self.update_template_coefficient_map()
+
+    def on_auto_range_changed(self):
+        """Handle auto-range checkbox change."""
+        if self.auto_range_var.get():
+            self.vmin_var.set(0.0)
+            self.vmax_var.set(1.0)
+            self.on_visualization_changed(None)
+    
+    def update_data_range(self, map_data=None):
+        """Calculate and update the data range fields based on current map data."""
+        if map_data is None:
+            # Try to get the current map data
+            feature = self.current_feature.get()
+            
+            # Only update for numerical features that use a continuous scale
+            if feature == "Template Coefficient":
+                # Get selected template index
+                template_idx = self.template_combo.current() if hasattr(self, 'template_combo') else 0
+                if template_idx >= 0 and hasattr(self.map_data, 'template_coefficients'):
+                    map_data = self.map_data.get_template_coefficient_map(
+                        template_idx, normalized=self.normalize_coefficients.get()
+                    )
+            elif feature == "Template Residual":
+                if hasattr(self.map_data, 'template_residuals'):
+                    map_data = self.map_data.get_residual_map()
+            elif feature == "Integrated Intensity":
+                try:
+                    min_wn = float(self.min_wavenumber.get())
+                    max_wn = float(self.max_wavenumber.get())
+                    map_data = self.create_integrated_intensity_map(min_wn, max_wn)
+                except (ValueError, AttributeError):
+                    pass
+        
+        # Update the range fields if we have valid data
+        if map_data is not None and map_data.size > 0:
+            # Calculate min/max with some padding
+            data_min = np.nanmin(map_data)
+            data_max = np.nanmax(map_data)
+            
+            # Add 5% padding
+            range_padding = 0.05 * (data_max - data_min)
+            
+            # If range is zero or very small, use fixed padding
+            if range_padding < 1e-10:
+                if abs(data_min) < 1e-10:  # If data is near zero
+                    range_padding = 0.1  # Use fixed padding
+                else:
+                    range_padding = abs(data_min) * 0.1  # Use percentage of value
+            
+            # Set the min and max values
+            self.vmin_var.set(round(data_min - range_padding, 6))
+            self.vmax_var.set(round(data_max + range_padding, 6))
