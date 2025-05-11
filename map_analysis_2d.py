@@ -4161,8 +4161,8 @@ class TwoDMapAnalysisWindow:
     
     def create_template_analysis_tab(self):
         """Create template analysis tab."""
-        template_tab = ttk.Frame(self.notebook)
-        self.notebook.add(template_tab, text="Template Analysis")
+        template_tab = ttk.Frame(self.viz_notebook)
+        self.viz_notebook.add(template_tab, text="Template Analysis")
         
         # Create main split for controls and plot
         paned = ttk.PanedWindow(template_tab, orient=tk.HORIZONTAL)
@@ -4277,6 +4277,14 @@ class TwoDMapAnalysisWindow:
         ttk.Button(export_frame, text="Export Analysis", 
                   command=self.export_template_analysis).pack(fill=tk.X, pady=2)
         
+        # Template visibility frame
+        visibility_frame = ttk.LabelFrame(control_frame, text="Template Visibility", padding=5)
+        visibility_frame.pack(fill=tk.X, pady=5, expand=True)
+        
+        # This frame will hold the template visibility checkboxes
+        self.template_visibility_frame = ttk.Frame(visibility_frame)
+        self.template_visibility_frame.pack(fill=tk.BOTH, expand=True)
+        
         # Create plot in right frame
         self.template_fig = plt.Figure(figsize=(10, 6), dpi=72)
         self.template_canvas = FigureCanvasTkAgg(self.template_fig, plot_frame)
@@ -4323,11 +4331,16 @@ class TwoDMapAnalysisWindow:
             messagebox.showerror("Error", "Please load at least one template spectrum first.")
             return
         
+        # Get X and Y positions
         try:
-            # Get X and Y positions
-            x_pos = int(self.template_x_pos.get())
-            y_pos = int(self.template_y_pos.get())
-        except ValueError:
+            if hasattr(self, 'template_x_pos') and hasattr(self, 'template_y_pos'):
+                x_pos = int(self.template_x_pos.get())
+                y_pos = int(self.template_y_pos.get())
+            else:
+                # Get the first available position from the map
+                x_pos = self.map_data.x_positions[0] if self.map_data.x_positions else 0
+                y_pos = self.map_data.y_positions[0] if self.map_data.y_positions else 0
+        except (ValueError, IndexError):
             messagebox.showerror("Error", "Please enter valid X and Y positions.")
             return
         
@@ -4337,8 +4350,11 @@ class TwoDMapAnalysisWindow:
             messagebox.showerror("Error", f"No spectrum found at position ({x_pos}, {y_pos}).")
             return
         
-        # Switch to the template analysis tab
-        self.viz_notebook.select(self.template_tab)
+        # Switch to the template analysis tab - find it by text
+        for i in range(self.viz_notebook.index('end')):
+            if self.viz_notebook.tab(i, 'text') == 'Template Analysis':
+                self.viz_notebook.select(i)
+                break
         
         # Update the template visibility controls
         self.update_template_visibility_controls()
@@ -4354,9 +4370,15 @@ class TwoDMapAnalysisWindow:
         # If x_pos and y_pos are not provided, try to get them from the entry fields
         if x_pos is None or y_pos is None:
             try:
-                x_pos = int(self.template_x_pos.get())
-                y_pos = int(self.template_y_pos.get())
-            except ValueError:
+                if hasattr(self, 'template_x_pos') and hasattr(self, 'template_y_pos'):
+                    x_pos = int(self.template_x_pos.get())
+                    y_pos = int(self.template_y_pos.get())
+                else:
+                    # Get the first available position from the map
+                    x_pos = self.map_data.x_positions[0] if self.map_data.x_positions else 0
+                    y_pos = self.map_data.y_positions[0] if self.map_data.y_positions else 0
+            except (ValueError, IndexError):
+                # If we can't get valid positions, return
                 return
         
         # Get the spectrum at the specified position
@@ -4500,9 +4522,14 @@ class TwoDMapAnalysisWindow:
         
         # Get current X and Y positions
         try:
-            x_pos = int(self.template_x_pos.get())
-            y_pos = int(self.template_y_pos.get())
-        except ValueError:
+            if hasattr(self, 'template_x_pos') and hasattr(self, 'template_y_pos'):
+                x_pos = int(self.template_x_pos.get())
+                y_pos = int(self.template_y_pos.get())
+            else:
+                # Get the first available position from the map
+                x_pos = self.map_data.x_positions[0] if self.map_data.x_positions else 0
+                y_pos = self.map_data.y_positions[0] if self.map_data.y_positions else 0
+        except (ValueError, IndexError):
             messagebox.showerror("Error", "Please enter valid X and Y positions.")
             return
         
