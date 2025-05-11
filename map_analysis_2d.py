@@ -1630,6 +1630,8 @@ class TwoDMapAnalysisWindow:
                     "twilight", "turbo", "jet", "hot", "cool", "coolwarm"]
         colormap_combo = ttk.Combobox(colormap_frame, textvariable=self.colormap_var, values=colormaps)
         colormap_combo.pack(fill=tk.X, pady=2)
+        # Bind the colormap combo box to update both maps when changed
+        colormap_combo.bind("<<ComboboxSelected>>", self.on_visualization_changed)
         
         # Add update button
         update_button = ttk.Button(colormap_frame, text="Update Map", command=self.update_map)
@@ -1647,6 +1649,8 @@ class TwoDMapAnalysisWindow:
         interp_combo = ttk.Combobox(interp_frame, textvariable=self.interpolation_method,
                                   values=valid_interpolations)
         interp_combo.pack(fill=tk.X, pady=2)
+        # Bind the interpolation combo box to update both maps when changed
+        interp_combo.bind("<<ComboboxSelected>>", self.on_visualization_changed)
         
         # Create right panel with notebook for visualization and advanced analysis
         viz_frame = ttk.LabelFrame(main_frame, text="Analysis", padding=10)
@@ -1823,6 +1827,10 @@ class TwoDMapAnalysisWindow:
         
         if hasattr(self, 'template_combo'):
             self.template_combo.current(index)
+            
+            # If we're in Template Coefficient view mode, update the main map
+            if self.current_feature.get() == "Template Coefficient":
+                self.update_map()
             
         # Update the template coefficient map if available
         if hasattr(self, 'template_map_ax'):
@@ -5201,3 +5209,12 @@ class TwoDMapAnalysisWindow:
         # Update layout and draw
         self.template_map_fig.tight_layout()
         self.template_map_canvas.draw()
+
+    def on_visualization_changed(self, event):
+        """Handle visualization setting changes (colormap, interpolation, etc)."""
+        # Update the main 2D map
+        self.update_map()
+        
+        # Update the template coefficient map if it exists
+        if hasattr(self, 'template_map_ax'):
+            self.update_template_coefficient_map()
