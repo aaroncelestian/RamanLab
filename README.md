@@ -2,6 +2,8 @@
 
 ClaritySpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
+**Current Version:** 2.4.0
+
 ## Features
 
 - **Spectrum Analysis**
@@ -18,37 +20,42 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - View and search database contents
 
 - **Search and Matching**
-	- Multiple search algorithms:
-			- Correlation-based matching
-			- Peak-based matching
-   			- Correlation + Peak
-			- Machine learning-based matching (dynamic time warping)
-	- Advanced filtering options (peak regions, Hey index, element limiting)
-	- Confidence scoring for matches
-	- Experimental: Heatmap of best fit to molecular vibrational groups with chemical scoring
+  - Multiple search algorithms:
+    - Correlation-based matching
+    - Peak-based matching
+    - Correlation + Peak
+    - Machine learning-based matching (dynamic time warping)
+  - Advanced filtering options (peak regions, Hey index, element limiting)
+  - Confidence scoring for matches
+  - Experimental: Heatmap of best fit to molecular vibrational groups with chemical scoring
 
--  **Peak Fitting**
-	- Advanced background modeling: 
-			- Manual modeling
-			- Software suggested models that are user selectable
-			- Interactive background modeling
-	-    Algorytmically identify peaks, or add user selected/deleted
-	-    Peak modeling:
-			- Gaussian, Lorentzian, Pseudo-Voigt, and Aysmmetric Voigt
-			- No need to define regions for fitting, no need to spectral smoothing (although it is an option)
-			- Report generation and export of pubilication quality graphics
+- **Peak Fitting**
+  - Advanced background modeling: 
+    - Manual modeling
+    - Software suggested models that are user selectable
+    - Interactive background modeling
+  - Algorithmically identify peaks, or add user selected/deleted
+  - Peak modeling:
+    - Gaussian, Lorentzian, Pseudo-Voigt, and Asymmetric Voigt
+    - No need to define regions for fitting, no need for spectral smoothing (although it is an option)
+    - Report generation and export of publication quality graphics
 
 - **Batch Processing**
-	- Import any number of spectra that your system can handle
-	- Same background and peak shapes as in Peak Fitting
-	- AUTOMATIC background refinement
-	- User selective region fitting to speed fitting times
-	- Graphics analysis with 95% confidence intervals plotted (better than error bars)
+  - Import any number of spectra that your system can handle
+  - Same background and peak shapes as in Peak Fitting
+  - AUTOMATIC background refinement
+  - User selective region fitting to speed fitting times
+  - Graphics analysis with 95% confidence intervals plotted (better than error bars)
 
-- **2D Raman Map Analysis** (New!)
+- **2D Raman Map Analysis**
   - Import and visualize 2D Raman mapping data
   - Create heatmaps for integrated intensity, peak position, template coefficients
-  - Advanced template analysis for component identification
+  - Advanced template analysis for component identification:
+    - Multiple template fitting methods (NNLS, LSQ)
+    - Template coefficient visualization
+    - Percentage contribution calculation for visible components
+    - Interactive template visibility controls
+    - Export template analysis results
   - Cosmic ray filtering for improved data quality
   - Machine learning analysis with PCA, NMF, and Random Forest classification
   - Export analysis results and publication-quality visualizations
@@ -70,19 +77,20 @@ pip install -r requirements.txt
 3. Download the database and metadata correlation file:
   - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6 
 
-6. Run the application:
+4. Run the application:
 ```bash
 python3 main.py
 ```
+
 ## Manual Installation Method
 
-1. Download all the files from this reposity into a local drive on your computer.  It should not matter where.
-2. Run the dependecy checker from a terminal window (or IDE if you have one)
+1. Download all the files from this repository into a local drive on your computer. It should not matter where.
+2. Run the dependency checker from a terminal window (or IDE if you have one):
    ```bash
    python3 check_dependencies.py
    ```
-3. Make sure all the check boxes are checked on the output.  If it is, then you are good to go!  If not, then you need to install the missing ones (except for the raman_database.pkl, that can be added later) before proceeding.
-4. After all dependecies are installed, you are good to go.
+3. Make sure all the check boxes are checked on the output. If they are, then you are good to go! If not, then you need to install the missing ones (except for the raman_database.pkl, that can be added later) before proceeding.
+4. After all dependencies are installed, you are good to go:
    ```bash
    python3 main.py
    ```
@@ -95,11 +103,17 @@ python3 main.py
   - matplotlib >= 3.0.0
   - scipy >= 1.2.0
   - pandas >= 0.25.0
-  - scikit-learn >= 0.21.0 (for ML search functionality)
-  - dask (for large dataset processing)
+  - scikit-learn >= 0.21.0 (for ML functionality)
+  - seaborn >= 0.11.0 (for enhanced visualizations)
+  - mplcursors >= 0.5.0 (for interactive plots)
 
 - Optional packages:
   - reportlab >= 3.5.0 (for PDF export)
+  - openpyxl >= 3.0.0 (for Excel support)
+  - pillow >= 8.0.0 (for image processing)
+  - tensorflow >= 2.12.0 (for deep learning)
+  - keras >= 2.12.0 (for deep learning models)
+  - fastdtw >= 0.3.4 (for DTW-based matching)
 
 ## Usage
 
@@ -127,18 +141,22 @@ python3 main.py
    - Auto subtract/refine background
    - View and export results
 
-6. **2D Map Analysis** (New!)
+6. **2D Map Analysis**
    - Import Raman mapping data from directory
    - Create heatmaps for various spectral features
-   - Apply template matching for component identification
+   - Apply template matching for component identification:
+     - Load and manage template spectra
+     - Fit templates to map data
+     - View coefficient maps and percentages
+     - Export analysis results
    - Filter cosmic rays automatically
    - Use machine learning for classification and clustering
    - Export analysis results and publication-quality images
 
 ## Project Structure
 
-All files should be in the same directory
-- `main.py` - just run this from terminal: python3 main.py
+All files should be in the same directory:
+- `main.py` - Main application entry point
 - `raman_analysis_app.py` - Main application GUI
 - `raman_spectra.py` - Core spectrum processing functionality
 - `check_dependencies.py` - Dependency verification
@@ -147,8 +165,8 @@ All files should be in the same directory
 - `batch_peak_fitting.py` - Batch fitting
 - `map_analysis_2d.py` - 2D Raman map analysis
 - `ml_raman_map/` - Machine learning modules for map analysis
-- `raman_database.pkl` - Database of Raman spectra https://drive.google.com/drive/folders/1U1Wk9N82M9zt0PawAxlwHxPIHrpYpzkW?usp=drive_link
-- `RRUFF_Export_with_Hey_Classifcation.csv` - this is needed for adding new entries to the database so everything is mapped propertly. 
+- `raman_database.pkl` - Database of Raman spectra
+- `RRUFF_Export_with_Hey_Classifcation.csv` - Required for database mapping
 
 ## License
 
@@ -157,13 +175,11 @@ MIT
 ## Author
 
 Aaron Celestian, Ph.D.
-Curator of Mineal Sciences
+Curator of Mineral Sciences
 Natural History Museum of Los Angeles County
 
 ## Acknowledgments
 
-- RRUFF database for reference spectra
-    www.rruff.info
-- SLOPP and SLOPP-E for reference plastic spectra; 
-    https://rochmanlab.wordpress.com/spectral-libraries-for-microplastics-research/
-- Scientific community for Raman spectroscopy resources 
+- RRUFF database for reference spectra (www.rruff.info)
+- SLOPP and SLOPP-E for reference plastic spectra (https://rochmanlab.wordpress.com/spectral-libraries-for-microplastics-research/)
+- Scientific community for Raman spectroscopy resources
