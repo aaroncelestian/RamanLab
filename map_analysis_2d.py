@@ -36,6 +36,7 @@ warnings.filterwarnings('ignore')
 from scipy.optimize import nnls, lsq_linear
 from scipy import sparse
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -101,8 +102,48 @@ class TemplateSpectraManager:
             if name is None:
                 name = Path(filepath).stem
             
-            # Load the data
-            data = np.loadtxt(filepath)
+            # Determine file type based on extension
+            file_ext = Path(filepath).suffix.lower()
+            
+            # Load the data based on file type and try different separators
+            if file_ext in ['.csv', '.txt']:
+                # Try different separators
+                separators = [',', '\t', ' ', ';']
+                data = None
+                
+                # Try to load the file with different separators
+                for sep in separators:
+                    try:
+                        # Try with pandas first which is more flexible with different file formats
+                        import pandas as pd
+                        df = pd.read_csv(filepath, sep=sep, header=None, comment='#')
+                        
+                        # Check if we have at least 2 columns
+                        if df.shape[1] >= 2:
+                            # Extract wavenumbers and intensities
+                            wavenumbers = df.iloc[:, 0].values
+                            intensities = df.iloc[:, 1].values
+                            data = np.column_stack((wavenumbers, intensities))
+                            break
+                    except Exception as e:
+                        logger.debug(f"Failed to load {filepath} with separator '{sep}': {str(e)}")
+                        continue
+                
+                # If pandas methods fail, try numpy loadtxt as fallback
+                if data is None:
+                    try:
+                        data = np.loadtxt(filepath)
+                    except Exception as e:
+                        logger.debug(f"Failed to load {filepath} with np.loadtxt: {str(e)}")
+                
+                # If all loading methods fail, raise exception
+                if data is None:
+                    raise ValueError(f"Could not parse file {filepath} with any known separator")
+            else:
+                # Default to numpy loadtxt for other file types
+                data = np.loadtxt(filepath)
+            
+            # Extract wavenumbers and intensities
             wavenumbers = data[:, 0]
             intensities = data[:, 1]
             
@@ -141,7 +182,15 @@ class TemplateSpectraManager:
         """
         try:
             dir_path = Path(directory)
-            files = list(dir_path.glob('*.txt'))
+            
+            # Look for both CSV and TXT files
+            csv_files = list(dir_path.glob('*.csv'))
+            txt_files = list(dir_path.glob('*.txt'))
+            files = csv_files + txt_files
+            
+            if not files:
+                logger.warning(f"No .csv or .txt files found in directory {directory}")
+                return 0
             
             # Use ThreadPoolExecutor for parallel loading
             with ThreadPoolExecutor() as executor:
@@ -319,42 +368,55 @@ class RamanMapData:
     
     def __init__(self, data_dir: str, target_wavenumbers: Optional[np.ndarray] = None):
         """
-        Initialize with data directory.
+        Initialize the RamanMapData.
         
         Parameters:
         -----------
         data_dir : str
-            Directory containing spectrum files
+            Directory containing map data files or a single processed data file (.pkl)
         target_wavenumbers : Optional[np.ndarray]
-            Target wavenumber values for resampling (if None, will use automated detection)
+            Target wavenumber values for resampling
         """
-        self.data_dir = Path(data_dir)
-        self.spectra: Dict[Tuple[int, int], SpectrumData] = {}
-        self.x_positions: List[int] = []
-        self.y_positions: List[int] = []
-        self.wavenumbers: Optional[np.ndarray] = None
+        # Maps with resolution x, y
+        self.map_xrange = None
+        self.map_yrange = None
+        self.spectra = {}  # Dictionary to store spectra by (x, y) position
+        self.data_dir = data_dir
         
-        # Set up target wavenumbers for resampling
+        # ML/Analysis results
+        self.ml_results = None
+        
+        # Template management
         if target_wavenumbers is None:
             self.target_wavenumbers = np.linspace(100, 3500, 400)
         else:
             self.target_wavenumbers = target_wavenumbers
-            
-        # Add template manager
+        
         self.template_manager = TemplateSpectraManager(self.target_wavenumbers)
+        self.template_fits = {}  # Will store template fitting results by (x, y) position
         
-        # Store template fitting results
-        self.template_coefficients: Dict[Tuple[int, int], np.ndarray] = {}
-        self.template_residuals: Dict[Tuple[int, int], float] = {}
+        # Flag to track if data is loaded
+        self.is_loaded = False
         
-        # Set default cosmic ray detection parameters - more sensitive defaults
-        self._cre_threshold_factor = 4.0  # Reduced from 5.0
-        self._cre_window_size = 3  # Reduced from 5
-        self._cre_min_width_ratio = 0.15  # Increased from 0.1
-        self._cre_max_fwhm = 7.0  # Increased from 5.0
+        # Properties for template fitting analysis
+        self.fitted = False
         
-        # Load data if directory exists
-        if self.data_dir.exists() and self.data_dir.is_dir():
+        # Set default cosmic ray detection parameters - less sensitive defaults
+        self._cre_threshold_factor = 9.0  # Increased from 6.0 to be even less sensitive
+        self._cre_window_size = 5
+        self._cre_min_width_ratio = 0.1
+        self._cre_max_fwhm = 5.0
+        
+        # Load the data
+        if data_dir.endswith('.pkl'):
+            # This is a processed data file, load directly
+            try:
+                self.load_processed_data(data_dir)
+            except Exception as e:
+                logger.error(f"Error loading processed data: {str(e)}")
+                self.is_loaded = False
+        else:
+            # This is a directory, load all files
             self._load_data()
     
     def _parse_filename(self, filename: str) -> Tuple[int, int]:
@@ -904,6 +966,167 @@ class RamanMapData:
             # Fallback if peak finding fails
             # Rely only on sign changes and intensity ratio
             return num_sign_changes >= 4 and intensity_ratio > 8.0
+        
+    def _detect_complex_cosmic_ray(self, wavenumbers: np.ndarray, intensities: np.ndarray) -> bool:
+        """
+        Detect complex, undulating cosmic ray patterns in Raman spectra.
+        This method can detect various shapes of cosmic rays, not just W-shaped patterns.
+        
+        Parameters:
+        -----------
+        wavenumbers : np.ndarray
+            Wavenumber values
+        intensities : np.ndarray
+            Intensity values
+            
+        Returns:
+        --------
+        bool
+            True if a complex cosmic ray pattern is detected, False otherwise
+        """
+        # First, check the entire spectrum for regions of high variability
+        # We'll use a sliding window approach
+        window_size = 15  # Points to analyze at once
+        
+        if len(intensities) < window_size * 2:
+            return False
+            
+        # Look for regions with strong local variations and undulations
+        potential_regions = []
+        
+        for i in range(0, len(intensities) - window_size, window_size // 2):
+            window = intensities[i:i+window_size]
+            
+            # Calculate metrics for this window
+            window_mean = np.mean(window)
+            window_median = np.median(window)
+            window_max = np.max(window)
+            window_min = np.min(window)
+            
+            # Point-to-point changes
+            point_changes = np.abs(np.diff(window))
+            max_point_change = np.max(point_changes)
+            
+            # Calculate relative changes
+            relative_range = (window_max - window_min) / (window_median if window_median > 0 else 1.0)
+            normalized_max_change = max_point_change / (window_median if window_median > 0 else 1.0)
+            
+            # Look for sign changes in the derivative (undulations)
+            window_deriv = np.diff(window)
+            sign_changes = np.diff(np.signbit(window_deriv))
+            num_sign_changes = np.sum(sign_changes)
+            
+            # If this region shows characteristics of a cosmic ray, add to potential regions
+            if (num_sign_changes >= 2 and  # Multiple direction changes (undulations)
+                normalized_max_change > 0.5 and  # Sharp intensity changes
+                relative_range > 1.5):  # Large relative range
+                
+                potential_regions.append((i, i+window_size, 
+                                        num_sign_changes, 
+                                        normalized_max_change,
+                                        relative_range))
+        
+        # If no potential regions found, check the original specific pattern as a fallback
+        if not potential_regions:
+            # Try the original narrow wavenumber range as a fallback for specific cases
+            indices = np.where((wavenumbers >= 1315) & (wavenumbers <= 1345))[0]
+            
+            if len(indices) >= 10:
+                region_int = intensities[indices]
+                point_to_point_changes = np.abs(np.diff(region_int))
+                max_intensity_change = np.max(point_to_point_changes) if len(point_to_point_changes) > 0 else 0
+                region_median = np.median(region_int)
+                normalized_max_change = max_intensity_change / max(region_median, 1.0)
+                
+                # Check for the specific pattern that was previously detected
+                if normalized_max_change > 0.8:
+                    large_jumps = np.where(point_to_point_changes > 0.5 * max_intensity_change)[0]
+                    if len(large_jumps) >= 2 and (large_jumps[-1] - large_jumps[0]) <= 12:
+                        return True
+            
+            return False
+        
+        # Analyze each potential region in more detail
+        for start_idx, end_idx, sign_changes, norm_change, rel_range in potential_regions:
+            # Extract the region of interest
+            region_int = intensities[start_idx:end_idx]
+            
+            # Get variance ratio compared to rest of spectrum
+            region_variance = np.var(region_int)
+            
+            # Get a broader context for comparison to avoid including 
+            # other cosmic rays in the comparison
+            context_start = max(0, start_idx - window_size * 2)
+            context_end = min(len(intensities), end_idx + window_size * 2)
+            
+            # Get a representative sample of the spectrum excluding this region
+            context_intensities = np.concatenate([
+                intensities[context_start:start_idx],
+                intensities[end_idx:context_end]
+            ])
+            
+            if len(context_intensities) < 5:
+                continue  # Not enough context to analyze
+                
+            context_variance = np.var(context_intensities)
+            context_median = np.median(context_intensities)
+            
+            # Calculate variance ratio and intensity ratios
+            variance_ratio = region_variance / max(context_variance, 1e-10)
+            intensity_ratio = np.max(region_int) / max(context_median, 1.0)
+            
+            # Advanced analysis of peak and valley patterns
+            from scipy.signal import find_peaks
+            try:
+                # Find peaks and valleys
+                peaks, _ = find_peaks(region_int)
+                valleys, _ = find_peaks(-region_int)
+                
+                # A complex cosmic ray typically has multiple peaks/valleys in close proximity
+                has_peaks_and_valleys = len(peaks) >= 1 and len(valleys) >= 1
+                
+                # Check if peaks and valleys alternate (characteristic of undulating patterns)
+                alternating = False
+                if len(peaks) > 0 and len(valleys) > 0:
+                    # Combine peaks and valleys and sort by position
+                    features = [(p, 'peak') for p in peaks] + [(v, 'valley') for v in valleys]
+                    features.sort(key=lambda x: x[0])
+                    
+                    # Count alternations between peaks and valleys
+                    alternations = 0
+                    for i in range(1, len(features)):
+                        if features[i][1] != features[i-1][1]:
+                            alternations += 1
+                    
+                    alternating = alternations >= 2  # At least 2 alternations
+                
+                # Criteria for cosmic ray detection - now more flexible for different shapes
+                is_cosmic_ray = (
+                    # Must have either high variance ratio OR high intensity ratio
+                    (variance_ratio > 3.0 or intensity_ratio > 4.0) and
+                    # Must have undulations (sign changes in derivative)
+                    sign_changes >= 2 and
+                    # Sharp local changes
+                    norm_change > 0.7 and
+                    # Must have some peak/valley structure
+                    (has_peaks_and_valleys or alternating)
+                )
+                
+                if is_cosmic_ray:
+                    return True
+                    
+            except Exception as e:
+                # If peak analysis fails, use simpler criteria
+                is_cosmic_ray = (
+                    sign_changes >= 3 and
+                    norm_change > 1.0 and
+                    rel_range > 2.0
+                )
+                
+                if is_cosmic_ray:
+                    return True
+        
+        return False
     
     def _load_spectrum(self, filepath: Path) -> Optional[SpectrumData]:
         """
@@ -1435,48 +1658,87 @@ class RamanMapData:
                         map_data[i, j] = np.argmax(template_coeffs)
         
         return map_data
+        
+    def get_total_template_contributions(self, normalized: bool = True) -> dict:
+        """
+        Calculate the total contribution of each template across the entire map.
+        
+        Parameters:
+        -----------
+        normalized : bool
+            Whether to return normalized contributions (as percentages)
+            
+        Returns:
+        --------
+        dict
+            Dictionary with template names as keys and their total contributions as values
+        """
+        if not self.template_coefficients:
+            return {}
+            
+        # Get number of templates and their names
+        n_templates = self.template_manager.get_template_count()
+        template_names = self.template_manager.get_template_names()
+        
+        # Initialize dictionary to store total contributions for each template
+        total_contributions = {name: 0.0 for name in template_names}
+        
+        # Sum contributions across all map points
+        for (x, y), coeffs in self.template_coefficients.items():
+            # Only consider template coefficients (exclude baseline if present)
+            template_coeffs = coeffs[:n_templates] if len(coeffs) > n_templates else coeffs
+            for i, coeff in enumerate(template_coeffs):
+                if i < len(template_names):
+                    total_contributions[template_names[i]] += coeff
+        
+        # Normalize if requested
+        if normalized and sum(total_contributions.values()) > 0:
+            total_sum = sum(total_contributions.values())
+            for name in total_contributions:
+                total_contributions[name] = (total_contributions[name] / total_sum) * 100
+        
+        return total_contributions
 
 class TwoDMapAnalysisWindow:
     """Window for 2D map analysis of Raman spectra."""
     
     def __init__(self, parent, raman_app):
         """
-        Initialize the 2D map analysis window.
+        Initialize the 2D Map Analysis Window.
         
         Parameters:
         -----------
         parent : tk.Tk or tk.Toplevel
             Parent window
         raman_app : RamanAnalysisApp
-            Reference to the main application instance
+            Main application instance
         """
+        # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("2D Map Analysis")
-        self.window.geometry("1300x700")
-        self.window.minsize(1100, 600)
+        self.window.geometry("1400x800")
+        self.window.minsize(1000, 600)
         
-        # Store references
-        self.parent = parent
+        # Store reference to main app
         self.raman_app = raman_app
         
-        # Variables
+        # Set up initial variables
         self.map_data = None
         self.current_feature = tk.StringVar(value="Integrated Intensity")
-        self.interpolation_method = tk.StringVar(value="cubic")
         self.use_processed = tk.BooleanVar(value=True)
         
-        # Template variables
-        self.selected_template = tk.IntVar(value=0)
+        # Template analysis variables
         self.template_fitting_method = tk.StringVar(value="nnls")
         self.use_baseline = tk.BooleanVar(value=True)
         self.normalize_coefficients = tk.BooleanVar(value=True)
         self.filter_cosmic_rays = tk.BooleanVar(value=True)  # Add cosmic ray filtering option
+        self.selected_template = tk.IntVar(value=0)  # Add missing selected_template attribute
         
-        # Cosmic ray detection parameters - more sensitive defaults
-        self.cre_threshold_factor = tk.DoubleVar(value=4.0)  # Reduced from 5.0
-        self.cre_window_size = tk.IntVar(value=3)  # Reduced from 5
-        self.cre_min_width_ratio = tk.DoubleVar(value=0.15)  # Increased from 0.1
-        self.cre_max_fwhm = tk.DoubleVar(value=7.0)  # Increased from 5.0
+        # Cosmic ray detection parameters - less sensitive defaults for better handling of real data
+        self.cre_threshold_factor = tk.DoubleVar(value=9.0)  # Increased from 6.0 to be even less sensitive
+        self.cre_window_size = tk.IntVar(value=5)  # Back to 5 (default)
+        self.cre_min_width_ratio = tk.DoubleVar(value=0.1)  # Back to 0.1 (default)
+        self.cre_max_fwhm = tk.DoubleVar(value=5.0)  # Back to 5.0 (default)
         
         # Track colorbar
         self.colorbar = None
@@ -1574,6 +1836,15 @@ class TwoDMapAnalysisWindow:
         max_entry = ttk.Entry(max_frame, textvariable=self.max_wavenumber, width=8)
         max_entry.pack(side=tk.RIGHT)
         
+        # Peak width threshold - Create but don't add to layout by default
+        # (We'll keep this for other features that might use it)
+        self.peak_width_frame = ttk.Frame(self.wavenumber_range_frame)
+        ttk.Label(self.peak_width_frame, text="Peak Width:").pack(side=tk.LEFT)
+        self.peak_width = tk.StringVar(value="10")
+        width_entry = ttk.Entry(self.peak_width_frame, textvariable=self.peak_width, width=8)
+        width_entry.pack(side=tk.RIGHT)
+        # Note: peak_width_frame is not packed here as it's not used for Integrated Intensity
+        
         # Correlation threshold frame
         self.correlation_frame = ttk.LabelFrame(feature_frame, text="Correlation Settings", padding=5)
         self.correlation_frame.pack(fill=tk.X, pady=2)
@@ -1585,14 +1856,6 @@ class TwoDMapAnalysisWindow:
         self.correlation_threshold = tk.DoubleVar(value=0.5)
         threshold_entry = ttk.Entry(threshold_frame, textvariable=self.correlation_threshold, width=8)
         threshold_entry.pack(side=tk.RIGHT)
-        
-        # Peak width threshold
-        width_frame = ttk.Frame(self.wavenumber_range_frame)
-        width_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(width_frame, text="Peak Width:").pack(side=tk.LEFT)
-        self.peak_width = tk.StringVar(value="10")
-        width_entry = ttk.Entry(width_frame, textvariable=self.peak_width, width=8)
-        width_entry.pack(side=tk.RIGHT)
         
         # ML visualization components selector
         self.ml_components_frame = ttk.LabelFrame(feature_frame, text="ML Components", padding=5)
@@ -1619,6 +1882,24 @@ class TwoDMapAnalysisWindow:
         ttk.Checkbutton(process_frame, text="Use Processed Data",
                        variable=self.use_processed,
                        command=self.update_map).pack(anchor=tk.W)
+        
+        # Add cosmic ray filter toggle option for quick access
+        ttk.Checkbutton(process_frame, text="Filter Cosmic Rays (Global)",
+                       variable=self.filter_cosmic_rays).pack(anchor=tk.W)
+        
+        # Add a note about cosmic ray sensitivity
+        ttk.Label(process_frame, text="Note: Higher threshold = less filtering",
+                 font=('Arial', 8, 'italic')).pack(anchor=tk.W)
+        
+        # Add option to adjust threshold
+        cosmic_thresh_frame = ttk.Frame(process_frame)
+        cosmic_thresh_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(cosmic_thresh_frame, text="Sensitivity (1-10):").pack(side=tk.LEFT)
+        cosmic_thresh_scale = ttk.Scale(cosmic_thresh_frame, from_=1.0, to=10.0, 
+                                      variable=self.cre_threshold_factor, 
+                                      orient=tk.HORIZONTAL)
+        cosmic_thresh_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))
+        ttk.Label(cosmic_thresh_frame, textvariable=self.cre_threshold_factor).pack(side=tk.RIGHT, padx=(0, 5))
         
         # Colormap selection
         colormap_frame = ttk.LabelFrame(controls_frame, text="Visualization", padding=5)
@@ -1716,14 +1997,17 @@ class TwoDMapAnalysisWindow:
         self.toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame)
         self.toolbar.update()
         
-        # Create Advanced Analysis tabs
+        # Create tabs in the order we want:
+        # 1. First, create the advanced analysis tabs (PCA, NMF, Results)
         self.create_advanced_analysis_tabs()
         
-        # Create Template Analysis tab
-        self.create_template_analysis_tab()
-        
-        # Create Classify Spectra tab (moved from left panel)
+        # 2. Then create the ML tab (Classify Spectra)
         self.create_ml_tab()
+        
+        # 3. Create the RF tab (Model Tools) - handled within create_ml_tab 
+        
+        # 4. Finally, create the Template Analysis tab
+        self.create_template_analysis_tab()
     
     def on_feature_selected(self, event=None):
         """Handle feature selection change"""
@@ -1736,9 +2020,14 @@ class TwoDMapAnalysisWindow:
         if hasattr(self, 'template_selection_frame'):
             self.template_selection_frame.pack_forget()
         
+        # Hide the peak width frame if it exists
+        if hasattr(self, 'peak_width_frame'):
+            self.peak_width_frame.pack_forget()
+        
         # Show appropriate frames based on feature selected
         if feature == "Integrated Intensity":
             self.wavenumber_range_frame.pack(fill=tk.X, pady=2)
+            # Note: peak_width_frame is not shown for Integrated Intensity
         elif feature == "Template Coefficient":
             self.template_selection_frame.pack(fill=tk.X, pady=2)
             self.update_template_combo()
@@ -1775,7 +2064,12 @@ class TwoDMapAnalysisWindow:
             return
         
         filepath = filedialog.askopenfilename(
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            filetypes=[
+                ("Spectrum files", "*.csv;*.txt"),
+                ("CSV files", "*.csv"),
+                ("Text files", "*.txt"),
+                ("All files", "*.*")
+            ],
             title="Select Template Spectrum"
         )
         
@@ -3118,7 +3412,7 @@ class TwoDMapAnalysisWindow:
         self.window.destroy()
 
     def create_advanced_analysis_tabs(self):
-        """Create tabs for advanced analysis (PCA, NMF, Random Forest)."""
+        """Create tabs for advanced analysis (PCA, NMF)."""
         # PCA Tab
         self.pca_tab = ttk.Frame(self.viz_notebook)
         self.viz_notebook.add(self.pca_tab, text="PCA")
@@ -3129,14 +3423,12 @@ class TwoDMapAnalysisWindow:
         self.viz_notebook.add(self.nmf_tab, text="NMF")
         self._create_nmf_controls()
         
-        # Random Forest Tab
+        # Create RF tab but don't add it yet - will be added in create_ml_tab
         self.rf_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(self.rf_tab, text="Model Tools")
         self._create_rf_controls()
         
-        # Results Tab
+        # Create Results Tab but don't add it yet - will be added after Model Tools
         self.results_tab = ttk.Frame(self.viz_notebook)
-        self.viz_notebook.add(self.results_tab, text="Results")
         self._create_results_controls()
 
     def _create_pca_controls(self):
@@ -3202,6 +3494,7 @@ class TwoDMapAnalysisWindow:
         button_frame.pack(fill=tk.X, pady=5)
         ttk.Button(button_frame, text="Run NMF", command=self.run_nmf).pack(side=tk.LEFT, padx=2)
         ttk.Button(button_frame, text="Save Results", command=self.save_nmf_results).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Save Spectra", command=self.save_nmf_spectra).pack(side=tk.LEFT, padx=2)
         
         # Results frame
         results_frame = ttk.LabelFrame(self.nmf_tab, text="NMF Results", padding=10)
@@ -3312,9 +3605,10 @@ class TwoDMapAnalysisWindow:
         # Create the ML tab
         self.ml_tab = ttk.Frame(self.viz_notebook)
         
-        # Add the tab in the correct position (after NMF, before Random Forest)
-        tab_index = self.viz_notebook.index("end") - 2  # Position before RF tab
-        self.viz_notebook.insert(tab_index, self.ml_tab, text="Classify Spectra")
+        # Add tabs in the desired order: Classify Spectra, Model Tools, Results
+        self.viz_notebook.add(self.ml_tab, text="Classify Spectra")
+        self.viz_notebook.add(self.rf_tab, text="Model Tools")
+        self.viz_notebook.add(self.results_tab, text="Results")
         
         # Initialize variables
         self.class_a_dir = tk.StringVar()
@@ -3405,6 +3699,34 @@ class TwoDMapAnalysisWindow:
         
         # Make the first column (labels) expandable
         param_frame.columnconfigure(0, weight=1)
+        
+        # Add Cosmic Ray Detection controls
+        cre_frame = ttk.LabelFrame(training_frame, text="Cosmic Ray Detection Settings", padding=5)
+        cre_frame.pack(fill=tk.X, expand=True, pady=5)
+        
+        # Sensitivity threshold
+        thresh_frame = ttk.Frame(cre_frame)
+        thresh_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(thresh_frame, text="Sensitivity Threshold:").pack(side=tk.LEFT)
+        # Use the existing cre_threshold_factor variable
+        thresh_scale = ttk.Scale(thresh_frame, from_=1.0, to=15.0, 
+                              variable=self.cre_threshold_factor, 
+                              orient=tk.HORIZONTAL)
+        thresh_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        ttk.Label(thresh_frame, textvariable=self.cre_threshold_factor).pack(side=tk.RIGHT)
+        ttk.Label(cre_frame, text="Note: Higher value = less sensitive detection", 
+                 font=('Arial', 8, 'italic')).pack(anchor=tk.W)
+        
+        # Window size for local analysis
+        window_frame = ttk.Frame(cre_frame)
+        window_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(window_frame, text="Window Size:").pack(side=tk.LEFT)
+        window_spin = ttk.Spinbox(window_frame, from_=3, to=15, textvariable=self.cre_window_size, width=5)
+        window_spin.pack(side=tk.RIGHT)
+        
+        # Add toggle for cosmic ray filter to make it obvious
+        ttk.Checkbutton(cre_frame, text="Enable Cosmic Ray Filtering",
+                      variable=self.filter_cosmic_rays).pack(anchor=tk.W, pady=2)
         
         # Train and Predict buttons side by side
         button_frame = ttk.Frame(training_frame)
@@ -3499,12 +3821,29 @@ class TwoDMapAnalysisWindow:
                 wavenumbers = data[:, 0]
                 intensities = data[:, 1]
                 
-                # Detect cosmic rays
+                if not self.filter_cosmic_rays.get():
+                    # Skip cosmic ray detection completely if disabled
+                    total_spectra += 1
+                    processed = preprocess_spectrum(wavenumbers, intensities, target_wavenumbers)
+                    if processed.shape[0] == expected_length:
+                        return processed[:, 1], class_label  # Only intensities
+                    return None, None
+                
+                # Get the current threshold settings
+                threshold = self.cre_threshold_factor.get()
+                window = self.cre_window_size.get()
+                
+                # Special adjustment for ML training: 
+                # Since we don't want too many false positives in training data,
+                # make detection even less sensitive for ML training
+                ml_threshold_adjustment = 1.5  # Further reduce sensitivity for ML training
+                
+                # Detect cosmic rays with adjusted (less sensitive) parameters
                 has_cosmic_ray, cleaned_intensities = self.map_data.detect_cosmic_rays(
                     wavenumbers, 
                     intensities,
-                    threshold_factor=self.cre_threshold_factor.get(),
-                    window_size=self.cre_window_size.get(),
+                    threshold_factor=threshold * ml_threshold_adjustment,  # Make less sensitive for ML
+                    window_size=window,
                     min_width_ratio=self.cre_min_width_ratio.get(),
                     max_fwhm=self.cre_max_fwhm.get()
                 )
@@ -3576,8 +3915,27 @@ class TwoDMapAnalysisWindow:
         self.ml_results_text.insert(tk.END, f"Confusion Matrix:\n{cm}\n")
         self.ml_results_text.insert(tk.END, f"Classification Report:\n{report}\n")
         self.ml_results_text.insert(tk.END, f"\nCosmic Ray Detection:\n")
-        self.ml_results_text.insert(tk.END, f"Total spectra: {total_spectra}\n")
-        self.ml_results_text.insert(tk.END, f"Cosmic rays detected: {cosmic_ray_count} ({cosmic_ray_count/total_spectra:.1%})\n")
+        
+        # Show if cosmic ray detection was enabled
+        if self.filter_cosmic_rays.get():
+            actual_threshold = self.cre_threshold_factor.get() * 1.5  # Show the adjusted value
+            self.ml_results_text.insert(tk.END, f"Status: Enabled\n")
+            self.ml_results_text.insert(tk.END, f"Base Threshold: {self.cre_threshold_factor.get():.1f}\n")
+            self.ml_results_text.insert(tk.END, f"Adjusted ML Threshold: {actual_threshold:.1f}\n")
+            self.ml_results_text.insert(tk.END, f"Window Size: {self.cre_window_size.get()}\n")
+            self.ml_results_text.insert(tk.END, f"Total spectra: {total_spectra}\n")
+            self.ml_results_text.insert(tk.END, f"Cosmic rays detected: {cosmic_ray_count} ({cosmic_ray_count/total_spectra:.1%})\n")
+            
+            if cosmic_ray_count/total_spectra > 0.1:
+                self.ml_results_text.insert(tk.END, f"\nCosmic ray detection rate is still high. Consider:\n")
+                self.ml_results_text.insert(tk.END, f"1. Increasing the threshold further (currently {self.cre_threshold_factor.get():.1f})\n")
+                self.ml_results_text.insert(tk.END, f"2. Checking your spectra quality - too much noise can trigger false detections\n")
+                self.ml_results_text.insert(tk.END, f"3. Apply smoothing to your spectra before analysis\n")
+                self.ml_results_text.insert(tk.END, f"4. Disable cosmic ray filtering completely\n")
+        else:
+            self.ml_results_text.insert(tk.END, f"Status: Disabled\n")
+            self.ml_results_text.insert(tk.END, f"Total spectra: {total_spectra}\n")
+            
         self.ml_results_text.config(state=tk.DISABLED)
 
     def predict_map(self):
@@ -3893,6 +4251,187 @@ class TwoDMapAnalysisWindow:
         
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save NMF results: {str(e)}")
+    
+    def save_nmf_spectra(self):
+        """Save the top 5 NMF component spectra to CSV files."""
+        if self.nmf is None or self.nmf_components is None:
+            messagebox.showwarning("Warning", "No NMF results to save.")
+            return
+        
+        if not hasattr(self, 'map_data') or self.map_data is None:
+            messagebox.showwarning("Warning", "No map data available.")
+            return
+        
+        try:
+            # Create 'NMF Results' folder in the data directory
+            data_dir = self.map_data.data_dir
+            nmf_results_dir = os.path.join(data_dir, 'NMF Results')
+            
+            # Create the directory if it doesn't exist
+            if not os.path.exists(nmf_results_dir):
+                os.makedirs(nmf_results_dir)
+                
+            # Get the wavenumbers for the x-axis
+            wavenumbers = self.map_data.target_wavenumbers
+            
+            # Number of components to save (up to 5)
+            n_components = min(5, self.nmf.n_components)
+            
+            # Colors for the components
+            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
+            
+            # Create a combined figure to show all components
+            combined_fig, combined_ax = plt.subplots(figsize=(10, 6), dpi=100)
+            
+            # Save each component spectrum to a CSV file and as an image
+            for i in range(n_components):
+                component = self.nmf.components_[i]
+                
+                # Create file paths for this component
+                csv_path = os.path.join(nmf_results_dir, f"NMF_Component_{i+1}.csv")
+                img_path = os.path.join(nmf_results_dir, f"NMF_Component_{i+1}.png")
+                
+                # Create a DataFrame with wavenumbers and intensities
+                import pandas as pd
+                df = pd.DataFrame({
+                    'Wavenumber (cm⁻¹)': wavenumbers,
+                    'Intensity': component
+                })
+                
+                # Save to CSV
+                df.to_csv(csv_path, index=False)
+                
+                # Create and save individual plot
+                fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
+                ax.plot(wavenumbers, component, color=colors[i], linewidth=2)
+                ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=12)
+                ax.set_ylabel('Intensity (a.u.)', fontsize=12)
+                ax.set_title(f'NMF Component {i+1}', fontsize=14, fontweight='bold')
+                ax.grid(True, linestyle='--', alpha=0.7)
+                
+                # Improve appearance
+                ax.spines['top'].set_visible(False)
+                ax.spines['right'].set_visible(False)
+                
+                # Save the figure
+                fig.tight_layout()
+                fig.savefig(img_path, dpi=300, bbox_inches='tight')
+                plt.close(fig)  # Close to free memory
+                
+                # Add to combined plot
+                combined_ax.plot(wavenumbers, component, color=colors[i], linewidth=2, 
+                               label=f'Component {i+1}')
+            
+            # Finalize combined plot
+            combined_ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=12)
+            combined_ax.set_ylabel('Intensity (a.u.)', fontsize=12)
+            combined_ax.set_title('NMF Components', fontsize=14, fontweight='bold')
+            combined_ax.grid(True, linestyle='--', alpha=0.7)
+            combined_ax.legend(loc='best', frameon=True, fancybox=True, shadow=True)
+            
+            # Improve appearance
+            combined_ax.spines['top'].set_visible(False)
+            combined_ax.spines['right'].set_visible(False)
+            
+            # Save combined figure
+            combined_fig.tight_layout()
+            combined_fig.savefig(os.path.join(nmf_results_dir, "NMF_All_Components.png"), 
+                              dpi=300, bbox_inches='tight')
+            plt.close(combined_fig)  # Close to free memory
+            
+            # Also save a summary file with metadata
+            summary_path = os.path.join(nmf_results_dir, "NMF_Summary.txt")
+            with open(summary_path, 'w') as f:
+                f.write("=== NMF Analysis Summary ===\n\n")
+                f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Number of components: {self.nmf.n_components}\n")
+                f.write(f"Reconstruction error: {self.nmf.reconstruction_err_:.6f}\n")
+                f.write(f"Data shape: {self.nmf.components_.shape}\n\n")
+                f.write("Files in this directory:\n")
+                for i in range(n_components):
+                    f.write(f"- NMF_Component_{i+1}.csv: Component {i+1} spectrum data\n")
+                    f.write(f"- NMF_Component_{i+1}.png: Component {i+1} spectrum image\n")
+                f.write(f"- NMF_All_Components.png: Combined plot of all components\n")
+                f.write(f"- NMF_Summary.txt: This summary file\n")
+            
+            # Create additional HTML report for easier viewing
+            html_path = os.path.join(nmf_results_dir, "NMF_Report.html")
+            with open(html_path, 'w') as f:
+                f.write(f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>NMF Analysis Results</title>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+                        h1 {{ color: #2c3e50; }}
+                        h2 {{ color: #3498db; }}
+                        .container {{ max-width: 1200px; margin: 0 auto; }}
+                        .info {{ background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
+                        .components {{ display: flex; flex-wrap: wrap; justify-content: center; }}
+                        .component {{ margin: 10px; text-align: center; }}
+                        img {{ max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 5px; }}
+                        table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
+                        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                        th {{ background-color: #f2f2f2; }}
+                        tr:nth-child(even) {{ background-color: #f9f9f9; }}
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>NMF Analysis Results</h1>
+                        <div class="info">
+                            <h2>Analysis Summary</h2>
+                            <p><strong>Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                            <p><strong>Number of components:</strong> {self.nmf.n_components}</p>
+                            <p><strong>Reconstruction error:</strong> {self.nmf.reconstruction_err_:.6f}</p>
+                        </div>
+                        
+                        <h2>All Components</h2>
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <img src="NMF_All_Components.png" alt="All NMF Components" style="max-width: 800px;">
+                        </div>
+                        
+                        <h2>Individual Components</h2>
+                        <div class="components">
+                """)
+                
+                # Add each component
+                for i in range(n_components):
+                    f.write(f"""
+                            <div class="component">
+                                <h3>Component {i+1}</h3>
+                                <img src="NMF_Component_{i+1}.png" alt="NMF Component {i+1}">
+                                <p><a href="NMF_Component_{i+1}.csv">Download CSV data</a></p>
+                            </div>
+                    """)
+                
+                f.write("""
+                        </div>
+                    </div>
+                </body>
+                </html>
+                """)
+            
+            messagebox.showinfo("Success", f"NMF spectra saved to {nmf_results_dir}\n\nAn HTML report has also been created for easy viewing.")
+            
+            # Ask if user wants to open the folder
+            if messagebox.askyesno("Open Folder", "Do you want to open the NMF Results folder?"):
+                import subprocess
+                import platform
+                
+                # Open folder based on operating system
+                if platform.system() == "Windows":
+                    os.startfile(nmf_results_dir)
+                elif platform.system() == "Darwin":  # macOS
+                    subprocess.run(["open", nmf_results_dir])
+                else:  # Linux
+                    subprocess.run(["xdg-open", nmf_results_dir])
+                    
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save NMF spectra: {str(e)}")
+            import traceback
+            print(f"Error details: {traceback.format_exc()}")
     
     def save_rf_model(self):
         """Save Random Forest model to file."""
@@ -4646,7 +5185,7 @@ class TwoDMapAnalysisWindow:
                 messagebox.showerror("Error", f"Failed to open CSV: {str(e)}")
     
     def create_template_analysis_tab(self):
-        """Create template analysis tab."""
+        """Create the template analysis tab with its controls."""
         template_tab = ttk.Frame(self.viz_notebook)
         self.viz_notebook.add(template_tab, text="Template Analysis")
         
@@ -4762,6 +5301,10 @@ class TwoDMapAnalysisWindow:
         
         ttk.Button(export_frame, text="Export Analysis", 
                   command=self.export_template_analysis).pack(fill=tk.X, pady=2)
+        
+        # Add button to show total template contributions
+        ttk.Button(export_frame, text="Show Total Contributions", 
+                  command=self.show_total_template_contributions).pack(fill=tk.X, pady=2)
         
         # Template visibility frame
         visibility_frame = ttk.LabelFrame(control_frame, text="Template Visibility", padding=5)
@@ -4885,37 +5428,24 @@ class TwoDMapAnalysisWindow:
     
     def update_template_plot(self, x_pos=None, y_pos=None):
         """Update the template analysis plot."""
-        if not self.map_data or not hasattr(self, 'template_ax'):
+        if not self.map_data:
             return
-        
-        # If x_pos and y_pos are not provided, try to get them from the entry fields
-        if x_pos is None or y_pos is None:
-            try:
-                if hasattr(self, 'template_x_pos') and hasattr(self, 'template_y_pos'):
-                    x_pos = int(self.template_x_pos.get())
-                    y_pos = int(self.template_y_pos.get())
-                else:
-                    # Get the first available position from the map
-                    x_pos = self.map_data.x_positions[0] if self.map_data.x_positions else 0
-                    y_pos = self.map_data.y_positions[0] if self.map_data.y_positions else 0
-            except (ValueError, IndexError):
-                # If we can't get valid positions, return
-                return
+            
+        # Clear the plot
+        self.template_ax.clear()
         
         # Get the spectrum at the specified position
         spectrum = self.map_data.get_spectrum(x_pos, y_pos)
         if spectrum is None:
             return
-        
-        # Clear the plot
-        self.template_ax.clear()
-        
-        # Get the processed spectrum
-        target_wavenumbers = self.map_data.target_wavenumbers
+            
+        # Get processed intensities and target wavenumbers
         processed_intensities = spectrum.processed_intensities
+        target_wavenumbers = self.map_data.target_wavenumbers
         
         # Plot the original spectrum
-        self.template_ax.plot(target_wavenumbers, processed_intensities, 'k-', linewidth=2, label='Original')
+        self.template_ax.plot(target_wavenumbers, processed_intensities, 'k-', 
+                          linewidth=1, label='Original Spectrum')
         
         # Check if templates have been fitted
         if hasattr(self.map_data, 'template_coefficients') and (x_pos, y_pos) in self.map_data.template_coefficients:
@@ -4929,6 +5459,9 @@ class TwoDMapAnalysisWindow:
             template_names = self.map_data.template_manager.get_template_names()
             n_templates = len(template_names)
             
+            # Calculate percentages for visible templates
+            percentages = self.calculate_template_percentages(coeffs, n_templates)
+            
             # Plot individual template contributions
             for i, template in enumerate(self.map_data.template_manager.templates):
                 # Check if this template should be visible
@@ -4939,8 +5472,13 @@ class TwoDMapAnalysisWindow:
                 # Calculate template contribution
                 if i < len(coeffs):
                     contribution = template_matrix[:, i] * coeffs[i]
+                    # Add percentage to label if available
+                    label = f'{template.name} ({coeffs[i]:.3f}'
+                    if percentages and i in percentages:
+                        label += f', {percentages[i]:.1f}%'
+                    label += ')'
                     self.template_ax.plot(target_wavenumbers, contribution, '-', 
-                                      linewidth=1.5, label=f'{template.name} ({coeffs[i]:.3f})')
+                                      linewidth=1.5, label=label)
             
             # Include baseline if used
             if self.use_baseline.get() and len(coeffs) > n_templates:
@@ -5310,3 +5848,161 @@ class TwoDMapAnalysisWindow:
             # Set the min and max values
             self.vmin_var.set(round(data_min - range_padding, 6))
             self.vmax_var.set(round(data_max + range_padding, 6))
+
+    def calculate_template_percentages(self, coeffs, n_templates):
+        """Calculate the percentage contribution of each visible template component."""
+        if not hasattr(self, 'template_visibility'):
+            return None
+            
+        # Get total contribution of visible templates
+        total_visible = 0
+        for i in range(min(n_templates, len(coeffs))):
+            if i in self.template_visibility and self.template_visibility[i].get():
+                total_visible += coeffs[i]
+                
+        # Calculate percentages
+        percentages = {}
+        for i in range(min(n_templates, len(coeffs))):
+            if i in self.template_visibility and self.template_visibility[i].get():
+                if total_visible > 0:
+                    percentages[i] = (coeffs[i] / total_visible) * 100
+                else:
+                    percentages[i] = 0
+                    
+        return percentages
+
+    def show_total_template_contributions(self):
+        """Show a dialog with the total template contributions across the entire map."""
+        if not hasattr(self, 'map_data') or self.map_data is None:
+            messagebox.showinfo("Info", "Load map data first.")
+            return
+        
+        if not hasattr(self.map_data, 'template_coefficients') or not self.map_data.template_coefficients:
+            messagebox.showinfo("Info", "Fit templates to map first.")
+            return
+        
+        # Calculate the total contributions
+        contributions = self.map_data.get_total_template_contributions(
+            normalized=self.normalize_coefficients.get()
+        )
+        
+        if not contributions:
+            messagebox.showinfo("Info", "No template contributions found.")
+            return
+        
+        # Create a new dialog window
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Total Template Contributions")
+        dialog.geometry("800x600")
+        
+        # Create a frame for the plot
+        plot_frame = ttk.Frame(dialog)
+        plot_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create a figure and canvas for the plot
+        fig = plt.Figure(figsize=(10, 6), dpi=100)
+        canvas = FigureCanvasTkAgg(fig, plot_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Add toolbar
+        toolbar = NavigationToolbar2Tk(canvas, plot_frame)
+        toolbar.update()
+        
+        # Create the plot
+        ax = fig.add_subplot(111)
+        
+        # Extract data for plotting
+        names = list(contributions.keys())
+        values = list(contributions.values())
+        
+        # Get colors from the templates if available
+        colors = []
+        for name in names:
+            # Find the template by name
+            template_idx = self.map_data.template_manager.get_template_names().index(name)
+            if template_idx >= 0 and template_idx < len(self.map_data.template_manager.templates):
+                template = self.map_data.template_manager.templates[template_idx]
+                colors.append(template.color)
+            else:
+                # Generate a random color if template not found
+                import random
+                r = random.randint(0, 255)
+                g = random.randint(0, 255)
+                b = random.randint(0, 255)
+                colors.append(f'#{r:02x}{g:02x}{b:02x}')
+        
+        # Create the bar chart
+        bars = ax.bar(names, values, color=colors)
+        
+        # Add labels to the bars
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                   f'{height:.1f}{"%" if self.normalize_coefficients.get() else ""}',
+                   ha='center', va='bottom', fontsize=10)
+        
+        # Set labels and title
+        ax.set_xlabel('Template', fontsize=12)
+        if self.normalize_coefficients.get():
+            ax.set_ylabel('Contribution (%)', fontsize=12)
+            ax.set_title('Normalized Template Contributions', fontsize=14)
+        else:
+            ax.set_ylabel('Total Coefficient Sum', fontsize=12)
+            ax.set_title('Raw Template Contributions', fontsize=14)
+        
+        # Rotate x-axis labels if there are many templates
+        if len(names) > 3:
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        
+        # Adjust layout
+        fig.tight_layout()
+        
+        # Add a button frame at the bottom
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Add export button
+        def export_plot():
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".png",
+                filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"), ("All files", "*.*")],
+                title="Save Plot"
+            )
+            if file_path:
+                try:
+                    fig.savefig(file_path, dpi=300, bbox_inches='tight')
+                    messagebox.showinfo("Success", f"Plot saved to {file_path}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to save plot: {str(e)}")
+        
+        ttk.Button(button_frame, text="Export Plot", command=export_plot).pack(side=tk.LEFT, padx=5)
+        
+        # Add export data button
+        def export_data():
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+                title="Save Data"
+            )
+            if file_path:
+                try:
+                    # Create a DataFrame from the contributions
+                    import pandas as pd
+                    df = pd.DataFrame({
+                        'Template': names,
+                        'Contribution': values
+                    })
+                    df.to_csv(file_path, index=False)
+                    messagebox.showinfo("Success", f"Data saved to {file_path}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to save data: {str(e)}")
+        
+        ttk.Button(button_frame, text="Export Data", command=export_data).pack(side=tk.LEFT, padx=5)
+        
+        # Add close button
+        ttk.Button(button_frame, text="Close", command=dialog.destroy).pack(side=tk.RIGHT, padx=5)
+        
+        # Make dialog modal
+        dialog.transient(self.window)
+        dialog.grab_set()
+        self.window.wait_window(dialog)
