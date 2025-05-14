@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Union
 import pickle
 from dataclasses import dataclass
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from scipy.signal import savgol_filter
 from scipy.interpolate import interp1d
@@ -37,6 +37,9 @@ from scipy.optimize import nnls, lsq_linear
 from scipy import sparse
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from datetime import datetime
+from tqdm import tqdm
+import psutil
+import multiprocessing
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -368,56 +371,28 @@ class RamanMapData:
     
     def __init__(self, data_dir: str, target_wavenumbers: Optional[np.ndarray] = None):
         """
-        Initialize the RamanMapData.
+        Initialize RamanMapData object.
         
         Parameters:
         -----------
         data_dir : str
-            Directory containing map data files or a single processed data file (.pkl)
+            Directory containing the map data files
         target_wavenumbers : Optional[np.ndarray]
-            Target wavenumber values for resampling
+            Target wavenumbers for interpolation
         """
-        # Maps with resolution x, y
-        self.map_xrange = None
-        self.map_yrange = None
-        self.spectra = {}  # Dictionary to store spectra by (x, y) position
-        self.data_dir = data_dir
-        
-        # ML/Analysis results
-        self.ml_results = None
-        
-        # Template management
-        if target_wavenumbers is None:
-            self.target_wavenumbers = np.linspace(100, 3500, 400)
-        else:
-            self.target_wavenumbers = target_wavenumbers
-        
+        self.data_dir = Path(data_dir)
+        self.target_wavenumbers = target_wavenumbers if target_wavenumbers is not None else np.linspace(100, 3500, 400)
+        self.spectra = {}
+        self.x_positions = set()
+        self.y_positions = set()
+        self.wavenumbers = None
         self.template_manager = TemplateSpectraManager(self.target_wavenumbers)
-        self.template_fits = {}  # Will store template fitting results by (x, y) position
-        
-        # Flag to track if data is loaded
-        self.is_loaded = False
-        
-        # Properties for template fitting analysis
-        self.fitted = False
-        
-        # Set default cosmic ray detection parameters - less sensitive defaults
-        self._cre_threshold_factor = 9.0  # Increased from 6.0 to be even less sensitive
-        self._cre_window_size = 5
-        self._cre_min_width_ratio = 0.1
-        self._cre_max_fwhm = 5.0
+        # Initialize template fitting attributes
+        self.template_coefficients = {}
+        self.template_residuals = {}
         
         # Load the data
-        if data_dir.endswith('.pkl'):
-            # This is a processed data file, load directly
-            try:
-                self.load_processed_data(data_dir)
-            except Exception as e:
-                logger.error(f"Error loading processed data: {str(e)}")
-                self.is_loaded = False
-        else:
-            # This is a directory, load all files
-            self._load_data()
+        self._load_data()
     
     def _parse_filename(self, filename: str) -> Tuple[int, int]:
         """
@@ -426,20 +401,36 @@ class RamanMapData:
         Parameters:
         -----------
         filename : str
-            Filename in format 'filename_Y020_X140.txt'
+            Filename in format 'filename_Y12_X078.txt' or similar
             
         Returns:
         --------
         Tuple[int, int]
             (x_position, y_position)
         """
+        # Try the format with Y and X coordinates (e.g., Y12_X078)
         pattern = r'_Y(\d+)_X(\d+)\.txt$'
         match = re.search(pattern, filename)
         if match:
             y_pos = int(match.group(1))
             x_pos = int(match.group(2))
+            # print(f"DEBUG: Parsed coordinates from {filename}: x={x_pos}, y={y_pos}")
             return x_pos, y_pos
-        raise ValueError(f"Invalid filename format: {filename}")
+            
+        print(f"DEBUG: Could not parse coordinates from {filename}")
+        # If no coordinates found, use the filename as a key for sequential positioning
+        if not hasattr(self, '_filename_to_position'):
+            self._filename_to_position = {}
+            self._next_position = 0
+            
+        if filename not in self._filename_to_position:
+            self._filename_to_position[filename] = self._next_position
+            self._next_position += 1
+            
+        # Use the position as both x and y to create a single column of spectra
+        pos = self._filename_to_position[filename]
+        print(f"DEBUG: Using sequential position for {filename}: {pos}")
+        return pos, 0
     
     def _preprocess_spectrum(self, wavenumbers: np.ndarray, intensities: np.ndarray) -> np.ndarray:
         """
@@ -1130,43 +1121,35 @@ class RamanMapData:
     
     def _load_spectrum(self, filepath: Path) -> Optional[SpectrumData]:
         """
-        Load and preprocess a single spectrum file.
+        Load and preprocess a single spectrum file (optimized version).
         
         Parameters:
         -----------
         filepath : Path
             Path to the spectrum file
-            
+                
         Returns:
         --------
         Optional[SpectrumData]
             SpectrumData object if successful, None if failed
         """
         try:
+            # Parse filename for position
             x_pos, y_pos = self._parse_filename(filepath.name)
-            data = np.loadtxt(filepath)
-            wavenumbers = data[:, 0]
-            intensities = data[:, 1]
             
-            # Use custom parameters for cosmic ray detection if they're set
-            threshold_factor = getattr(self, '_cre_threshold_factor', 5.0)
-            window_size = getattr(self, '_cre_window_size', 5)
-            min_width_ratio = getattr(self, '_cre_min_width_ratio', 0.1)
-            max_fwhm = getattr(self, '_cre_max_fwhm', 5.0)
+            # Use pandas for faster loading - automatically detects separator
+            import pandas as pd
+            df = pd.read_csv(filepath, sep=None, engine='python', 
+                            header=None, comment='#', 
+                            names=['wavenumber', 'intensity'])
             
-            # Detect and remove cosmic rays
-            has_cosmic_ray, cleaned_intensities = self.detect_cosmic_rays(
-                wavenumbers, 
-                intensities,
-                threshold_factor=threshold_factor,
-                window_size=window_size,
-                min_width_ratio=min_width_ratio,
-                max_fwhm=max_fwhm
-            )
+            wavenumbers = df['wavenumber'].values
+            intensities = df['intensity'].values
             
-            # Use cleaned intensities for further processing
-            processed_intensities = self._preprocess_spectrum(wavenumbers, cleaned_intensities)
+            # Simple preprocessing without cosmic ray detection for initial load
+            processed_intensities = self._preprocess_spectrum(wavenumbers, intensities)
             
+            # Create spectrum data
             spectrum_data = SpectrumData(
                 x_pos=x_pos,
                 y_pos=y_pos,
@@ -1176,30 +1159,53 @@ class RamanMapData:
                 processed_intensities=processed_intensities
             )
             
-            # Add cosmic ray flag as attribute
-            spectrum_data.has_cosmic_ray = has_cosmic_ray
+            # Flag for later cosmic ray detection
+            spectrum_data.has_cosmic_ray = False
             
             return spectrum_data
         except Exception as e:
-            logger.error(f"Error loading {filepath}: {str(e)}")
+            print(f"Error loading {filepath}: {str(e)}")
             return None
     
     def _load_data(self):
         """Load all spectrum files in the data directory."""
+        from concurrent.futures import as_completed
+        
         # Get all .txt files in the directory
         files = list(self.data_dir.glob('*.txt'))
+        total_files = len(files)
+        print(f"\nFound {total_files} spectrum files to load...")
+        
+        # Initialize lists for positions
+        self.x_positions = []
+        self.y_positions = []
+        self.spectra = {}
         
         # Use ThreadPoolExecutor for parallel loading
         with ThreadPoolExecutor() as executor:
-            results = list(executor.map(self._load_spectrum, files))
-        
-        # Filter out None results and store valid spectra
-        for spectrum in filter(None, results):
-            self.spectra[(spectrum.x_pos, spectrum.y_pos)] = spectrum
-            if spectrum.x_pos not in self.x_positions:
-                self.x_positions.append(spectrum.x_pos)
-            if spectrum.y_pos not in self.y_positions:
-                self.y_positions.append(spectrum.y_pos)
+            # Submit all tasks
+            future_to_file = {executor.submit(self._load_spectrum, file): file for file in files}
+            
+            # Process results as they complete
+            from tqdm import tqdm
+
+            completed = 0
+            for future in tqdm(as_completed(future_to_file), total=total_files, desc="Loading files"):
+            #completed = 0
+            #for future in as_completed(future_to_file):
+                file = future_to_file[future]
+                completed += 1
+                try:
+                    spectrum = future.result()
+                    if spectrum is not None:
+                        self.spectra[(spectrum.x_pos, spectrum.y_pos)] = spectrum
+                        if spectrum.x_pos not in self.x_positions:
+                            self.x_positions.append(spectrum.x_pos)
+                        if spectrum.y_pos not in self.y_positions:
+                            self.y_positions.append(spectrum.y_pos)
+                except Exception as e:
+                    print(f"\nError loading {file.name}: {str(e)}")
+                #print(f"Loading file {completed}/{total_files}: {file.name}")
         
         # Sort positions
         self.x_positions.sort()
@@ -1209,6 +1215,10 @@ class RamanMapData:
         if self.spectra:
             first_spectrum = next(iter(self.spectra.values()))
             self.wavenumbers = first_spectrum.wavenumbers
+            print(f"\nSuccessfully loaded {len(self.spectra)} out of {total_files} files")
+            print(f"Map dimensions: {len(self.x_positions)} x {len(self.y_positions)}")
+            print(f"X range: {min(self.x_positions)} to {max(self.x_positions)}")
+            print(f"Y range: {min(self.y_positions)} to {max(self.y_positions)}")
     
     def get_spectrum(self, x_pos: int, y_pos: int) -> Optional[SpectrumData]:
         """
@@ -2516,9 +2526,10 @@ class TwoDMapAnalysisWindow:
         self.nmf_ax1.clear()
         self.nmf_ax2.clear()
         
-        # Plot component spectra
+        # Plot component spectra with correct wavenumber axis
+        wavenumbers = self.map_data.target_wavenumbers if hasattr(self, 'map_data') and self.map_data is not None else np.arange(self.nmf.components_.shape[1])
         for i in range(min(5, self.nmf.n_components)):
-            self.nmf_ax1.plot(self.nmf.components_[i], label=f'Component {i+1}')
+            self.nmf_ax1.plot(wavenumbers, self.nmf.components_[i], label=f'Component {i+1}')
         self.nmf_ax1.set_xlabel('Wavenumber')
         self.nmf_ax1.set_ylabel('Intensity')
         self.nmf_ax1.set_title('NMF Component Spectra')
@@ -4101,9 +4112,10 @@ class TwoDMapAnalysisWindow:
         self.nmf_ax1.clear()
         self.nmf_ax2.clear()
         
-        # Plot component spectra
+        # Plot component spectra with correct wavenumber axis
+        wavenumbers = self.map_data.target_wavenumbers if hasattr(self, 'map_data') and self.map_data is not None else np.arange(self.nmf.components_.shape[1])
         for i in range(min(5, self.nmf.n_components)):
-            self.nmf_ax1.plot(self.nmf.components_[i], label=f'Component {i+1}')
+            self.nmf_ax1.plot(wavenumbers, self.nmf.components_[i], label=f'Component {i+1}')
         self.nmf_ax1.set_xlabel('Wavenumber')
         self.nmf_ax1.set_ylabel('Intensity')
         self.nmf_ax1.set_title('NMF Component Spectra')
