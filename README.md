@@ -2,7 +2,7 @@
 
 ClaritySpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
-**Current Version:** 2.4.0
+**Current Version:** 2.4.1
 
 ## Features
 
@@ -28,6 +28,7 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Advanced filtering options (peak regions, Hey index, element limiting)
   - Confidence scoring for matches
   - Experimental: Heatmap of best fit to molecular vibrational groups with chemical scoring
+  - Mixed Mineral Analysis - unique way of find mulitple minerals in your Raman data
 
 - **Peak Fitting**
   - Advanced background modeling: 
@@ -49,7 +50,7 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
 
 - **2D Raman Map Analysis**
   - Import and visualize 2D Raman mapping data
-  - Create heatmaps for integrated intensity, peak position, template coefficients
+  - Create heatmaps for integrated intensity, template coefficients, and others
   - Advanced template analysis for component identification:
     - Multiple template fitting methods (NNLS, LSQ)
     - Template coefficient visualization
@@ -66,7 +67,6 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Multiple data import options:
     - Import from folder
     - Import from database with filtering options
-    - Import directly from main application
   - Advanced visualization methods:
     - PCA (Principal Component Analysis)
     - t-SNE (t-Distributed Stochastic Neighbor Embedding)
