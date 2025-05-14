@@ -61,6 +61,30 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Export analysis results and publication-quality visualizations
   - Class distribution visualization and sample identification
 
+- **Raman Group Analysis**
+  - Hierarchical clustering of Raman spectra collections
+  - Multiple data import options:
+    - Import from folder
+    - Import from database with filtering options
+    - Import directly from main application
+  - Advanced visualization methods:
+    - PCA (Principal Component Analysis)
+    - t-SNE (t-Distributed Stochastic Neighbor Embedding)
+    - UMAP (Uniform Manifold Approximation and Projection) when available
+  - Interactive data exploration:
+    - Dendrogram visualization of hierarchical clustering
+    - Heatmap visualization of spectral features
+    - Scatter plots with cluster highlighting
+    - Selection and examination of specific clusters
+  - Cluster refinement capabilities:
+    - Split clusters using K-means or Spectral Clustering
+    - Merge selected clusters
+    - Interactive cluster editing with undo functionality
+  - Analysis and export:
+    - Cluster statistics and representative spectra
+    - Publication-quality visualization export
+    - Data export for further analysis
+
 ## Installation
 
 1. Clone the repository:
@@ -114,6 +138,7 @@ python3 main.py
   - tensorflow >= 2.12.0 (for deep learning)
   - keras >= 2.12.0 (for deep learning models)
   - fastdtw >= 0.3.4 (for DTW-based matching)
+  - umap-learn (for UMAP visualization in Raman Group Analysis)
 
 ## Usage
 
@@ -153,6 +178,13 @@ python3 main.py
    - Use machine learning for classification and clustering
    - Export analysis results and publication-quality images
 
+7. **Raman Group Analysis**
+   - Import multiple spectra from folders or database
+   - Perform hierarchical clustering to group similar spectra
+   - Visualize relationships using dendrograms, heatmaps, and scatter plots
+   - Refine clusters with splitting and merging operations
+   - Analyze cluster characteristics and export results
+
 ## Project Structure
 
 All files should be in the same directory:
@@ -164,6 +196,7 @@ All files should be in the same directory:
 - `peak_fitting.py` - Peak fitting
 - `batch_peak_fitting.py` - Batch fitting
 - `map_analysis_2d.py` - 2D Raman map analysis
+- `raman_group_analysis.py` - Group analysis and clustering
 - `ml_raman_map/` - Machine learning modules for map analysis
 - `raman_database.pkl` - Database of Raman spectra
 - `RRUFF_Export_with_Hey_Classifcation.csv` - Required for database mapping
