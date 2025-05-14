@@ -65,7 +65,7 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/ClaritySpectra.git
+git clone https://github.com/aaroncelestian/ClaritySpectra.git
 cd ClaritySpectra
 ```
 

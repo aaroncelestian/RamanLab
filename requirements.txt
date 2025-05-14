@@ -3,18 +3,30 @@ numpy>=1.16.0
 matplotlib>=3.0.0
 scipy>=1.2.0
 pandas>=0.25.0
+tkinter  # Usually comes with Python installation
 
-# Optional packages
-reportlab>=3.5.0  # For PDF export
-scikit-learn>=0.21.0  # For ML search functionality
+# GUI and visualization
+matplotlib>=3.0.0
+seaborn>=0.11.0  # For enhanced visualizations
+
+# Scientific computing
+scipy>=1.2.0
+numpy>=1.16.0
+pandas>=0.25.0
+
+# Machine learning and analysis
+scikit-learn>=0.21.0  # For ML functionality
 tensorflow>=2.12.0  # For deep learning functionality
 keras>=2.12.0  # For deep learning models
 fastdtw>=0.3.4  # For DTW-based spectral matching
 
+# Data processing and export
+reportlab>=3.5.0  # For PDF export
+openpyxl>=3.0.0  # For Excel file support
+pillow>=8.0.0  # For image processing
+
 # Packaging tools
 pyinstaller>=5.0.0
 
-# Additional dependencies that might be required
-# Uncomment if needed
-# pillow>=8.0.0  # For image processing
-# openpyxl>=3.0.0  # For Excel file support
+# Additional dependencies
+mplcursors>=0.5.0  # For interactive plot cursors

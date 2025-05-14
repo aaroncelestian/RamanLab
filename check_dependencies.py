@@ -110,7 +110,12 @@ def suggest_install_command(missing_packages):
             "pandas": "pip install pandas",
             "tkinter": "Tkinter is included with Python, but may need additional installation:",
             "reportlab": "pip install reportlab",
-            "scikit-learn": "pip install scikit-learn"
+            "scikit-learn": "pip install scikit-learn",
+            "seaborn": "pip install seaborn",
+            "mplcursors": "pip install mplcursors",
+            "openpyxl": "pip install openpyxl",
+            "pillow": "pip install pillow",
+            "fastdtw": "pip install fastdtw"
         }
         
         print("\nInstallation instructions for missing packages:")
@@ -135,6 +140,8 @@ def suggest_install_command(missing_packages):
                     print("  May require compiler tools. For binary installation: pip install scipy --only-binary=scipy")
                 elif package == "scikit-learn":
                     print("  Depends on numpy and scipy. Install with: pip install scikit-learn")
+                elif package == "fastdtw":
+                    print("  May require Cython. If installation fails, try: pip install Cython first")
         
         # General command for all missing packages (except tkinter)
         regular_packages = [p for p in missing_packages if p != "tkinter"]
@@ -176,7 +183,12 @@ def main():
         ("matplotlib", "3.0.0"), 
         ("scipy", "1.2.0"), 
         ("pandas", "0.25.0"),
-        ("tkinter", None)  # tkinter doesn't follow standard versioning
+        ("tkinter", None),  # tkinter doesn't follow standard versioning
+        ("seaborn", "0.11.0"),
+        ("mplcursors", "0.5.0"),
+        ("openpyxl", "3.0.0"),
+        ("pillow", "8.0.0"),
+        ("fastdtw", "0.3.4")
     ]
     
     missing_packages = []
