@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 # Raman Spectrum Analysis Tool - Main Application Runner
 
+import sys
+import importlib
+
+# Force reload any modules that might be cached
+if 'raman_polarization_analyzer' in sys.modules:
+    importlib.reload(sys.modules['raman_polarization_analyzer'])
+
 import tkinter as tk
 from tkinter import ttk
 from raman_analysis_app import RamanAnalysisApp

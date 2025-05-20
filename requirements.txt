@@ -1,32 +1,32 @@
-# Core requirements
+# ClaritySpectra v2.5.0 Requirements
+# Core dependencies
 numpy>=1.16.0
 matplotlib>=3.0.0
 scipy>=1.2.0
 pandas>=0.25.0
-tkinter  # Usually comes with Python installation
+scikit-learn>=0.21.0
+fastdtw>=0.3.4
+mplcursors>=0.5.0
 
 # GUI and visualization
-matplotlib>=3.0.0
-seaborn>=0.11.0  # For enhanced visualizations
-
-# Scientific computing
-scipy>=1.2.0
-numpy>=1.16.0
-pandas>=0.25.0
-
-# Machine learning and analysis
-scikit-learn>=0.21.0  # For ML functionality
-tensorflow>=2.12.0  # For deep learning functionality
-keras>=2.12.0  # For deep learning models
-fastdtw>=0.3.4  # For DTW-based spectral matching
+seaborn>=0.11.0
+pillow>=8.0.0  # For image processing
 
 # Data processing and export
 reportlab>=3.5.0  # For PDF export
 openpyxl>=3.0.0  # For Excel file support
-pillow>=8.0.0  # For image processing
+
+# Machine learning and deep learning (optional)
+tensorflow>=2.12.0  # For deep learning functionality
+keras>=2.12.0  # For deep learning models
 
 # Packaging tools
-pyinstaller>=5.0.0
+pyinstaller>=5.0.0  # For creating standalone executables
 
-# Additional dependencies
-mplcursors>=0.5.0  # For interactive plot cursors
+# Notes:
+# - tkinter is not included as it's typically bundled with Python
+# - Specific OS-dependent installations:
+#   - Windows: Python installer should include tkinter
+#   - macOS: 'brew install python-tk' or reinstall Python with tkinter
+#   - Debian/Ubuntu: 'sudo apt-get install python3-tk'
+#   - Fedora: 'sudo dnf install python3-tkinter'

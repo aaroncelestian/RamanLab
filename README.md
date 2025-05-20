@@ -2,7 +2,7 @@
 
 ClaritySpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
-**Current Version:** 2.4.1
+**Current Version:** 2.5.0
 
 ## Features
 
@@ -18,6 +18,12 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Edit metadata and classifications
   - Batch import capabilities
   - View and search database contents
+  - **Mineral Raman Modes Database**
+    - Store peak positions, symmetry characters, and relative intensities
+    - Import modes from peak fitting results
+    - Build a customizable reference database for minerals
+    - Visualize mineral Raman modes
+    - **NEW: Enhanced database with improved visualization and search capabilities**
 
 - **Search and Matching**
   - Multiple search algorithms:
@@ -40,6 +46,7 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
     - Gaussian, Lorentzian, Pseudo-Voigt, and Asymmetric Voigt
     - No need to define regions for fitting, no need for spectral smoothing (although it is an option)
     - Report generation and export of publication quality graphics
+  - Export fitted peaks to the mineral Raman modes database
 
 - **Batch Processing**
   - Import any number of spectra that your system can handle
@@ -84,6 +91,27 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
     - Cluster statistics and representative spectra
     - Publication-quality visualization export
     - Data export for further analysis
+  - **NEW: Enhanced group analysis with improved visualization and comparison tools**
+
+- **NEW: Raman Polarization Analysis**
+  - Import and analyze polarized Raman spectra
+  - Interactive peak fitting for polarized spectra
+  - Advanced crystal orientation analysis:
+    - Calculate orientation-dependent Raman intensities
+    - Optimize crystal orientation to match experimental data
+    - Support for all crystal symmetries and Raman tensor characters
+  - CIF file import and analysis:
+    - Parse crystallographic information files
+    - Extract symmetry and atomic position data
+    - Calculate Raman tensors from crystal structure
+    - **Optional pymatgen integration for advanced crystallographic analysis**
+  - **NEW: 3D Tensor Visualization**
+    - Interactive 3D visualization of Raman tensors
+    - Visualize tensor ellipsoids for different vibrational modes
+    - Explore principal axes and orientation effects
+    - View crystal shapes based on point group symmetry
+    - Customizable visualization settings (scale, opacity, orientation)
+    - Export publication-quality 3D visualizations
 
 ## Installation
 
@@ -127,9 +155,10 @@ python3 main.py
   - matplotlib >= 3.0.0
   - scipy >= 1.2.0
   - pandas >= 0.25.0
-  - scikit-learn >= 0.21.0 (for ML functionality)
-  - seaborn >= 0.11.0 (for enhanced visualizations)
-  - mplcursors >= 0.5.0 (for interactive plots)
+  - scikit-learn >= 0.21.0
+  - seaborn >= 0.11.0
+  - mplcursors >= 0.5.0
+  - fastdtw >= 0.3.4
 
 - Optional packages:
   - reportlab >= 3.5.0 (for PDF export)
@@ -137,8 +166,9 @@ python3 main.py
   - pillow >= 8.0.0 (for image processing)
   - tensorflow >= 2.12.0 (for deep learning)
   - keras >= 2.12.0 (for deep learning models)
-  - fastdtw >= 0.3.4 (for DTW-based matching)
   - umap-learn (for UMAP visualization in Raman Group Analysis)
+  - pymatgen (for advanced crystallographic analysis)
+  - pyinstaller >= 5.0.0 (for creating standalone executables)
 
 ## Usage
 
@@ -185,6 +215,22 @@ python3 main.py
    - Refine clusters with splitting and merging operations
    - Analyze cluster characteristics and export results
 
+8. **Mineral Raman Modes Database**
+   - Access the database with `python3 browse_mineral_database.py`
+   - Add minerals and their Raman modes manually
+   - Import peak data directly from peak fitting results
+   - Import data from other pickle files
+   - Visualize mineral Raman modes with simulated spectra
+
+9. **NEW: Raman Polarization Analysis**
+   - Access with `python3 raman_polarization_analyzer.py`
+   - Import and analyze polarized Raman spectra
+   - Perform peak fitting on polarized data
+   - Import crystal structure from CIF files
+   - Calculate and visualize Raman tensors
+   - Determine optimal crystal orientation
+   - Visualize Raman tensors in 3D
+
 ## Project Structure
 
 All files should be in the same directory:
@@ -198,8 +244,14 @@ All files should be in the same directory:
 - `map_analysis_2d.py` - 2D Raman map analysis
 - `raman_group_analysis.py` - Group analysis and clustering
 - `ml_raman_map/` - Machine learning modules for map analysis
-- `raman_database.pkl` - Database of Raman spectra
-- `RRUFF_Export_with_Hey_Classifcation.csv` - Required for database mapping
+- `mineral_database.py` - Mineral Raman modes database management
+- `import_peaks_to_database.py` - Tool for importing peak fitting results to database
+- `browse_mineral_database.py` - Utility to browse the mineral database
+- `mineral_modes.pkl` - Pickle file storing mineral Raman modes
+- `raman_polarization_analyzer.py` - **NEW: Polarized Raman analysis and crystal orientation**
+- `raman_tensor_3d_visualization.py` - **NEW: 3D visualization of Raman tensors**
+- `tensor_character_demo.py` - **NEW: Demonstrations of tensor symmetry characters**
+- `version.py` - Version information
 
 ## License
 

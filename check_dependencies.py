@@ -11,6 +11,7 @@ import sys
 import pkg_resources
 import subprocess
 import os
+from version import __version__  # Import version from version.py
 
 def check_python_version():
     """Check if Python version meets requirements."""
@@ -100,6 +101,28 @@ def get_sklearn_status():
         print("ℹ️ scikit-learn: Not installed - ML search will not be available")
         return False, None
 
+def get_pymatgen_status():
+    """Check if pymatgen is installed (for crystallographic analysis)."""
+    try:
+        import pymatgen
+        version = pkg_resources.get_distribution("pymatgen").version
+        print(f"✅ pymatgen: Installed (version: {version}) - Advanced crystallographic analysis available")
+        return True, version
+    except ImportError:
+        print("ℹ️ pymatgen: Not installed - Advanced crystallographic analysis will not be available")
+        return False, None
+
+def get_pyinstaller_status():
+    """Check if PyInstaller is installed (for creating standalone executables)."""
+    try:
+        import PyInstaller
+        version = pkg_resources.get_distribution("pyinstaller").version
+        print(f"✅ PyInstaller: Installed (version: {version}) - Executable creation available")
+        return True, version
+    except ImportError:
+        print("ℹ️ PyInstaller: Not installed - Standalone executable creation will not be available")
+        return False, None
+
 def suggest_install_command(missing_packages):
     """Suggest pip install command for missing packages."""
     if missing_packages:
@@ -115,7 +138,11 @@ def suggest_install_command(missing_packages):
             "mplcursors": "pip install mplcursors",
             "openpyxl": "pip install openpyxl",
             "pillow": "pip install pillow",
-            "fastdtw": "pip install fastdtw"
+            "fastdtw": "pip install fastdtw",
+            "tensorflow": "pip install tensorflow",
+            "keras": "pip install keras",
+            "pymatgen": "pip install pymatgen",
+            "pyinstaller": "pip install pyinstaller"
         }
         
         print("\nInstallation instructions for missing packages:")
@@ -142,6 +169,10 @@ def suggest_install_command(missing_packages):
                     print("  Depends on numpy and scipy. Install with: pip install scikit-learn")
                 elif package == "fastdtw":
                     print("  May require Cython. If installation fails, try: pip install Cython first")
+                elif package == "pymatgen":
+                    print("  Large package with many dependencies. Install with: pip install pymatgen")
+                elif package == "tensorflow":
+                    print("  Consider installing tensorflow-cpu for lower resource usage: pip install tensorflow-cpu")
         
         # General command for all missing packages (except tkinter)
         regular_packages = [p for p in missing_packages if p != "tkinter"]
@@ -170,7 +201,7 @@ def check_package_versions(package_name, min_version=None):
 def main():
     """Main function to check all dependencies."""
     print("=" * 60)
-    print("ClaritySpectra - Dependency Checker")
+    print(f"ClaritySpectra v{__version__} - Dependency Checker")
     print("=" * 60)
     print("\nChecking Python version...")
     python_ok = check_python_version()
@@ -186,9 +217,10 @@ def main():
         ("tkinter", None),  # tkinter doesn't follow standard versioning
         ("seaborn", "0.11.0"),
         ("mplcursors", "0.5.0"),
+        ("scikit-learn", "0.21.0"),
+        ("fastdtw", "0.3.4"),
         ("openpyxl", "3.0.0"),
-        ("pillow", "8.0.0"),
-        ("fastdtw", "0.3.4")
+        ("pillow", "8.0.0")
     ]
     
     missing_packages = []
@@ -216,10 +248,14 @@ def main():
     keras_ok, keras_version = get_keras_status()
     if not keras_ok:
         missing_packages.append("keras")
-    
-    sklearn_ok, sklearn_version = get_sklearn_status()
-    if not sklearn_ok:
-        missing_packages.append("scikit-learn")
+
+    pymatgen_ok, pymatgen_version = get_pymatgen_status()
+    if not pymatgen_ok:
+        missing_packages.append("pymatgen")
+
+    pyinstaller_ok, pyinstaller_version = get_pyinstaller_status()
+    if not pyinstaller_ok:
+        missing_packages.append("pyinstaller")
     
     # Summary
     print("\n" + "=" * 60)
@@ -258,12 +294,12 @@ def main():
     print("\nAdditional notes:")
     if not reportlab_ok:
         print("- PDF export functionality will not be available")
-    if not tensorflow_ok:
+    if not tensorflow_ok or not keras_ok:
         print("- Deep learning functionality will not be available")
-    if not keras_ok:
-        print("- Deep learning functionality will not be available")
-    if not sklearn_ok:
-        print("- Machine learning search functionality will not be available")
+    if not pymatgen_ok:
+        print("- Advanced crystallographic analysis features will not be available")
+    if not pyinstaller_ok:
+        print("- Creating standalone executables will not be available")
     
     # Check for database files
     print("\nChecking for required data files...")

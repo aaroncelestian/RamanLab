@@ -1340,75 +1340,235 @@ class PeakFittingWindow:
         self.canvas.draw()
     
     def export_results(self):
-        """Export the fit results to a CSV file."""
-        if self.fit_params is None or len(self.fit_params) == 0:
-            messagebox.showerror("No Results", "No fit results available to export.")
+        """Export the fitting results to a file and optionally to the mineral database."""
+        if not self.fit_params:
+            messagebox.showwarning("Warning", "No fit results to export.")
+            return
+        
+        # Ask for export options
+        export_window = tk.Toplevel(self.window)
+        export_window.title("Export Fit Results")
+        export_window.geometry("400x300")
+        
+        ttk.Label(export_window, text="Export Options:", font=("TkDefaultFont", 12, "bold")).pack(pady=(10, 5))
+        
+        # File export frame
+        file_frame = ttk.LabelFrame(export_window, text="File Export", padding=10)
+        file_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # File format selection
+        format_frame = ttk.Frame(file_frame)
+        format_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(format_frame, text="Format:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        format_var = tk.StringVar(value="JSON")
+        formats = ["JSON", "CSV", "TXT"]
+        format_combo = ttk.Combobox(format_frame, textvariable=format_var, values=formats, width=10, state="readonly")
+        format_combo.pack(side=tk.LEFT)
+        
+        # Export to file button
+        ttk.Button(file_frame, text="Export to File", 
+                  command=lambda: self._export_to_file(format_var.get())).pack(pady=5)
+        
+        # Database export frame
+        db_frame = ttk.LabelFrame(export_window, text="Mineral Database Export", padding=10)
+        db_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Label(db_frame, text="Export peak data to the mineral database:").pack(pady=(0, 5))
+        
+        # Export to database button
+        ttk.Button(db_frame, text="Export to Mineral Database", 
+                  command=self._export_to_mineral_database).pack(pady=5)
+                  
+        # Close button
+        ttk.Button(export_window, text="Close", command=export_window.destroy).pack(pady=10)
+        
+    def _export_to_file(self, format_type):
+        """Export the fitting results to a file in the specified format."""
+        # Create export data dictionary
+        export_data = {
+            "wavenumbers": self.wavenumbers.tolist(),
+            "original_spectrum": self.original_spectra.tolist(),
+            "fitted_spectrum": self.fit_result.tolist() if self.fit_result is not None else None,
+            "background": self.background.tolist() if self.background is not None else None,
+            "residuals": self.residuals.tolist() if self.residuals is not None else None,
+            "peak_model": self.current_model.get(),
+            "peaks": []
+        }
+        
+        # Add peak data
+        for i, params in enumerate(self.fit_params):
+            peak_data = {}
+            model = self.current_model.get()
+            
+            if model == "Gaussian":
+                amp, cen, wid = params
+                peak_data = {
+                    "index": i + 1,
+                    "amplitude": float(amp),
+                    "center": float(cen),
+                    "width": float(wid),
+                    "area": float(amp * wid * np.sqrt(2 * np.pi)),
+                    "model": "Gaussian"
+                }
+            elif model == "Lorentzian":
+                amp, cen, wid = params
+                peak_data = {
+                    "index": i + 1,
+                    "amplitude": float(amp),
+                    "center": float(cen),
+                    "width": float(wid),
+                    "area": float(amp * wid * np.pi),
+                    "model": "Lorentzian"
+                }
+            elif model == "Pseudo-Voigt":
+                amp, cen, wid, eta = params
+                # Area is a combination of Gaussian and Lorentzian areas
+                g_area = amp * wid * np.sqrt(2 * np.pi) * (1 - eta)
+                l_area = amp * wid * np.pi * eta
+                peak_data = {
+                    "index": i + 1,
+                    "amplitude": float(amp),
+                    "center": float(cen),
+                    "width": float(wid),
+                    "eta": float(eta),
+                    "area": float(g_area + l_area),
+                    "model": "Pseudo-Voigt"
+                }
+            elif model == "Asymmetric-Voigt":
+                amp, cen, wid_l, wid_r, eta = params
+                # Approximate area
+                avg_width = (wid_l + wid_r) / 2
+                g_area = amp * avg_width * np.sqrt(2 * np.pi) * (1 - eta)
+                l_area = amp * avg_width * np.pi * eta
+                peak_data = {
+                    "index": i + 1,
+                    "amplitude": float(amp),
+                    "center": float(cen),
+                    "width_left": float(wid_l),
+                    "width_right": float(wid_r),
+                    "eta": float(eta),
+                    "area": float(g_area + l_area),
+                    "model": "Asymmetric-Voigt"
+                }
+            
+            export_data["peaks"].append(peak_data)
+        
+        # Ask for save location
+        file_types = [("JSON Files", "*.json")] if format_type == "JSON" else \
+                     [("CSV Files", "*.csv")] if format_type == "CSV" else \
+                     [("Text Files", "*.txt")]
+        default_ext = ".json" if format_type == "JSON" else ".csv" if format_type == "CSV" else ".txt"
+        
+        file_path = filedialog.asksaveasfilename(
+            title="Save Fit Results",
+            filetypes=file_types,
+            defaultextension=default_ext
+        )
+        
+        if not file_path:
             return
         
         try:
-            from tkinter import filedialog
-            import csv
+            if format_type == "JSON":
+                with open(file_path, 'w') as f:
+                    import json
+                    json.dump(export_data, f, indent=2)
+            elif format_type == "CSV":
+                import csv
+                with open(file_path, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    # Write header
+                    writer.writerow(["Peak", "Center", "Amplitude", "Width", "Area", "Model"])
+                    # Write peak data
+                    for peak in export_data["peaks"]:
+                        writer.writerow([
+                            peak["index"],
+                            peak["center"],
+                            peak["amplitude"],
+                            peak.get("width", peak.get("width_left", 0)),
+                            peak["area"],
+                            peak["model"]
+                        ])
+            else:  # TXT
+                with open(file_path, 'w') as f:
+                    f.write(f"Peak Fitting Results - {self.current_model.get()} Model\n")
+                    f.write("-" * 60 + "\n")
+                    f.write("Peak\tCenter\tAmplitude\tWidth\tArea\n")
+                    for peak in export_data["peaks"]:
+                        width = peak.get("width", f"{peak.get('width_left', 0)}/{peak.get('width_right', 0)}")
+                        f.write(f"{peak['index']}\t{peak['center']:.2f}\t{peak['amplitude']:.3f}\t{width}\t{peak['area']:.2f}\n")
             
-            # Ask for file location
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV Files", "*.csv"), ("Text Files", "*.txt"), ("All Files", "*.*")],
-                title="Save Fit Results"
-            )
-            
-            if not file_path:
-                return  # User cancelled
-            
-            # Get model type
-            model_type = self.current_model.get()
-            if model_type == "Gaussian" or model_type == "Lorentzian":
-                params_per_peak = 3
-            elif model_type == "Pseudo-Voigt":
-                params_per_peak = 4
-            elif model_type == "Asymmetric Voigt":
-                params_per_peak = 5
-            else:
-                params_per_peak = 3  # Default case
-            n_peaks = len(self.fit_params) // params_per_peak
-            
-            # Write to CSV
-            with open(file_path, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                
-                # Write header
-                if model_type == "Pseudo-Voigt":
-                    writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Width (cm⁻¹)', 'Eta'])
-                elif model_type == "Asymmetric Voigt":
-                    writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Left Width (cm⁻¹)', 'Right Width (cm⁻¹)', 'Asymmetry', 'Eta'])
-                else:
-                    writer.writerow(['Peak', 'Position (cm⁻¹)', 'Amplitude', 'Width (cm⁻¹)'])
-                
-                # Write parameters for each peak
-                for i in range(n_peaks):
-                    start_idx = i * params_per_peak
-                    
-                    if model_type == "Pseudo-Voigt":
-                        amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
-                        writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid:.2f}", f"{eta:.2f}"])
-                    elif model_type == "Asymmetric Voigt":
-                        amp, cen, wid_left, wid_right, eta = self.fit_params[start_idx:start_idx+5]
-                        asymmetry = wid_right / wid_left
-                        writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid_left:.2f}", f"{wid_right:.2f}", f"{asymmetry:.2f}", f"{eta:.2f}"])
-                    else:
-                        amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                        writer.writerow([i+1, f"{cen:.2f}", f"{amp:.2f}", f"{wid:.2f}"])
-                
-                # Write R-squared
-                ss_tot = np.sum((self.spectra - np.mean(self.spectra))**2)
-                ss_res = np.sum(self.residuals**2)
-                r_squared = 1 - (ss_res / ss_tot)
-                writer.writerow([])
-                writer.writerow(['R-squared', f"{r_squared:.4f}"])
-            
-            messagebox.showinfo("Export Complete", f"Fit results saved to {file_path}")
-            
+            messagebox.showinfo("Export Successful", f"Results exported to {file_path}")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to export results: {str(e)}")
+            messagebox.showerror("Export Failed", f"Failed to export results: {e}")
+            
+    def _export_to_mineral_database(self):
+        """Export the fitting results to the mineral database."""
+        try:
+            # Check if the mineral database module is available
+            import importlib.util
+            spec = importlib.util.find_spec("import_peaks_to_database")
+            
+            if spec is None:
+                # If the import_peaks_to_database.py is not available, try mineral_database directly
+                spec = importlib.util.find_spec("mineral_database")
+                
+            if spec is None:
+                messagebox.showwarning(
+                    "Module Not Found", 
+                    "The mineral database module was not found.\n\n"
+                    "Please ensure mineral_database.py is in your project directory."
+                )
+                return
+                
+            # If import_peaks_to_database.py is available, use it
+            if importlib.util.find_spec("import_peaks_to_database"):
+                import import_peaks_to_database
+                tool = import_peaks_to_database.PeakImportTool(self.window)
+                # Let the import tool handle the rest
+            else:
+                # Otherwise use mineral_database directly
+                import mineral_database
+                # Create a new GUI instance
+                db_gui = mineral_database.MineralDatabaseGUI(self.window)
+                
+                # Get peak data
+                peak_data = []
+                for params in self.fit_params:
+                    model = self.current_model.get()
+                    if model in ["Gaussian", "Lorentzian"]:
+                        amp, cen, wid = params
+                        peak_data.append({
+                            'position': cen,
+                            'amplitude': amp,
+                            'width': wid
+                        })
+                    elif model == "Pseudo-Voigt":
+                        amp, cen, wid, eta = params
+                        peak_data.append({
+                            'position': cen,
+                            'amplitude': amp,
+                            'width': wid
+                        })
+                    elif model == "Asymmetric-Voigt":
+                        amp, cen, wid_l, wid_r, eta = params
+                        peak_data.append({
+                            'position': cen,
+                            'amplitude': amp,
+                            'width': (wid_l + wid_r) / 2  # Average width
+                        })
+                
+                # Show message about importing
+                messagebox.showinfo(
+                    "Manual Import Required", 
+                    "Please use the database GUI to manually import the peak data:\n\n"
+                    "1. Add a new mineral or select an existing one\n"
+                    "2. Add each peak manually with position and symmetry"
+                )
+                
+        except Exception as e:
+            messagebox.showerror("Export Failed", f"Failed to export to mineral database: {e}")
     
     def enable_manual_peak_adding(self):
         """Enable/disable manual peak addition mode where user can click on the plot to add peaks."""

@@ -298,6 +298,7 @@ class RamanAnalysisApp:
         ttk.Button(file_frame, text="Edit Metadata", command=self.edit_metadata).pack(
             fill=tk.X, pady=2
         )
+        
 
         # Metadata display frame
         self.metadata_frame = ttk.LabelFrame(
@@ -412,33 +413,33 @@ class RamanAnalysisApp:
             ),
         ).pack(anchor=tk.W, pady=2)
 
-        # Advanced Analysis frame
-        advanced_frame = ttk.LabelFrame(
-            self.tab_process, text="Advanced Analysis", padding=10
-        )
-        advanced_frame.pack(fill=tk.X, pady=5)
+        # # Advanced Analysis frame
+        # advanced_frame = ttk.LabelFrame(
+        #     self.tab_process, text="Advanced Analysis", padding=10
+        # )
+        # advanced_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Button(
-            advanced_frame, text="Peak Fitting", command=self.open_peak_fitting
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            advanced_frame,
-            text="Batch Peak Fitting",
-            command=self.open_batch_peak_fitting,
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            advanced_frame, text="2D Map Analysis", command=self.open_2d_map_analysis
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            advanced_frame,
-            text="Raman Group Analysis",
-            command=self.open_raman_group_analysis,
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            advanced_frame,
-            text="Mixed Mineral Analysis",
-            command=self.analyze_mixed_minerals,
-        ).pack(fill=tk.X, pady=2)
+        # ttk.Button(
+        #     advanced_frame, text="Peak Fitting", command=self.open_peak_fitting
+        # ).pack(fill=tk.X, pady=2)
+        # ttk.Button(
+        #     advanced_frame,
+        #     text="Batch Peak Fitting",
+        #     command=self.open_batch_peak_fitting,
+        # ).pack(fill=tk.X, pady=2)
+        # ttk.Button(
+        #     advanced_frame, text="2D Map Analysis", command=self.open_2d_map_analysis
+        # ).pack(fill=tk.X, pady=2)
+        # ttk.Button(
+        #     advanced_frame,
+        #     text="Raman Group Analysis",
+        #     command=self.open_raman_group_analysis,
+        # ).pack(fill=tk.X, pady=2)
+        # ttk.Button(
+        #     advanced_frame,
+        #     text="Mixed Mineral Analysis",
+        #     command=self.analyze_mixed_minerals,
+        # ).pack(fill=tk.X, pady=2)
 
     def create_search_tab(self, parent):
         """Create content for the search-match tab."""
@@ -1085,6 +1086,13 @@ class RamanAnalysisApp:
             manage_frame,
             text="Refresh Database Info",
             command=self.update_database_stats,
+        ).pack(fill=tk.X, pady=2)
+        
+        # Add the new button to launch the mineral database browser
+        ttk.Button(
+            manage_frame,
+            text="View/Edit Mineral Character Info",
+            command=self.launch_mineral_database_browser,
         ).pack(fill=tk.X, pady=2)
 
         # Database statistics frame
@@ -1820,7 +1828,7 @@ class RamanAnalysisApp:
             # Update the plot and metadata display
             self.update_plot()
             self.update_metadata_display()
-
+             
             # Update status in title bar
             filename = os.path.basename(file_path)
             self.root.title(f"ClaritySpectra: Raman Spectrum Analysis - {filename}")
@@ -6028,7 +6036,6 @@ class RamanAnalysisApp:
             )  # +1 because index 0 is for current spectrum
             color_indicator = ttk.Frame(spectrum_frame, width=15, height=15)
             color_indicator.pack(side=tk.LEFT, padx=5)
-
             # Add style for this spectrum with its color
             style_name = f"Spectrum{i}.TFrame"
             style.configure(style_name, background=self._rgb_to_hex(colors[color_idx]))
@@ -6675,7 +6682,50 @@ class RamanAnalysisApp:
             command=self.open_raman_group_analysis,
             style="PeakFitting.TButton",
         ).pack(fill=tk.X, pady=10, padx=5)
+        
+        # Add Raman Polarization Analysis button
+        ttk.Button(
+            self.tab_peak_fitting,
+            text="Raman Polarization Analysis",
+            command=self.open_polarization_analysis,
+            style="PeakFitting.TButton",
+        ).pack(fill=tk.X, pady=10, padx=5)
 
+    def open_polarization_analysis(self):
+        """Open the Raman polarization analysis window."""
+        try:
+            print("Opening Polarization Analysis window...")
+            from raman_polarization_analyzer import RamanPolarizationAnalyzer
+            
+            # Create a new top-level window
+            polarization_window = tk.Toplevel(self.root)
+            polarization_window.title("Raman Polarization Analysis")
+            polarization_window.geometry("1200x800")
+            
+            # Create the analyzer instance
+            analyzer = RamanPolarizationAnalyzer(polarization_window)
+            
+            # Store the analyzer instance in the window to prevent garbage collection
+            polarization_window.analyzer = analyzer
+            
+            # Add a protocol to handle window close properly
+            def on_window_close():
+                # Clean up any resources if needed
+                if hasattr(polarization_window, 'analyzer'):
+                    del polarization_window.analyzer
+                polarization_window.destroy()
+                
+            polarization_window.protocol("WM_DELETE_WINDOW", on_window_close)
+            
+            print("Polarization Analysis window opened successfully")
+        except Exception as e:
+            print(f"Error opening Polarization Analysis window: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for debugging
+            messagebox.showerror(
+                "Error", f"Failed to open polarization analysis window: {str(e)}"
+            )
+            
     def open_batch_peak_fitting(self):
         """Open the batch peak fitting window."""
         try:
@@ -6724,6 +6774,43 @@ class RamanAnalysisApp:
 
 
 
+    def launch_mineral_database_browser(self):
+        """Launch the mineral database browser within the same process."""
+        try:
+            # Try to use the standalone browser first (which handles DataFrame issues)
+            try:
+                import browse_mineral_database_standalone
+                browse_mineral_database_standalone.main()
+                return
+            except ImportError:
+                pass
+                
+            # Direct instantiation fallback
+            from mineral_database import MineralDatabaseGUI
+            
+            # Create a new toplevel window for the mineral database
+            db_window = tk.Toplevel(self.root)
+            db_window.title("Mineral Database Browser")
+            db_window.geometry("1000x800")
+            
+            # Create the mineral database GUI with the toplevel as parent
+            db_gui = MineralDatabaseGUI(parent=db_window)
+            
+            # Fix for DataFrame truth value issues
+            if hasattr(db_gui, 'is_standalone'):
+                if hasattr(db_gui.is_standalone, 'empty'):  # It's a DataFrame
+                    db_gui.is_standalone = bool(not db_gui.is_standalone.empty)
+                else:
+                    db_gui.is_standalone = bool(db_gui.is_standalone)
+            
+            # This prevents the window from being garbage collected
+            db_window.db_gui = db_gui
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch mineral database browser: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print the full traceback for debugging
+    
     def analyze_mixed_minerals(self):
         """Analyze a spectrum containing multiple minerals using simultaneous multi-component fitting with vibrational mode guidance."""
         # Create a new window
@@ -6756,6 +6843,13 @@ class RamanAnalysisApp:
         ax2 = fig.add_subplot(gs[1])  # Combined fit
         ax3 = fig.add_subplot(gs[2])  # Residual
         ax4 = fig.add_subplot(gs[3])  # Vibrational mode analysis
+        
+        # Add more padding to all plots
+        fig.subplots_adjust(left=0.12, right=0.95, top=0.95, bottom=0.08)
+
+
+
+
 
         # Create right panel for plots
         plot_panel = ttk.Frame(main_frame)
@@ -6771,17 +6865,56 @@ class RamanAnalysisApp:
         toolbar.update()
         # No redundant canvas packing here
 
-        # Get current spectrum data
+
+
         current_spectrum = self.raman.processed_spectra
         current_wavenumbers = self.raman.current_wavenumbers
 
+        # Fallback if processed spectrum is None or empty
+        if (
+            current_spectrum is None or
+            current_wavenumbers is None or
+            not hasattr(current_spectrum, '__len__') or
+            not hasattr(current_wavenumbers, '__len__') or
+            len(current_spectrum) == 0 or
+            len(current_wavenumbers) == 0
+        ):
+            current_spectrum = self.raman.current_spectra
+            current_wavenumbers = self.raman.current_wavenumbers
+
+
+
+        # Get current spectrum data
+        # current_spectrum = self.raman.processed_spectra
+        # current_wavenumbers = self.raman.current_wavenumbers
+
         # Plot original spectrum
         ax1.plot(current_wavenumbers, current_spectrum, "b-", label="Original Spectrum")
-        ax1.set_title("Original Spectrum")
+        # No title for cleaner look
         ax1.set_xlabel("Wavenumber (cm⁻¹)")
         ax1.set_ylabel("Intensity")
         ax1.grid(True, linestyle=":", alpha=0.6)
         ax1.legend()
+
+
+
+
+        # Data check: Prevent plotting if data is missing
+        if (
+            current_spectrum is not None and current_wavenumbers is not None
+            and hasattr(current_spectrum, '__len__') and hasattr(current_wavenumbers, '__len__')
+            and len(current_spectrum) > 0 and len(current_wavenumbers) > 0
+            and len(current_spectrum) == len(current_wavenumbers)
+        ):
+            ax1.plot(current_wavenumbers, current_spectrum, "b-", label="Original Spectrum")
+        else:
+            ax1.text(
+                0.5, 0.5, "No spectrum data available",
+                ha='center', va='center', transform=ax1.transAxes, fontsize=14, color='red'
+            )
+            print("Nothing to plot: spectrum or wavenumbers missing or mismatched.")
+    
+
 
         # Store selected minerals and their spectra
         selected_minerals = {}
@@ -6808,6 +6941,7 @@ class RamanAnalysisApp:
         ).grid(row=1, column=1, padx=5, pady=5, sticky="ew")
 
         # Configure grid columns to have equal width
+
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
 
@@ -6855,10 +6989,10 @@ class RamanAnalysisApp:
         
         # Add a frame for vibration display control
         vib_display_frame = ttk.LabelFrame(control_panel, text="Vibrational Mode Display")
-        vib_display_frame.pack(fill=tk.X, padx=5, pady=5)
+        vib_display_frame.pack(fill=tk.X, expand=True, padx=5, pady=5)
         
         # Create a canvas with scrollbar for the checkboxes to allow for scrolling
-        checkbox_canvas = tk.Canvas(vib_display_frame, height=120)
+        checkbox_canvas = tk.Canvas(vib_display_frame, height=120, width=300)
         checkbox_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
         checkbox_scrollbar = ttk.Scrollbar(vib_display_frame, orient="vertical", 
@@ -6872,24 +7006,35 @@ class RamanAnalysisApp:
         
         # Create a frame inside the canvas to hold checkboxes
         checkbox_frame = ttk.Frame(checkbox_canvas)
-        checkbox_canvas.create_window((0, 0), window=checkbox_frame, anchor="nw")
+        checkbox_frame.columnconfigure(0, weight=1)
+        checkbox_frame.columnconfigure(1, weight=1)
+        checkbox_frame.columnconfigure(2, weight=1)
+        checkbox_canvas.create_window((0, 0), window=checkbox_frame, anchor="nw", width=checkbox_canvas.winfo_width())
+
+        def update_frame_width(event):
+            checkbox_canvas.itemconfig(
+                1,  # First item is the window
+                width=event.width  # Set width to canvas width
+            )
+            
+        checkbox_canvas.bind("<Configure>", update_frame_width)
         
         # Create variables to track checkbox states
         vib_group_vars = {}
         for i, group in enumerate(vib_groups):
-            var = tk.BooleanVar(value=True)  # Default all to selected
+            var = tk.BooleanVar(value=False)  # Default all to deselected
             vib_group_vars[group] = var
             
             # Calculate row and column for 2-column layout
-            row = i // 2
-            column = i % 2
+            row = i // 3
+            column = i % 3
             
             ttk.Checkbutton(
                 checkbox_frame, 
                 text=group, 
                 variable=var,
                 command=lambda g=group: update_vibration_analysis()
-            ).grid(row=row, column=column, sticky="w", padx=5, pady=2)
+            ).grid(row=row, column=column, sticky="ew", padx=5, pady=2)
             
         # Add select all/none buttons
         select_btn_frame = ttk.Frame(vib_display_frame)
@@ -6900,47 +7045,47 @@ class RamanAnalysisApp:
                 var.set(True)
             update_vibration_analysis()
             
-        def clear_all_vibrations():
+        def deselect_all_vibrations():
             for var in vib_group_vars.values():
                 var.set(False)
             update_vibration_analysis()
             
         ttk.Button(select_btn_frame, text="Select All", command=select_all_vibrations).grid(
             row=0, column=0, padx=5, pady=2, sticky="ew")
-        ttk.Button(select_btn_frame, text="Clear All", command=clear_all_vibrations).grid(
+        ttk.Button(select_btn_frame, text="Deselect All", command=deselect_all_vibrations).grid(
             row=0, column=1, padx=5, pady=2, sticky="ew")
         
         select_btn_frame.columnconfigure(0, weight=1)
         select_btn_frame.columnconfigure(1, weight=1)
 
-        # Add a frame for vibration-based search
-        vib_search_frame = ttk.LabelFrame(
-            control_panel, text="Search by Vibrational Group"
-        )
-        vib_search_frame.pack(fill=tk.X, padx=5, pady=5)
+        # # Add a frame for vibration-based search
+        # vib_search_frame = ttk.LabelFrame(
+        #     control_panel, text="Search by Vibrational Group"
+        # )
+        # vib_search_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # Define the vibration groups for search
-        vib_groups = ["Silicate", "Carbonate", "Phosphate", "Sulfate", "Hydroxide", "Arsenate", "Oxide", "Sulfide", "Sulfosalt", "Vanadate", "Borate", "OH/H₂O", "Oxalate"]
-        vib_group_var = tk.StringVar()
-        vib_group_var.set(vib_groups[0])
+        # # Define the vibration groups for search
+        # vib_groups = ["Silicate", "Carbonate", "Phosphate", "Sulfate", "Hydroxide", "Arsenate", "Oxide", "Sulfide", "Sulfosalt", "Vanadate", "Borate", "OH/H₂O", "Oxalate"]
+        # vib_group_var = tk.StringVar()
+        # vib_group_var.set(vib_groups[0])
 
-        # Add a dropdown for vibration group selection
-        ttk.Label(vib_search_frame, text="Vibration Group:").pack(
-            anchor="w", padx=5, pady=2
-        )
-        ttk.Combobox(
-            vib_search_frame,
-            textvariable=vib_group_var,
-            values=vib_groups,
-            state="readonly",
-        ).pack(fill=tk.X, padx=5, pady=2)
+        # # Add a dropdown for vibration group selection
+        # ttk.Label(vib_search_frame, text="Vibration Group:").pack(
+        #     anchor="w", padx=5, pady=2
+        # )
+        # ttk.Combobox(
+        #     vib_search_frame,
+        #     textvariable=vib_group_var,
+        #     values=vib_groups,
+        #     state="readonly",
+        # ).pack(fill=tk.X, padx=5, pady=2)
 
-        # Add search button
-        ttk.Button(
-            vib_search_frame,
-            text="Search by Vibration",
-            command=lambda: search_by_vibration_group(vib_group_var.get()),
-        ).pack(fill=tk.X, padx=5, pady=5)
+        # # Add search button
+        # ttk.Button(
+        #     vib_search_frame,
+        #     text="Search by Vibration",
+        #     command=lambda: search_by_vibration_group(vib_group_var.get()),
+        # ).pack(fill=tk.X, padx=5, pady=5)
 
         def update_fit():
             if not selected_minerals:
@@ -7017,7 +7162,7 @@ class RamanAnalysisApp:
                     label="Original",
                     alpha=0.5,
                 )
-                ax2.plot(current_wavenumbers, fit, "r-", label="Combined Fit")
+                ax2.plot(current_wavenumbers, fit, "r-", label=f"Combined Fit (R² = {r_squared:.4f})")
                 for mineral_key, spectrum in selected_minerals.items():
                     weight = mineral_weights[mineral_key]
                     display_name = self.get_mineral_display_name(mineral_key)
@@ -7028,7 +7173,7 @@ class RamanAnalysisApp:
                         label=f"{display_name} ({weight:.2f})",
                         alpha=0.7,
                     )
-                ax2.set_title(f"Combined Fit (R² = {r_squared:.4f})")
+                # No title for cleaner look (R² value will be in legend)
                 ax2.set_xlabel("Wavenumber (cm⁻¹)")
                 ax2.set_ylabel("Intensity")
                 ax2.grid(True, linestyle=":", alpha=0.6)
@@ -7036,7 +7181,7 @@ class RamanAnalysisApp:
 
                 ax3.clear()
                 ax3.plot(current_wavenumbers, residual, "g-", label="Residual")
-                ax3.set_title("Residual Spectrum")
+                # No title for cleaner look
                 ax3.set_xlabel("Wavenumber (cm⁻¹)")
                 ax3.set_ylabel("Intensity")
                 ax3.grid(True, linestyle=":", alpha=0.6)
@@ -7164,7 +7309,7 @@ class RamanAnalysisApp:
                 ]
                 ax4.legend(handles=legend_elements, loc="upper right")
 
-            ax4.set_title("Vibrational Mode Analysis")
+            # No title for cleaner look
             ax4.set_xlabel("Wavenumber (cm⁻¹)")
             ax4.set_ylabel("Intensity")
             ax4.grid(True, linestyle=":", alpha=0.6)
@@ -7253,6 +7398,9 @@ class RamanAnalysisApp:
                 )
                 residual_spectrum = current_spectrum - fit
 
+                # Initialize matches list
+                matches = []
+                
                 # Update residual plot to highlight that we're searching on it
                 ax3.clear()
                 ax3.plot(
@@ -7262,41 +7410,111 @@ class RamanAnalysisApp:
                     label="Residual (Searching...)",
                     linewidth=2,
                 )
-                ax3.set_title("Residual Spectrum - Searching")
+                # No title for cleaner look
                 ax3.set_xlabel("Wavenumber (cm⁻¹)")
                 ax3.set_ylabel("Intensity")
                 ax3.grid(True, linestyle=":", alpha=0.6)
                 ax3.legend()
                 canvas.draw()
-                window.update()  # Update the display
+                
+                # Force immediate GUI update
+                window.update()
+                
+                # Define function to display search results
+                def display_search_results():
+                    # Create selection window
+                    select_window = tk.Toplevel(window)
+                    select_window.title("Select Mineral from Residual")
+                    select_window.geometry("400x300")
+                    match_frame = ttk.Frame(select_window)
+                    match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                    match_listbox = tk.Listbox(match_frame)
+                    match_listbox.pack(fill=tk.BOTH, expand=True)
 
-                # Perform the search on the residual spectrum
-                # Use correlation search which works with the spectrum parameter
-                matches = self.ml_based_search(5, 0.5, spectrum=residual_spectrum)
+                    # Add a title to explain what we're doing
+                    ttk.Label(
+                        match_frame,
+                        text="Minerals found in the residual spectrum:",
+                        font=("TkDefaultFont", 9, "bold"),
+                    ).pack(side=tk.TOP, pady=(0, 5))
 
-                # If no results, try with a lower threshold
-                if not matches:
-                    matches = self.ml_based_search(
-                        5, 0.3, spectrum=residual_spectrum
-                    )
+                    for match_name, score in matches:
+                        display_name = self.get_mineral_display_name(match_name)
+                        match_listbox.insert(tk.END, f"{display_name} (Score: {score:.2f})")
 
-                # Still no results, show warning
-                if not matches:
-                    messagebox.showwarning(
-                        "Warning", "No good matches found in residual."
-                    )
-                    # Restore original residual plot
-                    ax3.clear()
-                    ax3.plot(
-                        current_wavenumbers, residual_spectrum, "g-", label="Residual"
-                    )
-                    ax3.set_title("Residual Spectrum")
-                    ax3.set_xlabel("Wavenumber (cm⁻¹)")
-                    ax3.set_ylabel("Intensity")
-                    ax3.grid(True, linestyle=":", alpha=0.6)
-                    ax3.legend()
-                    canvas.draw()
-                    return
+                    def on_select():
+                        selection = match_listbox.curselection()
+                        if not selection:
+                            return
+                        match_name = matches[selection[0]][0]
+                        if match_name in selected_minerals:
+                            messagebox.showwarning(
+                                "Warning", "This mineral is already selected."
+                            )
+                            return
+                        match_data = self.raman.database[match_name]
+                        match_spectrum = match_data["intensities"]
+                        match_wavenumbers = match_data["wavenumbers"]
+                        match_spectrum_interp = np.interp(
+                            current_wavenumbers, match_wavenumbers, match_spectrum
+                        )
+                        selected_minerals[match_name] = match_spectrum_interp
+                        mineral_weights[match_name] = 1.0
+                        display_name = self.get_mineral_display_name(match_name)
+                        selected_minerals_listbox.insert(tk.END, display_name)
+                        update_fit()
+                        select_window.destroy()
+
+                    ttk.Button(select_window, text="Select", command=on_select).pack(pady=5)
+                
+                # Define function to process search results
+                def show_results():
+                    # Still no results, show warning
+                    if not matches:
+                        messagebox.showwarning(
+                            "Warning", "No good matches found in residual."
+                        )
+                        # Restore original residual plot
+                        ax3.clear()
+                        ax3.plot(
+                            current_wavenumbers, residual_spectrum, "g-", label="Residual"
+                        )
+                        # No title for cleaner look
+                        ax3.set_xlabel("Wavenumber (cm⁻¹)")
+                        ax3.set_ylabel("Intensity")
+                        ax3.grid(True, linestyle=":", alpha=0.6)
+                        ax3.legend()
+                        canvas.draw()
+                        return
+                    else:
+                        # Create selection window with search results
+                        display_search_results()
+                
+                # Define the search thread function
+                def search_thread_function():
+                    nonlocal matches
+                    # Perform the search on the residual spectrum
+                    # Use correlation search which works with the spectrum parameter
+                    matches = self.ml_based_search(5, 0.5, spectrum=residual_spectrum)
+
+                    # If no results, try with a lower threshold
+                    if not matches:
+                        matches = self.ml_based_search(
+                            5, 0.3, spectrum=residual_spectrum
+                        )
+                    
+                    # Process results in the main thread
+                    window.after(0, show_results)
+                
+                # Start the search thread
+                import threading
+                search_thread = threading.Thread(target=search_thread_function)
+                search_thread.daemon = True
+                search_thread.start()
+                
+                # Return early - the thread will handle the rest
+                return
+                
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to calculate residual: {str(e)}")
                 return
@@ -7347,7 +7565,7 @@ class RamanAnalysisApp:
                 # Reset the residual plot
                 ax3.clear()
                 ax3.plot(current_wavenumbers, residual_spectrum, "g-", label="Residual")
-                ax3.set_title("Residual Spectrum")
+                # No title for cleaner look
                 ax3.set_xlabel("Wavenumber (cm⁻¹)")
                 ax3.set_ylabel("Intensity")
                 ax3.grid(True, linestyle=":", alpha=0.6)
@@ -7356,127 +7574,127 @@ class RamanAnalysisApp:
 
             ttk.Button(select_window, text="Select", command=on_select).pack(pady=5)
 
-        def search_by_vibration_group(group_name):
-            """Search for minerals based on characteristic vibration bands for selected group."""
-            # TODO: need to make sure this searches the Hey Classification instead of vibrational mode
-            # Define vibration ranges for each group
-            vibration_bands = {
-                "Silicate": [(450, 550), (600, 680), (850, 1000), (1050, 1200)],
-                "Carbonate": [(700, 740), (1050, 1090)],
-                "Phosphate": [(550, 620), (950, 970), (1030, 1080)],
-                "Sulfate": [(450, 500), (975, 1010), (1100, 1150)],
-                "Hydroxide": [(3500, 3650), (600, 900), (1600, 1650)],
-                "Arsenate": [(420, 460), (810, 855), (780, 880)],
-                "Oxide": [(300, 350), (400, 450), (500, 600)],
-                "Sulfide": [(300, 400), (200, 280), (350, 420)],
-                "Sulfosalt": [(300, 360), (330, 380), (250, 290)],
-                "Vanadate": [(800, 860), (780, 820), (400, 450)],
-                "Borate": [(650, 700), (880, 950), (1300, 1400)],
-                "OH/H₂O": [(3200, 3500), (1600, 1650), (500, 800)],
-                "Oxalate": [(1455, 1490), (900, 920), (850, 870)],
-            }
+        # def search_by_vibration_group(group_name):
+        #     """Search for minerals based on characteristic vibration bands for selected group."""
+        #     # TODO: need to make sure this searches the Hey Classification instead of vibrational mode
+        #     # Define vibration ranges for each group
+        #     vibration_bands = {
+        #         "Silicate": [(450, 550), (600, 680), (850, 1000), (1050, 1200)],
+        #         "Carbonate": [(700, 740), (1050, 1090)],
+        #         "Phosphate": [(550, 620), (950, 970), (1030, 1080)],
+        #         "Sulfate": [(450, 500), (975, 1010), (1100, 1150)],
+        #         "Hydroxide": [(3500, 3650), (600, 900), (1600, 1650)],
+        #         "Arsenate": [(420, 460), (810, 855), (780, 880)],
+        #         "Oxide": [(300, 350), (400, 450), (500, 600)],
+        #         "Sulfide": [(300, 400), (200, 280), (350, 420)],
+        #         "Sulfosalt": [(300, 360), (330, 380), (250, 290)],
+        #         "Vanadate": [(800, 860), (780, 820), (400, 450)],
+        #         "Borate": [(650, 700), (880, 950), (1300, 1400)],
+        #         "OH/H₂O": [(3200, 3500), (1600, 1650), (500, 800)],
+        #         "Oxalate": [(1455, 1490), (900, 920), (850, 870)],
+        #     }
 
-            if group_name not in vibration_bands:
-                messagebox.showwarning(
-                    "Warning", f"No vibration bands defined for {group_name}."
-                )
-                return
+        #     if group_name not in vibration_bands:
+        #         messagebox.showwarning(
+        #             "Warning", f"No vibration bands defined for {group_name}."
+        #         )
+        #         return
 
-            # Create a peak list based on the vibration bands midpoints
-            peak_positions = []
-            for band_start, band_end in vibration_bands[group_name]:
-                peak_positions.append((band_start + band_end) / 2)
+        #     # Create a peak list based on the vibration bands midpoints
+        #     peak_positions = []
+        #     for band_start, band_end in vibration_bands[group_name]:
+        #         peak_positions.append((band_start + band_end) / 2)
 
-            # Use filtered search with peak positions
-            try:
-                # Get a higher number of potential matches with a lower threshold
-                matches = self._filtered_search(
-                    peak_positions=peak_positions,
-                    peak_tolerance=20,  # Higher tolerance for vibration band matching
-                    chemical_family="",  # No chemical family filter
-                    threshold=0.3,  # Lower threshold for more results
-                    hey_classification=True,
-                )
+        #     # Use filtered search with peak positions
+        #     try:
+        #         # Get a higher number of potential matches with a lower threshold
+        #         matches = self._filtered_search(
+        #             peak_positions=peak_positions,
+        #             peak_tolerance=20,  # Higher tolerance for vibration band matching
+        #             chemical_family="",  # No chemical family filter
+        #             threshold=0.3,  # Lower threshold for more results
+        #             hey_classification=True,
+        #         )
 
-                # Sort by score and limit
-                matches.sort(key=lambda x: x[1], reverse=True)
-                matches = matches[:10]  # Get top 10
+        #         # Sort by score and limit
+        #         matches.sort(key=lambda x: x[1], reverse=True)
+        #         matches = matches[:10]  # Get top 10
 
-                if not matches:
-                    messagebox.showwarning(
-                        "No Matches",
-                        f"No matches found for {group_name} vibration bands.",
-                    )
-                    return
+        #         if not matches:
+        #             messagebox.showwarning(
+        #                 "No Matches",
+        #                 f"No matches found for {group_name} vibration bands.",
+        #             )
+        #             return
 
-                # Create selection window
-                select_window = tk.Toplevel(window)
-                select_window.title(f"Select {group_name} Mineral")
-                select_window.geometry("400x300")
+        #         # Create selection window
+        #         select_window = tk.Toplevel(window)
+        #         select_window.title(f"Select {group_name} Mineral")
+        #         select_window.geometry("400x300")
 
-                # Add explanation label
-                ttk.Label(
-                    select_window,
-                    text=f"Minerals with {group_name.lower()} vibration bands:",
-                    font=("TkDefaultFont", 10, "bold"),
-                ).pack(pady=(10, 5))
+        #         # Add explanation label
+        #         ttk.Label(
+        #             select_window,
+        #             text=f"Minerals with {group_name.lower()} vibration bands:",
+        #             font=("TkDefaultFont", 10, "bold"),
+        #         ).pack(pady=(10, 5))
 
-                # Create frame for list
-                match_frame = ttk.Frame(select_window)
-                match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        #         # Create frame for list
+        #         match_frame = ttk.Frame(select_window)
+        #         match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-                # Create listbox with scrollbar
-                match_listbox = tk.Listbox(match_frame)
-                scrollbar = ttk.Scrollbar(
-                    match_frame, orient=tk.VERTICAL, command=match_listbox.yview
-                )
-                match_listbox.config(yscrollcommand=scrollbar.set)
+        #         # Create listbox with scrollbar
+        #         match_listbox = tk.Listbox(match_frame)
+        #         scrollbar = ttk.Scrollbar(
+        #             match_frame, orient=tk.VERTICAL, command=match_listbox.yview
+        #         )
+        #         match_listbox.config(yscrollcommand=scrollbar.set)
 
-                scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-                match_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        #         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        #         match_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-                # Populate listbox
-                for match_name, score in matches:
-                    match_listbox.insert(tk.END, f"{match_name} (Score: {score:.2f})")
+        #         # Populate listbox
+        #         for match_name, score in matches:
+        #             match_listbox.insert(tk.END, f"{match_name} (Score: {score:.2f})")
 
-                def on_select():
-                    selection = match_listbox.curselection()
-                    if not selection:
-                        return
-                    match_name = matches[selection[0]][0]
-                    if match_name in selected_minerals:
-                        messagebox.showwarning(
-                            "Warning", "This mineral is already selected."
-                        )
-                        return
+        #         def on_select():
+        #             selection = match_listbox.curselection()
+        #             if not selection:
+        #                 return
+        #             match_name = matches[selection[0]][0]
+        #             if match_name in selected_minerals:
+        #                 messagebox.showwarning(
+        #                     "Warning", "This mineral is already selected."
+        #                 )
+        #                 return
 
-                    match_data = self.raman.database[match_name]
-                    match_spectrum = match_data["intensities"]
-                    match_wavenumbers = match_data["wavenumbers"]
-                    match_spectrum_interp = np.interp(
-                        current_wavenumbers, match_wavenumbers, match_spectrum
-                    )
-                    selected_minerals[match_name] = match_spectrum_interp
-                    mineral_weights[match_name] = 1.0
-                    selected_minerals_listbox.insert(tk.END, match_name)
-                    update_fit()
-                    select_window.destroy()
+        #             match_data = self.raman.database[match_name]
+        #             match_spectrum = match_data["intensities"]
+        #             match_wavenumbers = match_data["wavenumbers"]
+        #             match_spectrum_interp = np.interp(
+        #                 current_wavenumbers, match_wavenumbers, match_spectrum
+        #             )
+        #             selected_minerals[match_name] = match_spectrum_interp
+        #             mineral_weights[match_name] = 1.0
+        #             selected_minerals_listbox.insert(tk.END, match_name)
+        #             update_fit()
+        #             select_window.destroy()
 
-                # Add buttons
-                btn_frame = ttk.Frame(select_window)
-                btn_frame.pack(fill=tk.X, pady=5)
+        #         # Add buttons
+        #         btn_frame = ttk.Frame(select_window)
+        #         btn_frame.pack(fill=tk.X, pady=5)
 
-                ttk.Button(btn_frame, text="Select", command=on_select).pack(
-                    side=tk.LEFT, padx=5
-                )
-                ttk.Button(
-                    btn_frame, text="Cancel", command=select_window.destroy
-                ).pack(side=tk.RIGHT, padx=5)
+        #         ttk.Button(btn_frame, text="Select", command=on_select).pack(
+        #             side=tk.LEFT, padx=5
+        #         )
+        #         ttk.Button(
+        #             btn_frame, text="Cancel", command=select_window.destroy
+        #         ).pack(side=tk.RIGHT, padx=5)
 
-            except Exception as e:
-                messagebox.showerror(
-                    "Search Error", f"Error searching by vibration group: {str(e)}"
-                )
+        #     except Exception as e:
+        #         messagebox.showerror(
+        #             "Search Error", f"Error searching by vibration group: {str(e)}"
+        #         )
 
 
 # --- Main Execution ---
@@ -7507,3 +7725,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
