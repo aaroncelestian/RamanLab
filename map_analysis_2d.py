@@ -4311,7 +4311,7 @@ class TwoDMapAnalysisWindow:
                 })
                 
                 # Save to CSV
-                df.to_csv(csv_path, index=False)
+                df.to_csv(csv_path, index=False, header=False)
                 
                 # Create and save individual plot
                 fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
@@ -5518,7 +5518,7 @@ class TwoDMapAnalysisWindow:
             
             # Plot residual with offset for clarity
             offset = np.min(processed_intensities)
-            self.template_ax.plot(target_wavenumbers, residual + offset, 'b-', 
+            self.template_ax.plot(target_wavenumbers, residual + offset, color='grey', linestyle=':', 
                               linewidth=1, label=f'Residual ({residual_norm:.3f})')
             
             # Add point info and fit quality to the plot

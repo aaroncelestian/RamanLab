@@ -1326,7 +1326,16 @@ class PeakFittingWindow:
                 
                 # Plot residuals
                 self.ax2.plot(self.wavenumbers, self.residuals, 'r-')
-                self.ax2.axhline(y=0, color='k', linestyle='-', alpha=0.3)
+                # Add zero line
+                self.ax2.axhline(y=0, color='gray', linestyle='--', linewidth=0.5)
+                
+                # Add colored fill for residuals
+                self.ax2.fill_between(self.wavenumbers, self.residuals, 0, 
+                                    where=(self.residuals > 0), 
+                                    color='red', alpha=0.3, interpolate=True)
+                self.ax2.fill_between(self.wavenumbers, self.residuals, 0, 
+                                    where=(self.residuals < 0), 
+                                    color='blue', alpha=0.3, interpolate=True)
         
         # Configure axes
         self.ax1.set_title('Raman Spectrum and Peak Fit')

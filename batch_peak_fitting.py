@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, Menu
 import pandas as pd
 from scipy.optimize import curve_fit
 from scipy import sparse
@@ -60,12 +60,201 @@ class BatchPeakFittingWindow:
         self.show_fitted_peaks = tk.BooleanVar(value=True)
         self.show_individual_peaks = tk.BooleanVar(value=True)
         
+        # Create menu bar
+        self.create_menu_bar()
+        
         # Create GUI
         self.create_gui()
         
         # Set up window close event
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         
+    def create_menu_bar(self):
+        """Create the menu bar with File and Help menus."""
+        self.menu_bar = Menu(self.window)
+        self.window.config(menu=self.menu_bar)
+        
+        # File menu
+        file_menu = Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Add Files", command=self.add_files)
+        file_menu.add_command(label="Export Results", command=self.export_results)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.on_closing)
+        
+        # Help menu
+        self.help_menu = Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Help", menu=self.help_menu)
+        self.help_menu.add_command(label="Help for Current Tab (F1)", command=self.show_current_help)
+        self.help_menu.add_command(label="General Help", command=self.show_general_help)
+        
+        # Bind F1 key to show help
+        self.window.bind("<F1>", lambda event: self.show_current_help())
+        
+        # Dictionary of help texts for each tab
+        self.help_texts = {
+            "General": (
+                "Batch Peak Fitting Help",
+                "This tool allows you to process multiple Raman spectra with consistent peak fitting parameters.\n\n"
+                "General Workflow:\n"
+                "1. Add spectrum files using the File Selection tab\n"
+                "2. Select a spectrum to work with\n"
+                "3. Subtract background in the Peaks tab\n"
+                "4. Detect peaks automatically or add them manually\n"
+                "5. Choose a peak model and fit the peaks\n"
+                "6. Set this spectrum as a reference in the Batch tab\n"
+                "7. Process all spectra with 'Apply to All'\n"
+                "8. Analyze trends in the Fit Results tab\n"
+                "9. Export results to CSV for further analysis\n\n"
+                "Use F1 or click 'Help for Current Tab' at any time for context-specific help."
+            ),
+            "File Selection": (
+                "File Selection Help",
+                "This tab allows you to manage the spectra files to be processed:\n\n"
+                "• Add Files: Import spectrum files (.txt, .csv) for batch processing\n"
+                "• Remove Selected: Remove highlighted files from the list\n"
+                "• Double-click a file to display it in the current spectrum view\n\n"
+                "Navigation buttons at the bottom of the plot allow you to move between files."
+            ),
+            "Peaks": (
+                "Peak Controls Help",
+                "This tab contains tools for manipulating and fitting peaks:\n\n"
+                "• Background: Set λ (smoothness) and p (asymmetry) parameters\n"
+                "  for baseline correction, then click Subtract Background\n\n"
+                "• Manual Peak Control: Add peaks by clicking on the spectrum\n"
+                "  or delete selected peaks\n\n"
+                "• Peak Detection: Set height, distance, and prominence thresholds\n"
+                "  to automatically find peaks, or click Clear Peaks to start over\n\n"
+                "• Peak Model: Select the mathematical model to use for peak fitting\n"
+                "  (Gaussian, Lorentzian, Pseudo-Voigt, or Asymmetric Voigt)\n\n"
+                "• Fit Ranges: Specify wavenumber ranges for ROI (region of interest)\n"
+                "  Use comma-separated ranges, e.g., 400-600,900-1100"
+            ),
+            "Batch": (
+                "Batch Processing Help",
+                "This tab allows you to process multiple spectra using consistent parameters:\n\n"
+                "• Set as Reference: Save current spectrum's peaks and background as a template\n"
+                "• Apply to All: Process all loaded spectra using the reference template\n"
+                "• Stop: Interrupt batch processing\n"
+                "• Export Results: Save batch results to a CSV file\n\n"
+                "Progress Log shows the status of each spectrum processed."
+            ),
+            "Plot": (
+                "Plot Visibility Help",
+                "This tab controls what is displayed in the Fit Results and Fit Stats tabs:\n\n"
+                "• Peak Visibility: Toggle which peaks are shown in trend plots\n"
+                "• Show All/Hide All: Quickly select or deselect all peaks\n"
+                "• Show 95% Boundary: Display confidence intervals on trend plots\n"
+                "• Show Grid Lines: Toggle grid visibility on trend plots\n\n"
+                "Preview buttons allow you to view individual parameter plots in separate windows.\n\n"
+                "Export controls let you save fit statistics plots as images."
+            ),
+            "Current Spectrum": (
+                "Current Spectrum Help",
+                "This view shows the currently selected spectrum:\n\n"
+                "• The top panel displays the raw spectrum, background, fitted peaks, and residuals\n"
+                "• The bottom panel shows residuals (difference between data and fit)\n"
+                "• Regions of interest (ROI) are highlighted in gray if specified\n"
+                "• Individual peaks show R² values indicating goodness of fit\n\n"
+                "Use the navigation buttons at the bottom to move between spectra."
+            ),
+            "Waterfall": (
+                "Waterfall Plot Help",
+                "This tab displays a stacked view of multiple spectra:\n\n"
+                "• Skip: Set how many spectra to skip between each displayed line\n"
+                "• Color: Choose a colormap for the stacked spectra\n"
+                "• Colormap Min/Max: Adjust the colormap intensity range\n"
+                "• Line Width: Set the thickness of spectrum lines\n"
+                "• Y Offset: Adjust vertical spacing between spectra\n"
+                "• Legend/Grid: Toggle display of legend and grid lines\n\n"
+                "X-axis Range controls let you focus on specific wavenumber regions."
+            ),
+            "Heatmap": (
+                "Heatmap Plot Help",
+                "This tab shows intensity as a color-coded 2D map:\n\n"
+                "• Colormap: Select color scheme for intensity visualization\n"
+                "• Contrast: Adjust intensity range of the colormap\n"
+                "• Brightness: Control overall brightness of the display\n"
+                "• Gamma: Adjust the non-linear intensity mapping\n\n"
+                "Use Reset Colors to return to default settings.\n"
+                "X-axis Range controls let you focus on specific wavenumber regions."
+            ),
+            "Fit Results": (
+                "Fit Results Help",
+                "This tab displays trends in peak parameters across all spectra:\n\n"
+                "• Position: How peak centers shift across spectra\n"
+                "• Amplitude: How peak heights change\n"
+                "• Width: Changes in peak widths\n"
+                "• Eta: Mixing parameter for Voigt profiles (when applicable)\n\n"
+                "Failed fits are excluded from plots. Use the Plot tab to control which peaks are displayed."
+            ),
+            "Fit Stats": (
+                "Fit Statistics Help",
+                "This tab shows fit quality metrics across all spectra:\n\n"
+                "• The top row shows the best fits (highest R²)\n"
+                "• The middle row shows median quality fits\n"
+                "• The bottom row shows the worst fits (lowest R²)\n\n"
+                "Each plot displays the original spectrum, background, and fit result.\n"
+                "R² values indicate the goodness of fit within the ROI regions."
+            )
+        }
+        
+    def show_current_help(self):
+        """Show help for the current tab or view."""
+        # Determine which tab is currently active
+        try:
+            # Check left notebook tabs
+            current_left_tab = self.left_notebook.tab(self.left_notebook.select(), "text")
+            help_key = current_left_tab
+            
+            # If visualization notebook exists and is visible, check its tabs too
+            if hasattr(self, 'viz_notebook'):
+                current_viz_tab = self.viz_notebook.tab(self.viz_notebook.select(), "text")
+                # If user is looking at a visualization tab, use that context instead
+                if self.viz_notebook.winfo_viewable():
+                    help_key = current_viz_tab
+        except:
+            # Default to general help if we can't determine the current tab
+            help_key = "General"
+        
+        # Get help text for the current context
+        if help_key in self.help_texts:
+            title, text = self.help_texts[help_key]
+        else:
+            title = "Help"
+            text = "No specific help is available for this view."
+        
+        # Display help dialog
+        self.show_help_dialog(title, text)
+    
+    def show_help_dialog(self, title, text):
+        """Display a help dialog with the given title and text."""
+        help_dialog = tk.Toplevel(self.window)
+        help_dialog.title(title)
+        help_dialog.geometry("600x400")
+        help_dialog.transient(self.window)  # Make dialog modal
+        help_dialog.grab_set()  # Make dialog modal
+        
+        # Create a frame with padding
+        frame = ttk.Frame(help_dialog, padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Add a scrolled text widget
+        text_widget = tk.Text(frame, wrap=tk.WORD, padx=10, pady=10)
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_widget.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        text_widget.config(yscrollcommand=scrollbar.set)
+        
+        # Insert help text
+        text_widget.insert(tk.END, text)
+        text_widget.config(state=tk.DISABLED)  # Make read-only
+        
+        # Add close button
+        ttk.Button(help_dialog, text="Close", command=help_dialog.destroy).pack(pady=10)
+    
     def create_gui(self):
         """Create the GUI elements."""
         # Main container
@@ -81,6 +270,9 @@ class BatchPeakFittingWindow:
         # Create notebook for tabs
         self.left_notebook = ttk.Notebook(self.left_panel_container)
         self.left_notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # Bind tab change event to update help menu
+        self.left_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
         # --- Tab 1: File Selection ---
         file_tab = ttk.Frame(self.left_notebook)
@@ -186,6 +378,25 @@ class BatchPeakFittingWindow:
         ttk.Button(batch_buttons_row, text="Stop", command=self.stop_batch).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         ttk.Button(batch_frame, text="Export Results", command=self.export_results).pack(fill=tk.X, pady=2)
 
+        # Add status text box with scrollbar
+        status_frame = ttk.LabelFrame(batch_frame, text="Progress Log", padding=5)
+        status_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        
+        # Create scrolled text widget
+        self.batch_status_text = tk.Text(status_frame, height=10, width=40, wrap=tk.WORD, 
+                                        font=("Courier", 9))
+        self.batch_status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Add scrollbar
+        status_scrollbar = ttk.Scrollbar(status_frame, orient=tk.VERTICAL, 
+                                        command=self.batch_status_text.yview)
+        status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.batch_status_text.config(yscrollcommand=status_scrollbar.set)
+        
+        # Set initial text
+        self.batch_status_text.insert(tk.END, "Ready. Set a reference spectrum and click 'Apply to All' to begin batch processing.\n")
+        self.batch_status_text.config(state=tk.DISABLED)  # Make read-only
+
         # --- Tab 4: Peak Visibility ---
         visibility_tab = ttk.Frame(self.left_notebook)
         self.left_notebook.add(visibility_tab, text="Plot")
@@ -240,6 +451,9 @@ class BatchPeakFittingWindow:
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         self.viz_notebook = ttk.Notebook(right_panel)
         self.viz_notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Bind tab change event for visualization notebook
+        self.viz_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
         # Current spectrum tab
         current_frame = ttk.Frame(self.viz_notebook)
@@ -493,6 +707,10 @@ class BatchPeakFittingWindow:
             text="Save Individual Plots",
             command=self.export_individual_fit_stats
         )
+        
+        # Create status bar at the bottom of the window
+        self.status_bar = ttk.Label(self.window, text="Press F1 for help with the current tab", relief=tk.SUNKEN, anchor=tk.W, padding=(10, 2))
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
     
     def add_files(self):
         """Add files to the batch processing list."""
@@ -621,63 +839,145 @@ class BatchPeakFittingWindow:
         # Store current index
         current_index = self.current_spectrum_index
         
+        # Enable text widget for updating
+        self.batch_status_text.config(state=tk.NORMAL)
+        self.batch_status_text.delete(1.0, tk.END)
+        self.batch_status_text.insert(tk.END, "Starting batch processing...\n")
+        self.batch_status_text.see(tk.END)
+        self.window.update()
+        
         # Process all spectra
-        for i in range(len(self.spectra_files)):
+        total_spectra = len(self.spectra_files)
+        for i in range(total_spectra):
             if self._stop_batch:
+                self.batch_status_text.insert(tk.END, "Batch processing stopped by user.\n")
+                self.batch_status_text.see(tk.END)
+                self.window.update()
                 messagebox.showinfo("Stopped", "Batch processing was stopped by the user.")
                 break
-            self.load_spectrum(i)
+        
+            # Reset fit_failed flag for this iteration
+            self.fit_failed = False
             
-            # Apply reference peaks
-            self.peaks = self.reference_peaks.copy()
-            
-            # Subtract background using current spectrum's parameters
             try:
-                # Get parameters
-                lambda_val = float(self.var_lambda.get())
-                p_val = float(self.var_p.get())
+                # Update status text - only show which spectrum is being processed
+                spectrum_name = os.path.basename(self.spectra_files[i])
+                self.batch_status_text.insert(tk.END, f"Processing {i+1}/{total_spectra}: {spectrum_name}\n")
+                self.batch_status_text.see(tk.END)
+                self.window.update()
                 
-                # Calculate background
-                L = len(self.spectra)
-                D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
-                w = np.ones(L)
+                self.load_spectrum(i)
                 
-                for j in range(10):
-                    W = sparse.spdiags(w, 0, L, L)
-                    Z = W + lambda_val * D.dot(D.transpose())
-                    z = spsolve(Z, w*self.spectra)
-                    w = p_val * (self.spectra > z) + (1-p_val) * (self.spectra < z)
+                # Apply reference peaks
+                self.peaks = self.reference_peaks.copy()
                 
-                self.background = z
-                self.spectra = self.original_spectra - self.background
+                # Subtract background using current spectrum's parameters
+                try:
+                    # Get parameters
+                    lambda_val = float(self.var_lambda.get())
+                    p_val = float(self.var_p.get())
+                    
+                    # Calculate background
+                    L = len(self.spectra)
+                    D = sparse.diags([1,-2,1],[0,-1,-2], shape=(L,L-2))
+                    w = np.ones(L)
+                    
+                    for j in range(10):
+                        W = sparse.spdiags(w, 0, L, L)
+                        Z = W + lambda_val * D.dot(D.transpose())
+                        z = spsolve(Z, w*self.spectra)
+                        w = p_val * (self.spectra > z) + (1-p_val) * (self.spectra < z)
+                    
+                    self.background = z
+                    self.spectra = self.original_spectra - self.background
+                except Exception as e:
+                    error_msg = f"Background subtraction failed: {str(e)}"
+                    print(error_msg)
+                    self.batch_status_text.insert(tk.END, f"  ✗ {error_msg}\n")
+                    self.batch_status_text.see(tk.END)
+                    self.window.update()
+                    self.fit_failed = True
+                
+                # Fit peaks only if background subtraction succeeded
+                if not self.fit_failed:                    
+                    self.fit_peaks()
+                    
+                    # Get NLLS cycle count from the fit_peaks method
+                    cycle_count = getattr(self, 'nlls_cycles', 0)
+                    
+                    if self.fit_failed:
+                        self.batch_status_text.insert(tk.END, f"  ✗ Fit failed after {cycle_count} NLLS cycles\n")
+                    else:
+                        self.batch_status_text.insert(tk.END, f"  ✓ Fit successful: {cycle_count} NLLS cycles\n")
+                    self.batch_status_text.see(tk.END)
+                    self.window.update()
+                
+                # Store results - even if fit failed (with appropriate placeholders)
+                result_entry = {
+                    'file': self.spectra_files[i],
+                    'peaks': self.peaks.copy() if hasattr(self, 'peaks') else [],
+                    'fit_failed': self.fit_failed,  # Explicitly store fit failure status
+                    'fit_params': np.copy(self.fit_params) if hasattr(self, 'fit_params') and self.fit_params is not None else None,
+                    'fit_cov': np.copy(self.fit_cov) if hasattr(self, 'fit_cov') and self.fit_cov is not None else None,
+                    'background': np.copy(self.background) if hasattr(self, 'background') and self.background is not None else None,
+                    'fit_result': np.copy(self.fit_result) if hasattr(self, 'fit_result') and self.fit_result is not None else None,
+                    'nlls_cycles': getattr(self, 'nlls_cycles', 0)  # Store NLLS cycle count
+                }
+                
+                self.batch_results.append(result_entry)
+                
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to subtract background for spectrum {i+1}: {str(e)}")
-                continue
-            
-            # Fit peaks
-            self.fit_peaks()
-            
-            # Store results
-            self.batch_results.append({
-                'file': self.spectra_files[i],
-                'peaks': self.peaks.copy(),
-                'fit_params': np.copy(self.fit_params) if self.fit_params is not None else None,
-                'fit_cov': np.copy(self.fit_cov) if hasattr(self, 'fit_cov') and self.fit_cov is not None else None,
-                'background': np.copy(self.background) if self.background is not None else None,
-                'fit_result': np.copy(self.fit_result) if self.fit_result is not None else None
-            })
+                error_msg = f"Error processing spectrum {i+1}: {str(e)}"
+                print(error_msg)
+                self.batch_status_text.insert(tk.END, f"  ✗ {error_msg}\n")
+                self.batch_status_text.see(tk.END)
+                self.window.update()
+                
+                # Add placeholder entry for failed spectrum
+                self.batch_results.append({
+                    'file': self.spectra_files[i],
+                    'peaks': [],
+                    'fit_failed': True,
+                    'fit_params': None,
+                    'fit_cov': None,
+                    'background': None,
+                    'fit_result': None,
+                    'nlls_cycles': 0  # Zero cycles for failed fits
+                })
             
             # Update progress
-            self.current_spectrum_label.config(text=f"Processing: {i+1}/{len(self.spectra_files)}")
+            self.current_spectrum_label.config(text=f"Processing: {i+1}/{total_spectra}")
             self.window.update()
+        
+        # Restore original index
+        if 0 <= current_index < len(self.spectra_files):
+            self.load_spectrum(current_index)
         
         # Update peak visibility controls and trends plot
         self.update_peak_visibility_controls()
         self.update_trends_plot()
-        self.update_fit_stats_plot()  # Add this line to update the Fit Stats plot
+        self.update_fit_stats_plot()
         
+        # Calculate and show statistics
+        if self.batch_results:
+            cycles_stats = [r.get('nlls_cycles', 0) for r in self.batch_results if not r.get('fit_failed', True)]
+            if cycles_stats:
+                avg_cycles = sum(cycles_stats) / len(cycles_stats)
+                max_cycles = max(cycles_stats)
+                min_cycles = min(cycles_stats)
+                self.batch_status_text.insert(tk.END, f"\nNLLS cycle statistics:\n")
+                self.batch_status_text.insert(tk.END, f"  Average: {avg_cycles:.1f}\n")
+                self.batch_status_text.insert(tk.END, f"  Min: {min_cycles}\n")
+                self.batch_status_text.insert(tk.END, f"  Max: {max_cycles}\n")
+        
+        # Final status update
         if not self._stop_batch:
+            self.batch_status_text.insert(tk.END, "\nBatch processing completed successfully.\n")
+            self.batch_status_text.see(tk.END)
             messagebox.showinfo("Complete", "Batch processing completed.")
+            
+        # Make text widget read-only again
+        self.batch_status_text.config(state=tk.DISABLED)
     
     def update_peak_visibility_controls(self):
         """Update the peak visibility checkboxes based on the current number of peaks."""
@@ -744,121 +1044,103 @@ class BatchPeakFittingWindow:
         all_params = []
         all_covs = []  # Add storage for covariance matrices
         for result in self.batch_results:
+            # Check if this is a failed fit
+            fit_failed = result.get('fit_failed', False)
             fit_params = result.get('fit_params')
             fit_cov = result.get('fit_cov')  # Get covariance matrix
-            if fit_params is not None:
+            
+            if not fit_failed and fit_params is not None:
                 if n_peaks is None:
                     n_peaks = len(fit_params) // params_per_peak
                 all_params.append(np.array(fit_params).reshape(-1, params_per_peak))
                 all_covs.append(fit_cov)  # Store covariance matrix
             else:
+                # For failed fits, append None to maintain array index correspondence
                 all_params.append(None)
                 all_covs.append(None)
+        
         if n_peaks is None:
             return None, None, None, None
+        
         x = np.arange(len(self.batch_results))
         trends = []
         uncertainties = []  # Add storage for uncertainties
+        
         for peak_idx in range(n_peaks):
             pos_vals, amp_vals, wid_vals, eta_vals, wid_left_vals, wid_right_vals = [], [], [], [], [], []
             pos_errs, amp_errs, wid_errs, eta_errs, wid_left_errs, wid_right_errs = [], [], [], [], [], []  # Add error storage
+            
             for i, (params, cov) in enumerate(zip(all_params, all_covs)):
+                # Initialize with NaN for all spectra indices
+                pos_vals.append(np.nan)
+                amp_vals.append(np.nan)
+                wid_vals.append(np.nan)
+                eta_vals.append(np.nan)
+                wid_left_vals.append(np.nan)
+                wid_right_vals.append(np.nan)
+                
+                pos_errs.append(None)
+                amp_errs.append(None)
+                wid_errs.append(None)
+                eta_errs.append(None)
+                wid_left_errs.append(None)
+                wid_right_errs.append(None)
+                
+                # Only fill in values for successful fits
                 if params is not None and peak_idx < params.shape[0]:
                     if model_type in ["Gaussian", "Lorentzian"]:
                         amp, pos, wid = params[peak_idx]
-                        amp_vals.append(amp)
-                        pos_vals.append(pos)
-                        wid_vals.append(wid)
+                        pos_vals[i] = pos
+                        amp_vals[i] = amp
+                        wid_vals[i] = wid
                         # Calculate uncertainties from covariance matrix
                         if cov is not None:
                             start_idx = peak_idx * params_per_peak
-                            pos_errs.append(1.96 * np.sqrt(cov[start_idx+1, start_idx+1]))  # 95% confidence interval
-                            amp_errs.append(1.96 * np.sqrt(cov[start_idx, start_idx]))
-                            wid_errs.append(1.96 * np.sqrt(cov[start_idx+2, start_idx+2]))
-                        else:
-                            pos_errs.append(None)
-                            amp_errs.append(None)
-                            wid_errs.append(None)
+                            pos_errs[i] = 1.96 * np.sqrt(cov[start_idx+1, start_idx+1])  # 95% confidence interval
+                            amp_errs[i] = 1.96 * np.sqrt(cov[start_idx, start_idx])
+                            wid_errs[i] = 1.96 * np.sqrt(cov[start_idx+2, start_idx+2])
                     elif model_type == "Pseudo-Voigt":
                         amp, pos, wid, eta = params[peak_idx]
-                        amp_vals.append(amp)
-                        pos_vals.append(pos)
-                        wid_vals.append(wid)
-                        eta_vals.append(eta)
+                        pos_vals[i] = pos
+                        amp_vals[i] = amp
+                        wid_vals[i] = wid
+                        eta_vals[i] = eta
                         if cov is not None:
                             start_idx = peak_idx * params_per_peak
-                            pos_errs.append(1.96 * np.sqrt(cov[start_idx+1, start_idx+1]))
-                            amp_errs.append(1.96 * np.sqrt(cov[start_idx, start_idx]))
-                            wid_errs.append(1.96 * np.sqrt(cov[start_idx+2, start_idx+2]))
-                            eta_errs.append(1.96 * np.sqrt(cov[start_idx+3, start_idx+3]))
-                        else:
-                            pos_errs.append(None)
-                            amp_errs.append(None)
-                            wid_errs.append(None)
-                            eta_errs.append(None)
+                            pos_errs[i] = 1.96 * np.sqrt(cov[start_idx+1, start_idx+1])
+                            amp_errs[i] = 1.96 * np.sqrt(cov[start_idx, start_idx])
+                            wid_errs[i] = 1.96 * np.sqrt(cov[start_idx+2, start_idx+2])
+                            eta_errs[i] = 1.96 * np.sqrt(cov[start_idx+3, start_idx+3])
                     elif model_type == "Asymmetric Voigt":
                         amp, pos, wid_left, wid_right, eta = params[peak_idx]
-                        amp_vals.append(amp)
-                        pos_vals.append(pos)
-                        wid_left_vals.append(wid_left)
-                        wid_right_vals.append(wid_right)
-                        eta_vals.append(eta)
+                        pos_vals[i] = pos
+                        amp_vals[i] = amp
+                        wid_left_vals[i] = wid_left
+                        wid_right_vals[i] = wid_right
+                        eta_vals[i] = eta
                         if cov is not None:
                             start_idx = peak_idx * params_per_peak
-                            pos_errs.append(1.96 * np.sqrt(cov[start_idx+1, start_idx+1]))
-                            amp_errs.append(1.96 * np.sqrt(cov[start_idx, start_idx]))
-                            wid_left_errs.append(1.96 * np.sqrt(cov[start_idx+2, start_idx+2]))
-                            wid_right_errs.append(1.96 * np.sqrt(cov[start_idx+3, start_idx+3]))
-                            eta_errs.append(1.96 * np.sqrt(cov[start_idx+4, start_idx+4]))
-                        else:
-                            pos_errs.append(None)
-                            amp_errs.append(None)
-                            wid_left_errs.append(None)
-                            wid_right_errs.append(None)
-                            eta_errs.append(None)
-                else:
-                    if model_type == "Asymmetric Voigt":
-                        amp_vals.append(np.nan)
-                        pos_vals.append(np.nan)
-                        wid_left_vals.append(np.nan)
-                        wid_right_vals.append(np.nan)
-                        eta_vals.append(np.nan)
-                        pos_errs.append(None)
-                        amp_errs.append(None)
-                        wid_left_errs.append(None)
-                        wid_right_errs.append(None)
-                        eta_errs.append(None)
-                    elif model_type == "Pseudo-Voigt":
-                        amp_vals.append(np.nan)
-                        pos_vals.append(np.nan)
-                        wid_vals.append(np.nan)
-                        eta_vals.append(np.nan)
-                        pos_errs.append(None)
-                        amp_errs.append(None)
-                        wid_errs.append(None)
-                        eta_errs.append(None)
-                    else:
-                        amp_vals.append(np.nan)
-                        pos_vals.append(np.nan)
-                        wid_vals.append(np.nan)
-                        pos_errs.append(None)
-                        amp_errs.append(None)
-                        wid_errs.append(None)
+                            pos_errs[i] = 1.96 * np.sqrt(cov[start_idx+1, start_idx+1])
+                            amp_errs[i] = 1.96 * np.sqrt(cov[start_idx, start_idx])
+                            wid_left_errs[i] = 1.96 * np.sqrt(cov[start_idx+2, start_idx+2])
+                            wid_right_errs[i] = 1.96 * np.sqrt(cov[start_idx+3, start_idx+3])
+                            eta_errs[i] = 1.96 * np.sqrt(cov[start_idx+4, start_idx+4])
+            
             trends.append({
-                'pos': pos_vals,
-                'amp': amp_vals,
-                'wid': wid_vals,
-                'eta': eta_vals,
-                'wid_left': wid_left_vals,
-                'wid_right': wid_right_vals
+                'pos': np.array(pos_vals),
+                'amp': np.array(amp_vals),
+                'wid': np.array(wid_vals),
+                'eta': np.array(eta_vals),
+                'wid_left': np.array(wid_left_vals),
+                'wid_right': np.array(wid_right_vals)
             })
             uncertainties.append({
-                'pos': pos_errs,
-                'amp': amp_errs,
-                'wid': wid_errs,
-                'eta': eta_errs,
-                'wid_left': wid_left_errs,
-                'wid_right': wid_right_errs
+                'pos': np.array(pos_errs),
+                'amp': np.array(amp_errs),
+                'wid': np.array(wid_errs),
+                'eta': np.array(eta_errs),
+                'wid_left': np.array(wid_left_errs),
+                'wid_right': np.array(wid_right_errs)
             })
         return x, trends, n_peaks, uncertainties
 
@@ -890,44 +1172,287 @@ class BatchPeakFittingWindow:
         # Only plot peaks whose checkboxes are checked
         visible_peaks = [i for i in range(n_peaks) if i < len(self.peak_visibility_vars) and self.peak_visibility_vars[i].get()]
 
+        # Count how many spectra had failed fits
+        failed_fits_count = sum(1 for result in self.batch_results if result.get('fit_failed', False))
+        if failed_fits_count > 0:
+            for ax in axes:
+                ax.text(0.02, 0.98, f"Note: {failed_fits_count} failed fits excluded", 
+                       transform=ax.transAxes, fontsize=8, va='top', ha='left', 
+                       color='red', bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
+
         for peak_idx in visible_peaks:
             color = f"C{peak_idx}"
+            
             # Position
-            y = np.array(trends[peak_idx]['pos'])
-            yerr = np.array(uncertainties[peak_idx]['pos'])
-            axes[0].plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-            if show_95:
-                axes[0].fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+            y = trends[peak_idx]['pos']
+            yerr = uncertainties[peak_idx]['pos']
+            valid_mask = ~np.isnan(y)
+            
+            if np.any(valid_mask):
+                x_valid = x[valid_mask]
+                y_valid = y[valid_mask]
+                yerr_valid = yerr[valid_mask]
+                
+                # Plot points
+                axes[0].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                
+                # Draw smooth confidence bands without vertical lines
+                if show_95:
+                    # Find consecutive groups of points
+                    # This identifies runs of adjacent indices in the original array
+                    groups = []
+                    current_group = []
+                    for i, idx in enumerate(np.where(valid_mask)[0]):
+                        if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                            # Consecutive point, add to current group
+                            current_group.append(i)
+                        else:
+                            # Gap detected, start a new group
+                            if current_group:
+                                groups.append(current_group)
+                            current_group = [i]
+                    if current_group:
+                        groups.append(current_group)
+                    
+                    # Draw each group as a separate smooth confidence band
+                    for group in groups:
+                        if len(group) < 2:
+                            continue  # Need at least 2 points to draw a band
+                            
+                        # Get values for this group
+                        xg = x_valid[group]
+                        yg = y_valid[group]
+                        yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                        
+                        if len(yerrg) != len(xg):
+                            continue  # Skip if not all errors are valid
+                            
+                        # Create a high-resolution interpolation for smooth curves
+                        x_interp = np.linspace(xg[0], xg[-1], 100)
+                        y_interp = np.interp(x_interp, xg, yg)
+                        
+                        # For the upper and lower bounds, interpolate separately
+                        upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                        lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                        
+                        # Fill once per group with a single call to avoid vertical lines
+                        axes[0].fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+            
             # Amplitude
-            y = np.array(trends[peak_idx]['amp'])
-            yerr = np.array(uncertainties[peak_idx]['amp'])
-            axes[1].plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-            if show_95:
-                axes[1].fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+            y = trends[peak_idx]['amp']
+            yerr = uncertainties[peak_idx]['amp']
+            valid_mask = ~np.isnan(y)
+            
+            if np.any(valid_mask):
+                x_valid = x[valid_mask]
+                y_valid = y[valid_mask]
+                yerr_valid = yerr[valid_mask]
+                
+                axes[1].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                
+                if show_95:
+                    # Find consecutive groups of points
+                    groups = []
+                    current_group = []
+                    for i, idx in enumerate(np.where(valid_mask)[0]):
+                        if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                            current_group.append(i)
+                        else:
+                            if current_group:
+                                groups.append(current_group)
+                            current_group = [i]
+                    if current_group:
+                        groups.append(current_group)
+                    
+                    for group in groups:
+                        if len(group) < 2:
+                            continue
+                            
+                        xg = x_valid[group]
+                        yg = y_valid[group]
+                        yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                        
+                        if len(yerrg) != len(xg):
+                            continue
+                            
+                        x_interp = np.linspace(xg[0], xg[-1], 100)
+                        y_interp = np.interp(x_interp, xg, yg)
+                        upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                        lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                        
+                        axes[1].fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+            
             # Width
             if model_type == "Asymmetric Voigt":
-                y_left = np.array(trends[peak_idx]['wid_left'])
-                y_right = np.array(trends[peak_idx]['wid_right'])
-                yerr_left = np.array(uncertainties[peak_idx]['wid_left'])
-                yerr_right = np.array(uncertainties[peak_idx]['wid_right'])
-                axes[2].plot(x, y_left, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
-                axes[2].plot(x, y_right, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
-                if show_95:
-                    axes[2].fill_between(x, y_left - yerr_left, y_left + yerr_left, color=color, alpha=0.2)
-                    axes[2].fill_between(x, y_right - yerr_right, y_right + yerr_right, color=color, alpha=0.2)
+                y_left = trends[peak_idx]['wid_left']
+                y_right = trends[peak_idx]['wid_right']
+                yerr_left = uncertainties[peak_idx]['wid_left']
+                yerr_right = uncertainties[peak_idx]['wid_right']
+                
+                valid_mask_left = ~np.isnan(y_left)
+                valid_mask_right = ~np.isnan(y_right)
+                
+                if np.any(valid_mask_left):
+                    x_valid = x[valid_mask_left]
+                    y_valid = y_left[valid_mask_left]
+                    yerr_valid = yerr_left[valid_mask_left]
+                    
+                    axes[2].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
+                    
+                    if show_95:
+                        groups = []
+                        current_group = []
+                        for i, idx in enumerate(np.where(valid_mask_left)[0]):
+                            if i == 0 or idx == np.where(valid_mask_left)[0][i-1] + 1:
+                                current_group.append(i)
+                            else:
+                                if current_group:
+                                    groups.append(current_group)
+                                current_group = [i]
+                        if current_group:
+                            groups.append(current_group)
+                        
+                        for group in groups:
+                            if len(group) < 2:
+                                continue
+                                
+                            xg = x_valid[group]
+                            yg = y_valid[group]
+                            yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                            
+                            if len(yerrg) != len(xg):
+                                continue
+                                
+                            x_interp = np.linspace(xg[0], xg[-1], 100)
+                            y_interp = np.interp(x_interp, xg, yg)
+                            upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                            lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                            
+                            axes[2].fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+                
+                if np.any(valid_mask_right):
+                    x_valid = x[valid_mask_right]
+                    y_valid = y_right[valid_mask_right]
+                    yerr_valid = yerr_right[valid_mask_right]
+                    
+                    axes[2].plot(x_valid, y_valid, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
+                    
+                    if show_95:
+                        groups = []
+                        current_group = []
+                        for i, idx in enumerate(np.where(valid_mask_right)[0]):
+                            if i == 0 or idx == np.where(valid_mask_right)[0][i-1] + 1:
+                                current_group.append(i)
+                            else:
+                                if current_group:
+                                    groups.append(current_group)
+                                current_group = [i]
+                        if current_group:
+                            groups.append(current_group)
+                        
+                        for group in groups:
+                            if len(group) < 2:
+                                continue
+                                
+                            xg = x_valid[group]
+                            yg = y_valid[group]
+                            yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                            
+                            if len(yerrg) != len(xg):
+                                continue
+                                
+                            x_interp = np.linspace(xg[0], xg[-1], 100)
+                            y_interp = np.interp(x_interp, xg, yg)
+                            upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                            lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                            
+                            axes[2].fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
             else:
-                y = np.array(trends[peak_idx]['wid'])
-                yerr = np.array(uncertainties[peak_idx]['wid'])
-                axes[2].plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-                if show_95:
-                    axes[2].fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+                y = trends[peak_idx]['wid']
+                yerr = uncertainties[peak_idx]['wid']
+                valid_mask = ~np.isnan(y)
+                
+                if np.any(valid_mask):
+                    x_valid = x[valid_mask]
+                    y_valid = y[valid_mask]
+                    yerr_valid = yerr[valid_mask]
+                    
+                    axes[2].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                    
+                    if show_95:
+                        groups = []
+                        current_group = []
+                        for i, idx in enumerate(np.where(valid_mask)[0]):
+                            if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                                current_group.append(i)
+                            else:
+                                if current_group:
+                                    groups.append(current_group)
+                                current_group = [i]
+                        if current_group:
+                            groups.append(current_group)
+                        
+                        for group in groups:
+                            if len(group) < 2:
+                                continue
+                                
+                            xg = x_valid[group]
+                            yg = y_valid[group]
+                            yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                            
+                            if len(yerrg) != len(xg):
+                                continue
+                                
+                            x_interp = np.linspace(xg[0], xg[-1], 100)
+                            y_interp = np.interp(x_interp, xg, yg)
+                            upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                            lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                            
+                            axes[2].fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+            
             # Eta
             if model_type in ["Pseudo-Voigt", "Asymmetric Voigt"]:
-                y = np.array(trends[peak_idx]['eta'])
-                yerr = np.array(uncertainties[peak_idx]['eta'])
-                axes[3].plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-                if show_95:
-                    axes[3].fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+                y = trends[peak_idx]['eta']
+                yerr = uncertainties[peak_idx]['eta']
+                valid_mask = ~np.isnan(y)
+                
+                if np.any(valid_mask):
+                    x_valid = x[valid_mask]
+                    y_valid = y[valid_mask]
+                    yerr_valid = yerr[valid_mask]
+                    
+                    axes[3].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                    
+                    if show_95:
+                        groups = []
+                        current_group = []
+                        for i, idx in enumerate(np.where(valid_mask)[0]):
+                            if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                                current_group.append(i)
+                            else:
+                                if current_group:
+                                    groups.append(current_group)
+                                current_group = [i]
+                        if current_group:
+                            groups.append(current_group)
+                        
+                        for group in groups:
+                            if len(group) < 2:
+                                continue
+                                
+                            xg = x_valid[group]
+                            yg = y_valid[group]
+                            yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                            
+                            if len(yerrg) != len(xg):
+                                continue
+                                
+                            x_interp = np.linspace(xg[0], xg[-1], 100)
+                            y_interp = np.interp(x_interp, xg, yg)
+                            upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                            lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                            
+                            axes[3].fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
 
         # If model does not support Eta, show message in bottom-right
         if model_type not in ["Pseudo-Voigt", "Asymmetric Voigt"]:
@@ -968,67 +1493,332 @@ class BatchPeakFittingWindow:
         show_grid = self.show_fit_grid.get()
         visible_peaks = [i for i in range(n_peaks) if i < len(self.peak_visibility_vars) and self.peak_visibility_vars[i].get()]
         plotted = False
+        
+        # Count failed fits
+        failed_fits_count = sum(1 for result in self.batch_results if result.get('fit_failed', False))
+        if failed_fits_count > 0:
+            ax.text(0.02, 0.98, f"Note: {failed_fits_count} failed fits excluded", 
+                   transform=ax.transAxes, fontsize=8, va='top', ha='left', 
+                   color='red', bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
+        
         for peak_idx in visible_peaks:
             color = f"C{peak_idx}"
             if which == 'position':
-                y = np.array(trends[peak_idx]['pos'])
-                yerr = np.array(uncertainties[peak_idx]['pos'])
-                ax.plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-                if show_95:
-                    ax.fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+                y = trends[peak_idx]['pos']
+                yerr = uncertainties[peak_idx]['pos']
+                valid_mask = ~np.isnan(y)
+                
+                if np.any(valid_mask):
+                    x_valid = x[valid_mask]
+                    y_valid = y[valid_mask]
+                    yerr_valid = yerr[valid_mask]
+                    
+                    # Plot points
+                    ax.plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                    
+                    # Draw confidence bands
+                    if show_95:
+                        # Find consecutive groups of points
+                        groups = []
+                        current_group = []
+                        for i, idx in enumerate(np.where(valid_mask)[0]):
+                            if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                                current_group.append(i)
+                            else:
+                                if current_group:
+                                    groups.append(current_group)
+                                current_group = [i]
+                        if current_group:
+                            groups.append(current_group)
+                        
+                        # Draw each group as a separate smooth confidence band
+                        for group in groups:
+                            if len(group) < 2:
+                                continue  # Need at least 2 points to draw a band
+                                
+                            # Get values for this group
+                            xg = x_valid[group]
+                            yg = y_valid[group]
+                            yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                            
+                            if len(yerrg) != len(xg):
+                                continue  # Skip if not all errors are valid
+                                
+                            # Create a high-resolution interpolation for smooth curves
+                            x_interp = np.linspace(xg[0], xg[-1], 100)
+                            y_interp = np.interp(x_interp, xg, yg)
+                            
+                            # For the upper and lower bounds, interpolate separately
+                            upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                            lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                            
+                            # Fill once per group with a single call to avoid vertical lines
+                            ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+                
                 ax.set_title('Peak Position')
                 ax.set_ylabel('Position (cm⁻¹)')
                 plotted = True
+                
             elif which == 'amplitude':
-                y = np.array(trends[peak_idx]['amp'])
-                yerr = np.array(uncertainties[peak_idx]['amp'])
-                ax.plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-                if show_95:
-                    ax.fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+                y = trends[peak_idx]['amp']
+                yerr = uncertainties[peak_idx]['amp']
+                valid_mask = ~np.isnan(y)
+                
+                if np.any(valid_mask):
+                    x_valid = x[valid_mask]
+                    y_valid = y[valid_mask]
+                    yerr_valid = yerr[valid_mask]
+                    
+                    # Plot points
+                    ax.plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                    
+                    # Draw confidence bands
+                    if show_95:
+                        groups = []
+                        current_group = []
+                        for i, idx in enumerate(np.where(valid_mask)[0]):
+                            if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                                current_group.append(i)
+                            else:
+                                if current_group:
+                                    groups.append(current_group)
+                                current_group = [i]
+                        if current_group:
+                            groups.append(current_group)
+                        
+                        for group in groups:
+                            if len(group) < 2:
+                                continue
+                                
+                            xg = x_valid[group]
+                            yg = y_valid[group]
+                            yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                            
+                            if len(yerrg) != len(xg):
+                                continue
+                                
+                            x_interp = np.linspace(xg[0], xg[-1], 100)
+                            y_interp = np.interp(x_interp, xg, yg)
+                            upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                            lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                            
+                            ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+                
                 ax.set_title('Peak Amplitude')
                 ax.set_ylabel('Amplitude')
                 plotted = True
+                
             elif which == 'width':
                 if model_type == "Asymmetric Voigt":
-                    y_left = np.array(trends[peak_idx]['wid_left'])
-                    y_right = np.array(trends[peak_idx]['wid_right'])
-                    yerr_left = np.array(uncertainties[peak_idx]['wid_left'])
-                    yerr_right = np.array(uncertainties[peak_idx]['wid_right'])
-                    ax.plot(x, y_left, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
-                    ax.plot(x, y_right, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
-                    if show_95:
-                        ax.fill_between(x, y_left - yerr_left, y_left + yerr_left, color=color, alpha=0.2)
-                        ax.fill_between(x, y_right - yerr_right, y_right + yerr_right, color=color, alpha=0.2)
+                    y_left = trends[peak_idx]['wid_left']
+                    y_right = trends[peak_idx]['wid_right']
+                    yerr_left = uncertainties[peak_idx]['wid_left']
+                    yerr_right = uncertainties[peak_idx]['wid_right']
+                    
+                    valid_mask_left = ~np.isnan(y_left)
+                    valid_mask_right = ~np.isnan(y_right)
+                    
+                    if np.any(valid_mask_left):
+                        x_valid = x[valid_mask_left]
+                        y_valid = y_left[valid_mask_left]
+                        yerr_valid = yerr_left[valid_mask_left]
+                        
+                        ax.plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
+                        
+                        if show_95:
+                            groups = []
+                            current_group = []
+                            for i, idx in enumerate(np.where(valid_mask_left)[0]):
+                                if i == 0 or idx == np.where(valid_mask_left)[0][i-1] + 1:
+                                    current_group.append(i)
+                                else:
+                                    if current_group:
+                                        groups.append(current_group)
+                                    current_group = [i]
+                            if current_group:
+                                groups.append(current_group)
+                            
+                            for group in groups:
+                                if len(group) < 2:
+                                    continue
+                                    
+                                xg = x_valid[group]
+                                yg = y_valid[group]
+                                yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                                
+                                if len(yerrg) != len(xg):
+                                    continue
+                                    
+                                x_interp = np.linspace(xg[0], xg[-1], 100)
+                                y_interp = np.interp(x_interp, xg, yg)
+                                upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                                lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                                
+                                ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+                    
+                    if np.any(valid_mask_right):
+                        x_valid = x[valid_mask_right]
+                        y_valid = y_right[valid_mask_right]
+                        yerr_valid = yerr_right[valid_mask_right]
+                        
+                        ax.plot(x_valid, y_valid, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
+                        
+                        if show_95:
+                            groups = []
+                            current_group = []
+                            for i, idx in enumerate(np.where(valid_mask_right)[0]):
+                                if i == 0 or idx == np.where(valid_mask_right)[0][i-1] + 1:
+                                    current_group.append(i)
+                                else:
+                                    if current_group:
+                                        groups.append(current_group)
+                                    current_group = [i]
+                            if current_group:
+                                groups.append(current_group)
+                            
+                            for group in groups:
+                                if len(group) < 2:
+                                    continue
+                                    
+                                xg = x_valid[group]
+                                yg = y_valid[group]
+                                yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                                
+                                if len(yerrg) != len(xg):
+                                    continue
+                                    
+                                x_interp = np.linspace(xg[0], xg[-1], 100)
+                                y_interp = np.interp(x_interp, xg, yg)
+                                upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                                lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                                
+                                ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
                 else:
-                    y = np.array(trends[peak_idx]['wid'])
-                    yerr = np.array(uncertainties[peak_idx]['wid'])
-                    ax.plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-                    if show_95:
-                        ax.fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+                    y = trends[peak_idx]['wid']
+                    yerr = uncertainties[peak_idx]['wid']
+                    valid_mask = ~np.isnan(y)
+                    
+                    if np.any(valid_mask):
+                        x_valid = x[valid_mask]
+                        y_valid = y[valid_mask]
+                        yerr_valid = yerr[valid_mask]
+                        
+                        ax.plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                        
+                        if show_95:
+                            groups = []
+                            current_group = []
+                            for i, idx in enumerate(np.where(valid_mask)[0]):
+                                if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                                    current_group.append(i)
+                                else:
+                                    if current_group:
+                                        groups.append(current_group)
+                                    current_group = [i]
+                            if current_group:
+                                groups.append(current_group)
+                            
+                            for group in groups:
+                                if len(group) < 2:
+                                    continue
+                                    
+                                xg = x_valid[group]
+                                yg = y_valid[group]
+                                yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                                
+                                if len(yerrg) != len(xg):
+                                    continue
+                                    
+                                x_interp = np.linspace(xg[0], xg[-1], 100)
+                                y_interp = np.interp(x_interp, xg, yg)
+                                upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                                lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                                
+                                ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+                
                 ax.set_title('Peak Width')
                 ax.set_ylabel('Width (cm⁻¹)')
                 plotted = True
+                
             elif which == 'eta':
                 if model_type in ["Pseudo-Voigt", "Asymmetric Voigt"]:
-                    y = np.array(trends[peak_idx]['eta'])
-                    yerr = np.array(uncertainties[peak_idx]['eta'])
-                    ax.plot(x, y, 'o', label=f'Peak {peak_idx+1}', color=color)
-                    if show_95:
-                        ax.fill_between(x, y - yerr, y + yerr, color=color, alpha=0.2)
+                    y = trends[peak_idx]['eta']
+                    yerr = uncertainties[peak_idx]['eta']
+                    valid_mask = ~np.isnan(y)
+                    
+                    if np.any(valid_mask):
+                        x_valid = x[valid_mask]
+                        y_valid = y[valid_mask]
+                        yerr_valid = yerr[valid_mask]
+                        
+                        ax.plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                        
+                        if show_95:
+                            groups = []
+                            current_group = []
+                            for i, idx in enumerate(np.where(valid_mask)[0]):
+                                if i == 0 or idx == np.where(valid_mask)[0][i-1] + 1:
+                                    current_group.append(i)
+                                else:
+                                    if current_group:
+                                        groups.append(current_group)
+                                    current_group = [i]
+                            if current_group:
+                                groups.append(current_group)
+                            
+                            for group in groups:
+                                if len(group) < 2:
+                                    continue
+                                
+                                xg = x_valid[group]
+                                yg = y_valid[group]
+                                yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
+                                
+                                if len(yerrg) != len(xg):
+                                    continue
+                                
+                                x_interp = np.linspace(xg[0], xg[-1], 100)
+                                y_interp = np.interp(x_interp, xg, yg)
+                                upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                                lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                                
+                                ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
+                    
                     ax.set_title('Peak Eta')
                     ax.set_ylabel('Eta')
                     plotted = True
-        if which == 'eta' and not (model_type in ["Pseudo-Voigt", "Asymmetric Voigt"]):
-            ax.text(0.5, 0.5, 'Eta not available for current model', ha='center', va='center', transform=ax.transAxes)
-            ax.set_title('Peak Eta')
-            ax.set_ylabel('Eta')
+                else:
+                    ax.text(0.5, 0.5, 'Eta not available for current model', ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title('Peak Eta')
+                    ax.set_ylabel('Eta')
+        
         ax.set_xlabel('Spectrum Number')
         if show_grid:
             ax.grid(True, linestyle=':', color='gray', alpha=0.6)
         else:
             ax.grid(False)
         ax.legend()
-    
+
+    def preview_trends_subplot(self, which):
+        """Preview a single trends subplot (position, amplitude, width, eta) in a new window."""
+        import matplotlib.pyplot as plt
+        import tkinter as tk
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        preview_win = tk.Toplevel(self.window)
+        preview_win.title(f"Preview {which.capitalize()} Plot")
+        preview_win.geometry("700x500")  # Set a reasonable size for the preview window
+        
+        fig, ax = plt.subplots(figsize=(7, 5))
+        # Call a helper to plot the selected subplot with current options
+        self._plot_single_trends_subplot(ax, which)
+        canvas = FigureCanvasTkAgg(fig, master=preview_win)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        toolbar_frame = ttk.Frame(preview_win)
+        toolbar_frame.pack(fill=tk.X)
+        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+        toolbar.update()
+
     def export_results(self):
         """Export the batch processing results to a CSV file."""
         if not self.batch_results:
@@ -1049,9 +1839,14 @@ class BatchPeakFittingWindow:
             # Prepare data for export
             data = []
             for result in self.batch_results:
+                # Start with basic file info
                 row = {'File': os.path.basename(result['file'])}
                 
-                if result['fit_params'] is not None:
+                # Check if this was a failed fit
+                fit_failed = result.get('fit_failed', False)
+                row['Fit_Success'] = 'No' if fit_failed else 'Yes'
+                
+                if not fit_failed and result['fit_params'] is not None:
                     # Get model type
                     model_type = self.current_model.get()
                     if model_type == "Gaussian" or model_type == "Lorentzian":
@@ -1077,6 +1872,36 @@ class BatchPeakFittingWindow:
                             row[f'Peak_{i+1}_Width_Left'] = result['fit_params'][start_idx+2]
                             row[f'Peak_{i+1}_Width_Right'] = result['fit_params'][start_idx+3]
                             row[f'Peak_{i+1}_Eta'] = result['fit_params'][start_idx+4]
+                else:
+                    # For failed fits, add NaN placeholders for all peak parameters
+                    model_type = self.current_model.get()
+                    # Estimate number of peaks from the first successful fit in batch results
+                    n_peaks = 0
+                    for res in self.batch_results:
+                        if not res.get('fit_failed', False) and res['fit_params'] is not None:
+                            if model_type == "Gaussian" or model_type == "Lorentzian":
+                                params_per_peak = 3
+                            elif model_type == "Pseudo-Voigt":
+                                params_per_peak = 4
+                            elif model_type == "Asymmetric Voigt":
+                                params_per_peak = 5
+                            else:
+                                params_per_peak = 3
+                            n_peaks = len(res['fit_params']) // params_per_peak
+                            break
+                    
+                    # Add placeholders for all peak parameters
+                    for i in range(n_peaks):
+                        row[f'Peak_{i+1}_Position'] = float('nan')
+                        row[f'Peak_{i+1}_Amplitude'] = float('nan')
+                        row[f'Peak_{i+1}_Width'] = float('nan')
+                        
+                        if model_type == "Pseudo-Voigt":
+                            row[f'Peak_{i+1}_Eta'] = float('nan')
+                        elif model_type == "Asymmetric Voigt":
+                            row[f'Peak_{i+1}_Width_Left'] = float('nan')
+                            row[f'Peak_{i+1}_Width_Right'] = float('nan')
+                            row[f'Peak_{i+1}_Eta'] = float('nan')
                 
                 data.append(row)
             
@@ -1128,46 +1953,84 @@ class BatchPeakFittingWindow:
             distance = self.var_distance.get()
             prominence = self.var_prominence.get()
             
-            # Convert parameters to float if not "Auto"
-            height = float(height) if height != "Auto" else None
-            distance = float(distance) if distance != "Auto" else None
-            prominence = float(prominence) if prominence != "Auto" else None
+            # Convert parameters to float if not "Auto" - use safe conversion
+            try:
+                height = float(height) if height != "Auto" else None
+            except (ValueError, TypeError):
+                height = None
+                
+            try:
+                distance = int(float(distance)) if distance != "Auto" else None
+            except (ValueError, TypeError):
+                distance = None
+                
+            try:
+                prominence = float(prominence) if prominence != "Auto" else None
+            except (ValueError, TypeError):
+                prominence = None
             
-            # Find peaks
-            from scipy.signal import find_peaks
-            peak_indices, properties = find_peaks(
-                self.spectra, 
-                height=height, 
-                distance=distance,
-                prominence=prominence
-            )
+            # Get a copy of the spectrum data to avoid modifying the original
+            spectra_data = np.copy(self.spectra)
+            
+            # Ensure we have valid data
+            if spectra_data is None or len(spectra_data) == 0:
+                messagebox.showerror("Error", "No spectrum data available")
+                return
+                
+            # Import scipy find_peaks function safely inside the try block
+            try:
+                from scipy.signal import find_peaks
+                peak_indices, properties = find_peaks(
+                    spectra_data, 
+                    height=height, 
+                    distance=distance,
+                    prominence=prominence
+                )
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to execute scipy.signal.find_peaks: {str(e)}")
+                return
             
             # Store peak positions and intensities
             self.peaks = []
             for idx in peak_indices:
+                idx_int = int(idx)  # Convert to int to avoid array indexing issues
                 self.peaks.append({
-                    'position': float(self.wavenumbers[int(idx)]),
-                    'intensity': float(self.spectra[int(idx)]),
-                    'index': int(idx)
+                    'position': float(self.wavenumbers[idx_int]),
+                    'intensity': float(spectra_data[idx_int]),
+                    'index': idx_int
                 })
             
             # Update plot
             self.update_plot()
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error in find_peaks: {error_details}")
             messagebox.showerror("Error", f"Failed to find peaks: {str(e)}")
     
     def gaussian(self, x, a, x0, sigma):
         """Gaussian peak function."""
-        return a * np.exp(-(x-x0)**2/(2*sigma**2))
+        # Use numpy operations for safety
+        x_array = np.asarray(x)
+        diff = np.subtract(x_array, x0)
+        exponent = np.divide(np.negative(np.square(diff)), 2.0 * np.square(sigma))
+        return a * np.exp(exponent)
     
-    def lorentzian(self, x, a, x0, gamma):
+    def lorentzian(self, x, a, x0, wid):
         """Lorentzian peak function."""
-        return a * gamma**2 / ((x-x0)**2 + gamma**2)
+        # Use numpy operations for safety
+        x_array = np.asarray(x)
+        diff = np.subtract(x_array, x0)
+        denom = np.add(np.square(diff), np.square(wid))
+        return np.multiply(a, np.divide(np.square(wid), denom))
     
     def pseudo_voigt(self, x, a, x0, sigma, eta):
         """Pseudo-Voigt peak function."""
-        return eta * self.lorentzian(x, a, x0, sigma) + (1-eta) * self.gaussian(x, a, x0, sigma)
+        # Safely compute as a weighted sum of Gaussian and Lorentzian components
+        gaussian_part = self.gaussian(x, a, x0, sigma)
+        lorentzian_part = self.lorentzian(x, a, x0, sigma)
+        return np.add(np.multiply(eta, lorentzian_part), np.multiply(np.subtract(1.0, eta), gaussian_part))
     
     def asymmetric_voigt(self, x, amp, cen, wid_left, wid_right, eta=0.5):
         """
@@ -1195,24 +2058,30 @@ class BatchPeakFittingWindow:
         array-like
             The asymmetric Voigt function evaluated at x
         """
-        # Create separate arrays for left and right sides
-        left_mask = x <= cen
-        right_mask = ~left_mask
+        # Ensure we're working with numpy arrays
+        x_array = np.asarray(x)
+        cen_val = float(cen)
         
         # Initialize result array
-        result = np.zeros_like(x)
+        result = np.zeros_like(x_array)
         
-        # Calculate Gaussian and Lorentzian components for left side
-        g_left = np.exp(-((x[left_mask] - cen) / wid_left) ** 2)
-        l_left = 1 / (1 + ((x[left_mask] - cen) / wid_left) ** 2)
+        # Calculate the mask for left and right sides using numpy functions
+        left_indices = np.nonzero(np.less_equal(x_array, cen_val))[0]
+        right_indices = np.nonzero(np.greater(x_array, cen_val))[0]
         
-        # Calculate Gaussian and Lorentzian components for right side
-        g_right = np.exp(-((x[right_mask] - cen) / wid_right) ** 2)
-        l_right = 1 / (1 + ((x[right_mask] - cen) / wid_right) ** 2)
+        # Process left side
+        if left_indices.size > 0:
+            x_left = x_array[left_indices]
+            g_left = np.exp(-np.square((x_left - cen_val) / wid_left))
+            l_left = 1.0 / (1.0 + np.square((x_left - cen_val) / wid_left))
+            result[left_indices] = amp * (eta * g_left + (1.0 - eta) * l_left)
         
-        # Combine components using eta parameter
-        result[left_mask] = amp * (eta * g_left + (1 - eta) * l_left)
-        result[right_mask] = amp * (eta * g_right + (1 - eta) * l_right)
+        # Process right side
+        if right_indices.size > 0:
+            x_right = x_array[right_indices]
+            g_right = np.exp(-np.square((x_right - cen_val) / wid_right))
+            l_right = 1.0 / (1.0 + np.square((x_right - cen_val) / wid_right))
+            result[right_indices] = amp * (eta * g_right + (1.0 - eta) * l_right)
         
         return result
     
@@ -1254,34 +2123,45 @@ class BatchPeakFittingWindow:
                             roi_ranges.append((min_w, max_w))
                 except Exception as e:
                     messagebox.showerror("Fit Range Error", f"Could not parse fit ranges: {fit_ranges_str}\nError: {e}")
+                    self.fit_failed = True
                     return
             
             # Filter peaks to only include those within ROI ranges
             peaks_in_roi = []
             for peak in self.peaks:
                 peak_pos = peak['position']
-                if not roi_ranges:  # If no ROI specified, include all peaks
+                # Check if roi_ranges is empty using len() instead of direct boolean evaluation
+                if len(roi_ranges) == 0:  # If no ROI specified, include all peaks
                     peaks_in_roi.append(peak)
                 else:
                     for min_w, max_w in roi_ranges:
-                        if min_w <= peak_pos <= max_w:
+                        # Use explicit comparisons to avoid potential array logic issues
+                        is_in_range = (min_w <= peak_pos) and (peak_pos <= max_w)
+                        if is_in_range:
                             peaks_in_roi.append(peak)
                             break
             
             if not peaks_in_roi:
                 messagebox.showwarning("No Peaks in ROI", "No peaks found within the specified ROI ranges.")
+                self.fit_failed = True
                 return
             
             # HARD CAP for Asymmetric Voigt
             if model_type == "Asymmetric Voigt" and len(peaks_in_roi) > 8:
                 messagebox.showerror("Too Many Peaks", "Asymmetric Voigt fitting is limited to 8 peaks for stability. Please reduce the number of detected peaks (e.g., by increasing the prominence or height threshold).")
+                self.fit_failed = True
                 return
 
             # Create mask for ROI ranges
             mask = np.zeros_like(self.wavenumbers, dtype=bool)
             if roi_ranges:
                 for min_w, max_w in roi_ranges:
-                    mask |= (self.wavenumbers >= min_w) & (self.wavenumbers <= max_w)
+                    # Use numpy logical operations to avoid truth value ambiguity
+                    new_mask = np.logical_and(
+                        np.greater_equal(self.wavenumbers, min_w),
+                        np.less_equal(self.wavenumbers, max_w)
+                    )
+                    mask = np.logical_or(mask, new_mask)
                 x_fit = self.wavenumbers[mask]
                 y_fit = self.spectra[mask]
             else:
@@ -1326,59 +2206,110 @@ class BatchPeakFittingWindow:
             # Check initial parameter count for Asymmetric Voigt
             if model_type == "Asymmetric Voigt" and len(initial_params) % 5 != 0:
                 messagebox.showerror("Parameter Error", f"Initial parameter list for Asymmetric Voigt is not a multiple of 5 (got {len(initial_params)}). This indicates a bug or mismatch. Please clear peaks and try again.")
+                self.fit_failed = True
                 return
             
             # Define combined model function
             def combined_model(x, *params):
                 result = np.zeros_like(x)
                 for i in range(0, len(params), params_per_peak):
-                    peak_params = params[i:i+params_per_peak]
-                    if len(peak_params) != params_per_peak:
-                        print(f"Skipping peak at i={i}, expected {params_per_peak} params, got {len(peak_params)}: {peak_params}")
-                        continue
-                    try:
-                        result += model_func(x, *peak_params)
-                    except Exception as e:
-                        print(f"Error in model_func at i={i} with params {peak_params}: {e}")
-                        continue
+                    # Make sure we have enough parameters for this peak
+                    if i + params_per_peak <= len(params):
+                        peak_params = params[i:i+params_per_peak]
+                        try:
+                            # Add the contribution of this peak to the result
+                            peak_result = model_func(x, *peak_params)
+                            result = result + peak_result  # Use explicit addition instead of +=
+                        except Exception as e:
+                            print(f"Error in model_func at i={i} with params {peak_params}: {e}")
+                            continue
+                    else:
+                        print(f"Skipping peak at i={i}, not enough parameters left")
                 return result
+            
+            # Add a counter for function evaluations (NLLS cycles)
+            self.func_eval_count = 0
+            
+            # Wrap the model function to count evaluations
+            def counting_model(x, *params):
+                self.func_eval_count += 1
+                return combined_model(x, *params)
             
             # Perform fit
             try:
-                popt, pcov = curve_fit(combined_model, x_fit, y_fit,
+                # Reset counter for each new fit
+                self.func_eval_count = 0
+                
+                popt, pcov = curve_fit(counting_model, x_fit, y_fit,
                                      p0=initial_params,
                                      bounds=(bounds_lower, bounds_upper),
-                                     maxfev=2000)
+                                     maxfev=2000,
+                                     full_output=False)
+                                     
+                # Store the number of function evaluations
+                self.nlls_cycles = self.func_eval_count
+                
             except Exception as e1:
+                print(f"First fitting attempt failed: {str(e1)}")
                 # Retry with higher maxfev
                 try:
-                    popt, pcov = curve_fit(combined_model, x_fit, y_fit,
+                    # Reset counter for retry
+                    self.func_eval_count = 0
+                    
+                    popt, pcov = curve_fit(counting_model, x_fit, y_fit,
                                          p0=initial_params,
                                          bounds=(bounds_lower, bounds_upper),
-                                         maxfev=20000)
+                                         maxfev=20000,
+                                         full_output=False)
+                                         
+                    # Store the number of function evaluations for the retry
+                    self.nlls_cycles = self.func_eval_count
+                    
                 except Exception as e2:
+                    print(f"Second fitting attempt failed: {str(e2)}")
                     # Fallback: use initial guess, no covariance, flag as failed
                     popt = np.array(initial_params)
                     pcov = None
                     self.fit_params = popt
                     self.fit_cov = pcov
-                    self.fit_result = combined_model(self.wavenumbers, *popt)
-                    self.residuals = self.spectra - self.fit_result
+                    self.nlls_cycles = 0  # No successful cycles
+                    
+                    # Try to calculate fit result and residuals with initial parameters
+                    try:
+                        self.fit_result = combined_model(self.wavenumbers, *popt)
+                        self.residuals = self.spectra - self.fit_result
+                    except Exception as e3:
+                        print(f"Failed to calculate fit with initial parameters: {str(e3)}")
+                        # If even that fails, set empty arrays
+                        self.fit_result = np.zeros_like(self.wavenumbers)
+                        self.residuals = np.copy(self.spectra)
+                    
                     self.fit_failed = True
                     messagebox.showwarning("Fit Failed", f"Failed to fit peaks after two attempts. Using initial guess for this spectrum.\n\nFirst error: {str(e1)}\nSecond error: {str(e2)}")
                     self.update_plot()
                     self.update_peak_visibility_controls()
                     return
+                    
             # Robust check for Asymmetric Voigt
-            if model_type == "Asymmetric Voigt" and len(popt) % 5 != 0:
-                messagebox.showerror("Fit Error", f"Fit failed: number of fit parameters ({len(popt)}) is not a multiple of 5. Try reducing the number of peaks or adjusting initial guesses.")
-                return
+            if model_type == "Asymmetric Voigt":
+                if len(popt) % 5 != 0:
+                    messagebox.showerror("Fit Error", f"Fit failed: number of fit parameters ({len(popt)}) is not a multiple of 5. Try reducing the number of peaks or adjusting initial guesses.")
+                    self.fit_failed = True
+                    return
+                    
             # Store results
             self.fit_params = popt
             self.fit_cov = pcov
-            self.fit_result = combined_model(self.wavenumbers, *popt)
-            self.residuals = self.spectra - self.fit_result
-            self.fit_failed = False
+            
+            # Calculate fit result and residuals
+            try:
+                self.fit_result = combined_model(self.wavenumbers, *popt)
+                self.residuals = np.subtract(self.spectra, self.fit_result)  # Use np.subtract to avoid array issues
+                self.fit_failed = False
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to calculate fit results: {str(e)}")
+                self.fit_failed = True
+                return
             
             # Update plot
             self.update_plot()
@@ -1386,9 +2317,11 @@ class BatchPeakFittingWindow:
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to fit peaks: {str(e)}")
+            self.fit_failed = True
     
     def update_plot(self):
         """Update the current spectrum plot."""
+        # Safety check - do we have required data?
         if not hasattr(self, 'wavenumbers') or not hasattr(self, 'spectra'):
             return
             
@@ -1397,23 +2330,32 @@ class BatchPeakFittingWindow:
         self.ax2_current.clear()
         
         # Set title to current filename
-        if self.current_spectrum_index >= 0 and self.current_spectrum_index < len(self.spectra_files):
-            filename = os.path.basename(self.spectra_files[self.current_spectrum_index])
-            self.ax1_current.set_title(f"Current Spectrum: {filename}")
+        if hasattr(self, 'current_spectrum_index') and hasattr(self, 'spectra_files'):
+            if self.current_spectrum_index >= 0 and self.current_spectrum_index < len(self.spectra_files):
+                filename = os.path.basename(self.spectra_files[self.current_spectrum_index])
+                self.ax1_current.set_title(f"Current Spectrum: {filename}")
         
         # Plot spectrum
         self.ax1_current.plot(self.wavenumbers, self.spectra, 'k-', label='Spectrum')
         
         # Plot background if available
-        if self.background is not None:
+        if hasattr(self, 'background') and self.background is not None:
             self.ax1_current.plot(self.wavenumbers, self.background, 'b--', label='Background')
         
         # Plot fitted peaks if available
-        if self.fit_result is not None:
-            self.ax1_current.plot(self.wavenumbers, self.fit_result, 'r-', label='Fit')
+        has_fit_result = (hasattr(self, 'fit_result') and 
+                          self.fit_result is not None and 
+                          isinstance(self.fit_result, np.ndarray) and 
+                          len(self.fit_result) > 0)
+                          
+        if has_fit_result:
+            wavenumbers = np.asarray(self.wavenumbers)
+            fit_result = np.asarray(self.fit_result)
+            self.ax1_current.plot(wavenumbers, fit_result, 'r-', label='Fit')
             
             # Plot individual peaks if requested
-            if self.show_individual_peaks.get():
+            show_individual = hasattr(self, 'show_individual_peaks') and self.show_individual_peaks.get()
+            if show_individual:
                 model_type = self.current_model.get()
                 if model_type == "Gaussian" or model_type == "Lorentzian":
                     params_per_peak = 3
@@ -1424,41 +2366,105 @@ class BatchPeakFittingWindow:
                 else:
                     params_per_peak = 3
                 
-                # Calculate R² values for each peak
-                peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, self.fit_params, model_type)
-                
-                for i in range(0, len(self.fit_params), params_per_peak):
-                    peak_params = self.fit_params[i:i+params_per_peak]
-                    if model_type == "Gaussian":
-                        peak = self.gaussian(self.wavenumbers, *peak_params)
-                    elif model_type == "Lorentzian":
-                        peak = self.lorentzian(self.wavenumbers, *peak_params)
-                    elif model_type == "Pseudo-Voigt":
-                        peak = self.pseudo_voigt(self.wavenumbers, *peak_params)
-                    elif model_type == "Asymmetric Voigt":
-                        peak = self.asymmetric_voigt(self.wavenumbers, *peak_params)
-                    else:
-                        peak = self.gaussian(self.wavenumbers, *peak_params)
+                # Calculate R² values for each peak only if we have fit_params and peaks
+                has_fit_params = (hasattr(self, 'fit_params') and 
+                                 self.fit_params is not None and 
+                                 hasattr(self, 'peaks') and 
+                                 isinstance(self.peaks, list) and len(self.peaks) > 0 and
+                                 isinstance(self.fit_params, (list, np.ndarray)) and 
+                                 len(self.fit_params) > 0)
+                                
+                if has_fit_params:
+                    # Safely cast to numpy array if not already
+                    fit_params = np.asarray(self.fit_params)
                     
-                    # Get R² value for this peak
-                    peak_idx = i // params_per_peak
-                    r2 = peak_r_squared[peak_idx]
+                    # Calculate R² values for each peak using the full fit result
+                    peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, fit_params, model_type)
                     
-                    # Plot peak with label including R² value
-                    label = f'Peak {peak_idx+1} (R²={r2:.3f})'
-                    color = 'red' if r2 < 0.95 else 'g'
-                    self.ax1_current.plot(self.wavenumbers, peak, '--', color=color, alpha=0.5, label=label)
+                    n_peaks = len(fit_params) // params_per_peak
+                    for peak_idx in range(n_peaks):
+                        i = peak_idx * params_per_peak
+                        if i + params_per_peak <= len(fit_params):  # Safety check
+                            peak_params = fit_params[i:i+params_per_peak]
+                            
+                            try:
+                                if model_type == "Gaussian":
+                                    peak = self.gaussian(self.wavenumbers, *peak_params)
+                                elif model_type == "Lorentzian":
+                                    peak = self.lorentzian(self.wavenumbers, *peak_params)
+                                elif model_type == "Pseudo-Voigt":
+                                    peak = self.pseudo_voigt(self.wavenumbers, *peak_params)
+                                elif model_type == "Asymmetric Voigt":
+                                    peak = self.asymmetric_voigt(self.wavenumbers, *peak_params)
+                                else:
+                                    peak = self.gaussian(self.wavenumbers, *peak_params)
+                                
+                                # Get R² value for this peak
+                                if peak_idx < len(peak_r_squared):  # Safety check
+                                    r2 = peak_r_squared[peak_idx]
+                                    
+                                    # Plot peak with label including R² value
+                                    label = f'Peak {peak_idx+1} (R²={r2:.3f})'
+                                    color = 'red' if r2 < 0.95 else 'g'
+                                    self.ax1_current.plot(self.wavenumbers, peak, '--', color=color, alpha=0.5, label=label)
+                            except Exception as e:
+                                print(f"Error plotting peak {peak_idx}: {str(e)}")
         
         # Plot peak positions if available
-        if self.peaks:
-            peak_positions = [peak['position'] for peak in self.peaks]
-            peak_intensities = [peak['intensity'] for peak in self.peaks]
-            self.ax1_current.plot(peak_positions, peak_intensities, 'ro', label='Peaks')
+        has_peaks = hasattr(self, 'peaks') and isinstance(self.peaks, list) and len(self.peaks) > 0
+        if has_peaks:
+            try:
+                peak_positions = [peak['position'] for peak in self.peaks]
+                peak_intensities = [peak['intensity'] for peak in self.peaks]
+                self.ax1_current.plot(peak_positions, peak_intensities, 'ro', label='Peaks')
+            except Exception as e:
+                print(f"Error plotting peak positions: {str(e)}")
+                
+        # The rest of the plotting code remains mostly unchanged, but we'll add safety checks
         
         # Plot residuals if available
-        if self.residuals is not None:
-            self.ax2_current.plot(self.wavenumbers, self.residuals, 'k-')
-            self.ax2_current.axhline(y=0, color='r', linestyle='--')
+        has_residuals = (hasattr(self, 'residuals') and 
+                        self.residuals is not None and 
+                        isinstance(self.residuals, np.ndarray) and 
+                        len(self.residuals) > 0)
+                        
+        if has_residuals:
+            try:
+                # Ensure we have valid arrays
+                residuals_array = np.asarray(self.residuals)
+                wavenumbers_array = np.asarray(self.wavenumbers)
+                
+                # Plot the residuals
+                self.ax2_current.plot(wavenumbers_array, residuals_array, 'k-')
+                self.ax2_current.axhline(y=0, color='r', linestyle='--')
+                
+                # Add colored fill for residuals
+                positive_mask = np.greater(residuals_array, 0)
+                negative_mask = np.less(residuals_array, 0)
+                
+                if np.any(positive_mask):
+                    self.ax2_current.fill_between(
+                        wavenumbers_array, 
+                        residuals_array, 
+                        0, 
+                        where=positive_mask, 
+                        color='red', 
+                        alpha=0.3, 
+                        interpolate=True
+                    )
+                
+                if np.any(negative_mask):
+                    self.ax2_current.fill_between(
+                        wavenumbers_array, 
+                        residuals_array, 
+                        0, 
+                        where=negative_mask, 
+                        color='blue', 
+                        alpha=0.3, 
+                        interpolate=True
+                    )
+            except Exception as e:
+                print(f"Error plotting residuals: {str(e)}")
         
         # Set labels and grid
         self.ax1_current.set_ylabel('Intensity')
@@ -1468,22 +2474,27 @@ class BatchPeakFittingWindow:
         self.ax2_current.grid(True, linestyle=':', color='gray', alpha=0.6)
         
         # Plot fit ranges (ROI) as grey regions if specified
-        fit_ranges_str = self.var_fit_ranges.get().strip() if hasattr(self, 'var_fit_ranges') else ''
-        roi_ranges = []
-        if fit_ranges_str:
-            try:
+        try:
+            fit_ranges_str = self.var_fit_ranges.get().strip() if hasattr(self, 'var_fit_ranges') else ''
+            roi_ranges = []
+            if fit_ranges_str:
                 for part in fit_ranges_str.split(','):
                     if '-' in part:
                         min_w, max_w = map(float, part.split('-'))
                         roi_ranges.append((min_w, max_w))
-            except Exception:
-                pass
-        for min_w, max_w in roi_ranges:
-            self.ax1_current.axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
-        # Add legend
-        self.ax1_current.legend()
-        # Draw canvas
-        self.canvas_current.draw()
+            
+            # Plot ROI ranges as grey regions
+            for min_w, max_w in roi_ranges:
+                self.ax1_current.axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
+        except Exception as e:
+            print(f"Error plotting ROI regions: {str(e)}")
+            
+        # Add legend and draw
+        try:
+            self.ax1_current.legend()
+            self.canvas_current.draw()
+        except Exception as e:
+            print(f"Error finalizing plot: {str(e)}")
     
     def clear_plot(self):
         """Clear the current spectrum plot."""
@@ -1508,6 +2519,15 @@ class BatchPeakFittingWindow:
     def stop_batch(self):
         """Set a flag to stop the batch process."""
         self._stop_batch = True
+        if hasattr(self, 'batch_status_text'):
+            try:
+                self.batch_status_text.config(state=tk.NORMAL)
+                self.batch_status_text.insert(tk.END, "Stopping batch process (after current spectrum)...\n")
+                self.batch_status_text.see(tk.END)
+                self.batch_status_text.config(state=tk.DISABLED)
+                self.window.update()
+            except:
+                pass
     
     def on_closing(self):
         """Handle window closing event."""
@@ -1515,7 +2535,14 @@ class BatchPeakFittingWindow:
     
     def update_roi_regions(self):
         """Refresh the plot to show the current fit regions as shaded areas."""
-        self.update_plot()
+        try:
+            # Update the plot safely, avoiding any direct array comparisons
+            self.update_plot()
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error in update_roi_regions: {error_details}")
+            messagebox.showerror("Error", f"Failed to update ROI regions: {str(e)}")
 
     def enable_peak_addition(self):
         """Enable mode to add peaks by clicking on the plot. Stays active until Esc is pressed."""
@@ -1832,71 +2859,192 @@ class BatchPeakFittingWindow:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to update heatmap plot: {str(e)}")
 
-    def preview_trends_subplot(self, which):
-        """Preview a single trends subplot (position, amplitude, width, eta) in a new window."""
-        import matplotlib.pyplot as plt
-        import tkinter as tk
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-        preview_win = tk.Toplevel(self.window)
-        preview_win.title(f"Preview {which.capitalize()} Plot")
-        fig, ax = plt.subplots(figsize=(7, 5))
-        # Call a helper to plot the selected subplot with current options
-        self._plot_single_trends_subplot(ax, which)
-        canvas = FigureCanvasTkAgg(fig, master=preview_win)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        toolbar_frame = ttk.Frame(preview_win)
-        toolbar_frame.pack(fill=tk.X)
-        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
-        toolbar.update() 
-
     def calculate_r_squared(self, y_true, y_pred):
-        """Calculate R-squared value for a fit."""
-        ss_res = np.sum((y_true - y_pred) ** 2)
-        ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-        return 1 - (ss_res / ss_tot)
+        """Calculate R-squared value for a fit using safe NumPy operations."""
+        try:
+            # Convert inputs to numpy arrays
+            y_true_array = np.asarray(y_true)
+            y_pred_array = np.asarray(y_pred)
+            
+            # Make sure arrays have the same shape
+            if y_true_array.shape != y_pred_array.shape:
+                print(f"Array shape mismatch: {y_true_array.shape} vs {y_pred_array.shape}")
+                return 0.0
+                
+            # Calculate mean of true values
+            y_mean = np.mean(y_true_array)
+            
+            # Calculate sum of squared residuals
+            ss_res = np.sum(np.square(np.subtract(y_true_array, y_pred_array)))
+            
+            # Calculate total sum of squares
+            ss_tot = np.sum(np.square(np.subtract(y_true_array, y_mean)))
+            
+            # Safely calculate R-squared
+            if ss_tot > 0:
+                r2 = 1.0 - (ss_res / ss_tot)
+                return float(r2)  # Ensure we return a scalar
+            else:
+                return 0.0  # Default if ss_tot is zero
+                
+        except Exception as e:
+            print(f"Error in calculate_r_squared: {str(e)}")
+            return 0.0
 
-    def calculate_peak_r_squared(self, y_true, y_pred, peak_params, model_type):
+    def calculate_peak_r_squared(self, y_true, y_fit_total, peak_params, model_type):
         """Calculate R-squared value for individual peaks."""
         peak_r_squared = []
-        for i in range(0, len(peak_params), len(peak_params)//len(self.peaks)):
-            if model_type == "Gaussian":
-                peak_y = self.gaussian(self.wavenumbers, *peak_params[i:i+3])
-            elif model_type == "Lorentzian":
-                peak_y = self.lorentzian(self.wavenumbers, *peak_params[i:i+3])
-            elif model_type == "Pseudo-Voigt":
-                peak_y = self.pseudo_voigt(self.wavenumbers, *peak_params[i:i+4])
-            elif model_type == "Asymmetric Voigt":
-                peak_y = self.asymmetric_voigt(self.wavenumbers, *peak_params[i:i+5])
-            else:
-                peak_y = self.gaussian(self.wavenumbers, *peak_params[i:i+3])
-            r2 = self.calculate_r_squared(y_true, peak_y)
-            peak_r_squared.append(r2)
+        
+        # Check if peaks or parameters are empty
+        if not self.peaks or len(peak_params) == 0:
+            return peak_r_squared
+        
+        # Determine number of parameters per peak based on model type
+        if model_type == "Gaussian" or model_type == "Lorentzian":
+            params_per_peak = 3
+        elif model_type == "Pseudo-Voigt":
+            params_per_peak = 4
+        elif model_type == "Asymmetric Voigt":
+            params_per_peak = 5
+        else:
+            params_per_peak = 3
+            
+        n_peaks = len(peak_params) // params_per_peak
+        
+        # Continue with calculation for each peak
+        for peak_idx in range(n_peaks):
+            try:
+                # Get start index for this peak's parameters
+                i = peak_idx * params_per_peak
+                
+                # Extract peak parameters
+                if model_type == "Gaussian":
+                    peak_y = self.gaussian(self.wavenumbers, *peak_params[i:i+3])
+                    center = peak_params[i+1]
+                    width = peak_params[i+2]
+                    # FWHM for Gaussian
+                    fwhm = 2.355 * width
+                elif model_type == "Lorentzian":
+                    peak_y = self.lorentzian(self.wavenumbers, *peak_params[i:i+3])
+                    center = peak_params[i+1]
+                    width = peak_params[i+2]
+                    # FWHM for Lorentzian
+                    fwhm = 2 * width
+                elif model_type == "Pseudo-Voigt":
+                    peak_y = self.pseudo_voigt(self.wavenumbers, *peak_params[i:i+4])
+                    center = peak_params[i+1]
+                    width = peak_params[i+2]
+                    # Approximate FWHM for Pseudo-Voigt
+                    fwhm = 2 * width
+                elif model_type == "Asymmetric Voigt":
+                    peak_y = self.asymmetric_voigt(self.wavenumbers, *peak_params[i:i+5])
+                    center = peak_params[i+1]
+                    width_left = peak_params[i+2]
+                    width_right = peak_params[i+3]
+                    # Average FWHM for asymmetric peak
+                    fwhm = width_left + width_right
+                else:
+                    peak_y = self.gaussian(self.wavenumbers, *peak_params[i:i+3])
+                    center = peak_params[i+1]
+                    width = peak_params[i+2]
+                    fwhm = 2.355 * width
+                
+                # Create a mask for a region around the peak (±2*FWHM)
+                region_width = 2 * fwhm
+                min_bound = center - region_width
+                max_bound = center + region_width
+                
+                # Create mask indices for the peak region
+                mask_indices = np.where(
+                    np.logical_and(
+                        np.greater_equal(self.wavenumbers, min_bound),
+                        np.less_equal(self.wavenumbers, max_bound)
+                    )
+                )[0]
+                
+                # If mask is too narrow, widen it to ensure enough points
+                if len(mask_indices) < 10:
+                    region_width = 3 * fwhm
+                    min_bound = center - region_width
+                    max_bound = center + region_width
+                    mask_indices = np.where(
+                        np.logical_and(
+                            np.greater_equal(self.wavenumbers, min_bound),
+                            np.less_equal(self.wavenumbers, max_bound)
+                        )
+                    )[0]
+                
+                # Calculate contribution of this peak to the total fit
+                if len(mask_indices) > 3:  # Need at least a few points for meaningful R²
+                    # Get data, total fit, and individual peak in the region
+                    y_true_region = y_true[mask_indices]
+                    y_fit_region = y_fit_total[mask_indices]
+                    peak_y_region = peak_y[mask_indices]
+                    
+                    # Calculate peak's contribution to the fit in this region
+                    peak_contribution = np.sum(peak_y_region) / np.sum(y_fit_region) if np.sum(y_fit_region) > 0 else 0
+                    
+                    # Only consider regions where this peak is significant
+                    if peak_contribution > 0.2:  # At least 20% contribution
+                        # Calculate R² based on how well the total fit matches data in this region
+                        ss_res = np.sum((y_true_region - y_fit_region) ** 2)
+                        ss_tot = np.sum((y_true_region - np.mean(y_true_region)) ** 2)
+                        
+                        if ss_tot > 0:
+                            r2 = 1 - (ss_res / ss_tot)
+                            # Weight R² by peak's contribution to the total fit in this region
+                            # r2 = r2 * peak_contribution
+                        else:
+                            r2 = 0.0
+                    else:
+                        # Peak has minimal contribution here
+                        r2 = 0.0
+                else:
+                    r2 = 0.0
+                
+                peak_r_squared.append(r2)
+            except Exception as e:
+                # If any error occurs, add a default value
+                print(f"Error calculating R² for peak {peak_idx}: {e}")
+                peak_r_squared.append(0.0)
+        
         return peak_r_squared
 
     def update_fit_stats_plot(self):
-        """Update the Fit Stats plot showing best to worst fits."""
+        """Update the fit statistics plots to show best, median, and worst fits."""
         if not self.batch_results:
+            # Clear all subplots
             for ax in self.ax_stats.flatten():
-                ax.text(0.5, 0.5, 'No batch results to display.', ha='center', va='center')
+                ax.clear()
+                ax.axis('off')
             self.canvas_stats.draw()
             return
 
-        # Calculate R-squared values for all fits
-        fit_qualities = []
+        # Clear all subplots
+        for ax in self.ax_stats.flatten():
+            ax.clear()
+
+        # Calculate R² for each spectrum in batch results
+        r2_values = []
         for i, result in enumerate(self.batch_results):
-            if result['fit_params'] is not None:
+            if result.get('fit_failed', True) or result['fit_result'] is None or result['fit_params'] is None:
+                r2_values.append((i, 0))  # Default to 0 for failed fits
+                continue
+                
+            # Load the original spectrum data from file
+            try:
                 data = np.loadtxt(result['file'])
                 wavenumbers = data[:, 0]
                 original_spectrum = data[:, 1]
                 
-                # Apply background subtraction if available
+                # Get the background-subtracted spectrum used for fitting
                 if result['background'] is not None:
-                    spectrum = original_spectrum - result['background']
+                    background = result['background']
+                    spectrum = original_spectrum - background
                 else:
                     spectrum = original_spectrum
                 
-                # Get ROI ranges
+                # Parse fit ranges to only calculate R² within the ROI
                 fit_ranges_str = self.var_fit_ranges.get().strip()
                 roi_ranges = []
                 if fit_ranges_str:
@@ -1905,307 +3053,162 @@ class BatchPeakFittingWindow:
                             if '-' in part:
                                 min_w, max_w = map(float, part.split('-'))
                                 roi_ranges.append((min_w, max_w))
-                    except Exception as e:
-                        messagebox.showerror("Fit Range Error", f"Could not parse fit ranges: {fit_ranges_str}\nError: {e}")
-                        return
+                    except:
+                        # If parsing fails, use the entire range
+                        pass
                 
                 # Create mask for ROI ranges
-                mask = np.zeros_like(wavenumbers, dtype=bool)
                 if roi_ranges:
+                    mask = np.zeros_like(wavenumbers, dtype=bool)
                     for min_w, max_w in roi_ranges:
-                        mask |= (wavenumbers >= min_w) & (wavenumbers <= max_w)
-                    x_fit = wavenumbers[mask]
-                    y_fit = spectrum[mask]
-                    fit_result = result['fit_result'][mask]
+                        new_mask = (wavenumbers >= min_w) & (wavenumbers <= max_w)
+                        mask = mask | new_mask
+                    
+                    # Only use points within ROI for R² calculation
+                    spectrum_roi = spectrum[mask]
+                    fit_roi = result['fit_result'][mask]
                 else:
-                    x_fit = wavenumbers
-                    y_fit = spectrum
-                    fit_result = result['fit_result']
+                    # Use entire spectrum if no ROI specified
+                    spectrum_roi = spectrum
+                    fit_roi = result['fit_result']
                 
-                # Get model type and parameters
-                model_type = self.current_model.get()
-                if model_type == "Gaussian" or model_type == "Lorentzian":
-                    params_per_peak = 3
-                elif model_type == "Pseudo-Voigt":
-                    params_per_peak = 4
-                elif model_type == "Asymmetric Voigt":
-                    params_per_peak = 5
-                else:
-                    params_per_peak = 3
-
-                # Calculate overall R-squared
-                overall_r2 = self.calculate_r_squared(y_fit, fit_result)
-                
-                # Calculate individual peak R-squared values
-                peak_r2 = []
-                for j in range(0, len(result['fit_params']), params_per_peak):
-                    peak_params = result['fit_params'][j:j+params_per_peak]
-                    if model_type == "Gaussian":
-                        peak_y = self.gaussian(wavenumbers, *peak_params)
-                        center = peak_params[1]
-                        width = peak_params[2]
-                        fwhm = 2.3548 * width  # FWHM for Gaussian
-                    elif model_type == "Lorentzian":
-                        peak_y = self.lorentzian(wavenumbers, *peak_params)
-                        center = peak_params[1]
-                        width = peak_params[2]
-                        fwhm = 2 * width  # FWHM for Lorentzian
-                    elif model_type == "Pseudo-Voigt":
-                        peak_y = self.pseudo_voigt(wavenumbers, *peak_params)
-                        center = peak_params[1]
-                        width = peak_params[2]
-                        fwhm = 2 * width  # Approximate FWHM for Pseudo-Voigt
-                    elif model_type == "Asymmetric Voigt":
-                        peak_y = self.asymmetric_voigt(wavenumbers, *peak_params)
-                        center = peak_params[1]
-                        width_left = peak_params[2]
-                        width_right = peak_params[3]
-                        fwhm = (2 * width_left + 2 * width_right) / 2  # Average FWHM
+                # Calculate R² only for the spectrum used for fitting (background-subtracted)
+                # and only within the ROI where fitting was performed
+                if len(spectrum_roi) > 0:
+                    mean_data = np.mean(spectrum_roi)
+                    ss_tot = np.sum((spectrum_roi - mean_data) ** 2)
+                    ss_res = np.sum((spectrum_roi - fit_roi) ** 2)
+                    
+                    if ss_tot > 0:
+                        r2 = 1 - (ss_res / ss_tot)
                     else:
-                        peak_y = self.gaussian(wavenumbers, *peak_params)
-                        center = peak_params[1]
-                        width = peak_params[2]
-                        fwhm = 2.3548 * width
-                    # Mask for ±FWHM around center
-                    mask_peak = (wavenumbers >= center - fwhm) & (wavenumbers <= center + fwhm)
-                    if np.sum(mask_peak) < 3:
-                        # If too few points, expand window
-                        mask_peak = (wavenumbers >= center - 2*fwhm) & (wavenumbers <= center + 2*fwhm)
-                    y_true_peak = spectrum[mask_peak]
-                    y_pred_peak = peak_y[mask_peak]
-                    if len(y_true_peak) > 1:
-                        r2 = self.calculate_r_squared(y_true_peak, y_pred_peak)
-                    else:
-                        r2 = np.nan
-                    peak_r2.append(r2)
-                
-                fit_qualities.append({
-                    'spectrum_number': i + 1,
-                    'overall_r2': overall_r2,
-                    'peak_r2': peak_r2,
-                    'wavenumbers': wavenumbers,
-                    'original_spectrum': original_spectrum,
-                    'spectrum': spectrum,
-                    'fit_result': result['fit_result'],
-                    'fit_params': result['fit_params'],
-                    'background': result['background'],
-                    'roi_ranges': roi_ranges,
-                    'mask': mask
-                })
-
-        # Sort by overall R-squared (best to worst)
-        fit_qualities.sort(key=lambda x: x['overall_r2'], reverse=True)
-
-        # Select indices for best, median, and worst fits
-        n_total = len(fit_qualities)
-        n_plots = min(9, n_total)
-        best_indices = list(range(min(3, n_total)))
-        worst_indices = list(range(max(0, n_total-3), n_total))
-        # For median, pick 3 evenly spaced in the middle
-        if n_total >= 7:
-            median_indices = [n_total//2 - 1, n_total//2, n_total//2 + 1]
-        elif n_total > 3:
-            # If not enough for 3 medians, pick what we can
-            median_indices = list(range(3, min(6, n_total)))
-        else:
-            median_indices = []
-        # Combine for plotting order: best, median, worst
-        plot_indices = best_indices + median_indices + worst_indices
-        # Remove duplicates and keep order
-        seen = set()
-        plot_indices_unique = []
-        for idx in plot_indices:
-            if idx not in seen and idx < n_total:
-                plot_indices_unique.append(idx)
-                seen.add(idx)
-        # Pad with remaining fits if less than 9
-        for idx in range(n_total):
-            if len(plot_indices_unique) >= 9:
-                break
-            if idx not in seen:
-                plot_indices_unique.append(idx)
-                seen.add(idx)
-        # Now plot in 3x3 grid
-        for ax in self.ax_stats.flatten():
-            ax.clear()
-        # Add overall title
-        self.fig_stats.suptitle("Fit Quality Overview (Best, Median, Worst)", fontsize=14, y=0.98)
-        row_labels = ["Top 3 Fits", "Median 3 Fits", "Worst 3 Fits"]
-        for i, idx in enumerate(plot_indices_unique[:9]):
-            row = i // 3
-            col = i % 3
-            ax = self.ax_stats[row, col]
-            fit_data = fit_qualities[idx]
-            wavenumbers = fit_data['wavenumbers']
-            spectrum = fit_data['spectrum']
-            fit_result = fit_data['fit_result']
-            # Plot original spectrum and fit
-            ax.plot(wavenumbers, spectrum, 'k-', label='Spectrum', alpha=0.7, linewidth=1)
-            ax.plot(wavenumbers, fit_result, 'r-', label='Fit', alpha=0.7, linewidth=1)
-            # Plot background if available
-            if fit_data['background'] is not None:
-                ax.plot(wavenumbers, fit_data['background'], 'b--', label='Background', alpha=0.5, linewidth=0.8)
-            # Highlight ROI regions
-            for min_w, max_w in fit_data['roi_ranges']:
-                ax.axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
-            # Plot individual peaks
-            model_type = self.current_model.get()
-            params_per_peak = 3 if model_type in ["Gaussian", "Lorentzian"] else 4 if model_type == "Pseudo-Voigt" else 5
-            for j in range(0, len(fit_data['fit_params']), params_per_peak):
-                peak_params = fit_data['fit_params'][j:j+params_per_peak]
-                if model_type == "Gaussian":
-                    peak_y = self.gaussian(wavenumbers, *peak_params)
-                elif model_type == "Lorentzian":
-                    peak_y = self.lorentzian(wavenumbers, *peak_params)
-                elif model_type == "Pseudo-Voigt":
-                    peak_y = self.pseudo_voigt(wavenumbers, *peak_params)
-                elif model_type == "Asymmetric Voigt":
-                    peak_y = self.asymmetric_voigt(wavenumbers, *peak_params)
+                        r2 = 0
                 else:
-                    peak_y = self.gaussian(wavenumbers, *peak_params)
-                ax.plot(wavenumbers, peak_y, 'g--', alpha=0.5, linewidth=0.8)
-            # Add R-squared values to plot with cleaner formatting
-            ax.set_title(f"Spectrum {fit_data['spectrum_number']}\nR² = {fit_data['overall_r2']:.4f}", fontsize=9, pad=5)
-            # Add peak R-squared values with cleaner formatting
-            peak_r2_text = "\n".join([f"P{j+1}: {r2:.4f}" for j, r2 in enumerate(fit_data['peak_r2'])])
-            ax.text(0.02, 0.98, peak_r2_text,
-                   transform=ax.transAxes,
-                   verticalalignment='top',
-                   fontsize=8,
-                   bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.3'))
-            # Clean up axes
-            ax.grid(True, linestyle=':', color='gray', alpha=0.4)
-            ax.tick_params(axis='both', which='major', labelsize=8)
-            if i == 0:  # Only add legend to first plot
-                handles, labels = ax.get_legend_handles_labels()
-                if handles:
-                    ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
-            # Add axis labels only to left and bottom plots
-            if col == 0:
-                # Add vertical row label for first column, rotated 90 degrees ccw
-                ax.set_ylabel(row_labels[row], fontsize=11, labelpad=30, rotation=90, va='center')
-            if row == 2:
-                ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=8)
-        # Hide unused subplots
-        for i in range(len(plot_indices_unique), 9):
-            row = i // 3
-            col = i % 3
-            self.ax_stats[row, col].axis('off')
+                    r2 = 0
+                
+                r2_values.append((i, r2))
+            except Exception as e:
+                print(f"Error calculating R² for spectrum {i}: {e}")
+                r2_values.append((i, 0))
         
-        # Add export buttons
-        if not hasattr(self, 'export_stats_buttons_frame'):
-            self.export_stats_buttons_frame = ttk.Frame(self.viz_notebook.winfo_children()[3])  # Fit Stats tab
-            self.export_stats_buttons_frame.pack(side=tk.BOTTOM, pady=5)
+        # Sort by R² value
+        r2_values.sort(key=lambda x: x[1])
+        
+        # Get the worst, median, and best spectra indices
+        n_results = len(r2_values)
+        if n_results < 9:
+            # If fewer than 9 results, use all available
+            indices_to_show = [x[0] for x in r2_values]
+        else:
+            # Get worst 3 (lowest R²)
+            worst_indices = [x[0] for x in r2_values[:3]]
             
-            # Button for saving individual plots
-            self.export_individual_button = ttk.Button(
-                self.export_stats_buttons_frame,
-                text="Save Individual Plots",
-                command=self.export_individual_fit_stats
-            )
-    
-    def export_individual_fit_stats(self):
-        """Export individual Fit Stats plots to image files."""
-        if not self.batch_results:
-            messagebox.showwarning("No Results", "No batch results to export.")
-            return
+            # Get best 3 (highest R²)
+            best_indices = [x[0] for x in r2_values[-3:]]
+            best_indices.reverse()  # Show highest R² first
             
-        try:
-            # Ask for directory to save files
-            save_dir = filedialog.askdirectory(title="Select Directory to Save Individual Plots")
-            if not save_dir:
-                return
+            # Get median 3
+            median_start = n_results // 2 - 1
+            median_indices = [x[0] for x in r2_values[median_start:median_start+3]]
+            
+            # Combine in order: best, median, worst
+            indices_to_show = best_indices + median_indices + worst_indices
+        
+        # Plot each selected spectrum
+        for i, plot_idx in enumerate(indices_to_show[:9]):  # Limit to 9 plots (3x3 grid)
+            row = i // 3
+            col = i % 3
+            
+            # Get result for this spectrum
+            result = self.batch_results[plot_idx]
+            
+            try:
+                # Load the original data
+                data = np.loadtxt(result['file'])
+                wavenumbers = data[:, 0]
+                original_spectrum = data[:, 1]
                 
-            # Ask for file format
-            format_dialog = tk.Toplevel(self.window)
-            format_dialog.title("Select Format")
-            format_dialog.geometry("200x150")
-            
-            format_var = tk.StringVar(value="png")
-            ttk.Radiobutton(format_dialog, text="PNG", variable=format_var, value="png").pack(pady=5)
-            ttk.Radiobutton(format_dialog, text="PDF", variable=format_var, value="pdf").pack(pady=5)
-            ttk.Radiobutton(format_dialog, text="SVG", variable=format_var, value="svg").pack(pady=5)
-            
-            def save_plots():
-                format = format_var.get()
-                format_dialog.destroy()
+                # Get filename for title
+                filename = os.path.basename(result['file'])
                 
-                # Create a new figure for each plot
-                for i, ax in enumerate(self.ax_stats.flatten()):
-                    if not ax.has_data():
-                        continue
+                # Plot original spectrum
+                self.ax_stats[row, col].plot(wavenumbers, original_spectrum, 'k-', label='Data')
+                
+                # Plot background if available
+                if result['background'] is not None:
+                    background = result['background']
+                    self.ax_stats[row, col].plot(wavenumbers, background, 'b--', label='Background')
+                    
+                    # Plot background-subtracted spectrum
+                    spectrum = original_spectrum - background
+                    self.ax_stats[row, col].plot(wavenumbers, spectrum, 'g-', label='Subtracted', alpha=0.5)
+                    
+                    # Also plot the fit result on top of background-subtracted data
+                    if result['fit_result'] is not None:
+                        # Get correct R² value for this spectrum
+                        r2 = 0
+                        for idx, r2_val in r2_values:
+                            if idx == plot_idx:
+                                r2 = r2_val
+                                break
                         
-                    # Create new figure with same size as subplot
-                    fig = plt.figure(figsize=(6, 4))
-                    new_ax = fig.add_subplot(111)
-                    
-                    # Copy all elements from the subplot
-                    for line in ax.get_lines():
-                        new_ax.plot(line.get_xdata(), line.get_ydata(),
-                                  color=line.get_color(),
-                                  linestyle=line.get_linestyle(),
-                                  linewidth=line.get_linewidth(),
-                                  alpha=line.get_alpha(),
-                                  label=line.get_label())
-                    
-                    # Copy background patches (ROI regions)
-                    for patch in ax.patches:
-                        if isinstance(patch, mpatches.Rectangle):
-                            new_ax.add_patch(plt.Rectangle(
-                                patch.get_xy(),
-                                patch.get_width(),
-                                patch.get_height(),
-                                color=patch.get_facecolor(),
-                                alpha=patch.get_alpha()
-                            ))
-                    
-                    # Copy text elements with consistent positioning
-                    for text in ax.texts:
-                        bbox = text.get_bbox_patch()
-                        bbox_props = {
-                            'facecolor': bbox.get_facecolor(),
-                            'edgecolor': bbox.get_edgecolor(),
-                            'alpha': bbox.get_alpha(),
-                            'boxstyle': 'round,pad=0.3'
-                        }
-                        # Position text in upper right corner
-                        new_ax.text(0.98, 0.98, text.get_text(),
-                                  transform=new_ax.transAxes,
-                                  verticalalignment='top',
-                                  horizontalalignment='right',
-                                  fontsize=text.get_fontsize(),
-                                  bbox=bbox_props)
-                    
-                    # Copy title and labels
-                    new_ax.set_title(ax.get_title())
-                    new_ax.set_xlabel(ax.get_xlabel())
-                    new_ax.set_ylabel(ax.get_ylabel())
-                    
-                    # Copy grid
-                    new_ax.grid(True, linestyle=':', color='gray', alpha=0.4)
-                    
-                    # Copy legend
-                    if ax.get_legend():
-                        new_ax.legend(loc='upper right', fontsize=7, framealpha=0.8)
-                    
-                    # Set axis limits
-                    new_ax.set_xlim(ax.get_xlim())
-                    new_ax.set_ylim(ax.get_ylim())
-                    
-                    # Save the figure
-                    spectrum_num = int(ax.get_title().split()[1])  # Extract spectrum number from title
-                    filename = f"spectrum_{spectrum_num}_fit.{format}"
-                    filepath = os.path.join(save_dir, filename)
-                    
-                    fig.savefig(filepath, dpi=300, bbox_inches='tight', pad_inches=0.1)
-                    plt.close(fig)
+                        # Highlight ROI regions if specified
+                        fit_ranges_str = self.var_fit_ranges.get().strip()
+                        roi_ranges = []
+                        if fit_ranges_str:
+                            try:
+                                for part in fit_ranges_str.split(','):
+                                    if '-' in part:
+                                        min_w, max_w = map(float, part.split('-'))
+                                        roi_ranges.append((min_w, max_w))
+                                        # Add shaded region for ROI
+                                        self.ax_stats[row, col].axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
+                            except:
+                                pass
+                        
+                        # Plot the fit on top of background-subtracted data
+                        self.ax_stats[row, col].plot(wavenumbers, result['fit_result'], 'r-', label='Fit')
+                        
+                        # Set title with filename, spectrum number and R²
+                        quality_label = "Best" if row == 0 else "Median" if row == 1 else "Worst"
+                        self.ax_stats[row, col].set_title(f"{quality_label}: {filename}\nR²={r2:.3f}", fontsize=9)
+                    else:
+                        self.ax_stats[row, col].set_title(f"Spectrum {plot_idx+1} (No fit)", fontsize=9)
+                else:
+                    # No background case
+                    if result['fit_result'] is not None:
+                        r2 = 0
+                        for idx, r2_val in r2_values:
+                            if idx == plot_idx:
+                                r2 = r2_val
+                                break
+                        self.ax_stats[row, col].plot(wavenumbers, result['fit_result'], 'r-', label='Fit')
+                        quality_label = "Best" if row == 0 else "Median" if row == 1 else "Worst"
+                        self.ax_stats[row, col].set_title(f"{quality_label}: {filename}\nR²={r2:.3f}", fontsize=9)
+                    else:
+                        self.ax_stats[row, col].set_title(f"Spectrum {plot_idx+1} (No fit)", fontsize=9)
                 
-                messagebox.showinfo("Success", f"Individual plots saved to:\n{save_dir}")
-            
-            ttk.Button(format_dialog, text="Save", command=save_plots).pack(pady=10)
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to export individual plots: {str(e)}")
+                # Add grid
+                self.ax_stats[row, col].grid(True, linestyle=':', color='gray', alpha=0.4)
+                
+                # Set axis labels only for edge plots
+                if col == 0:
+                    self.ax_stats[row, col].set_ylabel('Intensity')
+                if row == 2:
+                    self.ax_stats[row, col].set_xlabel('Wavenumber (cm⁻¹)')
+                
+                # Add legend for first plot only (to save space)
+                if row == 0 and col == 0:
+                    self.ax_stats[row, col].legend(fontsize=8, loc='upper right')
+                
+            except Exception as e:
+                print(f"Error plotting spectrum {plot_idx}: {e}")
+                self.ax_stats[row, col].text(0.5, 0.5, f"Error loading spectrum {plot_idx+1}", 
+                                           ha='center', va='center', transform=self.ax_stats[row, col].transAxes)
+        
+        # Adjust layout
+        self.fig_stats.tight_layout()
+        self.canvas_stats.draw()
 
     def export_fit_stats_plot(self):
         """Export the Fit Stats plot to an image file."""
@@ -2348,3 +3351,85 @@ class BatchPeakFittingWindow:
                 self.load_spectrum(selection[0])
             else:
                 self.clear_plot()
+
+    def export_individual_fit_stats(self):
+        """Export individual fit statistics plots to separate image files."""
+        try:
+            # Ask for directory to save files
+            save_dir = filedialog.askdirectory(title="Select Directory to Save Individual Plots")
+            if not save_dir:
+                return
+                
+            # Get current model type for filename
+            model_type = self.current_model.get()
+            
+            # Create a temporary figure for each metric
+            metrics = ['position', 'amplitude', 'width', 'eta']
+            for metric in metrics:
+                # Skip eta for models that don't support it
+                if metric == 'eta' and model_type not in ["Pseudo-Voigt", "Asymmetric Voigt"]:
+                    continue
+                    
+                # Create figure for this metric
+                fig, ax = plt.subplots(figsize=(8, 6))
+                self._plot_single_trends_subplot(ax, metric)
+                
+                # Add title and labels
+                ax.set_title(f'Peak {metric.capitalize()} Trends')
+                ax.set_xlabel('Spectrum Number')
+                if metric == 'position':
+                    ax.set_ylabel('Position (cm⁻¹)')
+                elif metric == 'amplitude':
+                    ax.set_ylabel('Amplitude')
+                elif metric == 'width':
+                    ax.set_ylabel('Width (cm⁻¹)')
+                elif metric == 'eta':
+                    ax.set_ylabel('Eta')
+                
+                # Save figure
+                filename = f"{model_type}_peak_{metric}.png"
+                filepath = os.path.join(save_dir, filename)
+                fig.tight_layout()
+                fig.savefig(filepath, dpi=300, bbox_inches='tight')
+                plt.close(fig)
+                
+            messagebox.showinfo("Export Complete", f"Individual plots saved to {save_dir}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export individual plots: {str(e)}")
+
+    def on_tab_changed(self, event=None):
+        """Handle tab change events to update context-sensitive help."""
+        # Update status bar with a hint about the current tab
+        try:
+            # Determine which tab is active
+            if event and event.widget == self.left_notebook:
+                current_tab = self.left_notebook.tab(self.left_notebook.select(), "text")
+                if current_tab == "File Selection":
+                    self.status_bar.config(text="File Selection: Add or remove spectrum files. Double-click to select. Press F1 for help.")
+                elif current_tab == "Peaks":
+                    self.status_bar.config(text="Peak Controls: Subtract background, detect/add peaks, and fit with different models. Press F1 for help.")
+                elif current_tab == "Batch":
+                    self.status_bar.config(text="Batch Processing: Set reference spectrum and apply to all files. Press F1 for help.")
+                elif current_tab == "Plot":
+                    self.status_bar.config(text="Plot Controls: Configure which peaks are displayed in result plots. Press F1 for help.")
+            elif event and event.widget == self.viz_notebook:
+                current_tab = self.viz_notebook.tab(self.viz_notebook.select(), "text")
+                if current_tab == "Current Spectrum":
+                    self.status_bar.config(text="Current Spectrum: View selected spectrum with fit results. Press F1 for help.")
+                elif current_tab == "Waterfall":
+                    self.status_bar.config(text="Waterfall Plot: View multiple spectra stacked vertically. Press F1 for help.")
+                elif current_tab == "Heatmap":
+                    self.status_bar.config(text="Heatmap: View spectra as a color-coded intensity map. Press F1 for help.")
+                elif current_tab == "Fit Results":
+                    self.status_bar.config(text="Fit Results: View trends in peak parameters across all spectra. Press F1 for help.")
+                elif current_tab == "Fit Stats":
+                    self.status_bar.config(text="Fit Statistics: Compare fit quality across different spectra. Press F1 for help.")
+        except:
+            # Default status message if something goes wrong
+            self.status_bar.config(text="Press F1 for help with the current tab")
+
+    def show_general_help(self):
+        """Show general help for the application."""
+        title, text = self.help_texts["General"]
+        self.show_help_dialog(title, text)
