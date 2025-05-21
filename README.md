@@ -115,7 +115,53 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
 
 ## Installation
 
-1. Clone the repository:
+### Recommended for Beginners: Anaconda + Spyder IDE
+
+If you are new to Python or want the easiest way to get started, I recommend using the free [Anaconda](https://www.anaconda.com/products/distribution) Python distribution (this is the one I use). Anaconda includes Python and many scientific packages, and comes with the Spyder IDE, which is beginner-friendly and great for running this application.
+
+**Steps:**
+
+1. **Install Anaconda:**
+   - Download and install Anaconda from [https://www.anaconda.com/products/distribution](https://www.anaconda.com/products/distribution) (choose the version for your operating system).
+
+2. **Open Anaconda Navigator:**
+   - Launch "Anaconda Navigator" from your applications menu.
+
+3. **Launch Spyder IDE:**
+   - In Anaconda Navigator, click "Launch" under the Spyder IDE.
+
+4. **Clone or Download the Repository:**
+   - In Spyder, open the built-in terminal (or use your system terminal) and run:
+     ```bash
+     git clone https://github.com/aaroncelestian/ClaritySpectra.git
+     cd ClaritySpectra
+     ```
+   - Alternatively, you can download the ZIP from GitHub and extract it.
+   - Note, ```bash is just the terminal interface (Born Again SHell) in Spyder where you type in commands.
+
+5. **Install Dependencies:**
+   - In the Spyder terminal, run:
+     ```bash
+     pip install -r requirements.txt
+     ```
+   - (If you see errors, you may need to run `conda install PACKAGENAME` for any missing packages.)
+
+6. **Download the Database File:**
+   - Download the database and metadata correlation file that I made from:
+     - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6  (Compiled database of Raman reference spectra from RRUFF.info)
+                                     https://figshare.com/s/b55e31e89743d246895b  (Compiled database of Raman calculated mdoes from WURM.info)
+   - Place the file in the ClaritySpectra directory.
+
+7. **Open and Run the Application:**
+   - In Spyder, go to File > Open, and select `main.py` from the ClaritySpectra folder.
+   - Click the green "Run" button (or press F5) to start the application, and it should launch.
+   - If things go wrong with the program, you may need to reset the kernel (in one of the menus). This forces python to reset and you can re-run main.py
+
+---
+
+### Advanced/Alternative Installation (pip/manual)
+
+1. Clone the repository: (bash is your terminal window)
 ```bash
 git clone https://github.com/aaroncelestian/ClaritySpectra.git
 cd ClaritySpectra
@@ -127,8 +173,8 @@ pip install -r requirements.txt
 ```
 
 3. Download the database and metadata correlation file:
-  - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6 
-
+  - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6  (Compiled database of Raman reference spectra from RRUFF.info)
+                                  https://figshare.com/s/b55e31e89743d246895b  (Compiled database of Raman calculated mdoes from WURM.info)
 4. Run the application:
 ```bash
 python3 main.py
@@ -150,7 +196,7 @@ python3 main.py
 ## Dependencies
 
 - Python 3.6+
-- Core requirements:
+- Core requirements for the basics:
   - numpy >= 1.16.0
   - matplotlib >= 3.0.0
   - scipy >= 1.2.0
@@ -160,7 +206,7 @@ python3 main.py
   - mplcursors >= 0.5.0
   - fastdtw >= 0.3.4
 
-- Optional packages:
+- Optional packages for the full experience:
   - reportlab >= 3.5.0 (for PDF export)
   - openpyxl >= 3.0.0 (for Excel support)
   - pillow >= 8.0.0 (for image processing)
