@@ -9,7 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from scipy.optimize import curve_fit
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
@@ -1350,7 +1350,9 @@ class PeakFittingWindow:
     
     def export_results(self):
         """Export the fitting results to a file and optionally to the mineral database."""
-        if not self.fit_params:
+        # Check if fit_params exists and has data in a NumPy-safe way
+        has_fit_results = hasattr(self, 'fit_params') and self.fit_params is not None
+        if not has_fit_results or (isinstance(self.fit_params, np.ndarray) and self.fit_params.size == 0):
             messagebox.showwarning("Warning", "No fit results to export.")
             return
         
@@ -1405,13 +1407,27 @@ class PeakFittingWindow:
             "peaks": []
         }
         
-        # Add peak data
-        for i, params in enumerate(self.fit_params):
+        # Get model type and parameters per peak
+        model = self.current_model.get()
+        if model == "Gaussian" or model == "Lorentzian":
+            params_per_peak = 3
+        elif model == "Pseudo-Voigt":
+            params_per_peak = 4
+        elif model == "Asymmetric Voigt":
+            params_per_peak = 5
+        else:
+            params_per_peak = 3  # Default case
+        
+        # Calculate number of peaks
+        n_peaks = len(self.fit_params) // params_per_peak
+        
+        # Add peak data for each peak
+        for i in range(n_peaks):
             peak_data = {}
-            model = self.current_model.get()
+            start_idx = i * params_per_peak
             
             if model == "Gaussian":
-                amp, cen, wid = params
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                 peak_data = {
                     "index": i + 1,
                     "amplitude": float(amp),
@@ -1421,7 +1437,7 @@ class PeakFittingWindow:
                     "model": "Gaussian"
                 }
             elif model == "Lorentzian":
-                amp, cen, wid = params
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                 peak_data = {
                     "index": i + 1,
                     "amplitude": float(amp),
@@ -1431,7 +1447,7 @@ class PeakFittingWindow:
                     "model": "Lorentzian"
                 }
             elif model == "Pseudo-Voigt":
-                amp, cen, wid, eta = params
+                amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
                 # Area is a combination of Gaussian and Lorentzian areas
                 g_area = amp * wid * np.sqrt(2 * np.pi) * (1 - eta)
                 l_area = amp * wid * np.pi * eta
@@ -1444,8 +1460,8 @@ class PeakFittingWindow:
                     "area": float(g_area + l_area),
                     "model": "Pseudo-Voigt"
                 }
-            elif model == "Asymmetric-Voigt":
-                amp, cen, wid_l, wid_r, eta = params
+            elif model == "Asymmetric Voigt":
+                amp, cen, wid_l, wid_r, eta = self.fit_params[start_idx:start_idx+5]
                 # Approximate area
                 avg_width = (wid_l + wid_r) / 2
                 g_area = amp * avg_width * np.sqrt(2 * np.pi) * (1 - eta)
@@ -1458,7 +1474,7 @@ class PeakFittingWindow:
                     "width_right": float(wid_r),
                     "eta": float(eta),
                     "area": float(g_area + l_area),
-                    "model": "Asymmetric-Voigt"
+                    "model": "Asymmetric Voigt"
                 }
             
             export_data["peaks"].append(peak_data)
@@ -1542,26 +1558,41 @@ class PeakFittingWindow:
                 # Create a new GUI instance
                 db_gui = mineral_database.MineralDatabaseGUI(self.window)
                 
+                # Get model type and parameters per peak
+                model = self.current_model.get()
+                if model == "Gaussian" or model == "Lorentzian":
+                    params_per_peak = 3
+                elif model == "Pseudo-Voigt":
+                    params_per_peak = 4
+                elif model == "Asymmetric Voigt":
+                    params_per_peak = 5
+                else:
+                    params_per_peak = 3  # Default case
+                
+                # Calculate number of peaks
+                n_peaks = len(self.fit_params) // params_per_peak
+                
                 # Get peak data
                 peak_data = []
-                for params in self.fit_params:
-                    model = self.current_model.get()
+                for i in range(n_peaks):
+                    start_idx = i * params_per_peak
+                    
                     if model in ["Gaussian", "Lorentzian"]:
-                        amp, cen, wid = params
+                        amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                         peak_data.append({
                             'position': cen,
                             'amplitude': amp,
                             'width': wid
                         })
                     elif model == "Pseudo-Voigt":
-                        amp, cen, wid, eta = params
+                        amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
                         peak_data.append({
                             'position': cen,
                             'amplitude': amp,
                             'width': wid
                         })
-                    elif model == "Asymmetric-Voigt":
-                        amp, cen, wid_l, wid_r, eta = params
+                    elif model == "Asymmetric Voigt":
+                        amp, cen, wid_l, wid_r, eta = self.fit_params[start_idx:start_idx+5]
                         peak_data.append({
                             'position': cen,
                             'amplitude': amp,
