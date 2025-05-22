@@ -139,15 +139,17 @@ class BatchPeakFittingWindow:
                 "• Export Results: Save batch results to a CSV file\n\n"
                 "Progress Log shows the status of each spectrum processed."
             ),
-            "Plot": (
-                "Plot Visibility Help",
+            "Results": (
+                "Results Tab Help",
                 "This tab controls what is displayed in the Fit Results and Fit Stats tabs:\n\n"
                 "• Peak Visibility: Toggle which peaks are shown in trend plots\n"
                 "• Show All/Hide All: Quickly select or deselect all peaks\n"
                 "• Show 95% Boundary: Display confidence intervals on trend plots\n"
                 "• Show Grid Lines: Toggle grid visibility on trend plots\n\n"
                 "Preview buttons allow you to view individual parameter plots in separate windows.\n\n"
-                "Export controls let you save fit statistics plots as images."
+                "Export controls let you save fit statistics plots as images or export all peak data as CSV.\n"
+                "• Export Curve Data: Save all peak parameters (position, amplitude, width, eta) to CSV file\n"
+                "• Export Fit Stats: Save plots of the best, median, and worst fits"
             ),
             "Current Spectrum": (
                 "Current Spectrum Help",
@@ -399,7 +401,7 @@ class BatchPeakFittingWindow:
 
         # --- Tab 4: Peak Visibility ---
         visibility_tab = ttk.Frame(self.left_notebook)
-        self.left_notebook.add(visibility_tab, text="Plot")
+        self.left_notebook.add(visibility_tab, text="Results")
 
         visibility_frame = ttk.LabelFrame(visibility_tab, text="Peak Visibility Controls", padding=10)
         visibility_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -436,12 +438,18 @@ class BatchPeakFittingWindow:
 
         # Add export buttons for Fit Stats
         export_frame = ttk.LabelFrame(visibility_frame, text="Export Fit Stats", padding=5)
-        export_frame.pack(fill=tk.X, pady=40)
+        export_frame.pack(fill=tk.X, pady=5)
         
         ttk.Button(export_frame, text="Save Individual Stats Plots", 
                   command=self.export_individual_fit_stats).pack(fill=tk.X, pady=2)
         ttk.Button(export_frame, text="Save All Stats Plots", 
                   command=self.export_fit_stats_plot).pack(fill=tk.X, pady=2)
+        
+        # Add export CSV button
+        export_csv_frame = ttk.LabelFrame(visibility_frame, text="Export Curve Data", padding=5)
+        export_csv_frame.pack(fill=tk.X, pady=5)
+        ttk.Button(export_csv_frame, text="Export Peak Curve Data (CSV)", 
+                  command=self.export_curve_data_csv).pack(fill=tk.X, pady=2)
 
 
 
@@ -634,6 +642,11 @@ class BatchPeakFittingWindow:
         # Add reset button for color adjustments
         ttk.Button(basic_controls, text="Reset Colors", 
                   command=lambda: self.reset_heatmap_adjustments()).pack(side=tk.LEFT, padx=5)
+                  
+        # Add grid checkbox
+        self.heatmap_show_grid = tk.BooleanVar(value=False)
+        ttk.Checkbutton(basic_controls, text="Grid", variable=self.heatmap_show_grid, 
+                       command=self.update_heatmap_plot).pack(side=tk.LEFT, padx=5)
         
         # Create a frame for X-axis range controls
         range_controls = ttk.LabelFrame(heatmap_controls, text="X-axis Range (cm⁻¹)", padding=5)
@@ -2758,6 +2771,7 @@ class BatchPeakFittingWindow:
         self.heatmap_contrast.set(1.0)
         self.heatmap_brightness.set(1.0)
         self.heatmap_gamma.set(1.0)
+        # Grid remains at its current setting when resetting colors
         self.update_heatmap_plot()
 
     def update_heatmap_plot(self):
@@ -2851,6 +2865,12 @@ class BatchPeakFittingWindow:
             self.ax_heatmap.set_xlabel('Wavenumber (cm⁻¹)')
             self.ax_heatmap.set_ylabel('Spectrum Number')
             self.ax_heatmap.set_title('Heatmap Plot')
+            
+            # Show or hide grid based on checkbox
+            if self.heatmap_show_grid.get():
+                self.ax_heatmap.grid(True, linestyle=':', color='gray', alpha=0.6)
+            else:
+                self.ax_heatmap.grid(False)
             
             # Ensure tight layout and maintain aspect ratio
             self.fig_heatmap.tight_layout()
@@ -3397,6 +3417,79 @@ class BatchPeakFittingWindow:
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to export individual plots: {str(e)}")
+            
+    def export_curve_data_csv(self):
+        """Export all peak curve data to a CSV file."""
+        if not self.batch_results:
+            messagebox.showwarning("No Results", "No batch processing results to export.")
+            return
+            
+        try:
+            # Ask for file location
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+                title="Save Peak Curve Data"
+            )
+            
+            if not file_path:
+                return
+                
+            # Get data from extract_trend_data which already has all the peak information we need
+            x, trends, n_peaks, uncertainties = self.extract_trend_data()
+            if x is None or trends is None or n_peaks is None:
+                messagebox.showwarning("No Data", "No trend data available to export.")
+                return
+                
+            # Get model type to determine column headers
+            model_type = self.current_model.get()
+            
+            # Prepare data frame
+            data = []
+            # First add spectrum info (index and filename)
+            for i, result in enumerate(self.batch_results):
+                filename = os.path.basename(result['file'])
+                fit_success = not result.get('fit_failed', True)
+                row = {'Spectrum': i, 'File': filename, 'Fit_Success': fit_success}
+                data.append(row)
+                
+            # Create DataFrame
+            df = pd.DataFrame(data)
+            
+            # Add column for each peak parameter
+            for peak_idx in range(n_peaks):
+                # Only include visible peaks
+                if peak_idx < len(self.peak_visibility_vars) and self.peak_visibility_vars[peak_idx].get():
+                    # Position
+                    df[f'Peak_{peak_idx+1}_Position'] = trends[peak_idx]['pos']
+                    df[f'Peak_{peak_idx+1}_Position_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['pos']]
+                    
+                    # Amplitude
+                    df[f'Peak_{peak_idx+1}_Amplitude'] = trends[peak_idx]['amp']
+                    df[f'Peak_{peak_idx+1}_Amplitude_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['amp']]
+                    
+                    # Width
+                    if model_type == "Asymmetric Voigt":
+                        df[f'Peak_{peak_idx+1}_Width_Left'] = trends[peak_idx]['wid_left']
+                        df[f'Peak_{peak_idx+1}_Width_Left_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid_left']]
+                        df[f'Peak_{peak_idx+1}_Width_Right'] = trends[peak_idx]['wid_right']
+                        df[f'Peak_{peak_idx+1}_Width_Right_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid_right']]
+                    else:
+                        df[f'Peak_{peak_idx+1}_Width'] = trends[peak_idx]['wid']
+                        df[f'Peak_{peak_idx+1}_Width_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid']]
+                    
+                    # Eta (for Pseudo-Voigt and Asymmetric Voigt)
+                    if model_type in ["Pseudo-Voigt", "Asymmetric Voigt"]:
+                        df[f'Peak_{peak_idx+1}_Eta'] = trends[peak_idx]['eta']
+                        df[f'Peak_{peak_idx+1}_Eta_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['eta']]
+            
+            # Save to CSV
+            df.to_csv(file_path, index=False)
+            
+            messagebox.showinfo("Export Complete", f"Peak curve data saved to {file_path}")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export curve data: {str(e)}")
 
     def on_tab_changed(self, event=None):
         """Handle tab change events to update context-sensitive help."""
@@ -3411,8 +3504,8 @@ class BatchPeakFittingWindow:
                     self.status_bar.config(text="Peak Controls: Subtract background, detect/add peaks, and fit with different models. Press F1 for help.")
                 elif current_tab == "Batch":
                     self.status_bar.config(text="Batch Processing: Set reference spectrum and apply to all files. Press F1 for help.")
-                elif current_tab == "Plot":
-                    self.status_bar.config(text="Plot Controls: Configure which peaks are displayed in result plots. Press F1 for help.")
+                elif current_tab == "Results":
+                    self.status_bar.config(text="Results: Configure which peaks are displayed and export data. Press F1 for help.")
             elif event and event.widget == self.viz_notebook:
                 current_tab = self.viz_notebook.tab(self.viz_notebook.select(), "text")
                 if current_tab == "Current Spectrum":
