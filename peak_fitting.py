@@ -53,7 +53,6 @@ class PeakFittingWindow:
         self.background = None
         self.current_model = tk.StringVar(value="Gaussian")
         self.residuals = None
-        self.show_fitted_peaks = tk.BooleanVar(value=True)  # Add checkbox variable
         self.show_individual_peaks = tk.BooleanVar(value=True)
         
         # Flag for manual peak mode
@@ -74,34 +73,27 @@ class PeakFittingWindow:
         main_frame = ttk.Frame(self.window, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Create left panel for controls
-        controls_frame = ttk.LabelFrame(main_frame, text="Fitting Controls", padding=10, width=425)
+        # Create left panel for controls with tabs
+        controls_frame = ttk.LabelFrame(main_frame, text="Controls", padding=10, width=450)
         controls_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         controls_frame.pack_propagate(False)  # Prevent shrinking
         
-        # Create a canvas with scrollbar for the controls
-        control_canvas = tk.Canvas(controls_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(controls_frame, orient=tk.VERTICAL, command=control_canvas.yview)
-        scrollable_frame = ttk.Frame(control_canvas)
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(controls_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True)
         
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: control_canvas.configure(scrollregion=control_canvas.bbox("all"))
-        )
+        # Create frames for each tab
+        self.background_frame = ttk.Frame(self.notebook, padding=10)
+        self.peak_detection_frame = ttk.Frame(self.notebook, padding=10)
+        self.peak_fitting_frame = ttk.Frame(self.notebook, padding=10)
         
-        control_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        control_canvas.configure(yscrollcommand=scrollbar.set)
+        # Add tabs to notebook
+        self.notebook.add(self.background_frame, text="Background")
+        self.notebook.add(self.peak_detection_frame, text="Peak Detection")
+        self.notebook.add(self.peak_fitting_frame, text="Peak Fitting")
         
-        control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Add checkbox for showing fitted peaks
-        ttk.Checkbutton(
-            scrollable_frame,
-            text="Show Fitted Peaks",
-            variable=self.show_fitted_peaks,
-            command=self.update_plot
-        ).pack(pady=5)
+        # Set initial tab to Background
+        self.notebook.select(self.background_frame)
         
         # Create right panel for visualization
         viz_frame = ttk.LabelFrame(main_frame, text="Spectrum and Fit", padding=10)
@@ -120,9 +112,19 @@ class PeakFittingWindow:
         self.toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame)
         self.toolbar.update()
         
-        # -- Create controls --
+        # -- Create Background Tab Controls --
+        self.create_background_tab()
+        
+        # -- Create Peak Detection Tab Controls --
+        self.create_peak_detection_tab()
+        
+        # -- Create Peak Fitting Tab Controls --
+        self.create_peak_fitting_tab()
+        
+    def create_background_tab(self):
+        """Create the background subtraction tab controls."""
         # Background subtraction frame
-        bg_frame = ttk.LabelFrame(scrollable_frame, text="ALS Background", padding=10)
+        bg_frame = ttk.LabelFrame(self.background_frame, text="ALS Background", padding=10)
         bg_frame.pack(fill=tk.X, pady=(0, 10))
         
         # Compact help text
@@ -185,16 +187,18 @@ class PeakFittingWindow:
                  command=self.compare_background_parameters).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         ttk.Button(utility_frame, text="Interactive Tuning", 
                  command=self.interactive_background_tuning).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
-        
+    
+    def create_peak_detection_tab(self):
+        """Create the peak detection tab controls."""
         # Peak detection frame
-        peak_frame = ttk.LabelFrame(scrollable_frame, text="Peak Detection", padding=10)
+        peak_frame = ttk.LabelFrame(self.peak_detection_frame, text="Peak Detection", padding=10)
         peak_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Small help text for peak detection
-        #peak_help = tk.Text(peak_frame, height=1, width=42, wrap=tk.WORD)
-        #peak_help.pack(fill=tk.X, pady=(0, 5))
-        #peak_help.insert(tk.END, "Auto height sets threshold at 5% above background.")
-        #peak_help.config(state=tk.DISABLED)
+        # Help text for peak detection
+        peak_help = tk.Text(peak_frame, height=2, width=42, wrap=tk.WORD)
+        peak_help.pack(fill=tk.X, pady=(0, 5))
+        peak_help.insert(tk.END, "Auto height sets threshold at 5% above background. Distance is minimum separation between peaks.")
+        peak_help.config(state=tk.DISABLED)
         
         # Use grid for more compact layout
         peak_grid = ttk.Frame(peak_frame)
@@ -228,43 +232,41 @@ class PeakFittingWindow:
                   command=self.clear_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         ttk.Button(peak_management_frame, text="Delete Peak", 
                   command=self.delete_selected_peak).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+    
+    def create_peak_fitting_tab(self):
+        """Create the peak fitting tab controls."""
+        # Display options
+        display_frame = ttk.LabelFrame(self.peak_fitting_frame, text="Display Options", padding=10)
+        display_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Peak fitting frame
-        fit_frame = ttk.LabelFrame(scrollable_frame, text="Peak Fitting", padding=10)
-        fit_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Use grid for more compact layout
-        fit_grid = ttk.Frame(fit_frame)
-        fit_grid.pack(fill=tk.X)
-        
-        ttk.Label(fit_grid, text="Model:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        self.current_model = tk.StringVar(value="Gaussian")
-        model_combo = ttk.Combobox(fit_grid, textvariable=self.current_model, 
-                                  values=["Gaussian", "Lorentzian", "Pseudo-Voigt", "Asymmetric Voigt"], width=15)
-        model_combo.grid(row=0, column=1, sticky="w", padx=2, pady=2)
-        model_combo.bind("<<ComboboxSelected>>", lambda e: self.update_plot())
-        
-        # Create a frame for the fit button and checkbox
-        fit_button_frame = ttk.Frame(fit_frame)
-        fit_button_frame.pack(fill=tk.X, pady=5)
-        
-        # Add checkbox for showing individual peaks
         ttk.Checkbutton(
-            fit_button_frame,
+            display_frame,
             text="Show Individual Peaks",
             variable=self.show_individual_peaks,
             command=self.update_plot
-        ).pack(side=tk.LEFT, padx=(0, 10))
+        ).pack(anchor="w", pady=2)
         
-        # Add fit peaks button
-        ttk.Button(
-            fit_button_frame,
-            text="Fit Peaks",
-            command=self.fit_peaks
-        ).pack(side=tk.LEFT)
+        # Peak fitting frame
+        fit_frame = ttk.LabelFrame(self.peak_fitting_frame, text="Peak Fitting", padding=10)
+        fit_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Model selection
+        model_frame = ttk.Frame(fit_frame)
+        model_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(model_frame, text="Model:").pack(side=tk.LEFT, padx=(0, 5))
+        self.current_model = tk.StringVar(value="Gaussian")
+        model_combo = ttk.Combobox(model_frame, textvariable=self.current_model, 
+                                  values=["Gaussian", "Lorentzian", "Pseudo-Voigt", "Asymmetric Voigt"], 
+                                  width=15, state="readonly")
+        model_combo.pack(side=tk.LEFT)
+        model_combo.bind("<<ComboboxSelected>>", lambda e: self.update_plot())
+        
+        # Fit button
+        ttk.Button(fit_frame, text="Fit Peaks", command=self.fit_peaks).pack(pady=10)
         
         # Model info frame with compact info
-        model_info_frame = ttk.LabelFrame(scrollable_frame, text="Model Info", padding=10)
+        model_info_frame = ttk.LabelFrame(self.peak_fitting_frame, text="Model Info", padding=10)
         model_info_frame.pack(fill=tk.X, pady=(0, 10))
         
         model_info_text = tk.Text(model_info_frame, height=4, width=45, wrap=tk.WORD)
@@ -278,31 +280,24 @@ class PeakFittingWindow:
         model_info_text.config(state=tk.DISABLED)
         
         # Results frame
-        results_frame = ttk.LabelFrame(scrollable_frame, text="Fit Results", padding=10)
-        results_frame.pack(fill=tk.X, pady=(0, 10), expand=True)
+        results_frame = ttk.LabelFrame(self.peak_fitting_frame, text="Fit Results", padding=10)
+        results_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
-        self.results_text = tk.Text(results_frame, height=7, width=45, wrap=tk.WORD)
+        self.results_text = tk.Text(results_frame, height=6, width=45, wrap=tk.WORD)
         results_scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, 
                                         command=self.results_text.yview)
         self.results_text.config(yscrollcommand=results_scrollbar.set)
         results_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.results_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Export/Apply buttons in a more compact layout
-        button_frame = ttk.Frame(scrollable_frame)
+        # Export/Close buttons
+        button_frame = ttk.Frame(self.peak_fitting_frame)
         button_frame.pack(fill=tk.X, pady=5)
         
-        button_grid = ttk.Frame(button_frame)
-        button_grid.pack(fill=tk.X, expand=True)
-        
-        ttk.Button(button_grid, text="Export Results", 
-                  command=self.export_results).grid(row=0, column=0, sticky="we", padx=1, pady=1)
-        ttk.Button(button_grid, text="Close", 
-                  command=self.window.destroy).grid(row=0, column=1, sticky="we", padx=1, pady=1)
-        
-        # Configure the grid to expand properly
-        button_grid.columnconfigure(0, weight=1)
-        button_grid.columnconfigure(1, weight=1)
+        ttk.Button(button_frame, text="Export Results", 
+                  command=self.export_results).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(button_frame, text="Close", 
+                  command=self.window.destroy).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         
     def subtract_background(self):
         """Subtract the background from the spectrum."""
