@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClaritySpectra User Manual</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1, h2, h3, h4 {
+            color: #2c3e50;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .feature-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .feature-list li {
+            margin-bottom: 10px;
+            padding-left: 20px;
+            position: relative;
+        }
+        .feature-list li:before {
+            content: "✓";
+            color: #27ae60;
+            position: absolute;
+            left: 0;
+        }
+        .code-block {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: monospace;
+        }
+        .note {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .warning {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .tip {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .screenshot {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .screenshot-container {
+            margin: 20px 0;
+            text-align: center;
+        }
+        .screenshot-caption {
+            font-style: italic;
+            color: #666;
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+        .nav-menu {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .nav-menu ul {
+            list-style: none;
+            padding: 0;
+        }
+        .nav-menu li {
+            margin: 5px 0;
+        }
+        .nav-menu a {
+            text-decoration: none;
+            color: #2c3e50;
+        }
+        .nav-menu a:hover {
+            color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ClaritySpectra User Manual</h1>
+        
+        <div class="nav-menu">
+            <h3>Contents</h3>
+            <ul>
+                <li><a href="#getting-started">Getting Started</a></li>
+                <li><a href="#basic-operations">Basic Operations</a></li>
+                <li><a href="#spectrum-processing">Spectrum Processing</a></li>
+                <li><a href="#database-management">Database Management</a></li>
+                <li><a href="#advanced-analysis">Advanced Analysis</a></li>
+                <li><a href="#export-import">Export and Import</a></li>
+                <li><a href="#troubleshooting">Troubleshooting</a></li>
+            </ul>
+        </div>
+
+        <section id="getting-started">
+            <h2>Getting Started</h2>
+            
+            <h3>Launching the Application</h3>
+            <p>To start ClaritySpectra:</p>
+            <ol>
+                <li>Open a terminal/command prompt</li>
+                <li>Navigate to the ClaritySpectra directory</li>
+                <li>Run <code>python main.py</code></li>
+            </ol>
+
+            <h3>Main Interface Overview</h3>
+            <p>The main interface consists of several key components:</p>
+            <ul>
+                <li><strong>Menu Bar:</strong> Access to all major functions</li>
+                <li><strong>Control Panel:</strong> Processing and analysis tools</li>
+                <li><strong>Visualization Panel:</strong> Spectrum display and manipulation</li>
+                <li><strong>Status Bar:</strong> Current operation status and information</li>
+            </ul>
+            
+            <div class="screenshot-container">
+                <img src="images/main_interface.png" alt="ClaritySpectra Main Interface" class="screenshot">
+                <div class="screenshot-caption">Figure 1: Main interface of ClaritySpectra showing the menu bar, control panel, visualization panel, and status bar.</div>
+            </div>
+        </section>
+
+        <section id="basic-operations">
+            <h2>Basic Operations</h2>
+
+            <h3>Importing Spectra</h3>
+            <p>To import a Raman spectrum:</p>
+            <ol>
+                <li>Click "File" → "Import" or use the Import button in the control panel</li>
+                <li>Select your spectrum file (supported formats: CSV, TXT, DAT)</li>
+                <li>The spectrum will be displayed in the visualization panel</li>
+            </ol>
+
+            <div class="screenshot-container">
+                <img src="images/import_dialog.png" alt="Import Dialog" class="screenshot">
+                <div class="screenshot-caption">Figure 2: Import dialog showing supported file formats and options.</div>
+            </div>
+
+            <div class="tip">
+                <strong>Tip:</strong> For batch processing, use "File" → "Batch Import" to process multiple files at once.
+            </div>
+
+            <h3>Basic Spectrum Manipulation</h3>
+            <ul>
+                <li><strong>Zoom:</strong> Use the mouse wheel or zoom tools in the toolbar</li>
+                <li><strong>Pan:</strong> Click and drag the plot</li>
+                <li><strong>Reset View:</strong> Click the home icon in the toolbar</li>
+                <li><strong>Save View:</strong> Use "File" → "Save Plot"</li>
+            </ul>
+        </section>
+
+        <section id="spectrum-processing">
+            <h2>Spectrum Processing</h2>
+
+            <h3>Background Subtraction</h3>
+            <p>To remove background from your spectrum:</p>
+            <ol>
+                <li>Select "Process" → "Subtract Background"</li>
+                <li>Choose the background subtraction method:
+                    <ul>
+                        <li>Automatic (recommended for most cases)</li>
+                        <li>Manual (for custom background fitting)</li>
+                    </ul>
+                </li>
+                <li>Adjust parameters if needed</li>
+                <li>Click "Apply" to process the spectrum</li>
+            </ol>
+
+            <div class="screenshot-container">
+                <img src="images/background_subtraction.png" alt="Background Subtraction" class="screenshot">
+                <div class="screenshot-caption">Figure 3: Background subtraction interface showing automatic and manual options.</div>
+            </div>
+
+            <h3>Peak Detection</h3>
+            <p>To detect peaks in your spectrum:</p>
+            <ol>
+                <li>Select "Process" → "Find Peaks"</li>
+                <li>Adjust detection parameters:
+                    <ul>
+                        <li>Minimum height</li>
+                        <li>Minimum distance between peaks</li>
+                        <li>Peak width</li>
+                    </ul>
+                </li>
+                <li>Click "Find Peaks" to process</li>
+            </ol>
+
+            <div class="screenshot-container">
+                <img src="images/peak_detection.png" alt="Peak Detection" class="screenshot">
+                <div class="screenshot-caption">Figure 4: Peak detection interface with parameter controls and preview.</div>
+            </div>
+
+            <h3>Savitzky-Golay Smoothing</h3>
+            <p>To smooth your spectrum:</p>
+            <ol>
+                <li>Select "Process" → "Smooth Spectrum"</li>
+                <li>Choose window size and polynomial order</li>
+                <li>Use the preview to adjust parameters</li>
+                <li>Click "Apply" to process</li>
+            </ol>
+        </section>
+
+        <section id="database-management">
+            <h2>Database Management</h2>
+
+            <h3>Adding Spectra to Database</h3>
+            <p>To add a spectrum to your database:</p>
+            <ol>
+                <li>Process your spectrum as needed</li>
+                <li>Click "Database" → "Add to Database"</li>
+                <li>Fill in the metadata:
+                    <ul>
+                        <li>Sample name</li>
+                        <li>Chemical formula</li>
+                        <li>Crystal system</li>
+                        <li>Additional notes</li>
+                    </ul>
+                </li>
+                <li>Click "Save" to add to database</li>
+            </ol>
+
+            <div class="screenshot-container">
+                <img src="images/database_management.png" alt="Database Management" class="screenshot">
+                <div class="screenshot-caption">Figure 5: Database management interface showing metadata entry form.</div>
+            </div>
+
+            <h3>Searching the Database</h3>
+            <p>To search for spectra in the database:</p>
+            <ol>
+                <li>Click "Database" → "Search"</li>
+                <li>Choose search method:
+                    <ul>
+                        <li>Correlation search</li>
+                        <li>Peak-based search</li>
+                        <li>ML-based search</li>
+                    </ul>
+                </li>
+                <li>Set search parameters</li>
+                <li>Click "Search" to find matches</li>
+            </ol>
+        </section>
+
+        <section id="advanced-analysis">
+            <h2>Advanced Analysis</h2>
+
+            <h3>Peak Fitting</h3>
+            <p>To fit peaks in your spectrum:</p>
+            <ol>
+                <li>Select "Analysis" → "Peak Fitting"</li>
+                <li>Choose fitting model:
+                    <ul>
+                        <li>Gaussian</li>
+                        <li>Lorentzian</li>
+                        <li>Pseudo-Voigt</li>
+                    </ul>
+                </li>
+                <li>Adjust initial parameters</li>
+                <li>Click "Fit" to process</li>
+            </ol>
+
+            <div class="screenshot-container">
+                <img src="images/peak_fitting.png" alt="Peak Fitting" class="screenshot">
+                <div class="screenshot-caption">Figure 6: Peak fitting interface showing model selection and parameter controls.</div>
+            </div>
+
+            <h3>2D Map Analysis</h3>
+            <p>To analyze 2D Raman maps:</p>
+            <ol>
+                <li>Select "Analysis" → "2D Map Analysis"</li>
+                <li>Import your map data</li>
+                <li>Choose analysis type:
+                    <ul>
+                        <li>Intensity mapping</li>
+                        <li>Peak position mapping</li>
+                        <li>Peak width mapping</li>
+                    </ul>
+                </li>
+                <li>Process and visualize results</li>
+            </ol>
+
+            <div class="warning">
+                <strong>Note:</strong> Crystal orientation analysis and DFT calculations are experimental features. See the main documentation for details.
+            </div>
+        </section>
+
+        <section id="export-import">
+            <h2>Export and Import</h2>
+
+            <h3>Exporting Results</h3>
+            <p>To export your analysis results:</p>
+            <ul>
+                <li><strong>PDF Report:</strong> "File" → "Export" → "PDF Report"</li>
+                <li><strong>CSV Data:</strong> "File" → "Export" → "CSV Data"</li>
+                <li><strong>Plot Image:</strong> "File" → "Save Plot"</li>
+            </ul>
+
+            <h3>Batch Processing</h3>
+            <p>To process multiple files:</p>
+            <ol>
+                <li>Select "File" → "Batch Process"</li>
+                <li>Choose input directory</li>
+                <li>Select processing options</li>
+                <li>Choose output format</li>
+                <li>Click "Start Processing"</li>
+            </ol>
+        </section>
+
+        <section id="troubleshooting">
+            <h2>Troubleshooting</h2>
+
+            <h3>Common Issues</h3>
+            <ul>
+                <li><strong>Application won't start:</strong>
+                    <ul>
+                        <li>Check Python installation</li>
+                        <li>Verify all dependencies are installed</li>
+                        <li>Check for error messages in terminal</li>
+                    </ul>
+                </li>
+                <li><strong>Import errors:</strong>
+                    <ul>
+                        <li>Verify file format is supported</li>
+                        <li>Check file encoding</li>
+                        <li>Ensure file is not corrupted</li>
+                    </ul>
+                </li>
+                <li><strong>Processing issues:</strong>
+                    <ul>
+                        <li>Check spectrum quality</li>
+                        <li>Verify processing parameters</li>
+                        <li>Try different processing methods</li>
+                    </ul>
+                </li>
+            </ul>
+
+            <div class="tip">
+                <strong>Tip:</strong> For additional help, check the documentation in the <code>docs</code> directory or contact the author.
+            </div>
+        </section>
+    </div>
+</body>
+</html> 
