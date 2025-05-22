@@ -380,6 +380,8 @@ class BatchPeakFittingWindow:
         ttk.Button(batch_buttons_row, text="Stop", command=self.stop_batch).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
         ttk.Button(batch_frame, text="Export Results", command=self.export_results).pack(fill=tk.X, pady=2)
 
+
+
         # Add status text box with scrollbar
         status_frame = ttk.LabelFrame(batch_frame, text="Progress Log", padding=5)
         status_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -822,6 +824,32 @@ class BatchPeakFittingWindow:
                 self.background = None
             if not hasattr(self, 'residuals'):
                 self.residuals = None
+            if not hasattr(self, 'peak_r_squared'):
+                self.peak_r_squared = []
+                
+            # Check if this spectrum has batch results and load them
+            if hasattr(self, 'batch_results') and self.batch_results:
+                for result in self.batch_results:
+                    if 'file' in result and result['file'] == file_path:
+                        # Load the saved fit parameters, peaks, and results
+                        self.peaks = result['peaks'].copy() if 'peaks' in result and result['peaks'] is not None else []
+                        self.fit_params = np.copy(result['fit_params']) if 'fit_params' in result and result['fit_params'] is not None else None
+                        self.fit_cov = np.copy(result['fit_cov']) if 'fit_cov' in result and result['fit_cov'] is not None else None
+                        self.background = np.copy(result['background']) if 'background' in result and result['background'] is not None else None
+                        self.fit_result = np.copy(result['fit_result']) if 'fit_result' in result and result['fit_result'] is not None else None
+                        
+                        # Load stored R² values if available
+                        if 'peak_r_squared' in result and result['peak_r_squared'] is not None:
+                            self.peak_r_squared = result['peak_r_squared'].copy()
+                        
+                        # Recalculate residuals using background-subtracted data and fit
+                        # Important: residuals should always be (subtracted spectrum - fit)
+                        if self.fit_result is not None and self.background is not None:
+                            # Calculate background-subtracted spectrum
+                            background_subtracted = self.original_spectra - self.background
+                            # Calculate residuals from the subtracted spectrum
+                            self.residuals = background_subtracted - self.fit_result
+                        break
             
             # Update the plot
             self.update_plot()
@@ -934,6 +962,8 @@ class BatchPeakFittingWindow:
                     'fit_cov': np.copy(self.fit_cov) if hasattr(self, 'fit_cov') and self.fit_cov is not None else None,
                     'background': np.copy(self.background) if hasattr(self, 'background') and self.background is not None else None,
                     'fit_result': np.copy(self.fit_result) if hasattr(self, 'fit_result') and self.fit_result is not None else None,
+                    'original_spectra': np.copy(self.original_spectra) if hasattr(self, 'original_spectra') else None,  # Store original spectrum too
+                    'peak_r_squared': self.peak_r_squared.copy() if hasattr(self, 'peak_r_squared') and self.peak_r_squared is not None else [],
                     'nlls_cycles': getattr(self, 'nlls_cycles', 0)  # Store NLLS cycle count
                 }
                 
@@ -955,6 +985,8 @@ class BatchPeakFittingWindow:
                     'fit_cov': None,
                     'background': None,
                     'fit_result': None,
+                    'original_spectra': np.copy(self.original_spectra) if hasattr(self, 'original_spectra') else None,
+                    'peak_r_squared': [],
                     'nlls_cycles': 0  # Zero cycles for failed fits
                 })
             
@@ -2317,7 +2349,21 @@ class BatchPeakFittingWindow:
             # Calculate fit result and residuals
             try:
                 self.fit_result = combined_model(self.wavenumbers, *popt)
-                self.residuals = np.subtract(self.spectra, self.fit_result)  # Use np.subtract to avoid array issues
+                
+                # Calculate residuals (difference between background-subtracted data and fit)
+                # Use background-subtracted spectrum for residuals calculation
+                if hasattr(self, 'original_spectra') and hasattr(self, 'background') and self.background is not None:
+                    # Calculate background-subtracted spectrum directly from original data
+                    background_subtracted = np.subtract(self.original_spectra, self.background)
+                    # Calculate residuals from the subtracted spectrum
+                    self.residuals = np.subtract(background_subtracted, self.fit_result)
+                else:
+                    # Fallback if no background available
+                    self.residuals = np.subtract(self.spectra, self.fit_result)
+                
+                # Calculate and store R² values for each peak
+                self.peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, popt, model_type)
+                
                 self.fit_failed = False
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to calculate fit results: {str(e)}")
@@ -2348,12 +2394,20 @@ class BatchPeakFittingWindow:
                 filename = os.path.basename(self.spectra_files[self.current_spectrum_index])
                 self.ax1_current.set_title(f"Current Spectrum: {filename}")
         
-        # Plot spectrum
-        self.ax1_current.plot(self.wavenumbers, self.spectra, 'k-', label='Spectrum')
-        
+        # Plot original spectrum
+        if hasattr(self, 'original_spectra'):
+            self.ax1_current.plot(self.wavenumbers, self.original_spectra, 'k-', label='Original Spectrum')
+        else:
+            self.ax1_current.plot(self.wavenumbers, self.spectra, 'k-', label='Spectrum')
+            
         # Plot background if available
         if hasattr(self, 'background') and self.background is not None:
             self.ax1_current.plot(self.wavenumbers, self.background, 'b--', label='Background')
+            
+            # Also plot the background-subtracted data
+            if hasattr(self, 'original_spectra'):
+                background_subtracted = self.original_spectra - self.background
+                self.ax1_current.plot(self.wavenumbers, background_subtracted, 'g-', alpha=0.7, label='Subtracted Spectrum')
         
         # Plot fitted peaks if available
         has_fit_result = (hasattr(self, 'fit_result') and 
@@ -2391,8 +2445,12 @@ class BatchPeakFittingWindow:
                     # Safely cast to numpy array if not already
                     fit_params = np.asarray(self.fit_params)
                     
-                    # Calculate R² values for each peak using the full fit result
-                    peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, fit_params, model_type)
+                    # Get stored R² values or calculate new ones if not available
+                    if hasattr(self, 'peak_r_squared') and self.peak_r_squared is not None:
+                        peak_r_squared = self.peak_r_squared
+                    else:
+                        # Calculate R² values if not already stored
+                        peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, fit_params, model_type)
                     
                     n_peaks = len(fit_params) // params_per_peak
                     for peak_idx in range(n_peaks):
@@ -2483,6 +2541,7 @@ class BatchPeakFittingWindow:
         self.ax1_current.set_ylabel('Intensity')
         self.ax2_current.set_xlabel('Wavenumber (cm⁻¹)')
         self.ax2_current.set_ylabel('Residuals')
+        self.ax2_current.set_title('Residuals (Subtracted Spectrum - Fit)', fontsize=10)
         self.ax1_current.grid(True, linestyle=':', color='gray', alpha=0.6)
         self.ax2_current.grid(True, linestyle=':', color='gray', alpha=0.6)
         
@@ -3159,10 +3218,8 @@ class BatchPeakFittingWindow:
                     background = result['background']
                     self.ax_stats[row, col].plot(wavenumbers, background, 'b--', label='Background')
                     
-                    # Plot background-subtracted spectrum
+                    # Calculate background-subtracted spectrum for fit plotting
                     spectrum = original_spectrum - background
-                    self.ax_stats[row, col].plot(wavenumbers, spectrum, 'g-', label='Subtracted', alpha=0.5)
-                    
                     # Also plot the fit result on top of background-subtracted data
                     if result['fit_result'] is not None:
                         # Get correct R² value for this spectrum
