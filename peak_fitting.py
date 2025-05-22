@@ -1501,7 +1501,18 @@ class PeakFittingWindow:
                     json.dump(export_data, f, indent=2)
             elif format_type == "CSV":
                 import csv
-                with open(file_path, 'w', newline='') as f:
+                import os
+                
+                # Split file path to get base name and directory
+                base_dir = os.path.dirname(file_path)
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                
+                # Create two files: one for peak parameters and one for curve data
+                peak_params_file = os.path.join(base_dir, f"{base_name}_peak_params.csv")
+                curve_data_file = os.path.join(base_dir, f"{base_name}_curve_data.csv")
+                
+                # Write peak parameters
+                with open(peak_params_file, 'w', newline='') as f:
                     writer = csv.writer(f)
                     # Write header
                     writer.writerow(["Peak", "Center", "Amplitude", "Width", "Area", "Model"])
@@ -1515,6 +1526,96 @@ class PeakFittingWindow:
                             peak["area"],
                             peak["model"]
                         ])
+                
+                # Write curve data
+                with open(curve_data_file, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    
+                    # Prepare column headers
+                    headers = ["Wavenumber", "Original_Spectrum"]
+                    
+                    # Add columns based on available data
+                    if export_data["background"] is not None:
+                        headers.append("Background")
+                    
+                    if export_data["background"] is not None:
+                        headers.append("Background_Subtracted")
+                    
+                    if export_data["fitted_spectrum"] is not None:
+                        headers.append("Fitted_Spectrum")
+                    
+                    if export_data["residuals"] is not None:
+                        headers.append("Residuals")
+                    
+                    # Calculate individual peak profiles if we have fit params
+                    individual_peaks = []
+                    if len(self.fit_params) > 0:
+                        # Get model type and parameters per peak
+                        model = self.current_model.get()
+                        if model == "Gaussian" or model == "Lorentzian":
+                            params_per_peak = 3
+                        elif model == "Pseudo-Voigt":
+                            params_per_peak = 4
+                        elif model == "Asymmetric Voigt":
+                            params_per_peak = 5
+                        else:
+                            params_per_peak = 3
+                        
+                        # Calculate number of peaks
+                        n_peaks = len(self.fit_params) // params_per_peak
+                        
+                        # Add header for each peak
+                        for i in range(n_peaks):
+                            peak_num = i + 1
+                            headers.append(f"Peak_{peak_num}")
+                            
+                            # Calculate individual peak profile
+                            x = np.array(self.wavenumbers)
+                            start_idx = i * params_per_peak
+                            
+                            if model == "Gaussian":
+                                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                                peak = self.gaussian(x, amp, cen, wid)
+                            elif model == "Lorentzian":
+                                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                                peak = self.lorentzian(x, amp, cen, wid)
+                            elif model == "Pseudo-Voigt":
+                                amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
+                                peak = self.pseudo_voigt(x, amp, cen, wid, eta)
+                            elif model == "Asymmetric Voigt":
+                                amp, cen, wid_left, wid_right, eta = self.fit_params[start_idx:start_idx+5]
+                                peak = self.asymmetric_voigt(x, amp, cen, wid_left, wid_right, eta)
+                            
+                            individual_peaks.append(peak.tolist())
+                    
+                    # Write header
+                    writer.writerow(headers)
+                    
+                    # Prepare data rows
+                    for i in range(len(export_data["wavenumbers"])):
+                        row = [export_data["wavenumbers"][i], export_data["original_spectrum"][i]]
+                        
+                        if export_data["background"] is not None:
+                            row.append(export_data["background"][i])
+                        
+                        if export_data["background"] is not None:
+                            # Calculate background subtracted data from original spectrum and background
+                            row.append(export_data["original_spectrum"][i] - export_data["background"][i])
+                        
+                        if export_data["fitted_spectrum"] is not None:
+                            row.append(export_data["fitted_spectrum"][i])
+                        
+                        if export_data["residuals"] is not None:
+                            row.append(export_data["residuals"][i])
+                        
+                        # Add individual peak values
+                        for peak in individual_peaks:
+                            row.append(peak[i])
+                        
+                        writer.writerow(row)
+                
+                # Update file_path to reference base file for the success message
+                file_path = os.path.join(base_dir, base_name)
             else:  # TXT
                 with open(file_path, 'w') as f:
                     f.write(f"Peak Fitting Results - {self.current_model.get()} Model\n")
@@ -1524,7 +1625,13 @@ class PeakFittingWindow:
                         width = peak.get("width", f"{peak.get('width_left', 0)}/{peak.get('width_right', 0)}")
                         f.write(f"{peak['index']}\t{peak['center']:.2f}\t{peak['amplitude']:.3f}\t{width}\t{peak['area']:.2f}\n")
             
-            messagebox.showinfo("Export Successful", f"Results exported to {file_path}")
+            if format_type == "CSV":
+                messagebox.showinfo("Export Successful", 
+                                   f"Results exported to:\n"
+                                   f"- {peak_params_file} (peak parameters)\n"
+                                   f"- {curve_data_file} (curve data)")
+            else:
+                messagebox.showinfo("Export Successful", f"Results exported to {file_path}")
         except Exception as e:
             messagebox.showerror("Export Failed", f"Failed to export results: {e}")
             

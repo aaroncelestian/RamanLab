@@ -6695,7 +6695,7 @@ class RamanAnalysisApp:
         """Open the Raman polarization analysis window."""
         try:
             print("Opening Polarization Analysis window...")
-            from raman_polarization_analyzer import RamanPolarizationAnalyzer
+            from raman_polarization_analyzer_OLD import RamanPolarizationAnalyzer
             
             # Create a new top-level window
             polarization_window = tk.Toplevel(self.root)

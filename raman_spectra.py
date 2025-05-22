@@ -1912,3 +1912,90 @@ class RamanSpectra:
         except Exception as e:
             print(f"Error saving spectrum: {str(e)}")
             return False
+
+    def save_analysis_state(self, filepath):
+        """
+        Save the current analysis state to a file.
+        
+        This method saves the current analysis session, including:
+        - Current spectra and wavenumbers
+        - Processed spectra
+        - Background
+        - Peak data
+        - Metadata
+        - Fitted peaks and fit results
+        
+        Parameters:
+        -----------
+        filepath : str
+            Path where the analysis state will be saved
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            # Create a dictionary with all the state information
+            state = {
+                'timestamp': datetime.now().isoformat(),
+                'current_spectra': self.current_spectra,
+                'current_wavenumbers': self.current_wavenumbers,
+                'processed_spectra': self.processed_spectra,
+                'peaks': self.peaks,
+                'background': self.background,
+                'metadata': self.metadata,
+                'fitted_peaks': self.fitted_peaks,
+                'peak_fit_result': self.peak_fit_result
+            }
+            
+            # Add file extension if not present
+            if not filepath.endswith('.claritystate'):
+                filepath += '.claritystate'
+                
+            # Save the state to a file
+            with open(filepath, 'wb') as f:
+                pickle.dump(state, f)
+                
+            print(f"Analysis state saved to {filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"Error saving analysis state: {str(e)}")
+            return False
+            
+    def load_analysis_state(self, filepath):
+        """
+        Load a previously saved analysis state from a file.
+        
+        Parameters:
+        -----------
+        filepath : str
+            Path to the saved analysis state file
+            
+        Returns:
+        --------
+        bool
+            True if successful, False otherwise
+        """
+        try:
+            # Load the state from the file
+            with open(filepath, 'rb') as f:
+                state = pickle.load(f)
+                
+            # Restore the state
+            self.current_spectra = state.get('current_spectra')
+            self.current_wavenumbers = state.get('current_wavenumbers')
+            self.processed_spectra = state.get('processed_spectra')
+            self.peaks = state.get('peaks')
+            self.background = state.get('background')
+            self.metadata = state.get('metadata', {})
+            self.fitted_peaks = state.get('fitted_peaks')
+            self.peak_fit_result = state.get('peak_fit_result')
+            
+            print(f"Analysis state loaded from {filepath}")
+            return True
+            
+        except Exception as e:
+            print(f"Error loading analysis state: {str(e)}")
+            return False
