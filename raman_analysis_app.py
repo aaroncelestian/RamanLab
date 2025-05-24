@@ -6649,53 +6649,85 @@ class RamanAnalysisApp:
 
     def create_advanced_analysis_tab(self):
         """Create content for the advanced analysis tab."""
-        # Peak fitting button with styling
+        # Configure button styles with hover effects
         style = ttk.Style()
-        style.configure("PeakFitting.TButton", background="#4a7a96", foreground="white")
-        ttk.Button(
-            self.tab_peak_fitting,
-            text="Open Peak Fitting Window",
-            command=self.open_peak_fitting,
-            style="PeakFitting.TButton",
-        ).pack(fill=tk.X, pady=10, padx=5)
-
-        # Batch peak fitting button
-        ttk.Button(
-            self.tab_peak_fitting,
-            text="Open Batch Peak Fitting",
-            command=self.open_batch_peak_fitting,
-            style="PeakFitting.TButton",
-        ).pack(fill=tk.X, pady=10, padx=5)
-
-        # Add 2D Map Analysis button
-        ttk.Button(
-            self.tab_peak_fitting,
-            text="2D Map Analysis",
-            command=self.open_2d_map_analysis,
-            style="PeakFitting.TButton",
-        ).pack(fill=tk.X, pady=10, padx=5)
-
-        # Add Raman Group Analysis button
-        ttk.Button(
-            self.tab_peak_fitting,
-            text="Raman Group Analysis",
-            command=self.open_raman_group_analysis,
-            style="PeakFitting.TButton",
-        ).pack(fill=tk.X, pady=10, padx=5)
         
-        # Add Raman Polarization Analysis button
-        ttk.Button(
+        # Normal state - Blue color scheme
+        style.configure("PeakFitting.TButton", 
+                       background="#4a7a96", 
+                       foreground="white",
+                       borderwidth=1,
+                       focuscolor='none',
+                       relief="raised")
+        
+        # Hover state - Darker blue
+        style.map("PeakFitting.TButton",
+                 background=[('active', '#365a73'),   # Darker blue on hover
+                           ('pressed', '#2a4559')])    # Even darker on press
+        
+        # Create helper function to add hover effects
+        def create_button_with_hover(parent, text, command, style_name):
+            """Create a button with enhanced hover effects."""
+            button = ttk.Button(parent, text=text, command=command, style=style_name)
+            
+            # Additional hover effects using tkinter events
+            def on_enter(event):
+                button.configure(cursor="hand2")
+                
+            def on_leave(event):
+                button.configure(cursor="")
+                
+            button.bind("<Enter>", on_enter)
+            button.bind("<Leave>", on_leave)
+            
+            return button
+
+        # Create buttons with hover effects
+        peak_fitting_btn = create_button_with_hover(
             self.tab_peak_fitting,
-            text="Raman Polarization Analysis",
-            command=self.open_polarization_analysis,
-            style="PeakFitting.TButton",
-        ).pack(fill=tk.X, pady=10, padx=5)
+            "Open Peak Fitting Window",
+            self.open_peak_fitting,
+            "PeakFitting.TButton"
+        )
+        peak_fitting_btn.pack(fill=tk.X, pady=10, padx=5)
+
+        batch_fitting_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Open Batch Peak Fitting",
+            self.open_batch_peak_fitting,
+            "PeakFitting.TButton"
+        )
+        batch_fitting_btn.pack(fill=tk.X, pady=10, padx=5)
+
+        map_analysis_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "2D Map Analysis",
+            self.open_2d_map_analysis,
+            "PeakFitting.TButton"
+        )
+        map_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
+
+        group_analysis_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Raman Group Analysis",
+            self.open_raman_group_analysis,
+            "PeakFitting.TButton"
+        )
+        group_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
+        
+        polarization_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Raman Polarization Analysis",
+            self.open_polarization_analysis,
+            "PeakFitting.TButton"
+        )
+        polarization_btn.pack(fill=tk.X, pady=10, padx=5)
 
     def open_polarization_analysis(self):
         """Open the Raman polarization analysis window."""
         try:
             print("Opening Polarization Analysis window...")
-            from raman_polarization_analyzer_OLD import RamanPolarizationAnalyzer
+            from raman_polarization_analyzer import RamanPolarizationAnalyzer
             
             # Create a new top-level window
             polarization_window = tk.Toplevel(self.root)
