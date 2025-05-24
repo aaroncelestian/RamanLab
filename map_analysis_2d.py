@@ -22,6 +22,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_pdf import PdfPages
+import base64
+from io import BytesIO
 from ml_raman_map.pre_processing import preprocess_spectrum
 from sklearn.decomposition import PCA, NMF
 from sklearn.ensemble import RandomForestClassifier
@@ -2452,8 +2455,30 @@ class TwoDMapAnalysisWindow:
         self.pca_ax1.set_title('PCA Explained Variance')
         self.pca_ax1.grid(True)
         
-        # Plot first two components
-        self.pca_ax2.scatter(self.pca_components[:, 0], self.pca_components[:, 1], alpha=0.5)
+        # Plot first two components with performance optimization for large datasets
+        n_points = len(self.pca_components)
+        if n_points > 5000:  # Use binning for large datasets
+            binned_data = self._create_binned_scatter(
+                self.pca_components[:, 0], 
+                self.pca_components[:, 1],
+                n_bins=min(80, int(np.sqrt(n_points / 10))),  # Adaptive bin count
+                min_size=10,
+                max_size=80,
+                alpha=0.7
+            )
+            
+            if len(binned_data['x']) > 0:
+                self.pca_ax2.scatter(binned_data['x'], binned_data['y'], 
+                                   s=binned_data['sizes'], alpha=0.7, 
+                                   edgecolors='black', linewidth=0.5)
+                # Add info text about binning
+                self.pca_ax2.text(0.02, 0.98, f'Showing {len(binned_data["x"])} bins\n({n_points:,} total points)', 
+                                transform=self.pca_ax2.transAxes, fontsize=8, 
+                                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        else:
+            # Use regular scatter for smaller datasets
+            self.pca_ax2.scatter(self.pca_components[:, 0], self.pca_components[:, 1], alpha=0.5)
+        
         self.pca_ax2.set_xlabel('PC1')
         self.pca_ax2.set_ylabel('PC2')
         self.pca_ax2.set_title('PCA Components')
@@ -2528,16 +2553,52 @@ class TwoDMapAnalysisWindow:
         
         # Plot component spectra with correct wavenumber axis
         wavenumbers = self.map_data.target_wavenumbers if hasattr(self, 'map_data') and self.map_data is not None else np.arange(self.nmf.components_.shape[1])
+        
+        # Find where to truncate the data to remove trailing zeros
+        components_to_analyze = [self.nmf.components_[i] for i in range(min(5, self.nmf.n_components))]
+        end_idx = self._find_spectral_data_end(wavenumbers, *components_to_analyze)
+        wavenumbers_truncated = wavenumbers[:end_idx]
+        
+        # Plot truncated component spectra
         for i in range(min(5, self.nmf.n_components)):
-            self.nmf_ax1.plot(wavenumbers, self.nmf.components_[i], label=f'Component {i+1}')
-        self.nmf_ax1.set_xlabel('Wavenumber')
+            component_truncated = self.nmf.components_[i][:end_idx]
+            self.nmf_ax1.plot(wavenumbers_truncated, component_truncated, label=f'Component {i+1}')
+        
+        self.nmf_ax1.set_xlabel('Wavenumber (cm⁻¹)')
         self.nmf_ax1.set_ylabel('Intensity')
         self.nmf_ax1.set_title('NMF Component Spectra')
         self.nmf_ax1.legend()
         self.nmf_ax1.grid(True)
         
-        # Plot first two components
-        self.nmf_ax2.scatter(self.nmf_components[:, 0], self.nmf_components[:, 1], alpha=0.5)
+        # Set x-axis limits to the truncated range with a small margin
+        if len(wavenumbers_truncated) > 0:
+            x_margin = (wavenumbers_truncated[-1] - wavenumbers_truncated[0]) * 0.02
+            self.nmf_ax1.set_xlim(wavenumbers_truncated[0] - x_margin, wavenumbers_truncated[-1] + x_margin)
+        
+        # Plot first two components with performance optimization for large datasets
+        n_points = len(self.nmf_components)
+        if n_points > 5000:  # Use binning for large datasets
+            binned_data = self._create_binned_scatter(
+                self.nmf_components[:, 0], 
+                self.nmf_components[:, 1],
+                n_bins=min(80, int(np.sqrt(n_points / 10))),  # Adaptive bin count
+                min_size=10,
+                max_size=80,
+                alpha=0.7
+            )
+            
+            if len(binned_data['x']) > 0:
+                self.nmf_ax2.scatter(binned_data['x'], binned_data['y'], 
+                                   s=binned_data['sizes'], alpha=0.7, 
+                                   edgecolors='black', linewidth=0.5)
+                # Add info text about binning
+                self.nmf_ax2.text(0.02, 0.98, f'Showing {len(binned_data["x"])} bins\n({n_points:,} total points)', 
+                                transform=self.nmf_ax2.transAxes, fontsize=8, 
+                                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        else:
+            # Use regular scatter for smaller datasets
+            self.nmf_ax2.scatter(self.nmf_components[:, 0], self.nmf_components[:, 1], alpha=0.5)
+        
         self.nmf_ax2.set_xlabel('Component 1')
         self.nmf_ax2.set_ylabel('Component 2')
         self.nmf_ax2.set_title('NMF Components')
@@ -3471,7 +3532,7 @@ class TwoDMapAnalysisWindow:
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create figure for PCA results
-        self.pca_fig, (self.pca_ax1, self.pca_ax2) = plt.subplots(2, 1, figsize=(6, 8))
+        self.pca_fig, (self.pca_ax1, self.pca_ax2) = plt.subplots(1, 2, figsize=(12, 4))
         self.pca_canvas = FigureCanvasTkAgg(self.pca_fig, master=results_frame)
         self.pca_canvas.draw()
         self.pca_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -3512,7 +3573,7 @@ class TwoDMapAnalysisWindow:
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create figure for NMF results
-        self.nmf_fig, (self.nmf_ax1, self.nmf_ax2) = plt.subplots(2, 1, figsize=(6, 8))
+        self.nmf_fig, (self.nmf_ax1, self.nmf_ax2) = plt.subplots(1, 2, figsize=(12, 4))
         self.nmf_canvas = FigureCanvasTkAgg(self.nmf_fig, master=results_frame)
         self.nmf_canvas.draw()
         self.nmf_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -3551,13 +3612,15 @@ class TwoDMapAnalysisWindow:
         button_frame.pack(fill=tk.X, pady=5)
         ttk.Button(button_frame, text="Train Model", command=self.train_rf).pack(side=tk.LEFT, padx=2)
         ttk.Button(button_frame, text="Save Model", command=self.save_rf_model).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Load Model", command=self.load_rf_model).pack(side=tk.LEFT, padx=2)
+        ttk.Button(button_frame, text="Export Class A Spectra", command=self.export_class_a_spectra).pack(side=tk.LEFT, padx=2)
         
         # Results frame
         results_frame = ttk.LabelFrame(self.rf_tab, text="Feature Importance Analysis", padding=10)
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create figure for feature importance visualization
-        self.rf_fig = plt.figure(figsize=(8, 10))  # Taller figure for horizontal bars
+        self.rf_fig = plt.figure(figsize=(12, 4))  # Wider figure for side-by-side plots
         
         # Add placeholder text until model is trained
         ax = self.rf_fig.add_subplot(111)
@@ -3582,34 +3645,34 @@ class TwoDMapAnalysisWindow:
         results_frame = ttk.LabelFrame(self.results_tab, text="Analysis Results", padding=10)
         results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Add a button to update/generate visualizations
-        update_frame = ttk.Frame(results_frame)
-        update_frame.pack(fill=tk.X, pady=5)
-        ttk.Button(update_frame, text="Generate Visualizations", 
-                  command=self.update_results_visualization).pack(fill=tk.X, pady=5)
+        # Top button frame for the two main buttons
+        top_button_frame = ttk.Frame(results_frame)
+        top_button_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Generate Visualizations button (left)
+        ttk.Button(top_button_frame, text="Generate Visualizations", 
+                  command=self.update_results_visualization).pack(side=tk.LEFT, padx=(0, 5), fill=tk.X, expand=True)
+        
+        # Generate Report button (right)  
+        ttk.Button(top_button_frame, text="Generate Report", 
+                  command=self.generate_report).pack(side=tk.LEFT, padx=(5, 0), fill=tk.X, expand=True)
         
         # Create figure for combined results
-        self.results_fig = plt.figure(figsize=(10, 8))
+        self.results_fig = plt.figure(figsize=(12, 10))
         self.results_fig.subplots_adjust(hspace=0.4, wspace=0.3)
+        
+        # Add toolbar before canvas (moved to top)
+        toolbar_frame = ttk.Frame(results_frame)
+        toolbar_frame.pack(fill=tk.X, pady=(0, 5))
         
         # Create a canvas
         self.results_canvas = FigureCanvasTkAgg(self.results_fig, master=results_frame)
         self.results_canvas.draw()
         self.results_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         
-        # Add toolbar
-        toolbar_frame = ttk.Frame(results_frame)
-        toolbar_frame.pack(fill=tk.X)
+        # Initialize toolbar after canvas
         self.results_toolbar = NavigationToolbar2Tk(self.results_canvas, toolbar_frame)
         self.results_toolbar.update()
-        
-        # Export buttons
-        button_frame = ttk.Frame(results_frame)
-        button_frame.pack(fill=tk.X, pady=5)
-        ttk.Button(button_frame, text="Export Results", 
-                  command=self.export_results).pack(side=tk.LEFT, padx=2)
-        ttk.Button(button_frame, text="Generate Report", 
-                  command=self.generate_report).pack(side=tk.LEFT, padx=2)
 
     def create_ml_tab(self):
         """Create the Classify Spectra tab with controls for training and prediction."""
@@ -3751,22 +3814,21 @@ class TwoDMapAnalysisWindow:
         results_frame = ttk.LabelFrame(content_frame, text="Results", padding=10)
         results_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         
-        # Use a frame to ensure the text widget extends properly
-        results_text_frame = ttk.Frame(results_frame)
-        results_text_frame.pack(fill=tk.BOTH, expand=True)
+        # Add a button to show analysis summary in popup window
+        summary_button_frame = ttk.Frame(results_frame)
+        summary_button_frame.pack(fill=tk.X, pady=(0, 5))
         
-        self.ml_results_text = tk.Text(results_text_frame, height=10, wrap=tk.WORD)
-        self.ml_results_text.pack(fill=tk.BOTH, expand=True)
+        self.show_summary_btn = ttk.Button(summary_button_frame, text="📊 Show Analysis Summary", 
+                                         command=self.show_analysis_summary_popup)
+        self.show_summary_btn.pack(side=tk.LEFT)
         
-        # Add scrollbar for results
-        results_scrollbar = ttk.Scrollbar(results_text_frame, orient=tk.VERTICAL, command=self.ml_results_text.yview)
-        results_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.ml_results_text.config(yscrollcommand=results_scrollbar.set)
+        # Add status label
+        self.analysis_status_label = ttk.Label(summary_button_frame, text="Train a model and predict the map to see results", 
+                                              foreground="gray")
+        self.analysis_status_label.pack(side=tk.LEFT, padx=(10, 0))
         
-        self.ml_results_text.config(state=tk.DISABLED)
-        self.ml_results_text.config(state=tk.NORMAL)
-        self.ml_results_text.insert(tk.END, "Train a model and predict the map to see results here.")
-        self.ml_results_text.config(state=tk.DISABLED)
+        # Initialize summary content (hidden)
+        self.analysis_summary_content = "Train a model and predict the map to see results here."
 
         # Make scrollable area expand to full width
         canvas.pack(side="left", fill="both", expand=True)
@@ -3916,43 +3978,49 @@ class TwoDMapAnalysisWindow:
         cm = confusion_matrix(y_test, y_pred)
         report = classification_report(y_test, y_pred)
         
-        # Store trained model
+        # Store trained model and clear any previously loaded model
         self.trained_model = clf
+        self.rf_model = None
         
-        # Show results
-        self.ml_results_text.config(state=tk.NORMAL)
-        self.ml_results_text.delete(1.0, tk.END)
-        self.ml_results_text.insert(tk.END, f"Accuracy: {acc:.3f}\n")
-        self.ml_results_text.insert(tk.END, f"Confusion Matrix:\n{cm}\n")
-        self.ml_results_text.insert(tk.END, f"Classification Report:\n{report}\n")
-        self.ml_results_text.insert(tk.END, f"\nCosmic Ray Detection:\n")
+        # Build results summary
+        summary = f"Accuracy: {acc:.3f}\n"
+        summary += f"Confusion Matrix:\n{cm}\n"
+        summary += f"Classification Report:\n{report}\n"
+        summary += f"\nCosmic Ray Detection:\n"
         
         # Show if cosmic ray detection was enabled
         if self.filter_cosmic_rays.get():
             actual_threshold = self.cre_threshold_factor.get() * 1.5  # Show the adjusted value
-            self.ml_results_text.insert(tk.END, f"Status: Enabled\n")
-            self.ml_results_text.insert(tk.END, f"Base Threshold: {self.cre_threshold_factor.get():.1f}\n")
-            self.ml_results_text.insert(tk.END, f"Adjusted ML Threshold: {actual_threshold:.1f}\n")
-            self.ml_results_text.insert(tk.END, f"Window Size: {self.cre_window_size.get()}\n")
-            self.ml_results_text.insert(tk.END, f"Total spectra: {total_spectra}\n")
-            self.ml_results_text.insert(tk.END, f"Cosmic rays detected: {cosmic_ray_count} ({cosmic_ray_count/total_spectra:.1%})\n")
+            summary += f"Status: Enabled\n"
+            summary += f"Base Threshold: {self.cre_threshold_factor.get():.1f}\n"
+            summary += f"Adjusted ML Threshold: {actual_threshold:.1f}\n"
+            summary += f"Window Size: {self.cre_window_size.get()}\n"
+            summary += f"Total spectra: {total_spectra}\n"
+            summary += f"Cosmic rays detected: {cosmic_ray_count} ({cosmic_ray_count/total_spectra:.1%})\n"
             
             if cosmic_ray_count/total_spectra > 0.1:
-                self.ml_results_text.insert(tk.END, f"\nCosmic ray detection rate is still high. Consider:\n")
-                self.ml_results_text.insert(tk.END, f"1. Increasing the threshold further (currently {self.cre_threshold_factor.get():.1f})\n")
-                self.ml_results_text.insert(tk.END, f"2. Checking your spectra quality - too much noise can trigger false detections\n")
-                self.ml_results_text.insert(tk.END, f"3. Apply smoothing to your spectra before analysis\n")
-                self.ml_results_text.insert(tk.END, f"4. Disable cosmic ray filtering completely\n")
+                summary += f"\nCosmic ray detection rate is still high. Consider:\n"
+                summary += f"1. Increasing the threshold further (currently {self.cre_threshold_factor.get():.1f})\n"
+                summary += f"2. Checking your spectra quality - too much noise can trigger false detections\n"
+                summary += f"3. Apply smoothing to your spectra before analysis\n"
+                summary += f"4. Disable cosmic ray filtering completely\n"
         else:
-            self.ml_results_text.insert(tk.END, f"Status: Disabled\n")
-            self.ml_results_text.insert(tk.END, f"Total spectra: {total_spectra}\n")
-            
-        self.ml_results_text.config(state=tk.DISABLED)
+            summary += f"Status: Disabled\n"
+            summary += f"Total spectra: {total_spectra}\n"
+        
+        # Update summary content
+        self._update_analysis_summary(summary)
 
     def predict_map(self):
         """Predict the map using the trained Random Forest model."""
-        if not self.trained_model:
-            messagebox.showerror("Error", "Please train a model first.")
+        # Check for both trained model and loaded model
+        model_to_use = None
+        if self.trained_model:
+            model_to_use = self.trained_model
+        elif self.rf_model:
+            model_to_use = self.rf_model
+        else:
+            messagebox.showerror("Error", "Please train a model first or load a model from the Model Tools tab.")
             return
             
         if not self.map_data:
@@ -3963,6 +4031,100 @@ class TwoDMapAnalysisWindow:
         X = self._prepare_data_for_analysis()
         if X is None:
             return
+        
+        # Check if the feature dimensions match the model's expectations
+        expected_features = None
+        if hasattr(model_to_use, 'n_features_in_'):
+            expected_features = model_to_use.n_features_in_
+        
+        # Debug information
+        print(f"DEBUG: Model feature check:")
+        print(f"  - Model n_features_in_: {expected_features}")
+        print(f"  - Map data features: {X.shape[1]}")
+        
+        # Also check metadata if available
+        metadata_features = None
+        if hasattr(self, 'model_metadata') and self.model_metadata:
+            metadata_features = self.model_metadata.get('expected_features', None)
+            n_features_meta = self.model_metadata.get('n_features', None)
+            print(f"  - Metadata expected_features: {metadata_features}")
+            print(f"  - Metadata n_features: {n_features_meta}")
+        
+        if expected_features is not None and X.shape[1] != expected_features:
+            # Check if we have PCA or other feature reduction available
+            can_reduce = False
+            reduction_method = None
+            
+            if hasattr(self, 'pca') and self.pca is not None:
+                if hasattr(self.pca, 'n_components_') and self.pca.n_components_ == expected_features:
+                    can_reduce = True
+                    reduction_method = "PCA"
+            
+            error_msg = f"Feature Mismatch Error!\n\n"
+            error_msg += f"The loaded model expects {expected_features} features, but your map data has {X.shape[1]} features.\n\n"
+            
+            if can_reduce:
+                error_msg += f"✅ SOLUTION AVAILABLE: You have a {reduction_method} model that can reduce your data to {expected_features} features.\n"
+                error_msg += f"The model will automatically apply {reduction_method} and try again.\n\n"
+                
+                # Apply the reduction and retry
+                try:
+                    if reduction_method == "PCA":
+                        X_reduced = self.pca.transform(X)
+                        print(f"Applied PCA reduction: {X.shape[1]} -> {X_reduced.shape[1]} features")
+                        
+                        # Continue with the reduced data
+                        X = X_reduced
+                        expected_features = X.shape[1]  # Update expected features
+                        
+                    # Show success message and continue
+                    messagebox.showinfo("Feature Reduction Applied", 
+                                      f"Successfully applied {reduction_method} to reduce features from {X.shape[1]} to {expected_features}.\nProceeding with prediction...")
+                    
+                except Exception as e:
+                    error_msg += f"❌ Failed to apply {reduction_method}: {str(e)}\n\n"
+                    can_reduce = False
+            
+            if not can_reduce:
+                # Add detailed model metadata if available
+                if hasattr(self, 'model_metadata') and self.model_metadata:
+                    metadata = self.model_metadata
+                    error_msg += f"Model metadata details:\n"
+                    if 'expected_features' in metadata:
+                        error_msg += f"• Metadata expected features: {metadata['expected_features']}\n"
+                    if 'n_features' in metadata:
+                        error_msg += f"• Metadata n_features: {metadata['n_features']}\n"
+                    if 'wavenumber_range' in metadata:
+                        wn_range = metadata['wavenumber_range']
+                        error_msg += f"• Model wavenumber range: {wn_range[0]:.1f} - {wn_range[1]:.1f} cm⁻¹\n"
+                    if 'n_wavenumbers' in metadata:
+                        error_msg += f"• Model wavenumber points: {metadata['n_wavenumbers']}\n"
+                    error_msg += f"\n"
+                
+                # Add current map data details
+                if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                    wn_range = [self.map_data.target_wavenumbers.min(), self.map_data.target_wavenumbers.max()]
+                    error_msg += f"Current map data details:\n"
+                    error_msg += f"• Map wavenumber range: {wn_range[0]:.1f} - {wn_range[1]:.1f} cm⁻¹\n"
+                    error_msg += f"• Map wavenumber points: {len(self.map_data.target_wavenumbers)}\n"
+                    error_msg += f"• Map data features: {X.shape[1]}\n\n"
+                
+                error_msg += f"This usually happens when:\n"
+                error_msg += f"• The model was trained using PCA or feature reduction (to {expected_features} features)\n"
+                error_msg += f"• The model was trained with different wavenumber ranges\n"
+                error_msg += f"• The model was trained with different preprocessing settings\n\n"
+                error_msg += f"Solutions:\n"
+                error_msg += f"• Run PCA analysis first and select {expected_features} components, then try prediction again\n"
+                error_msg += f"• Train a new model with your current {X.shape[1]}-feature map data\n"
+                error_msg += f"• Check if you have saved PCA results that can reduce to {expected_features} features\n\n"
+                error_msg += f"Quick fix: Go to the 'Analyze' tab → 'Advanced Analysis' → run PCA with {expected_features} components, then try prediction again."
+                
+                messagebox.showerror("Feature Mismatch Error", error_msg)
+                return
+            
+        # If we made it here, either features matched or reduction was applied successfully
+            
+        print(f"Feature check passed: Model expects {expected_features} features, map data has {X.shape[1]} features")
             
         # Track cosmic rays in the map
         cosmic_ray_mask = np.zeros(len(X), dtype=bool)
@@ -3985,8 +4147,8 @@ class TwoDMapAnalysisWindow:
         cosmic_ray_count = np.sum(cosmic_ray_mask)
         
         # Make predictions
-        predictions = self.trained_model.predict(X)
-        probabilities = self.trained_model.predict_proba(X)
+        predictions = model_to_use.predict(X)
+        probabilities = model_to_use.predict_proba(X)
         
         # Adjust predictions for cosmic rays - set them to Class B (0)
         # This is a conservative approach to avoid false positives
@@ -4030,26 +4192,23 @@ class TwoDMapAnalysisWindow:
             self.probability_map = probabilities[:grid_y*grid_x, 1].reshape(grid_y, grid_x)
             print(f"Warning: Created 2D probability map due to: {str(e)}")
         
-        # Show results in the text area
-        self.ml_results_text.config(state=tk.NORMAL)
-        self.ml_results_text.delete(1.0, tk.END)
-        self.ml_results_text.insert(tk.END, "Map prediction completed.\n\n")
-        self.ml_results_text.insert(tk.END, "Please select a map feature to view the results.\n\n")
-        
-        # Calculate and show statistics
+        # Build prediction summary
         total_points = len(predictions)
         class_a_points = np.sum(predictions == 1)
         class_b_points = np.sum(predictions == 0)
         
-        self.ml_results_text.insert(tk.END, f"Total points: {total_points}\n")
-        self.ml_results_text.insert(tk.END, f"Class A points: {class_a_points} ({class_a_points/total_points:.1%})\n")
-        self.ml_results_text.insert(tk.END, f"Class B points: {class_b_points} ({class_b_points/total_points:.1%})\n")
-        self.ml_results_text.insert(tk.END, f"Cosmic rays detected: {cosmic_ray_count} ({cosmic_ray_count/total_points:.1%})\n")
+        summary = "Map prediction completed.\n\n"
+        summary += "Please select a map feature to view the results.\n\n"
+        summary += f"Total points: {total_points}\n"
+        summary += f"Class A points: {class_a_points} ({class_a_points/total_points:.1%})\n"
+        summary += f"Class B points: {class_b_points} ({class_b_points/total_points:.1%})\n"
+        summary += f"Cosmic rays detected: {cosmic_ray_count} ({cosmic_ray_count/total_points:.1%})\n"
         
         # Store cosmic ray positions for visualization
         self.cosmic_ray_positions = (cosmic_ray_x, cosmic_ray_y)
         
-        self.ml_results_text.config(state=tk.DISABLED)
+        # Update summary content
+        self._update_analysis_summary(summary)
         
         # Show a notification to prompt the user
         messagebox.showinfo("Prediction Complete", 
@@ -4092,8 +4251,30 @@ class TwoDMapAnalysisWindow:
         self.pca_ax1.set_title('PCA Explained Variance')
         self.pca_ax1.grid(True)
         
-        # Plot first two components
-        self.pca_ax2.scatter(self.pca_components[:, 0], self.pca_components[:, 1], alpha=0.5)
+        # Plot first two components with performance optimization for large datasets
+        n_points = len(self.pca_components)
+        if n_points > 5000:  # Use binning for large datasets
+            binned_data = self._create_binned_scatter(
+                self.pca_components[:, 0], 
+                self.pca_components[:, 1],
+                n_bins=min(80, int(np.sqrt(n_points / 10))),  # Adaptive bin count
+                min_size=10,
+                max_size=80,
+                alpha=0.7
+            )
+            
+            if len(binned_data['x']) > 0:
+                self.pca_ax2.scatter(binned_data['x'], binned_data['y'], 
+                                   s=binned_data['sizes'], alpha=0.7, 
+                                   edgecolors='black', linewidth=0.5)
+                # Add info text about binning
+                self.pca_ax2.text(0.02, 0.98, f'Showing {len(binned_data["x"])} bins\n({n_points:,} total points)', 
+                                transform=self.pca_ax2.transAxes, fontsize=8, 
+                                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        else:
+            # Use regular scatter for smaller datasets
+            self.pca_ax2.scatter(self.pca_components[:, 0], self.pca_components[:, 1], alpha=0.5)
+        
         self.pca_ax2.set_xlabel('PC1')
         self.pca_ax2.set_ylabel('PC2')
         self.pca_ax2.set_title('PCA Components')
@@ -4114,16 +4295,52 @@ class TwoDMapAnalysisWindow:
         
         # Plot component spectra with correct wavenumber axis
         wavenumbers = self.map_data.target_wavenumbers if hasattr(self, 'map_data') and self.map_data is not None else np.arange(self.nmf.components_.shape[1])
+        
+        # Find where to truncate the data to remove trailing zeros
+        components_to_analyze = [self.nmf.components_[i] for i in range(min(5, self.nmf.n_components))]
+        end_idx = self._find_spectral_data_end(wavenumbers, *components_to_analyze)
+        wavenumbers_truncated = wavenumbers[:end_idx]
+        
+        # Plot truncated component spectra
         for i in range(min(5, self.nmf.n_components)):
-            self.nmf_ax1.plot(wavenumbers, self.nmf.components_[i], label=f'Component {i+1}')
-        self.nmf_ax1.set_xlabel('Wavenumber')
+            component_truncated = self.nmf.components_[i][:end_idx]
+            self.nmf_ax1.plot(wavenumbers_truncated, component_truncated, label=f'Component {i+1}')
+        
+        self.nmf_ax1.set_xlabel('Wavenumber (cm⁻¹)')
         self.nmf_ax1.set_ylabel('Intensity')
         self.nmf_ax1.set_title('NMF Component Spectra')
         self.nmf_ax1.legend()
         self.nmf_ax1.grid(True)
         
-        # Plot first two components
-        self.nmf_ax2.scatter(self.nmf_components[:, 0], self.nmf_components[:, 1], alpha=0.5)
+        # Set x-axis limits to the truncated range with a small margin
+        if len(wavenumbers_truncated) > 0:
+            x_margin = (wavenumbers_truncated[-1] - wavenumbers_truncated[0]) * 0.02
+            self.nmf_ax1.set_xlim(wavenumbers_truncated[0] - x_margin, wavenumbers_truncated[-1] + x_margin)
+        
+        # Plot first two components with performance optimization for large datasets
+        n_points = len(self.nmf_components)
+        if n_points > 5000:  # Use binning for large datasets
+            binned_data = self._create_binned_scatter(
+                self.nmf_components[:, 0], 
+                self.nmf_components[:, 1],
+                n_bins=min(80, int(np.sqrt(n_points / 10))),  # Adaptive bin count
+                min_size=10,
+                max_size=80,
+                alpha=0.7
+            )
+            
+            if len(binned_data['x']) > 0:
+                self.nmf_ax2.scatter(binned_data['x'], binned_data['y'], 
+                                   s=binned_data['sizes'], alpha=0.7, 
+                                   edgecolors='black', linewidth=0.5)
+                # Add info text about binning
+                self.nmf_ax2.text(0.02, 0.98, f'Showing {len(binned_data["x"])} bins\n({n_points:,} total points)', 
+                                transform=self.nmf_ax2.transAxes, fontsize=8, 
+                                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        else:
+            # Use regular scatter for smaller datasets
+            self.nmf_ax2.scatter(self.nmf_components[:, 0], self.nmf_components[:, 1], alpha=0.5)
+        
         self.nmf_ax2.set_xlabel('Component 1')
         self.nmf_ax2.set_ylabel('Component 2')
         self.nmf_ax2.set_title('NMF Components')
@@ -4134,76 +4351,55 @@ class TwoDMapAnalysisWindow:
         self.nmf_canvas.draw()
     
     def _plot_rf_results(self, X_test, y_test, y_pred):
-        """Plot Random Forest results focusing on feature importances."""
+        """Plot Random Forest results with representative spectra and spatial distribution."""
         if self.rf_model is None:
             return
         
         # Clear the previous figure without closing it
         self.rf_fig.clear()
         
-        # Create a single subplot for feature importances
-        ax_feature = self.rf_fig.add_subplot(111)
-        
-        # Create Feature Importances with labels
-        if hasattr(self.rf_model, 'feature_importances_'):
-            importances = self.rf_model.feature_importances_
-            indices = np.argsort(importances)[::-1]  # Sort in descending order
-            
-            # Only show top N features for clarity
-            top_n = min(20, len(importances))
-            top_indices = indices[:top_n]
-            top_importances = importances[top_indices]
-            
-            # Create feature labels - try to create meaningful labels
-            if hasattr(self, 'map_data') and self.map_data is not None:
-                # If we have wavenumber data, create labels based on wavenumber ranges
-                wavenumbers = self.map_data.target_wavenumbers
-                feature_labels = []
-                
-                step = len(wavenumbers) // min(len(importances), 30)  # Divide into regions
-                if step == 0:
-                    step = 1  # Ensure at least one element
-                
-                for i in top_indices:
-                    region_idx = min(i * step, len(wavenumbers) - step) if i * step < len(wavenumbers) else 0
-                    end_idx = min(region_idx + step, len(wavenumbers) - 1)
-                    if region_idx < len(wavenumbers) and end_idx < len(wavenumbers):
-                        start_wn = int(wavenumbers[region_idx])
-                        end_wn = int(wavenumbers[end_idx])
-                        feature_labels.append(f"{start_wn}-{end_wn} cm⁻¹")
-                    else:
-                        feature_labels.append(f"Feature {i+1}")
-            else:
-                # Generic labels if no wavenumber data
-                feature_labels = [f"Feature {i+1}" for i in top_indices]
-            
-            # Create horizontal bar chart (more readable for many features)
-            colors = plt.cm.viridis(np.linspace(0.2, 0.9, top_n))
-            bars = ax_feature.barh(range(top_n), top_importances, color=colors)
-            
-            # Set labels and title with better formatting
-            ax_feature.set_yticks(range(top_n))
-            ax_feature.set_yticklabels(feature_labels)
-            ax_feature.set_xlabel('Relative Importance')
-            ax_feature.set_title('Top Feature Importances', fontsize=14, fontweight='bold')
-            ax_feature.grid(axis='x', linestyle='--', alpha=0.7)
-            
-            # Add importance values to the end of each bar
-            for i, bar in enumerate(bars):
-                value = top_importances[i]
-                ax_feature.text(value + 0.01, i, f"{value:.3f}", 
-                               va='center', fontsize=9)
-                
-            # Add model accuracy on the plot if we have test data
+        # Check if we have prediction results and map data
+        if not hasattr(self, 'prediction_map') or self.prediction_map is None or not hasattr(self, 'map_data') or self.map_data is None:
+            # Fallback to simple accuracy display if no prediction map
+            ax = self.rf_fig.add_subplot(111)
             if X_test is not None and y_test is not None and y_pred is not None and len(y_test) > 0:
                 accuracy = np.mean(y_pred == y_test)
-                ax_feature.annotate(f"Model Accuracy: {accuracy:.1%}", xy=(0.5, 0.01),
-                                  xycoords='figure fraction', fontsize=12,
-                                  bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="gray", alpha=0.8),
-                                  ha='center')
+                ax.text(0.5, 0.5, f'Model Accuracy: {accuracy:.1%}\n\nRun "Predict Map" to see detailed results', 
+                       ha='center', va='center', fontsize=14, fontweight='bold')
+            else:
+                ax.text(0.5, 0.5, 'Train a model and run "Predict Map" to see detailed classification results', 
+                       ha='center', va='center', fontsize=12)
+            ax.axis('off')
+            self.rf_fig.tight_layout()
+            self.rf_canvas.draw()
+            return
+        
+        # Create two subplots in 1x2 layout
+        ax_spectra = self.rf_fig.add_subplot(1, 2, 1)
+        ax_map = self.rf_fig.add_subplot(1, 2, 2)
+        
+        # Left plot: Representative spectra overlay
+        try:
+            self._plot_representative_spectra(ax_spectra)
+        except Exception as e:
+            ax_spectra.text(0.5, 0.5, f'Error plotting spectra: {str(e)}', 
+                           ha='center', va='center', fontsize=10)
+            ax_spectra.axis('off')
+        
+        # Right plot: Spatial distribution map
+        try:
+            self._plot_classification_map(ax_map)
+        except Exception as e:
+            ax_map.text(0.5, 0.5, f'Error plotting map: {str(e)}', 
+                       ha='center', va='center', fontsize=10)
+            ax_map.axis('off')
+        
+        # Add overall accuracy if available
+        if X_test is not None and y_test is not None and y_pred is not None and len(y_test) > 0:
+            accuracy = np.mean(y_pred == y_test)
+            self.rf_fig.suptitle(f'Classification Results (Training Accuracy: {accuracy:.1%})', fontsize=14, fontweight='bold')
         else:
-            ax_feature.text(0.5, 0.5, 'No feature importance data available', 
-                          ha='center', va='center', fontsize=12)
+            self.rf_fig.suptitle('Classification Results', fontsize=14, fontweight='bold')
         
         # Adjust layout to prevent overlap
         self.rf_fig.tight_layout()
@@ -4211,6 +4407,609 @@ class TwoDMapAnalysisWindow:
         # Force figure update
         self.rf_canvas.draw()
         self.rf_canvas.flush_events()
+    
+    def _create_binned_scatter(self, x, y, labels=None, n_bins=100, min_size=5, max_size=100, alpha=0.7):
+        """
+        Create a binned scatter plot for performance optimization with large datasets.
+        
+        Parameters:
+        -----------
+        x, y : np.ndarray
+            2D coordinates of data points
+        labels : np.ndarray, optional
+            Labels for color coding (e.g., classification results)
+        n_bins : int
+            Number of bins in each dimension (creates n_bins x n_bins grid)
+        min_size : float
+            Minimum marker size
+        max_size : float
+            Maximum marker size
+        alpha : float
+            Transparency of markers
+            
+        Returns:
+        --------
+        dict
+            Dictionary containing binned data: {'x': x_centers, 'y': y_centers, 'sizes': sizes, 'colors': colors}
+        """
+        if len(x) == 0 or len(y) == 0:
+            return {'x': np.array([]), 'y': np.array([]), 'sizes': np.array([]), 'colors': np.array([])}
+        
+        # Create 2D histogram to bin the data
+        x_min, x_max = np.min(x), np.max(x)
+        y_min, y_max = np.min(y), np.max(y)
+        
+        # Add small padding to avoid edge effects
+        x_range = x_max - x_min
+        y_range = y_max - y_min
+        x_min -= x_range * 0.01
+        x_max += x_range * 0.01
+        y_min -= y_range * 0.01
+        y_max += y_range * 0.01
+        
+        # Create bin edges
+        x_edges = np.linspace(x_min, x_max, n_bins + 1)
+        y_edges = np.linspace(y_min, y_max, n_bins + 1)
+        
+        # Get bin centers
+        x_centers = (x_edges[:-1] + x_edges[1:]) / 2
+        y_centers = (y_edges[:-1] + y_edges[1:]) / 2
+        
+        # Create meshgrid for bin centers
+        x_grid, y_grid = np.meshgrid(x_centers, y_centers)
+        
+        # Bin the data
+        counts, _, _ = np.histogram2d(x, y, bins=[x_edges, y_edges])
+        counts = counts.T  # Transpose to match y, x indexing
+        
+        # Handle color coding if labels are provided
+        if labels is not None:
+            # Create a color map based on most common label in each bin
+            unique_labels = np.unique(labels)
+            n_labels = len(unique_labels)
+            
+            # Initialize arrays for label counts per bin
+            label_counts = np.zeros((n_bins, n_bins, n_labels))
+            
+            # Digitize the x, y coordinates to find which bin each point belongs to
+            x_indices = np.digitize(x, x_edges) - 1
+            y_indices = np.digitize(y, y_edges) - 1
+            
+            # Clip indices to valid range
+            x_indices = np.clip(x_indices, 0, n_bins - 1)
+            y_indices = np.clip(y_indices, 0, n_bins - 1)
+            
+            # Count labels in each bin
+            for i, label in enumerate(unique_labels):
+                mask = labels == label
+                for j in range(len(x)):
+                    if mask[j]:
+                        label_counts[y_indices[j], x_indices[j], i] += 1
+            
+            # Determine dominant label for each bin
+            dominant_labels = np.argmax(label_counts, axis=2)
+            bin_colors = unique_labels[dominant_labels]
+        else:
+            bin_colors = None
+        
+        # Filter out empty bins
+        mask = counts > 0
+        x_plot = x_grid[mask]
+        y_plot = y_grid[mask]
+        counts_plot = counts[mask]
+        
+        if labels is not None and bin_colors is not None:
+            colors_plot = bin_colors[mask]
+        else:
+            colors_plot = None
+        
+        # Scale marker sizes based on count
+        if len(counts_plot) > 0:
+            max_count = np.max(counts_plot)
+            min_count = np.min(counts_plot)
+            if max_count > min_count:
+                # Scale sizes proportionally to count
+                sizes = min_size + (max_size - min_size) * (counts_plot - min_count) / (max_count - min_count)
+            else:
+                sizes = np.full_like(counts_plot, min_size, dtype=float)
+        else:
+            sizes = np.array([])
+        
+        return {
+            'x': x_plot,
+            'y': y_plot, 
+            'sizes': sizes,
+            'colors': colors_plot,
+            'counts': counts_plot
+        }
+
+    def _find_spectral_data_end(self, wavenumbers, *intensity_arrays, consecutive_zeros=10, intensity_threshold=1e-6, min_keep_fraction=0.8):
+        """
+        Helper function to find where sustained zeros begin in spectral data.
+        
+        Parameters:
+        -----------
+        wavenumbers : np.ndarray
+            Wavenumber array
+        *intensity_arrays : np.ndarray
+            One or more intensity arrays to analyze
+        consecutive_zeros : int
+            Number of consecutive near-zero points needed to trigger truncation
+        intensity_threshold : float
+            Threshold below which values are considered "zero"
+        min_keep_fraction : float
+            Minimum fraction of data to keep (0.8 = 80%)
+            
+        Returns:
+        --------
+        int
+            Index where data should be truncated
+        """
+        def find_data_end_index(intensity_array):
+            """Find where sustained zeros begin in a single intensity array."""
+            if intensity_array is None or len(intensity_array) == 0:
+                return len(wavenumbers)
+            
+            # Find where values are effectively zero
+            near_zero = np.abs(intensity_array) < intensity_threshold
+            
+            # Look for consecutive zeros from the end
+            zero_count = 0
+            for i in range(len(near_zero) - 1, -1, -1):
+                if near_zero[i]:
+                    zero_count += 1
+                    if zero_count >= consecutive_zeros:
+                        # Found sustained zeros, return the index where they start
+                        return i + consecutive_zeros
+                else:
+                    zero_count = 0
+            
+            # Also check for regions where intensity is very small compared to max
+            max_intensity = np.max(np.abs(intensity_array))
+            if max_intensity > 0:
+                relative_threshold = max_intensity * 0.01  # 1% of max intensity (more aggressive)
+                relative_zeros = np.abs(intensity_array) < relative_threshold
+                
+                # Look for consecutive low values from the end
+                zero_count = 0
+                for i in range(len(relative_zeros) - 1, -1, -1):
+                    if relative_zeros[i]:
+                        zero_count += 1
+                        if zero_count >= consecutive_zeros:
+                            # Found sustained low values, return the index where they start
+                            return i + consecutive_zeros
+                    else:
+                        zero_count = 0
+            
+            # Additional check: look for the point where signal drops significantly
+            # and stays low (typical end of Raman data)
+            if len(intensity_array) > 10:
+                # Calculate moving average to smooth noise
+                window_size = min(10, len(intensity_array) // 10)
+                if window_size >= 3:
+                    # Simple moving average
+                    smoothed = np.convolve(np.abs(intensity_array), 
+                                         np.ones(window_size)/window_size, mode='valid')
+                    
+                    # Find where smoothed signal drops below 2% of max and stays low
+                    if len(smoothed) > 0:
+                        max_smoothed = np.max(smoothed)
+                        low_signal_threshold = max_smoothed * 0.02  # 2% of max
+                        
+                        # Look for sustained low signal from the end
+                        low_count = 0
+                        for i in range(len(smoothed) - 1, -1, -1):
+                            if smoothed[i] < low_signal_threshold:
+                                low_count += 1
+                                if low_count >= max(3, consecutive_zeros):
+                                    # Add back the window offset
+                                    return i + window_size // 2 + low_count
+                            else:
+                                low_count = 0
+            
+            # If no sustained zeros found, return full length
+            return len(intensity_array)
+        
+        # Find the end index for all provided arrays
+        end_indices = []
+        for intensity_array in intensity_arrays:
+            if intensity_array is not None:
+                end_indices.append(find_data_end_index(intensity_array))
+        
+        # Use the minimum end index (most aggressive truncation)
+        if end_indices:
+            end_idx = min(end_indices)
+            # Ensure we don't truncate too aggressively
+            min_keep = int(min_keep_fraction * len(wavenumbers))
+            end_idx = max(end_idx, min_keep)
+            
+            # Additional aggressive truncation checks
+            if end_idx > min_keep:
+                for intensity_array in intensity_arrays:
+                    if intensity_array is not None:
+                        # Check if the last 30% of kept data is mostly near zero
+                        check_start = int(0.7 * end_idx)
+                        tail_data = intensity_array[check_start:end_idx]
+                        if len(tail_data) > 0:
+                            max_in_tail = np.max(np.abs(tail_data))
+                            max_overall = np.max(np.abs(intensity_array[:end_idx]))
+                            if max_overall > 0 and max_in_tail < 0.1 * max_overall:
+                                # The tail is very low intensity, truncate more aggressively
+                                end_idx = check_start
+                                break
+                
+                # Final check: for Raman data, if we have wavenumber info,
+                # be extra aggressive about truncation beyond reasonable Raman range
+                if len(wavenumbers) > 0:
+                    # Find index corresponding to ~2200 wavenumbers (common Raman cutoff)
+                    cutoff_wn = 2200
+                    cutoff_indices = np.where(wavenumbers <= cutoff_wn)[0]
+                    if len(cutoff_indices) > 0:
+                        reasonable_end = cutoff_indices[-1]
+                        # If our current end is way beyond this, use the reasonable end
+                        if end_idx > reasonable_end + 50:  # Allow some buffer
+                            end_idx = min(end_idx, reasonable_end + 20)
+        else:
+            end_idx = len(wavenumbers)
+        
+        return end_idx
+
+    def _plot_representative_spectra(self, ax):
+        """Plot representative Class A and Class B spectra."""
+        if not hasattr(self, 'map_data') or self.map_data is None:
+            return
+        
+        # Get wavenumbers
+        wavenumbers = self.map_data.target_wavenumbers
+        if wavenumbers is None:
+            return
+        
+        # Collect Class A and Class B spectra
+        class_a_spectra = []
+        class_b_spectra = []
+        
+        for i, y in enumerate(self.map_data.y_positions):
+            for j, x in enumerate(self.map_data.x_positions):
+                if i < self.prediction_map.shape[0] and j < self.prediction_map.shape[1]:
+                    prediction = self.prediction_map[i, j]
+                    spectrum = self.map_data.get_spectrum(x, y)
+                    
+                    if spectrum is not None:
+                        # Use processed intensities if available
+                        intensities = spectrum.processed_intensities if spectrum.processed_intensities is not None else spectrum.intensities
+                        
+                        if prediction == 1:  # Class A
+                            class_a_spectra.append(intensities)
+                        else:  # Class B
+                            class_b_spectra.append(intensities)
+        
+        # Convert to numpy arrays
+        if class_a_spectra:
+            class_a_spectra = np.array(class_a_spectra)
+        if class_b_spectra:
+            class_b_spectra = np.array(class_b_spectra)
+        
+        # Calculate representative spectra (mean ± std)
+        mean_a, std_a, mean_b, std_b = None, None, None, None
+        
+        if len(class_a_spectra) > 0:
+            mean_a = np.mean(class_a_spectra, axis=0)
+            std_a = np.std(class_a_spectra, axis=0)
+        
+        if len(class_b_spectra) > 0:
+            mean_b = np.mean(class_b_spectra, axis=0)
+            std_b = np.std(class_b_spectra, axis=0)
+        
+        # Find where to truncate the data using the helper function
+        # Use very aggressive parameters to detect where real data ends
+        end_idx = self._find_spectral_data_end(wavenumbers, mean_a, mean_b, 
+                                             consecutive_zeros=3, 
+                                             intensity_threshold=1e-2, 
+                                             min_keep_fraction=0.4)
+        
+        # Truncate data
+        wavenumbers_truncated = wavenumbers[:end_idx]
+        
+        # Plot representative spectra (mean ± std) with truncated data
+        if mean_a is not None:
+            mean_a_truncated = mean_a[:end_idx]
+            std_a_truncated = std_a[:end_idx]
+            ax.plot(wavenumbers_truncated, mean_a_truncated, 'r-', linewidth=2, 
+                   label=f'Class A (n={len(class_a_spectra)})')
+            ax.fill_between(wavenumbers_truncated, 
+                           mean_a_truncated - std_a_truncated, 
+                           mean_a_truncated + std_a_truncated, 
+                           alpha=0.2, color='red')
+        
+        if mean_b is not None:
+            mean_b_truncated = mean_b[:end_idx]
+            std_b_truncated = std_b[:end_idx]
+            ax.plot(wavenumbers_truncated, mean_b_truncated, 'b-', linewidth=2, 
+                   label=f'Class B (n={len(class_b_spectra)})')
+            ax.fill_between(wavenumbers_truncated, 
+                           mean_b_truncated - std_b_truncated, 
+                           mean_b_truncated + std_b_truncated, 
+                           alpha=0.2, color='blue')
+        
+        # Formatting
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity (a.u.)')
+        ax.set_title('Representative Spectra')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Set x-axis limits to the truncated range with a small margin
+        if len(wavenumbers_truncated) > 0:
+            x_margin = (wavenumbers_truncated[-1] - wavenumbers_truncated[0]) * 0.02
+            ax.set_xlim(wavenumbers_truncated[0] - x_margin, wavenumbers_truncated[-1] + x_margin)
+        
+        # Improve appearance
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+    
+    def _plot_classification_map(self, ax):
+        """Plot 2D classification map with spatial distribution."""
+        if not hasattr(self, 'map_data') or self.map_data is None:
+            return
+        
+        # Create base intensity map for context
+        try:
+            # Use the first available intensity map as background
+            if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                # Use intensity at a representative wavenumber (middle of range)
+                mid_wn = self.map_data.target_wavenumbers[len(self.map_data.target_wavenumbers)//2]
+                intensity_map = self.map_data.get_map_data('intensity', mid_wn)
+            else:
+                # Fallback to simple intensity
+                intensity_map = self.map_data.get_map_data('intensity')
+            
+            # Plot intensity map as background
+            im = ax.imshow(intensity_map, cmap='gray', alpha=0.6, aspect='auto')
+            
+        except:
+            # If intensity map fails, just use the prediction map
+            pass
+        
+        # Overlay classification results
+        # Create arrays for Class A and Class B positions
+        class_a_x, class_a_y = [], []
+        class_b_x, class_b_y = [], []
+        
+        for i, y in enumerate(self.map_data.y_positions):
+            for j, x in enumerate(self.map_data.x_positions):
+                if i < self.prediction_map.shape[0] and j < self.prediction_map.shape[1]:
+                    prediction = self.prediction_map[i, j]
+                    if prediction == 1:  # Class A
+                        class_a_x.append(j)  # Column index for x
+                        class_a_y.append(i)  # Row index for y
+                    else:  # Class B
+                        class_b_x.append(j)
+                        class_b_y.append(i)
+        
+        # Plot Class B as small blue dots
+        if class_b_x:
+            ax.scatter(class_b_x, class_b_y, c='blue', s=20, alpha=0.6, label='Class B', marker='o')
+        
+        # Plot Class A as red stars (more prominent)
+        if class_a_x:
+            ax.scatter(class_a_x, class_a_y, c='red', s=50, alpha=0.8, label='Class A', marker='*')
+        
+        # Formatting
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.set_title(f'Spatial Classification Map (Class A: {len(class_a_x)}, Class B: {len(class_b_x)})')
+        ax.legend()
+        
+        # Set aspect ratio to be equal
+        ax.set_aspect('equal', adjustable='box')
+        
+        # Invert y-axis to match typical image coordinates
+        ax.invert_yaxis()
+    
+    def _plot_2d_map_with_class_a_overlay(self, ax):
+        """Plot 2D map from the 2D Map tab with Class A overlay using diamond symbols."""
+        if not hasattr(self, 'map_data') or self.map_data is None:
+            ax.text(0.5, 0.5, 'No map data available', ha='center', va='center', transform=ax.transAxes)
+            return
+        
+        # Get the current feature and create the base map (similar to 2D Map tab)
+        try:
+            # Get the currently selected feature from the 2D Map tab
+            feature = getattr(self, 'current_feature', None)
+            if feature is None or not hasattr(feature, 'get'):
+                # Default to integrated intensity if no feature selected
+                if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                    # Use intensity at a representative wavenumber (middle of range)
+                    mid_wn = self.map_data.target_wavenumbers[len(self.map_data.target_wavenumbers)//2]
+                    map_data = self.map_data.get_map_data('intensity', mid_wn)
+                    title = 'Class A Locations'
+                else:
+                    map_data = self.map_data.get_map_data('intensity')
+                    title = 'Class A Locations'
+            else:
+                selected_feature = feature.get()
+                
+                if selected_feature == "Integrated Intensity":
+                    # Use the wavenumber range from the 2D Map tab controls
+                    try:
+                        min_wn = float(getattr(self, 'min_wavenumber', tk.StringVar(value="400")).get())
+                        max_wn = float(getattr(self, 'max_wavenumber', tk.StringVar(value="2000")).get())
+                    except (ValueError, AttributeError):
+                        min_wn = 400
+                        max_wn = 2000
+                    map_data = self.create_integrated_intensity_map(min_wn, max_wn)
+                    title = 'Class A Locations'
+                elif selected_feature == "Peak Position":
+                    try:
+                        min_wn = float(getattr(self, 'min_wavenumber', tk.StringVar(value="400")).get())
+                        max_wn = float(getattr(self, 'max_wavenumber', tk.StringVar(value="2000")).get())
+                    except (ValueError, AttributeError):
+                        min_wn = 400
+                        max_wn = 2000
+                    map_data = self.create_peak_position_map(min_wn, max_wn)
+                    title = 'Class A Locations'
+                else:
+                    # Default case - use intensity
+                    if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                        mid_wn = self.map_data.target_wavenumbers[len(self.map_data.target_wavenumbers)//2]
+                        map_data = self.map_data.get_map_data('intensity', mid_wn)
+                        title = 'Class A Locations'
+                    else:
+                        map_data = self.map_data.get_map_data('intensity')
+                        title = 'Class A Locations'
+            
+            # Get colormap from 2D Map tab settings
+            colormap = getattr(self, 'colormap_var', tk.StringVar(value='viridis')).get()
+            
+            # Plot the base map
+            im = ax.imshow(map_data, cmap=colormap, aspect='auto', origin='lower')
+            
+            # Add colorbar for the base map
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            plt.colorbar(im, cax=cax, label='Intensity')
+            
+        except Exception as e:
+            # Fallback to simple intensity map
+            try:
+                map_data = self.map_data.get_map_data('intensity')
+                im = ax.imshow(map_data, cmap='viridis', aspect='auto', origin='lower')
+                title = 'Class A Locations'
+            except:
+                ax.text(0.5, 0.5, 'Error creating base map', ha='center', va='center', transform=ax.transAxes)
+                return
+        
+        # Overlay Class A positions if prediction map is available
+        if hasattr(self, 'prediction_map') and self.prediction_map is not None:
+            # Find Class A positions
+            class_a_x, class_a_y = [], []
+            
+            for i, y in enumerate(self.map_data.y_positions):
+                for j, x in enumerate(self.map_data.x_positions):
+                    if i < self.prediction_map.shape[0] and j < self.prediction_map.shape[1]:
+                        prediction = self.prediction_map[i, j]
+                        if prediction == 1:  # Class A
+                            class_a_x.append(j)  # Column index for x
+                            class_a_y.append(i)  # Row index for y
+            
+            # Plot Class A as red diamond symbols
+            if class_a_x:
+                ax.scatter(class_a_x, class_a_y, c='red', s=50, alpha=0.6, 
+                          marker='D', edgecolor='white', linewidth=1.5, 
+                          label=f'Class A ({len(class_a_x)} points)', zorder=10)
+                
+                # Add legend
+                ax.legend(loc='upper right')
+                # Keep the title short, don't append point count
+        
+        # Formatting
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.set_title(title)
+        
+        # Set aspect ratio to be equal
+        ax.set_aspect('equal', adjustable='box')
+    
+    def show_analysis_summary_popup(self):
+        """Show analysis summary in a popup window."""
+        # Create popup window
+        popup = tk.Toplevel(self.window)
+        popup.title("Analysis Summary")
+        popup.geometry("600x500")
+        popup.resizable(True, True)
+        
+        # Make it modal
+        popup.transient(self.window)
+        popup.grab_set()
+        
+        # Create main frame
+        main_frame = ttk.Frame(popup)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Title
+        title_label = ttk.Label(main_frame, text="Analysis Summary", font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 10))
+        
+        # Text widget with scrollbar
+        text_frame = ttk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+        
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Consolas", 10))
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+        
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        text_widget.config(yscrollcommand=scrollbar.set)
+        
+        # Insert content
+        text_widget.insert(tk.END, self.analysis_summary_content)
+        text_widget.config(state=tk.DISABLED)
+        
+        # Button frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        # Close button
+        close_btn = ttk.Button(button_frame, text="Close", command=popup.destroy)
+        close_btn.pack(side=tk.RIGHT)
+        
+        # Export button
+        export_btn = ttk.Button(button_frame, text="Export Summary", 
+                               command=lambda: self.export_analysis_summary(self.analysis_summary_content))
+        export_btn.pack(side=tk.RIGHT, padx=(0, 5))
+        
+        # Center the popup
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth() // 2) - (popup.winfo_width() // 2)
+        y = (popup.winfo_screenheight() // 2) - (popup.winfo_height() // 2)
+        popup.geometry(f"+{x}+{y}")
+        
+        # Focus on the popup
+        popup.focus_set()
+    
+    def export_analysis_summary(self, content):
+        """Export analysis summary to a text file."""
+        from tkinter import filedialog
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            title="Export Analysis Summary"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(content)
+                messagebox.showinfo("Success", f"Analysis summary exported to {file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to export summary: {str(e)}")
+    
+    def _update_analysis_summary(self, content):
+        """Update the analysis summary content and status label."""
+        self.analysis_summary_content = content
+        
+        # Update status label with a brief summary
+        lines = content.split('\n')
+        if len(lines) > 0:
+            # Extract key info for status
+            if "Accuracy:" in content:
+                for line in lines:
+                    if "Accuracy:" in line:
+                        accuracy = line.strip()
+                        self.analysis_status_label.config(text=f"✅ Analysis complete - {accuracy}")
+                        break
+            elif "Map prediction completed" in content:
+                # Extract class counts
+                for line in lines:
+                    if "Class A points:" in line and "Class B points:" in line:
+                        # This is from prediction results
+                        self.analysis_status_label.config(text="✅ Map prediction complete - Click to view details")
+                        break
+                else:
+                    self.analysis_status_label.config(text="✅ Map prediction complete")
+            else:
+                self.analysis_status_label.config(text="✅ Analysis available - Click to view")
     
     def save_pca_results(self):
         """Save PCA results to file."""
@@ -4446,7 +5245,7 @@ class TwoDMapAnalysisWindow:
             print(f"Error details: {traceback.format_exc()}")
     
     def save_rf_model(self):
-        """Save Random Forest model to file."""
+        """Save Random Forest model to file with metadata."""
         if self.rf_model is None:
             messagebox.showwarning("Warning", "No Random Forest model to save.")
             return
@@ -4460,11 +5259,224 @@ class TwoDMapAnalysisWindow:
             
             if file_path:
                 import joblib
-                joblib.dump(self.rf_model, file_path)
-                messagebox.showinfo("Success", "Random Forest model saved successfully.")
+                from datetime import datetime
+                
+                # Get the authoritative feature count from the model
+                model_features = self.rf_model.n_features_in_ if hasattr(self.rf_model, 'n_features_in_') else None
+                
+                # Create model package with metadata
+                model_package = {
+                    'model': self.rf_model,
+                    'metadata': {
+                        'n_features': model_features,
+                        'expected_features': model_features,  # Use the same value as model for consistency
+                        'created_date': datetime.now().isoformat(),
+                        'model_type': 'RandomForestClassifier',
+                        'n_estimators': self.rf_model.n_estimators,
+                        'max_depth': self.rf_model.max_depth,
+                        'version': '1.1'  # Increment version to indicate fix
+                    }
+                }
+                
+                # Add preprocessing info if available
+                if hasattr(self, 'map_data') and self.map_data:
+                    try:
+                        sample_data = self._prepare_data_for_analysis()
+                        if sample_data is not None:
+                            current_features = sample_data.shape[1]
+                            model_package['metadata']['data_shape'] = sample_data.shape
+                            model_package['metadata']['current_data_features'] = current_features
+                            
+                            # Warn if there's a mismatch at save time
+                            if model_features and current_features != model_features:
+                                print(f"WARNING: Model was trained with {model_features} features, "
+                                      f"but current data has {current_features} features")
+                            
+                            # Add wavenumber info if available
+                            if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                                model_package['metadata']['wavenumber_range'] = [
+                                    float(self.map_data.target_wavenumbers.min()),
+                                    float(self.map_data.target_wavenumbers.max())
+                                ]
+                                model_package['metadata']['n_wavenumbers'] = len(self.map_data.target_wavenumbers)
+                    except Exception as e:
+                        print(f"Warning: Could not add preprocessing metadata: {e}")
+                        pass  # Continue without this metadata
+                
+                joblib.dump(model_package, file_path)
+                
+                # Show detailed success message
+                info_msg = f"Random Forest model saved successfully!\n\n"
+                info_msg += f"Model details:\n"
+                info_msg += f"• Expected features: {model_package['metadata'].get('expected_features', 'Unknown')}\n"
+                info_msg += f"• Trees: {model_package['metadata']['n_estimators']}\n"
+                info_msg += f"• Max depth: {model_package['metadata']['max_depth']}\n"
+                if 'wavenumber_range' in model_package['metadata']:
+                    wn_range = model_package['metadata']['wavenumber_range']
+                    info_msg += f"• Wavenumber range: {wn_range[0]:.1f} - {wn_range[1]:.1f} cm⁻¹"
+                
+                messagebox.showinfo("Success", info_msg)
         
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save Random Forest model: {str(e)}")
+    
+    def load_rf_model(self):
+        """Load Random Forest model from file."""
+        try:
+            file_path = filedialog.askopenfilename(
+                defaultextension=".joblib",
+                filetypes=[("Joblib files", "*.joblib"), ("All files", "*.*")],
+                title="Load Random Forest Model"
+            )
+            
+            if file_path:
+                import joblib
+                loaded_data = joblib.load(file_path)
+                
+                # Handle both old format (direct model) and new format (with metadata)
+                if isinstance(loaded_data, dict) and 'model' in loaded_data:
+                    # New format with metadata
+                    self.rf_model = loaded_data['model']
+                    metadata = loaded_data.get('metadata', {})
+                    
+                    # Show detailed info about loaded model
+                    info_msg = "Random Forest model loaded successfully!\n\n"
+                    info_msg += "Model details:\n"
+                    
+                    # Show actual model features first
+                    if hasattr(self.rf_model, 'n_features_in_'):
+                        info_msg += f"• Model features (actual): {self.rf_model.n_features_in_}\n"
+                    
+                    # Then show metadata features for comparison
+                    if 'expected_features' in metadata:
+                        info_msg += f"• Expected features (metadata): {metadata['expected_features']}\n"
+                    if 'n_features' in metadata:
+                        info_msg += f"• N features (metadata): {metadata['n_features']}\n"
+                        
+                    if 'n_estimators' in metadata:
+                        info_msg += f"• Trees: {metadata['n_estimators']}\n"
+                    if 'max_depth' in metadata:
+                        info_msg += f"• Max depth: {metadata['max_depth']}\n"
+                    if 'wavenumber_range' in metadata:
+                        wn_range = metadata['wavenumber_range']
+                        info_msg += f"• Wavenumber range: {wn_range[0]:.1f} - {wn_range[1]:.1f} cm⁻¹\n"
+                    if 'created_date' in metadata:
+                        info_msg += f"• Created: {metadata['created_date'][:10]}\n"
+                    
+                    # Warn if there's a mismatch
+                    model_features = getattr(self.rf_model, 'n_features_in_', None)
+                    metadata_features = metadata.get('expected_features', None)
+                    if model_features and metadata_features and model_features != metadata_features:
+                        info_msg += f"\n⚠️ WARNING: Feature count mismatch detected!\n"
+                        info_msg += f"Model object expects {model_features} features but metadata says {metadata_features}.\n"
+                    
+                    info_msg += f"\nYou can now go to the Classify Spectra tab and use 'Predict Map' to classify your data."
+                    
+                    # Fix metadata if there's a mismatch (for backward compatibility)
+                    model_features = getattr(self.rf_model, 'n_features_in_', None)
+                    metadata_expected = metadata.get('expected_features', None)
+                    
+                    if model_features and metadata_expected and model_features != metadata_expected:
+                        print(f"Fixing metadata mismatch: {metadata_expected} -> {model_features}")
+                        metadata['expected_features'] = model_features
+                        metadata['n_features'] = model_features
+                    
+                    # Store metadata for later use
+                    self.model_metadata = metadata
+                    
+                else:
+                    # Old format (direct model)
+                    self.rf_model = loaded_data
+                    info_msg = "Random Forest model loaded successfully!\n\n"
+                    info_msg += "Note: This is an older model format without metadata.\n"
+                    if hasattr(self.rf_model, 'n_features_in_'):
+                        info_msg += f"Expected features: {self.rf_model.n_features_in_}\n"
+                    info_msg += f"\nYou can now go to the Classify Spectra tab and use 'Predict Map' to classify your data."
+                    
+                    # Create basic metadata
+                    self.model_metadata = {'version': 'legacy'}
+                
+                # Clear any previously trained model to avoid confusion
+                self.trained_model = None
+                
+                # Update the GUI to show that a model is loaded
+                if hasattr(self, 'rf_fig') and self.rf_fig:
+                    self.rf_fig.clear()
+                    ax = self.rf_fig.add_subplot(111)
+                    ax.text(0.5, 0.5, 'Model loaded successfully!\nGo to Classify Spectra tab and use "Predict Map"', 
+                           ha='center', va='center', fontsize=12, fontweight='bold')
+                    ax.axis('off')
+                    if hasattr(self, 'rf_canvas'):
+                        self.rf_canvas.draw()
+                
+                messagebox.showinfo("Success", info_msg)
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load Random Forest model: {str(e)}")
+    
+    def export_class_a_spectra(self):
+        """Export Class A spectra files and positions to a folder and CSV."""
+        import shutil
+        import pandas as pd
+        import os
+        from tkinter import messagebox
+
+        # Check if prediction_map exists
+        if not hasattr(self, 'prediction_map') or self.prediction_map is None:
+            messagebox.showerror("Error", "No prediction map available. Please run prediction first.")
+            return
+
+        # Get x/y positions
+        x_positions = self.map_data.x_positions if hasattr(self.map_data, 'x_positions') else range(self.prediction_map.shape[1])
+        y_positions = self.map_data.y_positions if hasattr(self.map_data, 'y_positions') else range(self.prediction_map.shape[0])
+        pred_shape = self.prediction_map.shape
+        has_correlation_data = hasattr(self, 'probability_map') and self.probability_map is not None
+        
+        class_a_x, class_a_y, class_a_conf = [], [], []
+        class_a_files = []
+        
+        for i, y in enumerate(y_positions[:pred_shape[0]]):
+            for j, x in enumerate(x_positions[:pred_shape[1]]):
+                pred = self.prediction_map[i, j]
+                if pred == 1:
+                    class_a_x.append(x)
+                    class_a_y.append(y)
+                    if has_correlation_data:
+                        if len(self.probability_map.shape) == 3:
+                            conf = self.probability_map[i, j, 1]
+                        else:
+                            conf = self.probability_map[i, j]
+                    else:
+                        conf = 1.0
+                    class_a_conf.append(conf)
+                    spectrum = self.map_data.get_spectrum(x, y)
+                    if spectrum is not None:
+                        class_a_files.append(spectrum.filename)
+        
+        if not class_a_x:
+            messagebox.showinfo("Export Class A Spectra", "No Class A points found.")
+            return
+        
+        data_dir = self.map_data.data_dir if hasattr(self.map_data, 'data_dir') else os.getcwd()
+        
+        # Save CSV
+        csv_path = os.path.join(data_dir, 'Class_A_positions.csv')
+        df = pd.DataFrame({'X': class_a_x, 'Y': class_a_y, 'Confidence': class_a_conf})
+        df.to_csv(csv_path, index=False)
+        
+        # Copy spectra files
+        dest_dir = os.path.join(data_dir, 'Class_A_spectra')
+        os.makedirs(dest_dir, exist_ok=True)
+        copied_count = 0
+        for fname in class_a_files:
+            src_path = os.path.join(data_dir, fname)
+            dest_path = os.path.join(dest_dir, fname)
+            if os.path.exists(src_path):
+                shutil.copy2(src_path, dest_path)
+                copied_count += 1
+        
+        messagebox.showinfo("Export Class A Spectra", 
+                           f"Exported {copied_count} Class A spectra files to {dest_dir}\nPositions saved to {csv_path}")
     
     def export_results(self):
         """Export analysis results to CSV file."""
@@ -4507,69 +5519,480 @@ class TwoDMapAnalysisWindow:
             messagebox.showerror("Error", f"Failed to export results: {str(e)}")
     
     def generate_report(self):
-        """Generate a comprehensive analysis report."""
+        """Generate a comprehensive analysis report with plots in both PDF and HTML formats."""
         try:
+            # Ask for file path without extension
             file_path = filedialog.asksaveasfilename(
-                defaultextension=".html",
-                filetypes=[("HTML files", "*.html"), ("All files", "*.*")],
-                title="Save Analysis Report"
+                defaultextension="",
+                filetypes=[("Report files", "*.pdf;*.html"), ("All files", "*.*")],
+                title="Save Analysis Report (will create both PDF and HTML)"
             )
             
-            if file_path:
-                # Create report content
-                report = []
-                report.append("<html><body>")
-                report.append("<h1>Raman Spectroscopy Analysis Report</h1>")
+            if not file_path:
+                return
                 
-                # Add PCA section if available
-                if self.pca is not None:
-                    report.append("<h2>PCA Analysis</h2>")
-                    report.append(f"<p>Number of components: {self.pca.n_components}</p>")
-                    report.append(f"<p>Explained variance ratio: {self.pca.explained_variance_ratio_.sum():.2%}</p>")
+            # Remove extension if provided and create base path
+            base_path = os.path.splitext(file_path)[0]
+            pdf_path = f"{base_path}.pdf"
+            html_path = f"{base_path}.html"
+            
+            # Check if we have analysis results to report
+            has_pca = self.pca is not None and hasattr(self, 'pca_components') and self.pca_components is not None
+            has_nmf = self.nmf is not None and hasattr(self, 'nmf_components') and self.nmf_components is not None
+            has_rf = self.rf_model is not None or self.trained_model is not None
+            has_prediction = hasattr(self, 'prediction_map') and self.prediction_map is not None
+            
+            # Get the active model
+            active_model = None
+            if self.trained_model is not None:
+                active_model = self.trained_model
+            elif self.rf_model is not None:
+                active_model = self.rf_model
+            
+            if not (has_pca or has_nmf or has_rf):
+                messagebox.showwarning("Warning", "No analysis results available to generate report.")
+                return
+            
+            # Generate timestamp
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Create figures for the report (separate from the results tab figure)
+            report_figures = []
+            
+            # Prepare data for plots
+            if has_pca:
+                X_pca = self.pca_components
+                var_explained = self.pca.explained_variance_ratio_
+            
+            if has_nmf:
+                X_nmf = self.nmf_components
+            
+            # Get prediction labels
+            if has_prediction:
+                labels_flat = self.prediction_map.flatten()
+            elif has_rf and active_model is not None and (has_pca or has_nmf):
+                if has_pca:
+                    labels_flat = active_model.predict(X_pca)
+                else:
+                    labels_flat = active_model.predict(X_nmf)
+            else:
+                labels_flat = None
+            
+            # Create PCA plot
+            if has_pca and labels_flat is not None:
+                fig1, ax1 = plt.subplots(figsize=(8, 6))
                 
-                # Add NMF section if available
-                if self.nmf is not None:
-                    report.append("<h2>NMF Analysis</h2>")
-                    report.append(f"<p>Number of components: {self.nmf.n_components}</p>")
-                    report.append(f"<p>Reconstruction error: {self.nmf.reconstruction_err_:.2f}</p>")
+                # Ensure dimensions match
+                min_len = min(len(X_pca), len(labels_flat))
+                X_pca_plot = X_pca[:min_len]
+                labels_plot = labels_flat[:min_len]
                 
-                # Add Random Forest section if available
-                if self.rf_model is not None:
-                    report.append("<h2>Random Forest Analysis</h2>")
-                    report.append(f"<p>Number of trees: {self.rf_model.n_estimators}</p>")
-                    report.append(f"<p>Max depth: {self.rf_model.max_depth}</p>")
-                    report.append("<h3>Feature Importances</h3>")
-                    report.append("<ul>")
-                    for i, importance in enumerate(self.rf_model.feature_importances_):
-                        report.append(f"<li>Feature {i+1}: {importance:.4f}</li>")
-                    report.append("</ul>")
+                scatter = ax1.scatter(X_pca_plot[:, 0], X_pca_plot[:, 1], c=labels_plot, 
+                                    cmap='coolwarm', alpha=0.7, s=15)
+                ax1.set_xlabel(f"PC1 ({var_explained[0]:.1%} variance)")
+                ax1.set_ylabel(f"PC2 ({var_explained[1]:.1%} variance)")
+                ax1.set_title("PCA Components with Classification")
+                ax1.grid(True, linestyle='--', alpha=0.7)
                 
-                report.append("</body></html>")
+                # Add legend
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', 
+                              markersize=8, label='Class B'),
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', 
+                              markersize=8, label='Class A')
+                ]
+                ax1.legend(handles=legend_elements, loc='best')
+                plt.tight_layout()
+                report_figures.append(fig1)
+            
+            # Create NMF plot
+            if has_nmf and labels_flat is not None:
+                fig2, ax2 = plt.subplots(figsize=(8, 6))
                 
-                # Save report
-                with open(file_path, 'w') as f:
-                    f.write("\n".join(report))
+                # Ensure dimensions match
+                min_len = min(len(X_nmf), len(labels_flat))
+                X_nmf_plot = X_nmf[:min_len]
+                labels_plot = labels_flat[:min_len]
                 
-                messagebox.showinfo("Success", "Analysis report generated successfully.")
+                scatter = ax2.scatter(X_nmf_plot[:, 0], X_nmf_plot[:, 1], c=labels_plot, 
+                                    cmap='coolwarm', alpha=0.7, s=15)
+                ax2.set_xlabel("NMF Component 1")
+                ax2.set_ylabel("NMF Component 2")
+                ax2.set_title("NMF Components with Classification")
+                ax2.grid(True, linestyle='--', alpha=0.7)
+                
+                # Add legend
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', 
+                              markersize=8, label='Class B'),
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', 
+                              markersize=8, label='Class A')
+                ]
+                ax2.legend(handles=legend_elements, loc='best')
+                plt.tight_layout()
+                report_figures.append(fig2)
+            
+            # Create feature importance plot
+            if has_rf and active_model is not None:
+                fig3, ax3 = plt.subplots(figsize=(8, 6))
+                
+                n_features = len(active_model.feature_importances_)
+                if n_features > 20:
+                    # For many features, just show top 20
+                    importances = active_model.feature_importances_
+                    indices = np.argsort(importances)[::-1][:20]
+                    
+                    ax3.bar(range(20), importances[indices])
+                    ax3.set_xlabel("Feature Rank")
+                    ax3.set_title("Top 20 Feature Importances")
+                else:
+                    # Show all features
+                    indices = np.arange(n_features)
+                    ax3.bar(indices, active_model.feature_importances_)
+                    ax3.set_xlabel("Feature Index")
+                    ax3.set_title("Feature Importances")
+                
+                ax3.set_ylabel("Importance")
+                ax3.grid(True, linestyle='--', alpha=0.7)
+                plt.tight_layout()
+                report_figures.append(fig3)
+            
+            # Create Representative Spectra plot
+            if has_prediction and hasattr(self, 'map_data') and self.map_data is not None:
+                fig4, ax4 = plt.subplots(figsize=(8, 6))
+                try:
+                    self._plot_representative_spectra(ax4)
+                    plt.tight_layout()
+                    report_figures.append(fig4)
+                except Exception as e:
+                    ax4.text(0.5, 0.5, f'Error creating representative spectra plot: {str(e)}', 
+                           ha='center', va='center', fontsize=10)
+                    ax4.set_title('Representative Spectra')
+                    plt.tight_layout()
+                    report_figures.append(fig4)
+            
+            # Create Class A Locations plot
+            if has_prediction and hasattr(self, 'map_data') and self.map_data is not None:
+                fig5, ax5 = plt.subplots(figsize=(8, 6))
+                try:
+                    self._plot_2d_map_with_class_a_overlay(ax5)
+                    plt.tight_layout()
+                    report_figures.append(fig5)
+                except Exception as e:
+                    ax5.text(0.5, 0.5, f'Error creating Class A locations plot: {str(e)}', 
+                           ha='center', va='center', fontsize=10)
+                    ax5.set_title('Class A Locations')
+                    plt.tight_layout()
+                    report_figures.append(fig5)
+            
+            # Generate PDF report
+            with PdfPages(pdf_path) as pdf:
+                # Title page
+                fig_title = plt.figure(figsize=(8.5, 11))
+                fig_title.text(0.5, 0.8, 'Raman Spectroscopy Analysis Report', 
+                             fontsize=24, weight='bold', ha='center')
+                fig_title.text(0.5, 0.7, f'Generated on: {timestamp}', 
+                             fontsize=14, ha='center')
+                
+                # Add summary information
+                y_pos = 0.6
+                if has_pca:
+                    fig_title.text(0.1, y_pos, f'PCA Analysis:', fontsize=16, weight='bold')
+                    y_pos -= 0.05
+                    fig_title.text(0.15, y_pos, f'• Components: {self.pca.n_components}')
+                    y_pos -= 0.04
+                    fig_title.text(0.15, y_pos, f'• Explained Variance: {np.sum(var_explained):.1%}')
+                    y_pos -= 0.08
+                
+                if has_nmf:
+                    fig_title.text(0.1, y_pos, f'NMF Analysis:', fontsize=16, weight='bold')
+                    y_pos -= 0.05
+                    fig_title.text(0.15, y_pos, f'• Components: {self.nmf.n_components}')
+                    y_pos -= 0.04
+                    fig_title.text(0.15, y_pos, f'• Reconstruction Error: {self.nmf.reconstruction_err_:.4f}')
+                    y_pos -= 0.08
+                
+                if has_rf and active_model is not None:
+                    fig_title.text(0.1, y_pos, f'Random Forest Analysis:', fontsize=16, weight='bold')
+                    y_pos -= 0.05
+                    fig_title.text(0.15, y_pos, f'• Trees: {active_model.n_estimators}')
+                    y_pos -= 0.04
+                    fig_title.text(0.15, y_pos, f'• Max Depth: {active_model.max_depth}')
+                    
+                    if labels_flat is not None:
+                        y_pos -= 0.04
+                        class_0 = np.sum(labels_flat == 0)
+                        class_1 = np.sum(labels_flat == 1)
+                        total = len(labels_flat)
+                        fig_title.text(0.15, y_pos, f'• Class A: {class_1} points ({class_1/total:.1%})')
+                        y_pos -= 0.04
+                        fig_title.text(0.15, y_pos, f'• Class B: {class_0} points ({class_0/total:.1%})')
+                
+                pdf.savefig(fig_title, bbox_inches='tight')
+                plt.close(fig_title)
+                
+                # Add all analysis plots
+                for fig in report_figures:
+                    pdf.savefig(fig, bbox_inches='tight')
+                    plt.close(fig)
+            
+            # Generate HTML report
+            html_content = []
+            html_content.append("<!DOCTYPE html>")
+            html_content.append("<html><head>")
+            html_content.append("<title>Raman Spectroscopy Analysis Report</title>")
+            html_content.append("<style>")
+            html_content.append("body { font-family: Arial, sans-serif; margin: 40px; }")
+            html_content.append("h1 { color: #2c3e50; border-bottom: 2px solid #3498db; }")
+            html_content.append("h2 { color: #34495e; margin-top: 30px; }")
+            html_content.append("h3 { color: #7f8c8d; }")
+            html_content.append(".summary { background-color: #ecf0f1; padding: 20px; border-radius: 5px; margin: 20px 0; }")
+            html_content.append(".plot { text-align: center; margin: 30px 0; }")
+            html_content.append("img { max-width: 100%; height: auto; border: 1px solid #bdc3c7; }")
+            html_content.append("ul { list-style-type: disc; margin-left: 20px; }")
+            html_content.append("li { margin: 5px 0; }")
+            html_content.append("</style>")
+            html_content.append("</head><body>")
+            
+            html_content.append("<h1>Raman Spectroscopy Analysis Report</h1>")
+            html_content.append(f"<p><strong>Generated on:</strong> {timestamp}</p>")
+            
+            # Add analysis summary
+            html_content.append("<div class='summary'>")
+            html_content.append("<h2>Analysis Summary</h2>")
+            
+            if has_pca:
+                html_content.append("<h3>PCA Analysis</h3>")
+                html_content.append("<ul>")
+                html_content.append(f"<li>Number of components: {self.pca.n_components}</li>")
+                html_content.append(f"<li>Explained variance ratio: {np.sum(var_explained):.2%}</li>")
+                if len(var_explained) >= 2:
+                    html_content.append(f"<li>PC1 explains: {var_explained[0]:.2%} of variance</li>")
+                    html_content.append(f"<li>PC2 explains: {var_explained[1]:.2%} of variance</li>")
+                html_content.append("</ul>")
+            
+            if has_nmf:
+                html_content.append("<h3>NMF Analysis</h3>")
+                html_content.append("<ul>")
+                html_content.append(f"<li>Number of components: {self.nmf.n_components}</li>")
+                html_content.append(f"<li>Reconstruction error: {self.nmf.reconstruction_err_:.4f}</li>")
+                html_content.append("</ul>")
+            
+            if has_rf and active_model is not None:
+                html_content.append("<h3>Random Forest Analysis</h3>")
+                html_content.append("<ul>")
+                html_content.append(f"<li>Number of trees: {active_model.n_estimators}</li>")
+                html_content.append(f"<li>Max depth: {active_model.max_depth}</li>")
+                
+                if labels_flat is not None:
+                    class_0 = np.sum(labels_flat == 0)
+                    class_1 = np.sum(labels_flat == 1)
+                    total = len(labels_flat)
+                    html_content.append(f"<li>Class A: {class_1} points ({class_1/total:.1%})</li>")
+                    html_content.append(f"<li>Class B: {class_0} points ({class_0/total:.1%})</li>")
+                
+                html_content.append("</ul>")
+            
+            html_content.append("</div>")
+            
+            # Add plots as base64 encoded images
+            plot_titles = []
+            if has_pca and labels_flat is not None:
+                plot_titles.append("PCA Components with Classification")
+            if has_nmf and labels_flat is not None:
+                plot_titles.append("NMF Components with Classification")
+            if has_rf:
+                plot_titles.append("Feature Importances")
+            if has_prediction and hasattr(self, 'map_data') and self.map_data is not None:
+                plot_titles.append("Representative Spectra")
+                plot_titles.append("Class A Locations")
+            
+            # Recreate figures for HTML (since we closed them for PDF)
+            figure_data = []
+            
+            # Re-create PCA plot for HTML
+            if has_pca and labels_flat is not None:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                min_len = min(len(X_pca), len(labels_flat))
+                X_pca_plot = X_pca[:min_len]
+                labels_plot = labels_flat[:min_len]
+                
+                scatter = ax.scatter(X_pca_plot[:, 0], X_pca_plot[:, 1], c=labels_plot, 
+                                   cmap='coolwarm', alpha=0.7, s=15)
+                ax.set_xlabel(f"PC1 ({var_explained[0]:.1%} variance)")
+                ax.set_ylabel(f"PC2 ({var_explained[1]:.1%} variance)")
+                ax.set_title("PCA Components with Classification")
+                ax.grid(True, linestyle='--', alpha=0.7)
+                
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', 
+                              markersize=8, label='Class B'),
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', 
+                              markersize=8, label='Class A')
+                ]
+                ax.legend(handles=legend_elements, loc='best')
+                plt.tight_layout()
+                
+                # Convert to base64
+                buffer = BytesIO()
+                fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+                buffer.seek(0)
+                image_data = base64.b64encode(buffer.getvalue()).decode()
+                buffer.close()
+                figure_data.append(image_data)
+                plt.close(fig)
+            
+            # Re-create NMF plot for HTML
+            if has_nmf and labels_flat is not None:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                min_len = min(len(X_nmf), len(labels_flat))
+                X_nmf_plot = X_nmf[:min_len]
+                labels_plot = labels_flat[:min_len]
+                
+                scatter = ax.scatter(X_nmf_plot[:, 0], X_nmf_plot[:, 1], c=labels_plot, 
+                                   cmap='coolwarm', alpha=0.7, s=15)
+                ax.set_xlabel("NMF Component 1")
+                ax.set_ylabel("NMF Component 2")
+                ax.set_title("NMF Components with Classification")
+                ax.grid(True, linestyle='--', alpha=0.7)
+                
+                legend_elements = [
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', 
+                              markersize=8, label='Class B'),
+                    plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', 
+                              markersize=8, label='Class A')
+                ]
+                ax.legend(handles=legend_elements, loc='best')
+                plt.tight_layout()
+                
+                # Convert to base64
+                buffer = BytesIO()
+                fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+                buffer.seek(0)
+                image_data = base64.b64encode(buffer.getvalue()).decode()
+                buffer.close()
+                figure_data.append(image_data)
+                plt.close(fig)
+            
+            # Re-create feature importance plot for HTML
+            if has_rf and active_model is not None:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                
+                n_features = len(active_model.feature_importances_)
+                if n_features > 20:
+                    importances = active_model.feature_importances_
+                    indices = np.argsort(importances)[::-1][:20]
+                    
+                    ax.bar(range(20), importances[indices])
+                    ax.set_xlabel("Feature Rank")
+                    ax.set_title("Top 20 Feature Importances")
+                else:
+                    indices = np.arange(n_features)
+                    ax.bar(indices, active_model.feature_importances_)
+                    ax.set_xlabel("Feature Index")
+                    ax.set_title("Feature Importances")
+                
+                ax.set_ylabel("Importance")
+                ax.grid(True, linestyle='--', alpha=0.7)
+                plt.tight_layout()
+                
+                # Convert to base64
+                buffer = BytesIO()
+                fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+                buffer.seek(0)
+                image_data = base64.b64encode(buffer.getvalue()).decode()
+                buffer.close()
+                figure_data.append(image_data)
+                plt.close(fig)
+            
+            # Re-create Representative Spectra plot for HTML
+            if has_prediction and hasattr(self, 'map_data') and self.map_data is not None:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                try:
+                    self._plot_representative_spectra(ax)
+                except Exception as e:
+                    ax.text(0.5, 0.5, f'Error creating representative spectra plot: {str(e)}', 
+                           ha='center', va='center', fontsize=10)
+                    ax.set_title('Representative Spectra')
+                
+                plt.tight_layout()
+                
+                # Convert to base64
+                buffer = BytesIO()
+                fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+                buffer.seek(0)
+                image_data = base64.b64encode(buffer.getvalue()).decode()
+                buffer.close()
+                figure_data.append(image_data)
+                plt.close(fig)
+            
+            # Re-create Class A Locations plot for HTML
+            if has_prediction and hasattr(self, 'map_data') and self.map_data is not None:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                try:
+                    self._plot_2d_map_with_class_a_overlay(ax)
+                except Exception as e:
+                    ax.text(0.5, 0.5, f'Error creating Class A locations plot: {str(e)}', 
+                           ha='center', va='center', fontsize=10)
+                    ax.set_title('Class A Locations')
+                
+                plt.tight_layout()
+                
+                # Convert to base64
+                buffer = BytesIO()
+                fig.savefig(buffer, format='png', dpi=150, bbox_inches='tight')
+                buffer.seek(0)
+                image_data = base64.b64encode(buffer.getvalue()).decode()
+                buffer.close()
+                figure_data.append(image_data)
+                plt.close(fig)
+            
+            # Add plots to HTML
+            for i, (title, img_data) in enumerate(zip(plot_titles, figure_data)):
+                html_content.append(f"<h2>{title}</h2>")
+                html_content.append("<div class='plot'>")
+                html_content.append(f"<img src='data:image/png;base64,{img_data}' alt='{title}' />")
+                html_content.append("</div>")
+            
+            html_content.append("</body></html>")
+            
+            # Save HTML report
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(html_content))
+            
+            messagebox.showinfo("Success", 
+                              f"Analysis reports generated successfully:\n"
+                              f"• PDF: {pdf_path}\n"
+                              f"• HTML: {html_path}")
         
         except Exception as e:
+            import traceback
+            print(f"Error generating report: {e}")
+            print(traceback.format_exc())
             messagebox.showerror("Error", f"Failed to generate report: {str(e)}")
     
     def update_results_visualization(self):
-        """Update the visualizations in the Results tab."""
+        """Update the visualizations in the Results tab with new layout."""
         try:
             # Check if we have the necessary data
             has_pca = self.pca is not None and self.pca_components is not None
             has_nmf = self.nmf is not None and self.nmf_components is not None
-            has_rf = self.rf_model is not None
+            has_rf = self.rf_model is not None or self.trained_model is not None
             has_prediction = hasattr(self, 'prediction_map') and self.prediction_map is not None
+            
+            # Get the active model
+            active_model = None
+            if self.trained_model is not None:
+                active_model = self.trained_model
+            elif self.rf_model is not None:
+                active_model = self.rf_model
             
             if not (has_pca or has_nmf):
                 messagebox.showinfo("Info", "Please run PCA or NMF analysis first.")
                 return
                 
             if not has_rf:
-                messagebox.showinfo("Info", "Please train a Random Forest model in the Model Tools tab.")
+                messagebox.showinfo("Info", "Please train a Random Forest model or load a model from the Model Tools tab.")
                 return
             
             # Clear the figure
@@ -4626,34 +6049,37 @@ class TwoDMapAnalysisWindow:
                 else:
                     labels_for_nmf = labels_flat
             else:
-                # Try to predict using the RF model
-                if has_pca:
-                    labels_flat = self.rf_model.predict(X_pca)
-                    labels_for_nmf = labels_flat
-                elif has_nmf:
-                    labels_flat = self.rf_model.predict(X_nmf)
-                    labels_for_nmf = labels_flat
-                else:
-                    data = self._prepare_data_for_analysis()
-                    labels_flat = self.rf_model.predict(data)
-                    
-                    # Handle potential mismatches
-                    if has_pca and len(X_pca) != len(labels_flat):
-                        X_pca = X_pca[:len(labels_flat)]
-                    if has_nmf and len(X_nmf) != len(labels_flat):
-                        X_nmf = X_nmf[:len(labels_flat)]
+                # Try to predict using the active model
+                if active_model is not None:
+                    if has_pca:
+                        labels_flat = active_model.predict(X_pca)
+                        labels_for_nmf = labels_flat
+                    elif has_nmf:
+                        labels_flat = active_model.predict(X_nmf)
+                        labels_for_nmf = labels_flat
+                    else:
+                        data = self._prepare_data_for_analysis()
+                        labels_flat = active_model.predict(data)
                         
-                    labels_for_nmf = labels_flat
+                        # Handle potential mismatches
+                        if has_pca and len(X_pca) != len(labels_flat):
+                            X_pca = X_pca[:len(labels_flat)]
+                        if has_nmf and len(X_nmf) != len(labels_flat):
+                            X_nmf = X_nmf[:len(labels_flat)]
+                            
+                        labels_for_nmf = labels_flat
+                else:
+                    labels_flat = None
+                    labels_for_nmf = None
             
-            # Create subplot grid
-            if has_pca and has_nmf:
-                grid = (2, 2)  # 2x2 grid if we have both PCA and NMF
-            else:
-                grid = (2, 1)  # 2x1 grid if we only have one reduction method
+            # Create subplot grid with analysis plots in 2x2 layout
+            # Top row: PCA (left), NMF (right)
+            # Bottom row: Representative Spectra (left), 2D Map with Class A overlay (right)
             
-            plot_idx = 1
+            # Create a 2x2 grid layout
+            gs = self.results_fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
             
-            # Plot PCA components with classification
+            # Plot PCA components with classification (top left)
             if has_pca:
                 # Final check to ensure dimensions match
                 print(f"Final dimensions for PCA plot: X={X_pca.shape}, labels={len(labels_flat)}")
@@ -4662,12 +6088,32 @@ class TwoDMapAnalysisWindow:
                     X_pca = X_pca[:min_len]
                     labels_flat = labels_flat[:min_len]
                 
-                ax1 = self.results_fig.add_subplot(grid[0], grid[1], plot_idx)
-                plot_idx += 1
+                ax1 = self.results_fig.add_subplot(gs[0, 0])
                 
-                # Only use the first two components
-                scatter = ax1.scatter(X_pca[:, 0], X_pca[:, 1], c=labels_flat, 
-                                    cmap='coolwarm', alpha=0.7, s=15)
+                # Only use the first two components - with performance optimization
+                n_points = len(X_pca)
+                if n_points > 5000:  # Use binning for large datasets
+                    binned_data = self._create_binned_scatter(
+                        X_pca[:, 0], X_pca[:, 1], labels_flat,
+                        n_bins=min(60, int(np.sqrt(n_points / 15))),  # Smaller bins for colored plots
+                        min_size=8, max_size=40, alpha=0.8
+                    )
+                    
+                    if len(binned_data['x']) > 0 and binned_data['colors'] is not None:
+                        # Use color coding for classification
+                        colors = ['blue' if c == 0 else 'red' for c in binned_data['colors']]
+                        scatter = ax1.scatter(binned_data['x'], binned_data['y'], 
+                                           s=binned_data['sizes'], c=colors, alpha=0.8,
+                                           edgecolors='black', linewidth=0.3)
+                        # Add info text about binning
+                        ax1.text(0.02, 0.98, f'{len(binned_data["x"])} bins\n({n_points:,} points)', 
+                                transform=ax1.transAxes, fontsize=7, 
+                                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                else:
+                    # Use regular scatter for smaller datasets
+                    scatter = ax1.scatter(X_pca[:, 0], X_pca[:, 1], c=labels_flat, 
+                                        cmap='coolwarm', alpha=0.7, s=15)
+                
                 ax1.set_xlabel(f"PC1 ({var_explained[0]:.1%} variance)")
                 ax1.set_ylabel(f"PC2 ({var_explained[1]:.1%} variance)")
                 ax1.set_title("PCA Components with Classification")
@@ -4681,8 +6127,14 @@ class TwoDMapAnalysisWindow:
                               markersize=8, label='Class A')
                 ]
                 ax1.legend(handles=legend_elements, loc='best')
+            else:
+                # If no PCA, show placeholder
+                ax1 = self.results_fig.add_subplot(gs[0, 0])
+                ax1.text(0.5, 0.5, 'PCA not available\nRun PCA analysis first', 
+                        ha='center', va='center', transform=ax1.transAxes)
+                ax1.set_title("PCA Components with Classification")
             
-            # Plot NMF components with classification
+            # Plot NMF components with classification (top right)
             if has_nmf:
                 # Final check to ensure dimensions match
                 print(f"Final dimensions for NMF plot: X={X_nmf.shape}, labels={len(labels_for_nmf)}")
@@ -4691,12 +6143,32 @@ class TwoDMapAnalysisWindow:
                     X_nmf = X_nmf[:min_len]
                     labels_for_nmf = labels_for_nmf[:min_len]
                 
-                ax2 = self.results_fig.add_subplot(grid[0], grid[1], plot_idx)
-                plot_idx += 1
+                ax2 = self.results_fig.add_subplot(gs[0, 1])
                 
-                # Only use the first two components
-                scatter = ax2.scatter(X_nmf[:, 0], X_nmf[:, 1], c=labels_for_nmf, 
-                                    cmap='coolwarm', alpha=0.7, s=15)
+                # Only use the first two components - with performance optimization
+                n_points = len(X_nmf)
+                if n_points > 5000:  # Use binning for large datasets
+                    binned_data = self._create_binned_scatter(
+                        X_nmf[:, 0], X_nmf[:, 1], labels_for_nmf,
+                        n_bins=min(60, int(np.sqrt(n_points / 15))),  # Smaller bins for colored plots
+                        min_size=8, max_size=40, alpha=0.8
+                    )
+                    
+                    if len(binned_data['x']) > 0 and binned_data['colors'] is not None:
+                        # Use color coding for classification
+                        colors = ['blue' if c == 0 else 'red' for c in binned_data['colors']]
+                        scatter = ax2.scatter(binned_data['x'], binned_data['y'], 
+                                           s=binned_data['sizes'], c=colors, alpha=0.8,
+                                           edgecolors='black', linewidth=0.3)
+                        # Add info text about binning
+                        ax2.text(0.02, 0.98, f'{len(binned_data["x"])} bins\n({n_points:,} points)', 
+                                transform=ax2.transAxes, fontsize=7, 
+                                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                else:
+                    # Use regular scatter for smaller datasets
+                    scatter = ax2.scatter(X_nmf[:, 0], X_nmf[:, 1], c=labels_for_nmf, 
+                                        cmap='coolwarm', alpha=0.7, s=15)
+                
                 ax2.set_xlabel("NMF Component 1")
                 ax2.set_ylabel("NMF Component 2")
                 ax2.set_title("NMF Components with Classification")
@@ -4710,68 +6182,28 @@ class TwoDMapAnalysisWindow:
                               markersize=8, label='Class A')
                 ]
                 ax2.legend(handles=legend_elements, loc='best')
+            else:
+                # If no NMF, show placeholder
+                ax2 = self.results_fig.add_subplot(gs[0, 1])
+                ax2.text(0.5, 0.5, 'NMF not available\nRun NMF analysis first', 
+                        ha='center', va='center', transform=ax2.transAxes)
+                ax2.set_title("NMF Components with Classification")
             
-            # Plot RF feature importance or performance metrics
-            if has_rf:
-                ax3 = self.results_fig.add_subplot(grid[0], grid[1], plot_idx)
-                plot_idx += 1
-                
-                # Plot feature importances
-                n_features = len(self.rf_model.feature_importances_)
-                if n_features > 20:
-                    # For many features, just show top 20
-                    importances = self.rf_model.feature_importances_
-                    indices = np.argsort(importances)[::-1][:20]
-                    
-                    ax3.bar(range(20), importances[indices])
-                    ax3.set_xlabel("Feature Rank")
-                    ax3.set_title("Top 20 Feature Importances")
-                else:
-                    # Show all features
-                    indices = np.arange(n_features)
-                    ax3.bar(indices, self.rf_model.feature_importances_)
-                    ax3.set_xlabel("Feature Index")
-                    ax3.set_title("Feature Importances")
-                
-                ax3.set_ylabel("Importance")
-                ax3.grid(True, linestyle='--', alpha=0.7)
+            # Plot Representative Spectra by Class (bottom left)
+            ax3 = self.results_fig.add_subplot(gs[1, 0])
+            if has_prediction:
+                self._plot_representative_spectra(ax3)
+            else:
+                ax3.text(0.5, 0.5, 'Prediction map not available\nPredict map first to see representative spectra', 
+                        ha='center', va='center', transform=ax3.transAxes)
+                ax3.set_title("Representative Spectra")
             
-            # Add a summary text plot with metrics
-            ax4 = self.results_fig.add_subplot(grid[0], grid[1], plot_idx)
-            ax4.axis('off')  # Hide axes
+            # Plot 2D Map with Class A overlay (bottom right)
+            ax4 = self.results_fig.add_subplot(gs[1, 1])
+            self._plot_2d_map_with_class_a_overlay(ax4)
             
-            # Create summary text
-            summary_text = "Analysis Summary\n\n"
-            
-            if has_pca:
-                summary_text += f"PCA Analysis:\n"
-                summary_text += f"- Components: {self.pca.n_components}\n"
-                summary_text += f"- Explained Variance: {np.sum(var_explained):.1%}\n\n"
-            
-            if has_nmf:
-                summary_text += f"NMF Analysis:\n"
-                summary_text += f"- Components: {self.nmf.n_components}\n"
-                summary_text += f"- Reconstruction Error: {self.nmf.reconstruction_err_:.4f}\n\n"
-            
-            if has_rf:
-                summary_text += f"Random Forest:\n"
-                summary_text += f"- Trees: {self.rf_model.n_estimators}\n"
-                summary_text += f"- Max Depth: {self.rf_model.max_depth}\n"
-                
-                # Add class distribution if available
-                if has_prediction:
-                    class_0 = np.sum(labels_flat == 0)
-                    class_1 = np.sum(labels_flat == 1)
-                    total = len(labels_flat)
-                    summary_text += f"- Class A: {class_1} points ({class_1/total:.1%})\n"
-                    summary_text += f"- Class B: {class_0} points ({class_0/total:.1%})\n"
-            
-            ax4.text(0.05, 0.95, summary_text, transform=ax4.transAxes,
-                   fontsize=10, verticalalignment='top', bbox=dict(
-                       boxstyle='round,pad=1', facecolor='lightyellow', alpha=0.7))
-            
-            # Adjust layout
-            self.results_fig.tight_layout()
+            # Adjust layout to prevent overlap
+            self.results_fig.tight_layout(pad=2.0)
             self.results_canvas.draw()
             
             # Update UI
@@ -4806,13 +6238,17 @@ class TwoDMapAnalysisWindow:
         # Update canvas
         self.canvas.draw()
         
-        # Show results in text box too
-        self.ml_results_text.config(state=tk.NORMAL)
-        self.ml_results_text.insert(tk.END, "\nClassification Results:\n")
+        # Add classification results to existing summary
+        additional_summary = "\nClassification Results:\n"
         for label, count in class_counts.items():
             percentage = count / total * 100
-            self.ml_results_text.insert(tk.END, f"{label}: {count} ({percentage:.1f}%)\n")
-        self.ml_results_text.config(state=tk.DISABLED)
+            additional_summary += f"{label}: {count} ({percentage:.1f}%)\n"
+        
+        # Append to existing summary (if it exists, otherwise create new)
+        if hasattr(self, 'analysis_summary_content'):
+            self.analysis_summary_content += additional_summary
+        else:
+            self.analysis_summary_content = additional_summary
     
     def visualize_csv_results(self):
         """Show a dialog to choose what to visualize and display the selected visualization."""
