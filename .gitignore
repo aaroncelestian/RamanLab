@@ -40,4 +40,4 @@ Thumbs.db
 *.swo
 
 # Application specific
-*.icns 
+*.icns .venv/
