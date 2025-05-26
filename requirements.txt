@@ -1,32 +1,73 @@
-# ClaritySpectra v2.5.0 Requirements
-# Core dependencies
-numpy>=1.16.0
-matplotlib>=3.0.0
-scipy>=1.2.0
-pandas>=0.25.0
-scikit-learn>=0.21.0
-fastdtw>=0.3.4
-mplcursors>=0.5.0
+# ClaritySpectra v2.5.0 Requirements - Complete Trilogy Edition
+# ================================================================
+# This file includes all dependencies for the complete ClaritySpectra
+# crystal orientation optimization trilogy (Stages 1, 2, and 3)
 
-# GUI and visualization
-seaborn>=0.11.0
-pillow>=8.0.0  # For image processing
+# Core Dependencies (Required)
+# ============================
+numpy>=1.16.0              # Numerical computations and arrays
+matplotlib>=3.0.0           # Plotting and visualization
+scipy>=1.2.0                # Scientific computing and optimization
+pandas>=0.25.0              # Data manipulation and analysis
 
-# Data processing and export
-reportlab>=3.5.0  # For PDF export
-openpyxl>=3.0.0  # For Excel file support
+# GUI and Visualization (Required)
+# ================================
+# tkinter - GUI framework (bundled with Python, see installation notes below)
+seaborn>=0.11.0             # Statistical data visualization
+pillow>=8.0.0               # Image processing and manipulation
+mplcursors>=0.5.0           # Interactive matplotlib cursors
 
-# Machine learning and deep learning (optional)
-tensorflow>=2.12.0  # For deep learning functionality
-keras>=2.12.0  # For deep learning models
+# Data Processing and Export (Required)
+# =====================================
+reportlab>=3.5.0            # PDF export functionality
+openpyxl>=3.0.0             # Excel file support
+fastdtw>=0.3.4              # Fast Dynamic Time Warping
 
-# Packaging tools
-pyinstaller>=5.0.0  # For creating standalone executables
+# Advanced Optimization Dependencies (Stage 2 & 3)
+# =================================================
+scikit-learn>=0.21.0        # Machine learning algorithms, Gaussian Processes, ensemble methods
+emcee>=3.0.0                # MCMC sampling for Bayesian analysis
 
-# Notes:
-# - tkinter is not included as it's typically bundled with Python
-# - Specific OS-dependent installations:
-#   - Windows: Python installer should include tkinter
-#   - macOS: 'brew install python-tk' or reinstall Python with tkinter
-#   - Debian/Ubuntu: 'sudo apt-get install python3-tk'
-#   - Fedora: 'sudo dnf install python3-tkinter'
+# Optional Deep Learning (Enhanced Features)
+# ==========================================
+tensorflow>=2.12.0         # Deep learning framework (optional)
+keras>=2.12.0               # High-level neural networks API (optional)
+
+# Development and Packaging Tools (Optional)
+# ===========================================
+pyinstaller>=5.0.0         # Creating standalone executables
+
+# Advanced Scientific Computing (Optional)
+# ========================================
+pymatgen>=2022.0.0          # Materials analysis and crystallography (optional)
+
+# Installation Notes:
+# ==================
+# 
+# TKINTER (GUI Framework):
+# tkinter is typically bundled with Python but may require separate installation:
+# - Windows: Usually included with Python installer
+# - macOS: 'brew install python-tk' or reinstall Python with tkinter support
+# - Debian/Ubuntu: 'sudo apt-get install python3-tk'
+# - Fedora/RHEL: 'sudo dnf install python3-tkinter'
+#
+# STAGE-SPECIFIC REQUIREMENTS:
+# - Stage 1 (Enhanced): Only core dependencies required
+# - Stage 2 (Probabilistic): Requires emcee for MCMC sampling
+# - Stage 3 (Advanced): Requires scikit-learn and emcee for full functionality
+#
+# INSTALLATION COMMANDS:
+# 
+# Core functionality (all stages with reduced features):
+# pip install numpy matplotlib scipy pandas seaborn pillow mplcursors reportlab openpyxl fastdtw
+#
+# Full Stage 2 & 3 functionality:
+# pip install numpy matplotlib scipy pandas seaborn pillow mplcursors reportlab openpyxl fastdtw scikit-learn emcee
+#
+# Complete installation with all optional features:
+# pip install -r requirements.txt
+#
+# Virtual Environment Setup (Recommended):
+# python -m venv clarityspectra_env
+# source clarityspectra_env/bin/activate  # On Windows: clarityspectra_env\Scripts\activate
+# pip install -r requirements.txt

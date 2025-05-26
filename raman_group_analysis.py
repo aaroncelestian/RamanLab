@@ -1,3 +1,6 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow info/warning messages
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import numpy as np
@@ -16,10 +19,11 @@ import seaborn as sns
 from matplotlib.widgets import RectangleSelector
 import csv
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 # Try to import UMAP for advanced visualization
 try:
-    import umap
+    import umap.umap_ as umap
     UMAP_AVAILABLE = True
 except ImportError:
     UMAP_AVAILABLE = False
@@ -273,6 +277,39 @@ class RamanGroupAnalysisWindow:
         dendro_frame = ttk.Frame(viz_notebook)
         viz_notebook.add(dendro_frame, text="Dendrogram")
         
+        # Add dendrogram controls
+        dendro_controls_frame = ttk.Frame(dendro_frame)
+        dendro_controls_frame.pack(fill=tk.X, pady=5)
+        
+        # Orientation control
+        ttk.Label(dendro_controls_frame, text="Orientation:").pack(side=tk.LEFT, padx=(5, 2))
+        self.dendro_orientation = tk.StringVar(value="top")
+        orientation_combo = ttk.Combobox(dendro_controls_frame, textvariable=self.dendro_orientation, width=8)
+        orientation_combo['values'] = ('top', 'bottom', 'left', 'right')
+        orientation_combo.pack(side=tk.LEFT, padx=2)
+        orientation_combo.bind('<<ComboboxSelected>>', lambda e: self.update_dendrogram())
+        
+        # Max samples to show
+        ttk.Label(dendro_controls_frame, text="Max Samples:").pack(side=tk.LEFT, padx=(10, 2))
+        self.dendro_max_samples = tk.IntVar(value=50)
+        max_samples_spinbox = ttk.Spinbox(dendro_controls_frame, textvariable=self.dendro_max_samples, 
+                                        from_=10, to=200, width=8)
+        max_samples_spinbox.pack(side=tk.LEFT, padx=2)
+        max_samples_spinbox.bind('<Return>', lambda e: self.update_dendrogram())
+        max_samples_spinbox.bind('<FocusOut>', lambda e: self.update_dendrogram())
+        
+        # Label display option
+        ttk.Label(dendro_controls_frame, text="Labels:").pack(side=tk.LEFT, padx=(10, 2))
+        self.dendro_show_labels = tk.BooleanVar(value=True)
+        show_labels_check = ttk.Checkbutton(dendro_controls_frame, text="Show", 
+                                          variable=self.dendro_show_labels,
+                                          command=self.update_dendrogram)
+        show_labels_check.pack(side=tk.LEFT, padx=2)
+        
+        # Update button
+        ttk.Button(dendro_controls_frame, text="Update", 
+                  command=self.update_dendrogram).pack(side=tk.RIGHT, padx=5)
+        
         # Create dendrogram figure
         self.dendro_fig = Figure(figsize=(6, 4))
         self.dendrogram_ax = self.dendro_fig.add_subplot(111)
@@ -403,13 +440,13 @@ class RamanGroupAnalysisWindow:
             self.viz_ax = self.viz_fig.add_subplot(111)
             
         # Create canvas for the figure
-        visualization_canvas = FigureCanvasTkAgg(self.viz_fig, master=plot_frame)
-        visualization_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.viz_canvas = FigureCanvasTkAgg(self.viz_fig, master=plot_frame)
+        self.viz_canvas.get_tk_widget().pack(fill="both", expand=True)
         
         # Add toolbar
         toolbar_frame = ttk.Frame(plot_frame)
         toolbar_frame.pack(fill=tk.X)
-        visualization_toolbar = NavigationToolbar2Tk(visualization_canvas, toolbar_frame)
+        visualization_toolbar = NavigationToolbar2Tk(self.viz_canvas, toolbar_frame)
         visualization_toolbar.update()
         
         # Add export button
@@ -555,13 +592,24 @@ class RamanGroupAnalysisWindow:
         control_frame.pack(fill=tk.X, padx=5, pady=5)
         
         # Refinement instructions
-        ttk.Label(control_frame, text="Instructions:").pack(anchor=tk.W)
-        ttk.Label(control_frame, text="1. Select points in the scatter plot to merge clusters\n"
-                 "2. Use the dendrogram to adjust cluster boundaries\n"
-                 "3. Select a cluster to split into subclusters\n"
-                 "4. Preview changes before applying\n"
-                 "5. Use undo to revert changes\n"
-                 "6. Apply changes to update the analysis").pack(anchor=tk.W)
+        instructions_text = ("Instructions:\n"
+                           "1. Click points in the scatter plot to select/deselect them\n"
+                           "2. Selected points will be highlighted in red\n"
+                           "3. Use 'Merge Selected Clusters' to combine clusters containing selected points\n"
+                           "4. Use 'Split Selected Cluster' to divide a cluster into subclusters\n"
+                           "5. 'Reset Selection' clears all selected points\n"
+                           "6. 'Apply Changes' updates the main analysis with refinement results")
+        
+        ttk.Label(control_frame, text=instructions_text, justify=tk.LEFT).pack(anchor=tk.W, pady=5)
+        
+        # Selection info frame
+        selection_frame = ttk.Frame(control_frame)
+        selection_frame.pack(fill=tk.X, pady=5)
+        
+        # Selection status label
+        self.selection_status = tk.StringVar(value="No points selected")
+        ttk.Label(selection_frame, textvariable=self.selection_status, 
+                 font=("", 10, "bold"), foreground="blue").pack(side=tk.LEFT, padx=5)
         
         # Action buttons
         button_frame = ttk.Frame(control_frame)
@@ -601,13 +649,39 @@ class RamanGroupAnalysisWindow:
         ttk.Button(preview_frame, text="Cancel Preview", 
                   command=self.cancel_preview).pack(side=tk.LEFT, padx=2)
         
-        # Results frame
-        results_frame = ttk.LabelFrame(refinement_tab, text="Refinement Results", padding=10)
-        results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Add visualization frame for interactive cluster selection
+        viz_frame = ttk.LabelFrame(refinement_tab, text="Interactive Cluster Visualization")
+        viz_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Add text widget for results
-        self.refinement_text = tk.Text(results_frame, wrap=tk.WORD, height=10)
-        self.refinement_text.pack(fill=tk.BOTH, expand=True)
+        # Create figure for refinement visualization
+        self.refinement_fig = Figure(figsize=(8, 6))
+        self.refinement_ax = self.refinement_fig.add_subplot(111)
+        self.refinement_canvas = FigureCanvasTkAgg(self.refinement_fig, master=viz_frame)
+        self.refinement_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Add toolbar for refinement plot
+        refinement_toolbar_frame = ttk.Frame(viz_frame)
+        refinement_toolbar_frame.pack(fill=tk.X)
+        self.refinement_toolbar = NavigationToolbar2Tk(self.refinement_canvas, refinement_toolbar_frame)
+        self.refinement_toolbar.update()
+        
+        # Connect pick events for interactive selection
+        self.refinement_canvas.mpl_connect('pick_event', self.on_refinement_pick)
+        
+        # Results frame (smaller now since we have visualization)
+        results_frame = ttk.LabelFrame(refinement_tab, text="Refinement Results", padding=10)
+        results_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Add text widget for results (smaller height)
+        self.refinement_text = tk.Text(results_frame, wrap=tk.WORD, height=6)
+        self.refinement_text.pack(fill=tk.X)
+        
+        # Initialize refinement results text
+        self.refinement_text.insert(tk.END, "Refinement results will appear here after making changes.\n\n")
+        self.refinement_text.insert(tk.END, "To use cluster refinement:\n")
+        self.refinement_text.insert(tk.END, "1. First run clustering from the Clustering tab\n")
+        self.refinement_text.insert(tk.END, "2. Click points in the visualization above to select them\n")
+        self.refinement_text.insert(tk.END, "3. Use the buttons to merge or split selected clusters\n")
         
     def create_dendrogram_frame(self, parent):
         """Create frame for dendrogram plot."""
@@ -803,12 +877,16 @@ class RamanGroupAnalysisWindow:
             self.update_heatmap()
             self.update_scatter_plot()
             
+            # Also update refinement visualization if it exists
+            if hasattr(self, 'refinement_ax'):
+                self.update_refinement_visualization()
+            
         except Exception as e:
             print(f"DEBUG: Visualization update error: {str(e)}")
             raise
 
     def update_dendrogram(self):
-        """Update the dendrogram plot."""
+        """Update the dendrogram plot with enhanced information display."""
         try:
             print("\nDEBUG: Updating dendrogram")
             print(f"DEBUG: Linkage matrix shape: {self.cluster_data['linkage_matrix'].shape}")
@@ -816,20 +894,113 @@ class RamanGroupAnalysisWindow:
             # Clear the current plot
             self.dendrogram_ax.clear()
             
-            # Use filenames as labels if available
-            labels = self.cluster_data.get('sample_labels', None)
+            # Get sample labels and metadata
+            sample_labels = self.cluster_data.get('sample_labels', None)
+            sample_metadata = self.cluster_data.get('sample_metadata', None)
             
-            # Plot the dendrogram
-            dendrogram(self.cluster_data['linkage_matrix'],
-                      ax=self.dendrogram_ax,
-                      truncate_mode='lastp',
-                      p=30,
-                      show_leaf_counts=True,
-                      leaf_rotation=90,
-                      labels=labels)
+            # Create enhanced labels with mineral info if available
+            enhanced_labels = []
+            if sample_labels is not None and self.dendro_show_labels.get():
+                for i, label in enumerate(sample_labels):
+                    enhanced_label = label
+                    
+                    # Add mineral classification if available
+                    if (sample_metadata and i < len(sample_metadata) and 
+                        sample_metadata[i] and 'HEY CLASSIFICATION' in sample_metadata[i]):
+                        hey_class = sample_metadata[i]['HEY CLASSIFICATION']
+                        if hey_class:
+                            # Shorten long classifications
+                            if len(hey_class) > 15:
+                                hey_class = hey_class[:12] + "..."
+                            enhanced_label = f"{label}\n({hey_class})"
+                    
+                    enhanced_labels.append(enhanced_label)
+            else:
+                enhanced_labels = None
             
-            # Update the plot
-            self.dendrogram_ax.set_title('Hierarchical Clustering Dendrogram')
+            # Get control values
+            orientation = self.dendro_orientation.get()
+            max_samples = self.dendro_max_samples.get()
+            
+            # Plot the dendrogram with enhanced features
+            dendro_result = dendrogram(
+                self.cluster_data['linkage_matrix'],
+                ax=self.dendrogram_ax,
+                truncate_mode='lastp',
+                p=min(max_samples, len(sample_labels) if sample_labels else 30),
+                show_leaf_counts=True,
+                leaf_rotation=45 if orientation in ['top', 'bottom'] else 0,
+                leaf_font_size=8,
+                labels=enhanced_labels,
+                above_threshold_color='gray',
+                color_threshold=0.7 * max(self.cluster_data['linkage_matrix'][:, 2]),
+                orientation=orientation
+            )
+            
+            # Add cluster cut line if we have cluster assignments
+            if self.cluster_data.get('labels') is not None:
+                n_clusters = len(np.unique(self.cluster_data['labels']))
+                
+                # Find the cut height for the specified number of clusters
+                if len(self.cluster_data['linkage_matrix']) >= n_clusters - 1:
+                    cut_height = self.cluster_data['linkage_matrix'][-(n_clusters-1), 2]
+                    
+                    # Draw horizontal line at cut height
+                    self.dendrogram_ax.axhline(y=cut_height, color='red', linestyle='--', 
+                                             linewidth=2, alpha=0.8, label=f'Cut for {n_clusters} clusters')
+                    
+                    # Add text annotation
+                    self.dendrogram_ax.text(0.02, cut_height, f'{n_clusters} clusters', 
+                                          transform=self.dendrogram_ax.get_yaxis_transform(),
+                                          verticalalignment='bottom', color='red', fontweight='bold')
+            
+            # Enhance the plot appearance
+            self.dendrogram_ax.set_title('Hierarchical Clustering Dendrogram\n(Hover for sample details)', 
+                                       fontsize=12, pad=20)
+            self.dendrogram_ax.set_xlabel('Samples', fontsize=10)
+            self.dendrogram_ax.set_ylabel('Distance (Linkage Height)', fontsize=10)
+            
+            # Add grid for better readability
+            self.dendrogram_ax.grid(True, alpha=0.3, axis='y')
+            
+            # Create interactive tooltips
+            def format_coord(x, y):
+                try:
+                    if sample_labels is not None:
+                        # Simple approximation for sample identification
+                        n_samples = len(sample_labels)
+                        sample_idx = int(round(x * n_samples / (10 * n_samples)))
+                        sample_idx = max(0, min(sample_idx, n_samples - 1))
+                        
+                        sample_name = sample_labels[sample_idx]
+                        tooltip_info = f"Sample: {sample_name}"
+                        
+                        # Add metadata if available
+                        if (sample_metadata and sample_idx < len(sample_metadata) and sample_metadata[sample_idx]):
+                            metadata = sample_metadata[sample_idx]
+                            if 'HEY CLASSIFICATION' in metadata and metadata['HEY CLASSIFICATION']:
+                                tooltip_info += f", Class: {metadata['HEY CLASSIFICATION']}"
+                            if 'CHEMICAL FORMULA' in metadata and metadata['CHEMICAL FORMULA']:
+                                tooltip_info += f", Formula: {metadata['CHEMICAL FORMULA']}"
+                        
+                        # Add cluster info if available
+                        if self.cluster_data.get('labels') is not None and sample_idx < len(self.cluster_data['labels']):
+                            cluster_id = self.cluster_data['labels'][sample_idx]
+                            tooltip_info += f", Cluster: {cluster_id}"
+                        
+                        tooltip_info += f", Height: {y:.2f}"
+                        return tooltip_info
+                    
+                    return f"Height: {y:.2f}"
+                except Exception:
+                    return f"Height: {y:.2f}"
+            
+            # Set the custom coordinate formatter
+            self.dendrogram_ax.format_coord = format_coord
+            
+            # Adjust layout to prevent label cutoff
+            self.dendro_fig.tight_layout()
+            
             self.dendro_canvas.draw()
             
         except Exception as e:
@@ -888,17 +1059,88 @@ class RamanGroupAnalysisWindow:
             # Get selected colormap
             colormap = self.heatmap_colormap.get()
             
-            # Create heatmap with selected colormap
-            im = self.heatmap_ax.imshow(display_data, aspect='auto', cmap=colormap)
+            # Set up wavenumber extent for proper cursor coordinates
+            wavenumbers = self.cluster_data['wavenumbers']
+            n_samples, n_features = display_data.shape
+            
+            # Create extent: [left, right, bottom, top] in data coordinates
+            # For wavenumbers: use actual min/max wavenumber values
+            # For samples: use sample indices (0 to n_samples-1)
+            extent = [
+                wavenumbers[0],          # left: first wavenumber
+                wavenumbers[-1],         # right: last wavenumber  
+                n_samples - 0.5,         # bottom: last sample (inverted y-axis)
+                -0.5                     # top: first sample (inverted y-axis)
+            ]
+            
+            # Create heatmap with selected colormap and proper extent
+            im = self.heatmap_ax.imshow(display_data, aspect='auto', cmap=colormap, extent=extent)
             
             # Add colorbar, anchored to the correct axis
             self.heatmap_fig.colorbar(im, ax=self.heatmap_ax)
             
+            # Create custom coordinate formatter to show wavenumber and sample info
+            def format_coord(x, y):
+                # x is wavenumber, y is sample index
+                try:
+                    # Find closest wavenumber index
+                    wavenumber_idx = np.argmin(np.abs(wavenumbers - x))
+                    wavenumber = wavenumbers[wavenumber_idx]
+                    
+                    # Sample index (rounded)
+                    sample_idx = int(np.round(y))
+                    
+                    # Get intensity value if within bounds
+                    if 0 <= sample_idx < n_samples and 0 <= wavenumber_idx < n_features:
+                        intensity = display_data[sample_idx, wavenumber_idx]
+                        
+                        # Get sample name if available
+                        sample_name = f"Sample {sample_idx}"
+                        if ('sample_labels' in self.cluster_data and 
+                            self.cluster_data['sample_labels'] is not None and 
+                            sample_idx < len(self.cluster_data['sample_labels'])):
+                            # Get the original sample index (before sorting)
+                            if hasattr(self, '_sort_idx_for_heatmap'):
+                                orig_idx = self._sort_idx_for_heatmap[sample_idx]
+                                sample_name = self.cluster_data['sample_labels'][orig_idx]
+                            else:
+                                sample_name = self.cluster_data['sample_labels'][sample_idx]
+                        
+                        return f"Wavenumber: {wavenumber:.1f} cm⁻¹, Sample: {sample_name}, Intensity: {intensity:.2f}"
+                    else:
+                        return f"Wavenumber: {x:.1f} cm⁻¹, Sample: {y:.1f}"
+                except:
+                    return f"Wavenumber: {x:.1f} cm⁻¹, Sample: {y:.1f}"
+            
+            # Set the custom coordinate formatter
+            self.heatmap_ax.format_coord = format_coord
+            
+            # Store sort indices for coordinate formatter
+            self._sort_idx_for_heatmap = sort_idx
+            
+            # Set up wavenumber x-axis
+            wavenumbers = self.cluster_data['wavenumbers']
+            n_features = display_data.shape[1]
+            
+            # Create x-axis ticks at reasonable intervals using actual wavenumber values
+            if len(wavenumbers) > 20:
+                # For large datasets, show every ~10th tick
+                tick_step = max(1, len(wavenumbers) // 10)
+                tick_wavenumbers = [wavenumbers[i] for i in range(0, len(wavenumbers), tick_step)]
+            else:
+                # For smaller datasets, show every few ticks  
+                tick_step = max(1, len(wavenumbers) // 5)
+                tick_wavenumbers = [wavenumbers[i] for i in range(0, len(wavenumbers), tick_step)]
+            
+            # Set x-axis ticks using actual wavenumber values
+            self.heatmap_ax.set_xticks(tick_wavenumbers)
+            self.heatmap_ax.set_xticklabels([f"{wn:.0f}" for wn in tick_wavenumbers], rotation=45, ha='right')
+            
             # Update the plot
             norm_info = f" ({norm_method} norm, contrast={contrast:.1f})" if norm_method != 'linear' or contrast != 1.0 else ""
-            self.heatmap_ax.set_title(f'Feature Heatmap{norm_info}')
-            self.heatmap_ax.set_xlabel('Features')
-            self.heatmap_ax.set_ylabel('Samples')
+            self.heatmap_ax.set_title(f'Spectral Heatmap{norm_info}')
+            self.heatmap_ax.set_xlabel('Wavenumber (cm⁻¹)')
+            self.heatmap_ax.set_ylabel('Samples (sorted by cluster)')
             
             # Add cluster boundaries
             unique_labels = np.unique(sorted_labels)
@@ -1010,8 +1252,11 @@ class RamanGroupAnalysisWindow:
                 alpha=0.8     # Slight transparency for better visibility
             )
             
-            # Add colorbar, anchored to the correct axis
-            self.viz_fig.colorbar(scatter, ax=self.viz_ax)
+            # Add colorbar, anchored to the correct axis with integer ticks
+            cbar = self.viz_fig.colorbar(scatter, ax=self.viz_ax)
+            cbar.set_label('Cluster ID')
+            cbar.locator = ticker.MaxNLocator(integer=True)
+            cbar.update_ticks()
             
             # Add grid for better readability
             self.viz_ax.grid(True, linestyle='--', alpha=0.5)
@@ -1028,8 +1273,14 @@ class RamanGroupAnalysisWindow:
                 
                 # Check if sample_labels are available
                 if 'sample_labels' in self.cluster_data and self.cluster_data['sample_labels'] is not None:
-                    # Create tooltips using mplcursors
-                    cursor = mplcursors.cursor(scatter, hover=True)
+                    # Create tooltips using mplcursors with hover-only behavior
+                    try:
+                        # Try with Transient hover mode (removes tooltip when mouse moves away)
+                        cursor = mplcursors.cursor(scatter, hover=mplcursors.HoverMode.Transient)
+                    except (AttributeError, TypeError):
+                        # Fallback to basic hover=True with manual cleanup
+                        cursor = mplcursors.cursor(scatter, hover=True)
+                        cursor.connect("add", lambda sel: setattr(sel.annotation, '_auto_hide', True))
                     
                     @cursor.connect("add")
                     def on_add(sel):
@@ -1121,20 +1372,14 @@ class RamanGroupAnalysisWindow:
                             # Format tooltip text
                             sel.annotation.set_text(tooltip_text)
                             
-                            # Customize tooltip appearance
-                            sel.annotation.get_bbox_patch().set(fc="white", alpha=0.9)
-                            sel.annotation.set_visible(True)
+                            # Customize tooltip appearance for transient display
+                            sel.annotation.get_bbox_patch().set(fc="lightyellow", alpha=0.95, edgecolor="black", linewidth=1)
+                            sel.annotation.set_fontsize(9)
                             
                         except Exception as e:
                             print(f"ERROR in tooltip display: {str(e)}")
                             # Set a basic tooltip with error information
-                            sel.annotation.set_text(f"Error displaying data: {str(e)[:50]}")
-                    
-                    @cursor.connect("remove")
-                    def on_remove(sel):
-                        if sel.annotation:
-                            sel.annotation.set_visible(False)
-                            self.viz_canvas.draw()
+                            sel.annotation.set_text(f"Error: {str(e)[:30]}")
                 
                 else:
                     print("DEBUG: No sample labels available for tooltips")
@@ -1148,8 +1393,34 @@ class RamanGroupAnalysisWindow:
             # Draw the canvas
             self.viz_canvas.draw()
             
+            # Add mouse motion handler to ensure tooltips disappear when moving away from points
+            def on_mouse_motion(event):
+                # This helps ensure tooltips disappear when mouse moves to empty areas
+                if event.inaxes == self.viz_ax:
+                    # Check if mouse is over any data points
+                    if hasattr(self, '_last_cursor') and self._last_cursor:
+                        try:
+                            # Force update of cursor state
+                            self._last_cursor._update_state(event)
+                        except:
+                            pass
+            
+            # Store cursor reference for motion handler
+            if 'sample_labels' in self.cluster_data and self.cluster_data['sample_labels'] is not None:
+                try:
+                    # Store cursor reference
+                    if 'cursor' in locals():
+                        self._last_cursor = cursor
+                        # Connect motion event
+                        self.viz_canvas.mpl_connect('motion_notify_event', on_mouse_motion)
+                except:
+                    pass
+            
             # Reconnect pick event handler for interactive selection
             self.viz_canvas.mpl_connect('pick_event', self.on_pick)
+            
+            # Draw the canvas to update the visualization
+            self.viz_canvas.draw()
             
         except Exception as e:
             print(f"DEBUG: Scatter plot update error: {str(e)}")
@@ -1209,15 +1480,15 @@ class RamanGroupAnalysisWindow:
         
     def save_state(self):
         """Save current state for undo."""
-        if self.cluster_data['labels'] is not None:
+        if self.cluster_data is not None and 'labels' in self.cluster_data and self.cluster_data['labels'] is not None:
             state = {
                 'cluster_labels': self.cluster_data['labels'].copy(),
-                'selected_points': self.selected_points.copy()
+                'selected_points': self.selected_points.copy() if hasattr(self, 'selected_points') else set()
             }
             self.undo_stack.append(state)
             if len(self.undo_stack) > self.max_undo_steps:
                 self.undo_stack.pop(0)
-            print("Refinement mode activated. Select points in the scatter plot to merge clusters.")
+            print(f"DEBUG: Saved state with {len(self.cluster_data['labels'])} labels and {len(state['selected_points'])} selected points")
 
     def undo_last_action(self):
         """Undo the last action."""
@@ -1227,26 +1498,38 @@ class RamanGroupAnalysisWindow:
             
         state = self.undo_stack.pop()
         self.cluster_data['labels'] = state['cluster_labels']
-        self.selected_points = state['selected_points']
         
-        # Update visualizations
+        # Restore selected points if they exist in the state
+        if 'selected_points' in state:
+            self.selected_points = state['selected_points']
+        else:
+            self.selected_points = set()
+        
+        # Update all visualizations including refinement
         self.update_visualizations()
         self.update_refinement_results()
+        self.update_selection_status()
         
         messagebox.showinfo("Success", "Last action undone.")
 
     def preview_split(self):
         """Preview the split of selected clusters."""
-        if not self.selected_points:
-            messagebox.showinfo("Info", "No points selected for splitting.")
-            return
-        # Use cluster labels from cluster_data
-        selected_clusters = set(np.array(self.cluster_data['labels'])[list(self.selected_points)])
-        if len(selected_clusters) != 1:
-            messagebox.showinfo("Info", "Please select points from only one cluster to split.")
+        if not hasattr(self, 'selected_points') or not self.selected_points:
+            messagebox.showinfo("Info", "No points selected for splitting.\n\nDouble-click points in the visualization to select them.")
             return
             
-        # Save current state
+        # Check if points are from a single cluster
+        selected_clusters = set()
+        for point_idx in self.selected_points:
+            if point_idx < len(self.cluster_data['labels']):
+                selected_clusters.add(self.cluster_data['labels'][point_idx])
+        
+        if len(selected_clusters) != 1:
+            messagebox.showinfo("Info", f"Please select points from only one cluster to split.\n\n" +
+                              f"Currently selected points are from {len(selected_clusters)} different clusters.")
+            return
+        
+        # Save current state for preview
         self.save_state()
         
         # Perform split
@@ -1255,6 +1538,9 @@ class RamanGroupAnalysisWindow:
         # Show preview message
         messagebox.showinfo("Preview", 
                           "Split preview applied. Use 'Apply Preview' to keep changes or 'Cancel Preview' to revert.")
+        
+        # Update refinement results to show preview
+        self.update_refinement_results()
 
     def apply_preview(self):
         """Apply the previewed changes."""
@@ -1285,74 +1571,146 @@ class RamanGroupAnalysisWindow:
 
     def split_selected_cluster(self, preview=False):
         """Split the selected cluster into subclusters."""
-        if not self.selected_points:
-            messagebox.showinfo("Info", "Please select points from a single cluster to split.")
+        if not hasattr(self, 'selected_points') or not self.selected_points:
+            messagebox.showinfo("Info", "Please select points from a single cluster to split.\n\n" +
+                              "Double-click points in the visualization to select them.")
             return
-            
-        # Get the cluster label of selected points
-        selected_clusters = set(np.array(self.cluster_data['labels'])[list(self.selected_points)])
+        
+        if self.cluster_data is None or 'labels' not in self.cluster_data or self.cluster_data['labels'] is None:
+            messagebox.showinfo("Info", "No clustering data available. Please run clustering first.")
+            return
+        
+        # Get the cluster labels of selected points
+        selected_clusters = set()
+        for point_idx in self.selected_points:
+            if point_idx < len(self.cluster_data['labels']):
+                selected_clusters.add(self.cluster_data['labels'][point_idx])
+        
         if len(selected_clusters) != 1:
-            messagebox.showinfo("Info", "Please select points from only one cluster to split.")
+            messagebox.showinfo("Info", f"Please select points from only one cluster to split.\n\n" +
+                              f"Currently selected points are from {len(selected_clusters)} different clusters.")
             return
-            
+        
         cluster_to_split = selected_clusters.pop()
         n_subclusters = self.n_subclusters.get()
         split_method = self.split_method.get()
         
-        # Get the points in the selected cluster
+        # Get all points in the selected cluster (not just selected points)
         cluster_points = np.where(self.cluster_data['labels'] == cluster_to_split)[0]
-        cluster_features = self.cluster_data['features_scaled'][cluster_points]
         
-        # Perform splitting based on selected method
-        if split_method == 'kmeans':
-            splitter = KMeans(n_clusters=n_subclusters, random_state=42)
-            subcluster_labels = splitter.fit_predict(cluster_features)
-        elif split_method == 'hierarchical':
-            from scipy.cluster.hierarchy import fcluster
-            linkage_matrix = linkage(cluster_features, method='ward')
-            subcluster_labels = fcluster(linkage_matrix, n_subclusters, criterion='maxclust')
-        else:  # spectral
-            splitter = SpectralClustering(n_clusters=n_subclusters, random_state=42)
-            subcluster_labels = splitter.fit_predict(cluster_features)
+        if len(cluster_points) < n_subclusters:
+            messagebox.showinfo("Info", f"Cannot split cluster {cluster_to_split} into {n_subclusters} subclusters.\n\n" +
+                              f"The cluster only has {len(cluster_points)} points.")
+            return
         
-        # Update cluster labels
-        max_label = np.max(self.cluster_data['labels'])
-        for i, point_idx in enumerate(cluster_points):
-            self.cluster_data['labels'][point_idx] = max_label + subcluster_labels[i] + 1
-        
-        # Update visualizations
-        self.update_visualizations()
-        self.update_refinement_results()
-        
+        # Confirm split operation
         if not preview:
-            messagebox.showinfo("Success", 
-                              f"Cluster {cluster_to_split} split into {n_subclusters} subclusters.")
+            split_msg = (f"Split cluster {cluster_to_split} ({len(cluster_points)} points) "
+                        f"into {n_subclusters} subclusters using {split_method}?")
+            if not messagebox.askyesno("Confirm Split", split_msg):
+                return
+        
+        # Save current state for undo (if not preview)
+        if not preview:
+            self.save_state()
+        
+        try:
+            # Get features for points in the cluster
+            cluster_features = self.cluster_data['features_scaled'][cluster_points]
+            
+            # Perform splitting based on selected method
+            if split_method == 'kmeans':
+                splitter = KMeans(n_clusters=n_subclusters, random_state=42, n_init=10)
+                subcluster_labels = splitter.fit_predict(cluster_features)
+            elif split_method == 'hierarchical':
+                from scipy.cluster.hierarchy import fcluster
+                linkage_matrix = linkage(cluster_features, method='ward')
+                subcluster_labels = fcluster(linkage_matrix, n_subclusters, criterion='maxclust')
+                # Convert to 0-based indexing
+                subcluster_labels = subcluster_labels - 1
+            else:  # spectral
+                splitter = SpectralClustering(n_clusters=n_subclusters, random_state=42, 
+                                            affinity='rbf', assign_labels='discretize')
+                subcluster_labels = splitter.fit_predict(cluster_features)
+            
+            # Update cluster labels - assign new cluster IDs
+            max_label = np.max(self.cluster_data['labels'])
+            for i, point_idx in enumerate(cluster_points):
+                self.cluster_data['labels'][point_idx] = max_label + subcluster_labels[i] + 1
+            
+            # Update visualizations
+            self.update_visualizations()
+            self.update_refinement_results()
+            
+            if not preview:
+                # Clear selection after split
+                self.selected_points.clear()
+                self.update_selection_status()
+                
+                messagebox.showinfo("Success", 
+                                  f"Successfully split cluster {cluster_to_split} into {n_subclusters} subclusters using {split_method}.")
+            
+        except Exception as e:
+            print(f"DEBUG: Error during cluster split: {str(e)}")
+            messagebox.showerror("Error", f"Failed to split cluster: {str(e)}")
+            # Remove saved state if split failed
+            if not preview and self.undo_stack:
+                self.undo_stack.pop()
 
     def merge_selected_clusters(self):
         """Merge selected clusters based on selected points."""
-        if not self.selected_points:
-            messagebox.showinfo("Info", "No points selected for merging.")
-            return
-        # Use cluster labels from cluster_data
-        selected_clusters = set(np.array(self.cluster_data['labels'])[list(self.selected_points)])
-        if len(selected_clusters) < 2:
-            messagebox.showinfo("Info", "Please select points from different clusters to merge.")
+        if not hasattr(self, 'selected_points') or not self.selected_points:
+            messagebox.showinfo("Info", "No points selected for merging.\n\nDouble-click points in the visualization to select them.")
             return
             
-        # Merge clusters
+        if self.cluster_data is None or 'labels' not in self.cluster_data or self.cluster_data['labels'] is None:
+            messagebox.showinfo("Info", "No clustering data available. Please run clustering first.")
+            return
+        
+        # Save current state for undo
+        self.save_state()
+        
+        # Get clusters that contain selected points
+        selected_clusters = set()
+        for point_idx in self.selected_points:
+            if point_idx < len(self.cluster_data['labels']):
+                selected_clusters.add(self.cluster_data['labels'][point_idx])
+        
+        if len(selected_clusters) < 2:
+            messagebox.showinfo("Info", "Please select points from at least 2 different clusters to merge.\n\n" +
+                              f"Currently selected points are from {len(selected_clusters)} cluster(s).")
+            return
+        
+        # Confirm merge operation
+        cluster_list = sorted(list(selected_clusters))
+        merge_msg = f"Merge clusters {cluster_list} into cluster {min(selected_clusters)}?"
+        if not messagebox.askyesno("Confirm Merge", merge_msg):
+            # Remove the saved state since we're not proceeding
+            if self.undo_stack:
+                self.undo_stack.pop()
+            return
+        
+        # Merge clusters - assign all selected clusters to the smallest cluster ID
         new_label = min(selected_clusters)
         for old_label in selected_clusters:
             if old_label != new_label:
                 self.cluster_data['labels'][self.cluster_data['labels'] == old_label] = new_label
-                
+        
         # Update visualizations
         self.update_visualizations()
         self.update_refinement_results()
+        
+        # Clear selection after merge
+        self.selected_points.clear()
+        self.update_selection_status()
+        
+        messagebox.showinfo("Success", f"Successfully merged clusters {cluster_list} into cluster {new_label}.")
 
     def reset_selection(self):
         """Reset the point selection."""
         self.selected_points.clear()
-        self.update_scatter_plot()
+        self.update_selection_status()
+        self.update_refinement_visualization()
         
     def apply_refinement(self):
         """Apply the refinement changes."""
@@ -1370,7 +1728,10 @@ class RamanGroupAnalysisWindow:
         
     def update_refinement_results(self):
         """Update the refinement results text."""
-        if self.cluster_data is None:
+        if self.cluster_data is None or 'labels' not in self.cluster_data or self.cluster_data['labels'] is None:
+            self.refinement_text.delete(1.0, tk.END)
+            self.refinement_text.insert(tk.END, "No clustering data available.\n\n")
+            self.refinement_text.insert(tk.END, "Please run clustering from the Clustering tab first.")
             return
             
         # Calculate cluster statistics
@@ -1384,17 +1745,68 @@ class RamanGroupAnalysisWindow:
                 'Size': len(cluster_points),
                 'Percentage': len(cluster_points) / len(self.cluster_data['labels']) * 100
             })
-            
+        
+        # Sort by cluster ID for consistent display
+        cluster_stats.sort(key=lambda x: x['Cluster'])
+        
         # Create results text
-        results_text = "Cluster Refinement Results:\n\n"
+        results_text = "Current Cluster Configuration:\n\n"
+        results_text += f"Total Clusters: {len(unique_clusters)}\n"
+        results_text += f"Total Points: {len(self.cluster_data['labels'])}\n\n"
+        
+        # Show detailed cluster information
+        results_text += "Cluster Details:\n"
         for stat in cluster_stats:
-            results_text += f"Cluster {stat['Cluster']}:\n"
-            results_text += f"  Size: {stat['Size']} points\n"
-            results_text += f"  Percentage: {stat['Percentage']:.1f}%\n\n"
+            results_text += f"  Cluster {stat['Cluster']}: {stat['Size']} points ({stat['Percentage']:.1f}%)\n"
+        
+        # Show selection information if points are selected
+        if hasattr(self, 'selected_points') and self.selected_points:
+            results_text += f"\nCurrent Selection:\n"
+            results_text += f"  Selected Points: {len(self.selected_points)}\n"
             
+            # Show which clusters the selected points belong to
+            selected_clusters = set()
+            for point_idx in self.selected_points:
+                if point_idx < len(self.cluster_data['labels']):
+                    selected_clusters.add(self.cluster_data['labels'][point_idx])
+            
+            if selected_clusters:
+                results_text += f"  Clusters Represented: {sorted(list(selected_clusters))}\n"
+                
+                # Show distribution of selected points across clusters
+                for cluster_id in sorted(selected_clusters):
+                    count = sum(1 for point_idx in self.selected_points 
+                              if point_idx < len(self.cluster_data['labels']) and 
+                              self.cluster_data['labels'][point_idx] == cluster_id)
+                    results_text += f"    Cluster {cluster_id}: {count} selected points\n"
+        else:
+            results_text += "\nNo points currently selected.\n"
+            results_text += "Double-click points in the visualization above to select them.\n"
+        
+        # Add refinement suggestions
+        results_text += "\nSuggested Actions:\n"
+        if hasattr(self, 'selected_points') and self.selected_points:
+            selected_clusters = set()
+            for point_idx in self.selected_points:
+                if point_idx < len(self.cluster_data['labels']):
+                    selected_clusters.add(self.cluster_data['labels'][point_idx])
+            
+            if len(selected_clusters) > 1:
+                results_text += f"  • Merge {len(selected_clusters)} clusters into one\n"
+            elif len(selected_clusters) == 1:
+                cluster_id = list(selected_clusters)[0]
+                cluster_size = len(np.where(self.cluster_data['labels'] == cluster_id)[0])
+                if cluster_size >= 4:  # Need at least 4 points to split into 2 clusters
+                    results_text += f"  • Split cluster {cluster_id} into subclusters\n"
+                else:
+                    results_text += f"  • Cluster {cluster_id} too small to split ({cluster_size} points)\n"
+        else:
+            results_text += "  • Select points to see available refinement options\n"
+        
+        # Clear and update the text widget
         self.refinement_text.delete(1.0, tk.END)
         self.refinement_text.insert(tk.END, results_text)
-        
+
     def update_analysis_results(self):
         """Update the analysis results with detailed statistics."""
         print("\nDEBUG: Updating analysis results tab")
@@ -3197,3 +3609,157 @@ class RamanGroupAnalysisWindow:
         except Exception as e:
             print(f"Error loading Hey Classifications from CSV: {str(e)}")
             return set()
+
+    def on_refinement_pick(self, event):
+        """Handle point selection in refinement scatter plot."""
+        if not hasattr(self, 'selected_points'):
+            self.selected_points = set()
+            
+        if event.mouseevent.dblclick:  # Double-click to select/deselect
+            ind = event.ind[0]  # Get the index of the selected point
+            if ind in self.selected_points:
+                self.selected_points.remove(ind)
+            else:
+                self.selected_points.add(ind)
+            
+            # Update visualization and status
+            self.update_refinement_visualization()
+            self.update_selection_status()
+
+    def update_selection_status(self):
+        """Update the selection status label."""
+        if not hasattr(self, 'selected_points') or not self.selected_points:
+            self.selection_status.set("No points selected")
+            return
+            
+        # Get cluster information for selected points
+        if self.cluster_data is None or 'labels' not in self.cluster_data or self.cluster_data['labels'] is None:
+            self.selection_status.set(f"{len(self.selected_points)} points selected")
+            return
+            
+        selected_clusters = set()
+        for point_idx in self.selected_points:
+            if point_idx < len(self.cluster_data['labels']):
+                selected_clusters.add(self.cluster_data['labels'][point_idx])
+        
+        if len(selected_clusters) == 1:
+            cluster_id = list(selected_clusters)[0]
+            self.selection_status.set(f"{len(self.selected_points)} points selected from cluster {cluster_id}")
+        else:
+            self.selection_status.set(f"{len(self.selected_points)} points selected from {len(selected_clusters)} clusters")
+
+    def update_refinement_visualization(self):
+        """Update the refinement tab visualization."""
+        if not hasattr(self, 'refinement_fig') or self.cluster_data is None:
+            return
+            
+        try:
+            # Clear the entire figure to prevent size changes
+            self.refinement_fig.clf()
+            
+            # Recreate the subplot
+            self.refinement_ax = self.refinement_fig.add_subplot(111)
+            
+            if self.cluster_data['features'] is None or self.cluster_data['labels'] is None:
+                self.refinement_ax.text(0.5, 0.5, "No clustering data available.\nRun clustering first.", 
+                                      ha='center', va='center', transform=self.refinement_ax.transAxes,
+                                      fontsize=14)
+                self.refinement_fig.tight_layout()
+                self.refinement_canvas.draw()
+                return
+            
+            # Use the same dimensionality reduction as the main visualization
+            method = self.visualization_method.get()
+            features_to_use = self.cluster_data['features_scaled']
+            
+            if features_to_use is None:
+                features_to_use = StandardScaler().fit_transform(self.cluster_data['features'])
+            
+            # Perform dimensionality reduction
+            if method == 'PCA':
+                reducer = PCA(n_components=2)
+                features_2d = reducer.fit_transform(features_to_use)
+            elif method == 'UMAP' and UMAP_AVAILABLE:
+                n_neighbors = min(30, max(5, len(features_to_use) // 10))
+                reducer = umap.UMAP(n_components=2, n_neighbors=n_neighbors, 
+                                  min_dist=0.1, metric='euclidean', random_state=42)
+                features_2d = reducer.fit_transform(features_to_use)
+            else:
+                # Fallback to PCA
+                reducer = PCA(n_components=2)
+                features_2d = reducer.fit_transform(features_to_use)
+            
+            # Create arrays for plotting
+            x_coords = features_2d[:, 0]
+            y_coords = features_2d[:, 1]
+            labels = self.cluster_data['labels']
+            
+            # Create masks for selected and unselected points
+            selected_mask = np.zeros(len(x_coords), dtype=bool)
+            if hasattr(self, 'selected_points') and self.selected_points:
+                selected_indices = list(self.selected_points)
+                selected_mask[selected_indices] = True
+            
+            unselected_mask = ~selected_mask
+            
+            # Plot all points first (this ensures consistent colorbar range)
+            scatter_all = self.refinement_ax.scatter(
+                x_coords, y_coords,
+                c=labels,
+                cmap='viridis',
+                alpha=0.7,
+                s=50,
+                picker=True,
+                pickradius=5
+            )
+            
+            # Plot selected points on top in red
+            if np.any(selected_mask):
+                self.refinement_ax.scatter(
+                    x_coords[selected_mask], 
+                    y_coords[selected_mask],
+                    c='red',
+                    s=100,
+                    alpha=0.9,
+                    picker=True,
+                    pickradius=5,
+                    edgecolors='darkred',
+                    linewidths=2,
+                    zorder=5  # Ensure selected points are on top
+                )
+            
+            # Add colorbar only once
+            cbar = self.refinement_fig.colorbar(scatter_all, ax=self.refinement_ax)
+            cbar.set_label('Cluster ID')
+            
+            # Set colorbar ticks to integers only (no fractional clusters)
+            cbar.locator = ticker.MaxNLocator(integer=True)
+            cbar.update_ticks()
+            
+            # Set labels and title
+            self.refinement_ax.set_xlabel(f'{method} Component 1')
+            self.refinement_ax.set_ylabel(f'{method} Component 2')
+            self.refinement_ax.set_title('Interactive Cluster Refinement\n(Double-click points to select/deselect)')
+            
+            # Add grid
+            self.refinement_ax.grid(True, alpha=0.3)
+            
+            # Use tight_layout to ensure consistent sizing
+            self.refinement_fig.tight_layout()
+            
+            # Draw the canvas
+            self.refinement_canvas.draw()
+            
+        except Exception as e:
+            print(f"DEBUG: Error updating refinement visualization: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            # Show error message in plot
+            self.refinement_fig.clf()
+            self.refinement_ax = self.refinement_fig.add_subplot(111)
+            self.refinement_ax.text(0.5, 0.5, f"Error updating visualization:\n{str(e)}", 
+                                  ha='center', va='center', transform=self.refinement_ax.transAxes,
+                                  fontsize=12, color='red')
+            self.refinement_fig.tight_layout()
+            self.refinement_canvas.draw()
