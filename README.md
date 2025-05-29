@@ -12,12 +12,25 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
   - Peak detection and analysis
   - Interactive plotting and zooming
   - Spectral comparison
+  - **NEW: Multi-Spectrum Manager Integration**
+    - Direct access from File tab for multi-spectrum analysis
+    - Comprehensive data playground for comparing multiple spectra
+    - Advanced visualization and manipulation tools
+    - Session saving and loading capabilities
 
 - **Database Management**
   - Store and organize Raman spectra
   - Edit metadata and classifications
   - Batch import capabilities
   - View and search database contents
+  - **NEW: Advanced Raman Database Browser**
+    - Dedicated interface for browsing the complete Raman database
+    - Advanced search and filtering capabilities
+    - Interactive spectrum visualization with peak analysis
+    - Metadata viewing and editing with comprehensive field support
+    - Export capabilities for individual spectra
+    - Database statistics and Hey classification summaries
+    - Standalone mode available via `launch_raman_database_browser.py`
   - **Mineral Raman Modes Database**
     - Store peak positions, symmetry characters, and relative intensities
     - Import modes from peak fitting results
@@ -47,6 +60,18 @@ ClaritySpectra is a comprehensive desktop application for analyzing and identify
     - No need to define regions for fitting, no need for spectral smoothing (although it is an option)
     - Report generation and export of publication quality graphics
   - Export fitted peaks to the mineral Raman modes database
+  - **NEW: Advanced Analysis Tab**
+    - Dedicated tab for advanced analysis tools
+    - Professional-styled buttons with hover effects
+    - Quick access to:
+      - Peak Fitting Window
+      - Batch Peak Fitting
+      - 2D Map Analysis  
+      - Raman Group Analysis
+      - Hey-Celestian Frequency Analysis
+      - Raman Polarization Analysis
+      - Specialized strain analysis tools (Stress/Strain and Chemical Strain)
+    - Integrated error handling and module availability checking
 
 - **Batch Processing**
   - Import any number of spectra that your system can handle

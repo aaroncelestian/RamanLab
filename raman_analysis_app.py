@@ -25,6 +25,14 @@ from datetime import datetime
 from io import BytesIO
 from version import __version__, __author__, __copyright__
 
+# Import the update checker for version management
+try:
+    from update_checker import UpdateChecker
+    UPDATE_CHECKER_AVAILABLE = True
+except ImportError:
+    UPDATE_CHECKER_AVAILABLE = False
+    print("Warning: UpdateChecker not available. Update checking will be disabled.")
+
 # from cnn_model import RamanCNN  # Import the RamanCNN class
 # from search_functions import plot_match_comparison, generate_correlation_heatmap, generate_match_report
 # import types
@@ -80,6 +88,10 @@ class RamanAnalysisApp:
 
         # Initialize RamanSpectra instance
         self.raman = RamanSpectra()
+        
+        # Initialize mineral database
+        self.mineral_database = None
+        self._initialize_mineral_database()
 
         # Initialize selected match
         self.selected_match = tk.StringVar()
@@ -96,6 +108,15 @@ class RamanAnalysisApp:
         # Only if db_stats_text has been properly initialized
         if self.db_stats_text is not None:
             self.update_database_stats()
+
+    def _initialize_mineral_database(self):
+        """Initialize the mineral database for use with Hey-Celestian analysis."""
+        try:
+            from mineral_database import MineralDatabase
+            self.mineral_database = MineralDatabase()
+        except Exception as e:
+            print(f"Warning: Could not initialize mineral database: {e}")
+            self.mineral_database = None
 
     def create_gui(self):
         """Create the GUI elements."""
@@ -165,7 +186,7 @@ class RamanAnalysisApp:
             label="2D Map Analysis", command=self.open_2d_map_analysis
         )
         analysis_menu.add_command(
-            label="Raman Group Analysis", command=self.open_raman_group_analysis
+            label="Raman Cluster Analysis", command=self.open_raman_cluster_analysis
         )
         analysis_menu.add_command(
             label="Mixed Mineral Analysis", command=self.analyze_mixed_minerals
@@ -177,15 +198,14 @@ class RamanAnalysisApp:
         database_menu.add_command(
             label="Add Current Spectrum", command=lambda: self.add_to_database()
         )
-        database_menu.add_command(
-            label="View/Search Database", command=self.view_database
-        )
         database_menu.add_command(label="Batch Import", command=self.batch_import)
 
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About", command=self.show_about_dialog)
+        help_menu.add_separator()
+        help_menu.add_command(label="Check for Updates", command=self.check_for_updates)
 
     def show_about_dialog(self):
         """Show the About dialog with application information."""
@@ -236,10 +256,85 @@ class RamanAnalysisApp:
             "https://tinyurl.com/2ek3zceb",
         ).pack(pady=10)
 
+        # Button frame
+        button_frame = ttk.Frame(about_window)
+        button_frame.pack(pady=10)
+
+        # Check for Updates button (if available)
+        if UPDATE_CHECKER_AVAILABLE:
+            ttk.Button(
+                button_frame, 
+                text="Check for Updates", 
+                command=lambda: [about_window.destroy(), self.check_for_updates()]
+            ).pack(side=tk.LEFT, padx=(0, 10))
+
         # Close button
-        ttk.Button(about_window, text="Close", command=about_window.destroy).pack(
-            pady=10
+        ttk.Button(button_frame, text="Close", command=about_window.destroy).pack(
+            side=tk.LEFT
         )
+
+    def check_for_updates(self):
+        """Check for updates and show update dialog if available."""
+        if not UPDATE_CHECKER_AVAILABLE:
+            messagebox.showerror(
+                "Update Check Unavailable",
+                "Update checking functionality is not available.\n"
+                "Please ensure the update_checker module is properly installed."
+            )
+            return
+        
+        try:
+            # Show a brief status message
+            status_window = tk.Toplevel(self.root)
+            status_window.title("Checking for Updates")
+            status_window.geometry("300x100")
+            status_window.resizable(False, False)
+            status_window.transient(self.root)
+            status_window.grab_set()
+            
+            # Center the status window
+            status_window.update_idletasks()
+            x = (status_window.winfo_screenwidth() // 2) - (300 // 2)
+            y = (status_window.winfo_screenheight() // 2) - (100 // 2)
+            status_window.geometry(f"300x100+{x}+{y}")
+            
+            # Status message
+            ttk.Label(
+                status_window, 
+                text="Checking for updates...", 
+                font=('TkDefaultFont', 10)
+            ).pack(expand=True)
+            
+            # Progress bar
+            progress = ttk.Progressbar(status_window, mode='indeterminate')
+            progress.pack(pady=10, padx=20, fill=tk.X)
+            progress.start()
+            
+            # Update the display
+            status_window.update()
+            
+            # Initialize update checker and check for updates
+            update_checker = UpdateChecker(current_version=__version__)
+            update_info = update_checker.check_for_updates(show_no_updates=True)
+            
+            # Close status window
+            status_window.destroy()
+            
+            # Show update dialog if updates are available
+            if update_info and update_info.get('update_available'):
+                update_checker.show_update_dialog(update_info)
+                
+        except Exception as e:
+            # Close status window if it exists
+            try:
+                status_window.destroy()
+            except:
+                pass
+                
+            messagebox.showerror(
+                "Update Check Error",
+                f"An error occurred while checking for updates:\n{str(e)}"
+            )
 
     def create_control_panel(self):
         """Create the control panel with tabs for different functions."""
@@ -281,7 +376,7 @@ class RamanAnalysisApp:
         self.create_process_tab()
         self.create_search_tab(self.tab_search)  # Pass the parent tab as argument
         self.create_database_tab()
-        self.create_advanced_analysis_tab()  # Changed from create_peak_fitting_tab
+        self.create_advanced_analysis_tab()  # Advanced analysis functionality
 
     def create_file_tab(self):
         """Create content for the file operations tab."""
@@ -296,6 +391,9 @@ class RamanAnalysisApp:
             file_frame, text="Save Current Spectrum", command=self.save_spectrum
         ).pack(fill=tk.X, pady=2)
         ttk.Button(file_frame, text="Edit Metadata", command=self.edit_metadata).pack(
+            fill=tk.X, pady=2
+        )
+        ttk.Button(file_frame, text="Multi-Spectrum Manager", command=self.launch_multi_spectrum_manager).pack(
             fill=tk.X, pady=2
         )
         
@@ -335,9 +433,17 @@ class RamanAnalysisApp:
         self.var_p = tk.StringVar(value="0.01")
         ttk.Entry(bg_frame, textvariable=self.var_p).pack(fill=tk.X, pady=2)
 
+        # Button frame for Subtract Background and Reset buttons
+        bg_button_frame = ttk.Frame(bg_frame)
+        bg_button_frame.pack(fill=tk.X, pady=5)
+        
         ttk.Button(
-            bg_frame, text="Subtract Background", command=self.subtract_background
-        ).pack(fill=tk.X, pady=5)
+            bg_button_frame, text="Subtract Background", command=self.subtract_background
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        ttk.Button(
+            bg_button_frame, text="Reset", command=self.reset_spectrum
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Savitzky-Golay smoothing frame
         sg_frame = ttk.LabelFrame(
@@ -1072,17 +1178,6 @@ class RamanAnalysisApp:
         manage_frame.pack(fill=tk.X, pady=5)
 
         ttk.Button(
-            manage_frame, text="Batch Import Spectra", command=self.batch_import
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            manage_frame, text="View/Search Database", command=self.view_database
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
-            manage_frame,
-            text="Update Hey Classification",
-            command=self.update_hey_classification_database,
-        ).pack(fill=tk.X, pady=2)
-        ttk.Button(
             manage_frame,
             text="Refresh Database Info",
             command=self.update_database_stats,
@@ -1093,6 +1188,13 @@ class RamanAnalysisApp:
             manage_frame,
             text="View/Edit Mineral Character Info",
             command=self.launch_mineral_database_browser,
+        ).pack(fill=tk.X, pady=2)
+        
+        # Add the new button to launch the Raman database browser
+        ttk.Button(
+            manage_frame,
+            text="View/Edit Database",
+            command=self.launch_raman_database_browser,
         ).pack(fill=tk.X, pady=2)
 
         # Database statistics frame
@@ -2000,6 +2102,57 @@ class RamanAnalysisApp:
 
         except Exception as e:
             messagebox.showerror("Background Subtraction Error", str(e))
+
+    def reset_spectrum(self):
+        """Reset the spectrum to its original state, clearing all processing."""
+        if self.raman.current_spectra is None:
+            messagebox.showwarning("Warning", "No spectrum loaded.")
+            return
+
+        try:
+            # Clear processed data and background
+            self.raman.processed_spectra = None
+            self.raman.background = None
+            self.raman.peaks = None
+            
+            # Reset display options
+            self.var_show_background.set(False)
+            self.var_show_peaks.set(False)
+            
+            # Update the plot to show original spectrum
+            self.update_plot(include_background=False, include_peaks=False)
+            
+            # Update title bar to remove processing indicators
+            current_title = self.root.title()
+            base_title = "ClaritySpectra: Raman Spectrum Analysis"
+            
+            # Remove common processing indicators from title
+            processing_indicators = [
+                " - Background Subtracted",
+                " - Smoothed", 
+                " - Peaks Detected",
+                " Peaks Detected",
+                "Background Subtracted"
+            ]
+            
+            for indicator in processing_indicators:
+                if indicator in current_title:
+                    current_title = current_title.replace(indicator, "")
+            
+            # Clean up any remaining " - " at the end
+            current_title = current_title.rstrip(" -")
+            
+            # Set clean title or default
+            if current_title.strip() == "ClaritySpectra":
+                current_title = base_title
+            
+            self.root.title(current_title)
+            
+            # Show success message in status bar instead of popup
+            self.root.title(f"{current_title} - Spectrum Reset")
+            
+        except Exception as e:
+            messagebox.showerror("Reset Error", f"Error resetting spectrum: {str(e)}")
 
     def find_peaks(self):
         """Find peaks in the current spectrum."""
@@ -4509,2303 +4662,6 @@ class RamanAnalysisApp:
         canvas.draw()
         return ax
 
-    def save_overlay_plot(self, fig):
-        """Save the overlay plot to a file."""
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".png",
-            filetypes=[
-                ("PNG files", "*.png"),
-                ("PDF files", "*.pdf"),
-                ("All files", "*.*"),
-            ],
-        )
-        if file_path:
-            fig.savefig(file_path, dpi=300, bbox_inches="tight")
-            messagebox.showinfo("Save Plot", f"Plot saved successfully to {file_path}")
-
-    def plot_comparison_data(self, match_data, fig, ax):
-        """Plot comparison between query spectrum and selected match.
-
-        Parameters:
-        -----------
-        match_data : tuple
-            Tuple containing (name, score) for the selected match
-        fig : matplotlib.figure.Figure
-            Figure object to plot on
-        ax : matplotlib.axes.Axes
-            Axes object to plot on
-        """
-        # Clear previous plots
-        if ax is None or not ax:
-            fig.clear()
-            ax = fig.add_subplot(111)
-        else:
-            ax.clear()
-
-        # Check if we have a valid spectrum loaded
-        if self.raman.current_spectra is None:
-            ax.text(
-                0.5,
-                0.5,
-                "No spectrum loaded for comparison.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return
-
-        # Get current spectrum (processed if available)
-        if self.raman.processed_spectra is not None:
-            query_spectrum = self.raman.processed_spectra
-        else:
-            query_spectrum = self.raman.current_spectra
-        query_wavenumbers = self.raman.current_wavenumbers
-
-        # Get match data
-        match_name, score = match_data
-
-        # Get mineral name from metadata if available
-        mineral_name = match_name
-        if (
-            match_name in self.raman.database
-            and "metadata" in self.raman.database[match_name]
-        ):
-            metadata = self.raman.database[match_name].get("metadata", {})
-            if "NAME" in metadata and metadata["NAME"]:
-                mineral_name = metadata["NAME"]
-
-        # Check if match exists in database
-        if match_name not in self.raman.database:
-            ax.text(
-                0.5,
-                0.5,
-                f"Match {mineral_name} not found.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return
-
-        match_data = self.raman.database[match_name]
-
-        # Handle both data formats (for backward compatibility)
-        if "wavenumbers" in match_data and "intensities" in match_data:
-            match_wavenumbers = match_data["wavenumbers"]
-            match_intensities = match_data["intensities"]
-        elif "wavenumber" in match_data and "intensity" in match_data:
-            match_wavenumbers = match_data["wavenumber"]
-            match_intensities = match_data["intensity"]
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                f"Match data format not recognized.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return
-
-        # Determine if we need to normalize
-        normalize = hasattr(self, "var_normalize") and self.var_normalize.get()
-
-        # Normalize query spectrum (if requested)
-        if normalize:
-            query_max = np.max(query_spectrum)
-            query_norm = query_spectrum / query_max if query_max > 0 else query_spectrum
-        else:
-            query_norm = query_spectrum
-
-        # Interpolate match spectrum if the wavenumbers differ
-        if not np.array_equal(query_wavenumbers, match_wavenumbers):
-            match_intensities_interp = np.interp(
-                query_wavenumbers, match_wavenumbers, match_intensities
-            )
-        else:
-            match_intensities_interp = match_intensities
-
-        # Normalize match spectrum (if requested)
-        if normalize:
-            match_max = np.max(match_intensities_interp)
-            match_norm = (
-                match_intensities_interp / match_max
-                if match_max > 0
-                else match_intensities_interp
-            )
-        else:
-            match_norm = match_intensities_interp
-
-        # Plot query spectrum
-        ax.plot(
-            query_wavenumbers, query_norm, "b-", label="Query Spectrum", linewidth=1.5
-        )
-
-        # Plot match spectrum
-        ax.plot(
-            query_wavenumbers,
-            match_norm,
-            "r-",
-            label=f"{mineral_name} ({score:.2f})",
-            linewidth=1.0,
-            alpha=0.8,
-        )
-
-        # Add difference plot if requested
-        show_diff = hasattr(self, "var_show_diff") and self.var_show_diff.get()
-        if show_diff:
-            diff = query_norm - match_norm
-            ax.plot(query_wavenumbers, diff, "k--", label="Difference", alpha=0.6)
-
-        # Highlight matching peaks if requested
-        if hasattr(self, "var_highlight_peaks") and self.var_highlight_peaks.get():
-            # Get peaks from both spectra
-            query_peaks = (
-                self.raman.peaks["wavenumbers"] if self.raman.peaks is not None else []
-            )
-
-            if "peaks" in match_data and match_data["peaks"] is not None:
-                match_peaks = match_data["peaks"].get("wavenumbers", [])
-
-                # Find matching peaks (within tolerance)
-                tolerance = 10  # Default peak match tolerance in cm^-1
-                if hasattr(self, "var_peak_tolerance"):
-                    try:
-                        tolerance = float(self.var_peak_tolerance.get())
-                    except (ValueError, TypeError):
-                        pass
-
-                # Plot matching peaks
-                for q_peak in query_peaks:
-                    for m_peak in match_peaks:
-                        if abs(q_peak - m_peak) <= tolerance:
-                            # Mark this as a matching peak
-                            q_height = np.interp(q_peak, query_wavenumbers, query_norm)
-                            m_height = np.interp(m_peak, query_wavenumbers, match_norm)
-
-                            # Draw highlights for matching peaks
-                            ax.axvline(
-                                x=q_peak, ymax=0.1, color="g", linestyle=":", alpha=0.5
-                            )
-                            ax.plot(q_peak, q_height, "go", markersize=5)
-                            ax.plot(m_peak, m_height, "go", markersize=5)
-
-                            # Optionally add peak position annotation
-                            ax.annotate(
-                                f"{q_peak:.1f}",
-                                xy=(q_peak, q_height),
-                                xytext=(0, 10),
-                                textcoords="offset points",
-                                ha="center",
-                                fontsize=8,
-                            )
-                            break  # Once matched, move to next query peak
-
-        # Configure plot appearance
-        ax.set_xlabel("Wavenumber (cm⁻¹)")
-        ax.set_ylabel("Intensity (Normalized)" if normalize else "Intensity (a.u.)")
-        ax.set_title(f"Query vs. {mineral_name}")
-        ax.legend(loc="upper right", fontsize="small")
-        ax.grid(True, linestyle=":", color="gray", alpha=0.6)
-
-        # Store the x-axis range for alignment with the mineral vibrations plot
-        self.comparison_x_range = ax.get_xlim()
-
-        # Make the figure tight in the plot window
-        # Adjust margins to minimize whitespace - more compact around the plot
-        fig.subplots_adjust(left=0.12, right=0.95, top=0.92, bottom=0.12)
-
-        # Use tight_layout for remaining adjustments
-        try:
-            fig.tight_layout(pad=0.5)  # Smaller padding for tighter layout
-        except:
-            # If tight_layout fails, continue without it
-            pass
-
-        return ax
-
-    def plot_correlation_data(self, match_data, fig, ax):
-        """Plot correlation heatmap for spectral regions between query and selected match."""
-        # Clear the entire figure first to ensure a clean start
-        fig.clear()
-        # Create a new axes object
-        ax = fig.add_subplot(111)
-
-        # Check if we have a valid spectrum loaded
-        if self.raman.current_spectra is None:
-            ax.text(
-                0.5,
-                0.5,
-                "No data for correlation heatmap.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return ax
-
-        # Get current spectrum (processed if available)
-        if self.raman.processed_spectra is not None:
-            current_spectrum = self.raman.processed_spectra
-        else:
-            current_spectrum = self.raman.current_spectra
-        query_wavenumbers = self.raman.current_wavenumbers
-
-        # Get match data
-        match_name, score = match_data
-
-        # Get mineral name from metadata if available
-        mineral_name = match_name
-        if (
-            match_name in self.raman.database
-            and "metadata" in self.raman.database[match_name]
-        ):
-            metadata = self.raman.database[match_name].get("metadata", {})
-            if "NAME" in metadata and metadata["NAME"]:
-                mineral_name = metadata["NAME"]
-
-        # Check if match exists in database
-        if match_name not in self.raman.database:
-            ax.text(
-                0.5,
-                0.5,
-                f"Match {mineral_name} not found.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return ax
-
-        match_data = self.raman.database[match_name]
-
-        # Get wavenumbers and intensities from match data - handle both formats
-        if "wavenumbers" in match_data and "intensities" in match_data:
-            match_wavenumbers = match_data["wavenumbers"]
-            match_intensities = match_data["intensities"]
-        elif "wavenumber" in match_data and "intensity" in match_data:
-            match_wavenumbers = match_data["wavenumber"]
-            match_intensities = match_data["intensity"]
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                f"Match data format not recognized.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return ax
-
-        # Normalize query spectrum (0-1)
-        query_max = np.max(current_spectrum)
-        current_norm = (
-            current_spectrum / query_max if query_max > 0 else current_spectrum
-        )
-
-        # Interpolate match spectrum if the wavenumbers differ
-        if not np.array_equal(query_wavenumbers, match_wavenumbers):
-            match_intensities_interp = np.interp(
-                query_wavenumbers, match_wavenumbers, match_intensities
-            )
-        else:
-            match_intensities_interp = match_intensities
-
-        # Normalize match spectrum
-        match_max = np.max(match_intensities_interp)
-        match_norm = (
-            match_intensities_interp / match_max
-            if match_max > 0
-            else match_intensities_interp
-        )
-
-        # Define spectral regions (adjust as needed)
-        regions = [
-            (200, 500, "Fingerprint Low"),
-            (500, 1000, "Fingerprint Mid"),
-            (1000, 1800, "Fingerprint High"),
-            (2800, 3200, "CH Stretch"),
-        ]
-
-        region_scores = []
-        region_labels = []
-
-        for start, end, label in regions:
-            indices = np.where(
-                (query_wavenumbers >= start) & (query_wavenumbers <= end)
-            )[0]
-            if len(indices) > 1:  # Need at least 2 points for correlation
-                region_current = current_norm[indices]
-                region_match = match_norm[indices]
-
-                # Calculate correlation coefficient for the region
-                try:
-                    if np.all(region_current == region_current[0]) or np.all(
-                        region_match == region_match[0]
-                    ):
-                        corr = 0.0  # Undefined for constant vectors
-                    else:
-                        corr = np.corrcoef(region_current, region_match)[0, 1]
-                    if np.isnan(corr):
-                        corr = 0.0
-                except Exception:
-                    corr = 0.0  # Handle potential errors
-
-                region_scores.append(corr)
-                region_labels.append(f"{label}\n({start}-{end} cm⁻¹)")
-
-        # Plot correlation heatmap
-        if region_scores:
-            # Use built-in colormaps
-            import matplotlib.cm as cm
-
-            cmap = cm.RdYlGn  # Red-Yellow-Green colormap (good for correlation)
-            regions_array = np.array(region_scores).reshape(1, -1)
-
-            # Add buffer to left and right sides to match the comparison plot width
-            # Also increase bottom margin to prevent x-axis label cutoff
-            fig.subplots_adjust(left=0.12, right=0.95, bottom=0.28)
-
-            # Create the heatmap without colorbar
-            im = ax.imshow(
-                regions_array, cmap=cmap, aspect="auto", vmin=0, vmax=1
-            )  # Correlation typically 0-1
-
-            # Safely remove existing colorbar if it exists
-            try:
-                if hasattr(fig, "_colorbar") and fig._colorbar is not None:
-                    try:
-                        fig._colorbar.remove()
-                    except:
-                        # If removal fails, set to None
-                        fig._colorbar = None
-            except:
-                # If any error in checking or removing, ensure _colorbar is None
-                fig._colorbar = None
-
-            # No longer creating colorbar
-            # The colorbar creation code has been removed
-
-            # Configure axes
-            ax.set_yticks([])  # No Y ticks needed for a single row
-
-            ax.set_xticks(np.arange(len(region_labels)))
-            ax.set_xticklabels(region_labels, rotation=45, ha="right", fontsize=9)
-
-            # Add correlation values as text
-            for i, score in enumerate(region_scores):
-                text_color = (
-                    "black" if 0.3 <= score <= 0.7 else "white"
-                )  # Contrast based on score
-                ax.text(
-                    i,
-                    0,
-                    f"{score:.2f}",
-                    ha="center",
-                    va="center",
-                    color=text_color,
-                    fontweight="bold",
-                )
-
-            ax.set_title(f"Spectral Region Correlation: Query vs. {mineral_name}")
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                "Insufficient data for correlation analysis",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-
-        # We already set custom subplots_adjust, so don't use tight_layout
-        # as it would override our custom spacing
-        # fig.tight_layout()
-        return ax
-
-    def plot_mineral_vibrations(self, match_data, fig, ax, comparison_ax=None):
-        """
-        Plot vertical bars representing specific mineral-related vibrations between query and match.
-
-        Parameters:
-        -----------
-        match_data : tuple
-            Tuple containing (name, score) for the selected match
-        fig : matplotlib.figure.Figure
-            Figure object to plot on
-        ax : matplotlib.axes.Axes
-            Axes object to plot on
-        """
-        # Clear the entire figure first to ensure a clean start
-        fig.clear()
-        # Create a new axes object
-        ax = fig.add_subplot(111)
-
-        # Check if we have a valid spectrum loaded
-        if self.raman.current_spectra is None:
-            ax.text(
-                0.5,
-                0.5,
-                "No data for mineral vibration analysis.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return ax
-
-        # Get current spectrum (processed if available)
-        if self.raman.processed_spectra is not None:
-            current_spectrum = self.raman.processed_spectra
-        else:
-            current_spectrum = self.raman.current_spectra
-        query_wavenumbers = self.raman.current_wavenumbers
-
-        # Get match data
-        match_name, score = match_data
-
-        # Get mineral name from metadata if available
-        mineral_name = match_name
-        if (
-            match_name in self.raman.database
-            and "metadata" in self.raman.database[match_name]
-        ):
-            metadata = self.raman.database[match_name].get("metadata", {})
-            if "NAME" in metadata and metadata["NAME"]:
-                mineral_name = metadata["NAME"]
-
-        # Check if match exists in database
-        if match_name not in self.raman.database:
-            ax.text(
-                0.5,
-                0.5,
-                f"Match {mineral_name} not found.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return ax
-
-        match_data = self.raman.database[match_name]
-
-        # Get wavenumbers and intensities from match data - handle both formats
-        if "wavenumbers" in match_data and "intensities" in match_data:
-            match_wavenumbers = match_data["wavenumbers"]
-            match_intensities = match_data["intensities"]
-        elif "wavenumber" in match_data and "intensity" in match_data:
-            match_wavenumbers = match_data["wavenumber"]
-            match_intensities = match_data["intensity"]
-        else:
-            ax.text(
-                0.5,
-                0.5,
-                f"Match data format not recognized.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            return ax
-
-        # Normalize query spectrum (0-1)
-        query_max = np.max(current_spectrum)
-        current_norm = (
-            current_spectrum / query_max if query_max > 0 else current_spectrum
-        )
-
-        # Interpolate match spectrum if the wavenumbers differ
-        if not np.array_equal(query_wavenumbers, match_wavenumbers):
-            match_intensities_interp = np.interp(
-                query_wavenumbers, match_wavenumbers, match_intensities
-            )
-        else:
-            match_intensities_interp = match_intensities
-
-        # Normalize match spectrum
-        match_max = np.max(match_intensities_interp)
-        match_norm = (
-            match_intensities_interp / match_max
-            if match_max > 0
-            else match_intensities_interp
-        )
-
-        # Define specific mineral vibration regions with group categories
-        # Extended with new mineral groups
-        mineral_regions = [
-            # Silicate vibrations
-            ("Silicate", 450, 550, "Si-O-Si 3MR Stretch"),
-            ("Silicate", 600, 680, "Si-O-Si"),
-            ("Silicate", 850, 1000, "Si-O Stretch Q$^{2}$,Q$^{3}$"),
-            ("Silicate", 1050, 1200, "Si-O-Si Stretch Q$^{0}$"),
-            # Carbonate vibrations
-            ("Carbonate", 700, 740, "CO$_3$ Bend v$_2$ "),
-            ("Carbonate", 1050, 1090, "CO$_3$ Stretch v$_4$"),
-            # Phosphate vibrations
-            ("Phosphate", 550, 620, "PO$_4$ Bend v$_4$"),
-            ("Phosphate", 950, 970, "PO$_4$ Stretch v$_1$"),
-            ("Phosphate", 1030, 1080, "PO$_4$ Asym"),
-            # Arsenate vibrations
-            ("Arsenate", 420, 460, "AsO$_4$ Bend v$_2$"),
-            ("Arsenate", 810, 855, "AsO$_4$ Stretch v$_1$"),
-            ("Arsenate", 780, 880, "AsO$_3$ Stretch v$_3$"),
-            # Sulfate vibrations
-            ("Sulfate", 450, 500, "SO$_4$ Bend v$_2$"),
-            ("Sulfate", 975, 1010, "SO$_4$ Stretch v$_1$"),
-            ("Sulfate", 1100, 1150, "SO$_4$ Asym v$_3$"),
-            # Oxide vibrations
-            ("Oxide", 300, 350, "Metal-O Stretch"),
-            ("Oxide", 400, 450, "Metal-O-Metal Bend"),
-            ("Oxide", 500, 600, "M-O Lattice"),
-            # Hydroxide vibrations
-            ("Hydroxide", 3500, 3650, "OH Stretch"),
-            ("Hydroxide", 600, 900, "M-OH Bend"),
-            ("Hydroxide", 1600, 1650, "HOH Bend"),
-            # Sulfide vibrations
-            ("Sulfide", 300, 400, "Metal-S Stretch"),
-            ("Sulfide", 200, 280, "S-S Stretch"),
-            ("Sulfide", 350, 420, "M-S-M Bend"),
-            # Sulfosalt vibrations
-            ("Sulfosalt", 300, 360, "Sb-S Stretch"),
-            ("Sulfosalt", 330, 380, "As-S Stretch"),
-            ("Sulfosalt", 250, 290, "S-S Stretch"),
-            # Vanadate vibrations
-            ("Vanadate", 800, 860, "V-O Stretch v$_1$"),
-            ("Vanadate", 780, 820, "V-O-V Asym v$_3$"),
-            ("Vanadate", 400, 450, "V-O Bend v$_4$"),
-            # Borate vibrations
-            ("Borate", 650, 700, "BO$_3$ Bend"),
-            ("Borate", 880, 950, "BO$_3$ Stretch"),
-            ("Borate", 1300, 1400, "BO$_3$ Asym"),
-            # Water vibrations
-            ("OH/H$_2$O", 3200, 3500, "H$_2$O Stretch"),
-            ("OH/H$_2$O", 1600, 1650, "H$_2$O Bend"),
-            ("OH/H$_2$O", 500, 800, "H$_2$O Libration"),
-            # Oxalate vibrations
-            ("Oxalate", 1455, 1490, "C-O Stretch"),
-            ("Oxalate", 900, 920, "C-C Stretch"),
-            ("Oxalate", 850, 870, "O-C-O Bend"),
-        ]
-
-        # Calculate correlation for each region
-        region_scores = []
-        region_data = []
-
-        # Dictionary to store group correlations
-        group_correlations = {}
-        group_weights = {}
-
-        # Define region importance factors
-        region_importance = {
-            "Carbonate": 1.0,
-            "Sulfate": 1.0,
-            "Phosphate": 1.0,
-            "Silicate": 1.0,
-            "OH/H$_2$O": 0.5,  # Reduce weight of OH/H2O regions
-            "Vanadate": 1.0,
-            "Borate": 1.0,
-            "Oxalate": 1.0,
-        }
-        filtered_regions = [region for region in mineral_regions if region[1] <= max(query_wavenumbers) and region[2] >= min(query_wavenumbers)]
-        # First pass: calculate individual region correlations
-        for group, start, end, label in filtered_regions:
-            indices = np.where(
-                (query_wavenumbers >= start) & (query_wavenumbers <= end)
-            )[0]
-            if len(indices) > 1:  # Need at least 2 points for correlation
-                region_current = current_norm[indices]
-                region_match = match_norm[indices]
-
-                # Calculate correlation coefficient for the region
-                try:
-                    if np.all(region_current == region_current[0]) or np.all(
-                        region_match == region_match[0]
-                    ):
-                        corr = 0.0  # Undefined for constant vectors
-                    else:
-                        corr = np.corrcoef(region_current, region_match)[0, 1]
-                    if np.isnan(corr):
-                        corr = 0.0
-                except Exception:
-                    corr = 0.0  # Handle potential errors
-            else:
-                corr = 0.0  # If this region doesn't have enough data points
-
-            region_scores.append(corr)
-            region_data.append((group, start, end, label, corr))
-
-            # Initialize group correlation tracking
-            if group not in group_correlations:
-                group_correlations[group] = []
-                group_weights[group] = []
-
-            # Store correlation and weight for this region
-            group_correlations[group].append(corr)
-
-            # Calculate weight based on region width and importance factor
-            width = end - start
-            # Use a larger normalization factor (2000 cm^-1) and apply importance factor
-            weight = (width / 2000.0) * region_importance.get(group, 1.0)
-            group_weights[group].append(weight)
-
-        # Second pass: calculate weighted group correlations
-        weighted_group_scores = {}
-        for group in group_correlations:
-            if len(group_correlations[group]) > 0:
-                # Calculate weighted average correlation for the group
-                weighted_corr = np.average(
-                    group_correlations[group], weights=group_weights[group]
-                )
-                weighted_group_scores[group] = weighted_corr
-
-        # Update region scores with group context
-        for i, (group, start, end, label, corr) in enumerate(region_data):
-            # Adjust individual region score based on group correlation
-            group_corr = weighted_group_scores.get(group, 0.0)
-            # Weight the individual region score with the group correlation
-            adjusted_corr = 0.7 * corr + 0.3 * group_corr
-            region_scores[i] = adjusted_corr
-
-        # Use a colormap for correlation values (for reference, will be used for the bars)
-        import matplotlib.cm as cm
-
-        cmap = cm.RdYlGn  # Red-Yellow-Green colormap (good for correlation)
-
-        # Match x-axis with comparison plot if available
-        if hasattr(self, "comparison_x_range") and self.comparison_x_range is not None:
-            x_min, x_max = self.comparison_x_range
-        else:
-            # Fallback: use spectral range plus a small buffer
-            x_min = min(query_wavenumbers)
-            x_max = max(query_wavenumbers)
-            x_range = x_max - x_min
-            x_min = max(0, x_min - 0.15 * x_range)  # Ensure no negative wavenumbers
-            x_max = x_max + 0.02 * x_range
-
-        # Stretch the x-axis more to the right by extending the x_max
-        x_max_extended = (
-            x_max + (x_max - x_min) * 0.1
-        )  # Add 10% more space to the right
-
-        # Set the new x-axis limits
-        ax.set_xlim(x_min, x_max_extended)
-        ax.set_ylim(0, 1)  # Correlation values range from 0 to 1
-
-        # Add gray dotted vertical grid lines
-        ax.grid(True, axis="x", linestyle=":", color="gray", alpha=0.6)
-
-        # Group by mineral types for better visualization
-        groups = {}
-        for item in region_data:
-            group = item[0]
-            if group not in groups:
-                groups[group] = []
-            groups[group].append(item)
-
-        # Calculate average correlation for each group
-        group_averages = {}
-        for group_name, group_items in groups.items():
-            correlations = [item[4] for item in group_items]  # Get correlation values
-            group_averages[group_name] = np.mean(correlations) if correlations else 0.0
-
-        # Define y-positions for each group - adjusted to accommodate more groups
-        group_positions = {
-            "Silicate": 0.94,
-            "Carbonate": 0.88,
-            "Phosphate": 0.82,
-            "Arsenate": 0.76,
-            "Sulfate": 0.70,
-            "Oxide": 0.64,
-            "Hydroxide": 0.58,
-            "Sulfide": 0.52,
-            "Sulfosalt": 0.46,
-            "Vanadate": 0.40,
-            "Borate": 0.34,
-            "OH/H$_2$O": 0.28,
-            "Oxalate": 0.22,
-        }
-
-        # Define height for bars - reduced to fit more groups
-        bar_height = 0.05  # Reduced from 0.10 to 0.05
-
-        # Create a collection of tooltip data to enable hover functionality
-        self.tooltip_data = []
-
-        # Plot each vibration region as a vertical bar and add group labels
-        for group_name, group_items in groups.items():
-            y_pos = group_positions.get(group_name, 0.5)
-            avg_corr = group_averages[group_name]
-
-            # Add group name with average correlation on the left side of the plot
-            group_label = f"{group_name} (Avg: {avg_corr:.2f})"
-            ax.text(
-                x_min - 0.05 * (x_max - x_min),
-                y_pos,
-                group_label,
-                fontsize=7,
-                ha="left",
-                va="center",
-                bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", pad=1),
-            )
-
-            # Plot each bar in the group
-            for _, start, end, label, corr in group_items:
-                # Skip regions that are outside our x-axis limits
-                if end < x_min or start > x_max_extended:
-                    continue
-
-                # Calculate bar width and position
-                width = end - start
-
-                # Get color based on correlation value
-                color = cmap(corr)
-
-                # Create bar
-                rect = plt.Rectangle(
-                    (start, y_pos - bar_height / 2),
-                    width=width,
-                    height=bar_height,
-                    facecolor=color,
-                    edgecolor="black",
-                    alpha=0.8,
-                )
-                ax.add_patch(rect)
-
-                # Add just the correlation value to the center of wider bars
-                if width > 70:  # Only add text if bar is wide enough
-                    ax.text(
-                        start + width / 2,
-                        y_pos,
-                        f"{corr:.2f}",
-                        ha="center",
-                        va="center",
-                        fontsize=7,
-                        fontweight="bold",  # Reduced font size
-                        color="black" if 0.3 <= corr <= 0.7 else "white",
-                    )
-
-                # Store data for hover tooltips - include the rectangle, tooltip info, the color, and the region range
-                tooltip_info = f"{group_name}: {label}\nRange: {start}-{end} cm⁻¹\nCorrelation: {corr:.2f}"
-                self.tooltip_data.append((rect, tooltip_info, color, start, end))
-
-        # Add a small color reference at the bottom of the plot instead of a vertical colorbar
-        # Create a horizontal color gradient bar
-        gradient_width = (
-            x_max_extended - x_min
-        ) * 0.7  # Make it wider to use more space
-        gradient_height = 0.02
-        gradient_x = (
-            x_min + (x_max_extended - x_min) * 0.15
-        )  # Position slightly left of center
-        gradient_y = 0.03  # Near the bottom
-
-        # Create the gradient rectangle
-        gradient = np.linspace(0, 1, 100).reshape(1, -1)
-        ax.imshow(
-            gradient,
-            aspect="auto",
-            extent=[
-                gradient_x,
-                gradient_x + gradient_width,
-                gradient_y - gradient_height / 2,
-                gradient_y + gradient_height / 2,
-            ],
-            cmap=cmap,
-        )
-
-        # Add min/max labels for the color gradient ON TOP of the bar
-        ax.text(
-            gradient_x,
-            gradient_y + gradient_height / 2 + 0.005,
-            "Low Correlation (0.0)",
-            ha="left",
-            va="bottom",
-            fontsize=6,
-            color="dimgray",
-        )
-        ax.text(
-            gradient_x + gradient_width,
-            gradient_y + gradient_height / 2 + 0.005,
-            "High Correlation (1.0)",
-            ha="right",
-            va="bottom",
-            fontsize=6,
-            color="dimgray",
-        )
-
-        # Set labels and title
-        ax.set_xlabel("Wavenumber (cm⁻¹)")
-        # ax.set_ylabel('Mineral Groups', labelpad=20)  # Added labelpad to move label further left
-        ax.set_title(f"Mineral Vibration Correlation: Query vs. {mineral_name}")
-
-        # Remove y-axis ticks as they're not needed
-        ax.set_yticks([])
-
-        # Adjust the figure to add more whitespace above and below the plot
-        fig.subplots_adjust(
-            left=0.12, right=0.98, top=0.88, bottom=0.16
-        )  # Increased top and bottom margins
-
-        # Configure tooltip functionality
-        self.setup_tooltip_event_handling(fig, ax, comparison_ax)
-
-        return ax
-
-    def setup_tooltip_event_handling(self, fig, ax, comparison_ax=None):
-        """Set up mouseover tooltips for the mineral vibration plot."""
-        from matplotlib.backend_bases import FigureCanvasBase
-
-        # Tooltip annotation - starts hidden (without styling yet)
-        self.tooltip = ax.annotate(
-            "",
-            xy=(0, 0),
-            xytext=(0, -70),  # Position below the cursor (-70 points in y direction)
-            textcoords="offset points",
-            bbox=dict(
-                boxstyle="round,pad=0.5", fc="white", alpha=0.9, edgecolor="black"
-            ),
-            arrowprops=dict(arrowstyle="->"),
-            visible=False,
-            fontsize=9,  # Slightly larger font for better readability
-            color="navy",
-        )  # Dark blue for better contrast and legibility
-
-        def hover(event):
-            # Check if we have tooltip data
-            if not hasattr(self, "tooltip_data") or not self.tooltip_data:
-                return
-
-            # Check if mouse is over the axis
-            if event.inaxes != ax:
-                self.tooltip.set_visible(False)
-                fig.canvas.draw_idle()
-                # Remove overlay if mouse leaves
-                if (
-                    comparison_ax is not None
-                    and hasattr(self, "_comparison_overlay")
-                    and self._comparison_overlay is not None
-                ):
-                    self._comparison_overlay.remove()
-                    self._comparison_overlay = None
-                    comparison_ax.figure.canvas.draw_idle()
-                return
-
-            # Check if mouse is over any rectangle
-            for rect, tooltip_text, color, start, end in self.tooltip_data:
-                contains, _ = rect.contains(event)
-                if contains:
-                    # Update tooltip text and position
-                    self.tooltip.set_text(tooltip_text)
-                    self.tooltip.xy = (event.xdata, event.ydata)
-
-                    # Position the tooltip below the cursor (let y positioning be handled by the xytext offset)
-                    # Center it horizontally with the cursor
-                    self.tooltip.xyann = (0, -70)  # Fixed position below cursor
-
-                    # Set tooltip background color to match the rectangle with 90% opacity
-                    # Extract RGB components from the color
-                    r, g, b, _ = color
-
-                    # Make the background slightly lighter for better text contrast
-                    # Blend with white (70% original color, 30% white)
-                    lighter_r = 0.7 * r + 0.3
-                    lighter_g = 0.7 * g + 0.3
-                    lighter_b = 0.7 * b + 0.3
-
-                    self.tooltip.get_bbox_patch().set(
-                        fc=(lighter_r, lighter_g, lighter_b, 0.9), ec=color
-                    )
-
-                    # Make sure tooltip is visible
-                    self.tooltip.set_visible(True)
-                    fig.canvas.draw_idle()
-                    # Add overlay to comparison plot
-                    if comparison_ax is not None:
-                        if (
-                            hasattr(self, "_comparison_overlay")
-                            and self._comparison_overlay is not None
-                        ):
-                            self._comparison_overlay.remove()
-                            self._comparison_overlay = None
-                        self._comparison_overlay = comparison_ax.axvspan(
-                            start, end, color=color, alpha=0.3, zorder=0
-                        )
-                        comparison_ax.figure.canvas.draw_idle()
-                    return
-
-            # If we get here, mouse is not over any rectangle
-            self.tooltip.set_visible(False)
-            fig.canvas.draw_idle()
-            # Remove overlay if not hovering any region
-            if (
-                comparison_ax is not None
-                and hasattr(self, "_comparison_overlay")
-                and self._comparison_overlay is not None
-            ):
-                self._comparison_overlay.remove()
-                self._comparison_overlay = None
-                comparison_ax.figure.canvas.draw_idle()
-
-        # Connect the event handlers
-        fig.canvas.mpl_connect("motion_notify_event", hover)
-
-    def display_search_results(self, matches):
-        """Display search results with comparison plots and mineral vibration analysis."""
-        if not matches:
-            messagebox.showinfo("Search Results", "No matches found.")
-            return
-
-        # Create a new window for results
-        results_window = tk.Toplevel(self.root)
-        results_window.title("Search Results")
-        results_window.geometry(
-            "1200x950"
-        )  # Increased height to accommodate more whitespace
-
-        # Store reference to the results window
-        self.results_window = results_window
-
-        # Variable to track the metadata window
-        self.metadata_window = None
-
-        # Store the x-axis range for alignment between plots
-        self.comparison_x_range = None
-
-        # Create main container
-        main_container = ttk.Frame(results_window)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # Create left panel for results list with reduced width
-        left_panel = ttk.Frame(
-            main_container, width=200
-        )  # Reduced width from 300 to 200
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
-        left_panel.pack_propagate(
-            False
-        )  # Prevent the frame from shrinking to fit its contents
-
-        # Create right panel for plots - will take more space
-        right_panel = ttk.Frame(main_container)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-
-        # Create listbox for matches with increased height
-        matches_frame = ttk.LabelFrame(left_panel, text="Matches", padding=5)
-        matches_frame.pack(
-            fill=tk.BOTH, expand=True, pady=5
-        )  # Set to expand=True to take available space
-
-        # Use grid for more control over the matches listbox and scrollbar
-        matches_frame.columnconfigure(0, weight=1)
-        matches_frame.rowconfigure(0, weight=1)
-
-        # Add scrollbar to matches list
-        scrollbar = ttk.Scrollbar(matches_frame)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-
-        # Create listbox with explicitly set height of 15 items
-        self.matches_listbox = tk.Listbox(
-            matches_frame,
-            yscrollcommand=scrollbar.set,
-            selectmode=tk.BROWSE,
-            height=15,  # Explicitly set height to 15 lines
-        )
-        self.matches_listbox.grid(row=0, column=0, sticky="nsew")
-        scrollbar.config(command=self.matches_listbox.yview)
-
-        # Add separator for visual spacing
-        ttk.Separator(left_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-
-        # Create smaller overlay selection panel with reduced width
-        overlay_frame = ttk.LabelFrame(left_panel, text="Overlay Selection", padding=5)
-        overlay_frame.pack(fill=tk.X, pady=5)
-
-        self.overlay_listbox = tk.Listbox(
-            overlay_frame, height=8, selectmode=tk.MULTIPLE
-        )
-        self.overlay_listbox.pack(fill=tk.X, expand=True, side=tk.LEFT)
-
-        overlay_scrollbar = ttk.Scrollbar(
-            overlay_frame, orient=tk.VERTICAL, command=self.overlay_listbox.yview
-        )
-        overlay_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.overlay_listbox.config(yscrollcommand=overlay_scrollbar.set)
-
-        # Add another separator for visual spacing
-        ttk.Separator(left_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-
-        # Store original match data for reference
-        self.match_data_map = {}
-
-        # Populate listbox with matches
-        for match in matches:
-            if isinstance(match, tuple):
-                # Handle tuple format (name, score)
-                name, score = match
-                # Get mineral name from metadata if available
-                mineral_name = name
-                if (
-                    name in self.raman.database
-                    and "metadata" in self.raman.database[name]
-                ):
-                    metadata = self.raman.database[name]["metadata"]
-                    if "NAME" in metadata and metadata["NAME"]:
-                        mineral_name = metadata["NAME"]
-
-                display_text = f"{mineral_name} (Score: {score:.2f})"
-                self.matches_listbox.insert(tk.END, display_text)
-                # Store mapping between display text and original name
-                self.match_data_map[display_text] = (name, score)
-            elif isinstance(match, dict):
-                # Handle dictionary format
-                name = match["name"]
-                score = match["score"]
-                # Get mineral name from metadata if available
-                mineral_name = name
-                if (
-                    name in self.raman.database
-                    and "metadata" in self.raman.database[name]
-                ):
-                    metadata = self.raman.database[name]["metadata"]
-                    if "NAME" in metadata and metadata["NAME"]:
-                        mineral_name = metadata["NAME"]
-
-                display_text = f"{mineral_name} (Score: {score:.2f})"
-                self.matches_listbox.insert(tk.END, display_text)
-                # Store mapping between display text and original name
-                self.match_data_map[display_text] = (name, score)
-            else:
-                # Handle string format
-                self.matches_listbox.insert(tk.END, str(match))
-                self.match_data_map[str(match)] = (str(match), 0.0)
-
-        # Button frames for controls and export - stacked vertically in left panel
-        # Style the buttons with consistent width and padding
-        button_style = {"width": 15, "padding": 3}
-
-        # Control buttons frame
-        controls_frame = ttk.Frame(left_panel)
-        controls_frame.pack(fill=tk.X, pady=5)
-
-        # Add View Metadata button at the top of the controls
-        metadata_button = ttk.Button(
-            controls_frame,
-            text="View Metadata",
-            command=self.show_metadata_window,
-            **button_style,
-        )
-        metadata_button.pack(fill=tk.X, pady=2)
-
-        # Add to Overlay button
-        add_button = ttk.Button(
-            controls_frame,
-            text="Add to Overlay",
-            command=self.add_selected_to_overlay,
-            **button_style,
-        )
-        add_button.pack(fill=tk.X, pady=2)
-
-        # Remove from Overlay button
-        remove_button = ttk.Button(
-            controls_frame,
-            text="Remove from Overlay",
-            command=self.remove_from_overlay,
-            **button_style,
-        )
-        remove_button.pack(fill=tk.X, pady=2)
-
-        # Overlay Selected button
-        overlay_button = ttk.Button(
-            controls_frame,
-            text="Overlay Selected",
-            command=self.overlay_from_selection,
-            **button_style,
-        )
-        overlay_button.pack(fill=tk.X, pady=2)
-
-        # Add separator between controls and export buttons
-        ttk.Separator(left_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-
-        # Export buttons frame - vertically stacked
-        export_frame = ttk.Frame(left_panel)
-        export_frame.pack(fill=tk.X, pady=5)
-
-        # Export As label
-        ttk.Label(export_frame, text="Export As:").pack(anchor=tk.W, padx=5)
-
-        # Add hidden report text widget for export functionality (not shown in GUI)
-        self.report_text = tk.Text(left_panel)
-        self.report_text.pack_forget()  # Hide this widget
-
-        # Export buttons stacked vertically
-        pdf_button = ttk.Button(
-            export_frame,
-            text="PDF Export",
-            command=lambda matches=matches: self.generate_match_report(
-                matches, self.report_text
-            )
-            or self.export_report_as_pdf(self.report_text.get(1.0, tk.END), matches),
-            **button_style,
-        )
-        pdf_button.pack(fill=tk.X, pady=2)
-
-        txt_button = ttk.Button(
-            export_frame,
-            text="TXT Export",
-            command=lambda matches=matches: self.generate_match_report(
-                matches, self.report_text
-            )
-            or self.export_report_as_txt(self.report_text.get(1.0, tk.END)),
-            **button_style,
-        )
-        txt_button.pack(fill=tk.X, pady=2)
-
-        csv_button = ttk.Button(
-            export_frame,
-            text="CSV Export",
-            command=lambda: self.export_results_as_csv(matches),
-            **button_style,
-        )
-        csv_button.pack(fill=tk.X, pady=2)
-
-        # Create comparison plot - give it more vertical space now
-        comparison_frame = ttk.LabelFrame(
-            right_panel, text="Comparison Plot", padding=5
-        )
-        comparison_frame.pack(
-            fill=tk.BOTH, expand=True, pady=(0, 15)
-        )  # Increased bottom padding
-
-        fig_comp = plt.figure(figsize=(6, 5))  # Taller figure for comparison plot
-        canvas_comp = FigureCanvasTkAgg(fig_comp, master=comparison_frame)
-        canvas_comp.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Add toolbar for comparison plot
-        toolbar_frame = ttk.Frame(comparison_frame)
-        toolbar_frame.pack(fill=tk.X)
-        toolbar = NavigationToolbar2Tk(canvas_comp, toolbar_frame)
-        toolbar.update()
-
-        # Create mineral vibrations analysis pane with more padding
-        mineral_frame = ttk.LabelFrame(
-            right_panel, text="Mineral Vibrations Analysis", padding=10
-        )  # Increased padding
-        mineral_frame.pack(
-            fill=tk.BOTH, expand=True, pady=(15, 5)
-        )  # Added top and bottom padding
-
-        fig_mineral = plt.figure(figsize=(6, 5))  # Taller figure for mineral analysis
-        canvas_mineral = FigureCanvasTkAgg(fig_mineral, master=mineral_frame)
-        canvas_mineral.get_tk_widget().pack(
-            fill=tk.BOTH, expand=True, padx=5, pady=5
-        )  # Added padding inside the frame
-
-        # Store references to figures and canvases
-        self.results_figures = {
-            "comparison": fig_comp,
-            "mineral": fig_mineral,
-            "canvas_comp": canvas_comp,
-            "canvas_mineral": canvas_mineral,
-        }
-
-        # Bind the selection event
-        self.matches_listbox.bind("<<ListboxSelect>>", self.on_match_select)
-
-        # Automatically select the first match
-        if self.matches_listbox.size() > 0:
-            self.matches_listbox.selection_set(0)
-            self.matches_listbox.see(0)
-            self.on_match_select()  # Manually trigger the selection event
-
-    def show_metadata_window(self):
-        """
-        Open a new window showing metadata for the currently selected match.
-        If the window is already open, bring it to the front.
-        """
-        # Check if a match is selected
-        selected_indices = self.matches_listbox.curselection()
-        if not selected_indices:
-            messagebox.showinfo(
-                "Selection Required", "Please select a spectrum from the list."
-            )
-            return
-
-        # Create window if it doesn't exist, or focus if it does
-        if (
-            not hasattr(self, "metadata_window")
-            or self.metadata_window is None
-            or not self.metadata_window.winfo_exists()
-        ):
-            # Create a new window
-            self.metadata_window = tk.Toplevel(self.results_window)
-            self.metadata_window.title("Spectrum Metadata")
-            self.metadata_window.geometry("400x500")
-
-            # Make it transient to the results window
-            self.metadata_window.transient(self.results_window)
-
-            # Create a frame for the metadata content
-            content_frame = ttk.Frame(self.metadata_window, padding=10)
-            content_frame.pack(fill=tk.BOTH, expand=True)
-
-            # Create text widget for displaying metadata
-            self.metadata_text = tk.Text(content_frame, wrap=tk.WORD)
-            self.metadata_text.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
-
-            # Add scrollbar
-            scrollbar = ttk.Scrollbar(
-                content_frame, orient=tk.VERTICAL, command=self.metadata_text.yview
-            )
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            self.metadata_text.config(yscrollcommand=scrollbar.set)
-
-            # Create button to close the window
-            ttk.Button(
-                self.metadata_window, text="Close", command=self.metadata_window.destroy
-            ).pack(pady=10)
-        else:
-            # If window exists, bring it to front
-            self.metadata_window.lift()
-            self.metadata_window.focus_set()
-
-        # Update the content
-        self.update_metadata_window()
-
-    def update_metadata_window(self):
-        """Update the content of the metadata window with current selection."""
-        if not hasattr(self, "metadata_text") or not hasattr(self, "matches_listbox"):
-            return
-
-        # Get the selected match
-        selected_indices = self.matches_listbox.curselection()
-        if not selected_indices:
-            return
-
-        selected_index = selected_indices[0]
-        selected_text = self.matches_listbox.get(selected_index)
-
-        # Get the actual database name from our mapping
-        if hasattr(self, "match_data_map") and selected_text in self.match_data_map:
-            db_name, score = self.match_data_map[selected_text]
-        else:
-            # Try to parse the name from the display text
-            if " (Score:" in selected_text:
-                db_name = selected_text.split(" (Score:")[0]
-            else:
-                db_name = selected_text
-
-        # Clear the text widget
-        self.metadata_text.config(state=tk.NORMAL)
-        self.metadata_text.delete(1.0, tk.END)
-
-        # Check if the spectrum exists in the database
-        if db_name in self.raman.database:
-            # Get metadata
-            spectrum_data = self.raman.database[db_name]
-            metadata = spectrum_data.get("metadata", {})
-
-            if metadata:
-                # Add a header
-                self.metadata_text.insert(tk.END, f"Metadata for: {db_name}\n")
-                self.metadata_text.insert(tk.END, "-" * 40 + "\n\n")
-
-                # Order of important metadata fields
-                important_fields = [
-                    "NAME",
-                    "RRUFFIDS",
-                    "HEY CLASSIFICATION",
-                    "IDEAL CHEMISTRY",
-                    "CHEMICAL FAMILY",
-                    "CRYSTAL SYSTEMS",
-                    "SPACE GROUPS",
-                    "LOCALITY",
-                    "DESCRIPTION",
-                    "URL",
-                    "PARAGENETIC MODES",
-                    "AGE",
-                    "CHEMICAL FORMULA",
-                    "NOTES",
-                ]
-
-                # Display important fields first in order
-                displayed_keys = set()
-                for field in important_fields:
-                    if field in metadata and metadata[field]:
-                        self.metadata_text.insert(
-                            tk.END, f"{field}: {metadata[field]}\n\n"
-                        )
-                        displayed_keys.add(field)
-
-                # Display other fields
-                for field, value in metadata.items():
-                    if field not in displayed_keys and value:
-                        self.metadata_text.insert(tk.END, f"{field}: {value}\n\n")
-            else:
-                self.metadata_text.insert(
-                    tk.END, f"No metadata available for {db_name}."
-                )
-        else:
-            self.metadata_text.insert(
-                tk.END, f"Spectrum '{db_name}' not found in database."
-            )
-
-        # Make the text widget read-only
-        self.metadata_text.config(state=tk.DISABLED)
-
-        # Update window title with spectrum name
-        if hasattr(self, "metadata_window") and self.metadata_window is not None:
-            self.metadata_window.title(f"Metadata: {db_name}")
-
-    def add_selected_to_overlay(self):
-        """Add selected spectra to the overlay list."""
-        selected_indices = self.matches_listbox.curselection()
-        if not selected_indices:
-            messagebox.showinfo(
-                "Selection Required", "Please select at least one spectrum."
-            )
-            return
-
-        for index in selected_indices:
-            match_text = self.matches_listbox.get(index)
-            if match_text in self.match_data_map:
-                self.overlay_listbox.insert(tk.END, match_text)
-
-    def remove_from_overlay(self):
-        """Remove selected spectra from the overlay list."""
-        selected_indices = self.overlay_listbox.curselection()
-        if not selected_indices:
-            messagebox.showinfo(
-                "Selection Required", "Please select at least one spectrum."
-            )
-            return
-
-        for index in selected_indices:
-            self.overlay_listbox.delete(index)
-
-    def overlay_from_selection(self):
-        """Overlay selected spectra on the main plot."""
-        selected_indices = self.overlay_listbox.curselection()
-        if not selected_indices:
-            messagebox.showinfo(
-                "Selection Required", "Please select at least one spectrum."
-            )
-            return
-
-        # Get selected spectra
-        selected_spectra = [
-            self.match_data_map[self.matches_listbox.get(index)]
-            for index in selected_indices
-        ]
-
-        # Update the main plot
-        self.update_plot(include_peaks=True)
-
-        # Create overlay window
-        self.create_overlay_window(
-            [i for i in range(self.overlay_listbox.size())], from_overlay_list=True
-        )
-
-    def create_overlay_window(self, selected_indices, from_overlay_list=False):
-        """Create an overlay window with selected spectra."""
-        if not hasattr(self, "raman") or self.raman.current_spectra is None:
-            messagebox.showerror("Error", "No spectrum loaded to overlay with.")
-            return
-
-        # Create overlay window
-        overlay_window = tk.Toplevel(self.root)
-        overlay_window.title("Spectra Overlay")
-        overlay_window.geometry("1000x800")
-
-        # Create main container
-        main_container = ttk.Frame(overlay_window)
-        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # Create control panel
-        control_frame = ttk.LabelFrame(
-            main_container, text="Global Controls", padding=5
-        )
-        control_frame.pack(fill=tk.X, pady=5)
-
-        # Add normalization checkbox
-        normalize_var = tk.BooleanVar(value=True)
-        normalize_check = ttk.Checkbutton(
-            control_frame, text="Normalize Spectra", variable=normalize_var
-        )
-        normalize_check.pack(side=tk.LEFT, padx=20)
-
-        # Add manual search
-        search_frame = ttk.Frame(control_frame)
-        search_frame.pack(side=tk.LEFT, padx=20)
-        ttk.Label(search_frame, text="Search Database:").pack(side=tk.LEFT)
-        search_entry = ttk.Entry(search_frame, width=30)
-        search_entry.pack(side=tk.LEFT, padx=5)
-        search_button = ttk.Button(
-            search_frame,
-            text="Add",
-            command=lambda: self.add_spectrum_from_search(search_entry.get()),
-        )
-        search_button.pack(side=tk.LEFT)
-
-        # Add save button
-        save_button = ttk.Button(
-            control_frame, text="Save Plot", command=lambda: self.save_overlay_plot(fig)
-        )
-        save_button.pack(side=tk.RIGHT, padx=5)
-
-        # Create spectrum control panel with transparency sliders for each spectrum
-        spectrum_control_frame = ttk.LabelFrame(
-            main_container, text="Spectrum Controls", padding=5
-        )
-        spectrum_control_frame.pack(fill=tk.X, pady=5)
-
-        # Add scrollable frame for spectrum controls
-        canvas_frame = ttk.Frame(spectrum_control_frame)
-        canvas_frame.pack(fill=tk.BOTH, expand=True)
-
-        # Create canvas and scrollbar
-        control_canvas = tk.Canvas(canvas_frame)
-        scrollbar = ttk.Scrollbar(
-            canvas_frame, orient="vertical", command=control_canvas.yview
-        )
-        scrollable_frame = ttk.Frame(control_canvas)
-
-        # Configure scrollable frame to update the canvas scrollregion when its size changes
-        def configure_scroll_region(event):
-            control_canvas.configure(scrollregion=control_canvas.bbox("all"))
-
-        scrollable_frame.bind("<Configure>", configure_scroll_region)
-
-        control_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        control_canvas.configure(yscrollcommand=scrollbar.set)
-
-        control_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # Store transparency variables in a dictionary
-        transparency_vars = {}
-
-        # Add control for current spectrum
-        current_frame = ttk.Frame(scrollable_frame)
-        current_frame.pack(fill=tk.X, pady=2)
-
-        # Color indicator
-        color_indicator = ttk.Frame(current_frame, width=15, height=15)
-        color_indicator.pack(side=tk.LEFT, padx=5)
-        color_indicator.configure(style="CurrentSpectrum.TFrame")
-
-        # Add style for current spectrum
-        style = ttk.Style()
-        style.configure("CurrentSpectrum.TFrame", background="blue")
-
-        # Checkbox to show/hide
-        show_current_var = tk.BooleanVar(value=True)
-        show_current_check = ttk.Checkbutton(
-            current_frame, text="Current Spectrum", variable=show_current_var
-        )
-        show_current_check.pack(side=tk.LEFT, padx=5)
-
-        # Transparency slider
-        ttk.Label(current_frame, text="Transparency:").pack(side=tk.LEFT, padx=5)
-        current_transparency_var = tk.DoubleVar(value=0.0)  # 0.0 for full opacity
-        current_transparency_scale = ttk.Scale(
-            current_frame,
-            from_=0.0,
-            to=0.9,
-            variable=current_transparency_var,
-            orient=tk.HORIZONTAL,
-            length=100,
-        )
-        current_transparency_scale.pack(side=tk.LEFT, padx=5)
-
-        # Store in dictionary
-        transparency_vars["current"] = {
-            "var": current_transparency_var,
-            "show": show_current_var,
-            "name": "Current Spectrum",
-        }
-
-        # Get the list of spectra to overlay and create controls for each
-        spectrum_names = []
-        colors = plt.cm.tab10.colors  # Use matplotlib color cycle
-
-        if from_overlay_list:
-            # Get spectra from overlay_listbox
-            spectrum_names = [self.overlay_listbox.get(i) for i in selected_indices]
-
-        # Create controls for each spectrum
-        for i, spectrum_text in enumerate(spectrum_names):
-            spectrum_frame = ttk.Frame(scrollable_frame)
-            spectrum_frame.pack(fill=tk.X, pady=2)
-
-            # Color indicator - use color from matplotlib color cycle
-            color_idx = (i + 1) % len(
-                colors
-            )  # +1 because index 0 is for current spectrum
-            color_indicator = ttk.Frame(spectrum_frame, width=15, height=15)
-            color_indicator.pack(side=tk.LEFT, padx=5)
-            # Add style for this spectrum with its color
-            style_name = f"Spectrum{i}.TFrame"
-            style.configure(style_name, background=self._rgb_to_hex(colors[color_idx]))
-            color_indicator.configure(style=style_name)
-
-            # Extract name from the listbox text (handle both formats)
-            if " (Score:" in spectrum_text:
-                display_name = spectrum_text.split(" (Score:")[0]
-            else:
-                display_name = spectrum_text
-
-            # Checkbox to show/hide
-            show_var = tk.BooleanVar(value=True)
-            show_check = ttk.Checkbutton(
-                spectrum_frame, text=display_name, variable=show_var
-            )
-            show_check.pack(side=tk.LEFT, padx=5)
-
-            # Transparency slider
-            ttk.Label(spectrum_frame, text="Transparency:").pack(side=tk.LEFT, padx=5)
-            spectrum_transparency_var = tk.DoubleVar(value=0.3)  # Default transparency
-            spectrum_transparency_scale = ttk.Scale(
-                spectrum_frame,
-                from_=0.0,
-                to=0.9,
-                variable=spectrum_transparency_var,
-                orient=tk.HORIZONTAL,
-                length=100,
-            )
-            spectrum_transparency_scale.pack(side=tk.LEFT, padx=5)
-
-            # Store in dictionary with spectrum text as key
-            transparency_vars[spectrum_text] = {
-                "var": spectrum_transparency_var,
-                "show": show_var,
-                "name": display_name,
-                "color": colors[color_idx],
-            }
-
-        # Create plot area
-        plot_frame = ttk.Frame(main_container)
-        plot_frame.pack(fill=tk.BOTH, expand=True)
-
-        fig = plt.figure(figsize=(8, 6))
-        canvas = FigureCanvasTkAgg(fig, master=plot_frame)
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Add toolbar
-        toolbar_frame = ttk.Frame(plot_frame)
-        toolbar_frame.pack(fill=tk.X)
-        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
-        toolbar.update()
-
-        # Store references
-        self.overlay_fig = fig
-        self.overlay_canvas = canvas
-        self.overlay_transparency_vars = transparency_vars
-        self.overlay_normalize = normalize_var
-        self.control_canvas = control_canvas  # Store reference to the control canvas
-
-        # Initial plot
-        self.update_overlay_plot(selected_indices, from_overlay_list)
-
-        # Create update function that captures the current state
-        def update_overlay(*args):
-            self.update_overlay_plot(selected_indices, from_overlay_list)
-
-        # Bind transparency changes and checkbox changes
-        for spectrum_id, controls in transparency_vars.items():
-            controls["var"].trace_add("write", update_overlay)
-            controls["show"].trace_add("write", update_overlay)
-
-        # Bind normalization change
-        normalize_var.trace_add("write", update_overlay)
-
-    def _rgb_to_hex(self, rgb_tuple):
-        """Convert RGB tuple (0-1 range) to hex color string."""
-        rgb_int = tuple(int(x * 255) for x in rgb_tuple[:3])
-        return "#{:02x}{:02x}{:02x}".format(*rgb_int)
-
-    def add_spectrum_from_search(self, search_term):
-        """Add a spectrum from the search results to the overlay."""
-        if not search_term:
-            return
-
-        # Search the database
-        matches = []
-        for name in self.raman.database:
-            if search_term.lower() in name.lower():
-                matches.append(name)
-
-            # Also search in metadata NAME field if available
-            if "metadata" in self.raman.database[name]:
-                metadata = self.raman.database[name].get("metadata", {})
-                if "NAME" in metadata and metadata["NAME"]:
-                    mineral_name = metadata["NAME"]
-                    if search_term.lower() in mineral_name.lower():
-                        matches.append(name)
-
-        # Remove duplicates
-        matches = list(set(matches))
-
-        if not matches:
-            messagebox.showinfo("Search", "No matches found.")
-            return
-
-        # Create selection window
-        select_window = tk.Toplevel(self.root)
-        select_window.title("Select Spectrum")
-        select_window.geometry("400x300")
-
-        # Create listbox
-        listbox = tk.Listbox(select_window, selectmode=tk.MULTIPLE)
-        listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Add matches to listbox
-        for match in matches:
-            # Get mineral name from metadata if available
-            display_name = match
-            if "metadata" in self.raman.database[match]:
-                metadata = self.raman.database[match].get("metadata", {})
-                if "NAME" in metadata and metadata["NAME"]:
-                    display_name = metadata["NAME"]
-
-            listbox.insert(tk.END, f"{display_name} ({match})")
-
-        # Add select button
-        ttk.Button(
-            select_window,
-            text="Add Selected",
-            command=lambda: self.add_selected_spectra(
-                listbox.curselection(), matches, select_window
-            ),
-        ).pack(pady=5)
-
-    def add_selected_spectra(self, indices, matches, window=None):
-        """Add selected spectra from search results to the overlay."""
-        if not indices:
-            return
-
-        # Get current selections
-        current_items = self.overlay_listbox.get(0, tk.END)
-
-        # List of newly added spectra
-        newly_added = []
-
-        # Add new selections
-        for idx in indices:
-            match_name = matches[idx]
-
-            # Get mineral name from metadata if available
-            display_name = match_name
-            if "metadata" in self.raman.database[match_name]:
-                metadata = self.raman.database[match_name].get("metadata", {})
-                if "NAME" in metadata and metadata["NAME"]:
-                    display_name = metadata["NAME"]
-
-            display_text = f"{display_name} (Score: N/A)"
-
-            # Check if already in overlay
-            if display_text not in current_items:
-                self.overlay_listbox.insert(tk.END, display_text)
-                # Add to match_data_map if not already there
-                if display_text not in self.match_data_map:
-                    self.match_data_map[display_text] = (match_name, 0.0)
-                newly_added.append(display_text)
-
-        # Close the selection window if provided
-        if window:
-            window.destroy()
-
-        # Update the overlay plot if it exists
-        if hasattr(self, "overlay_fig") and hasattr(self, "overlay_canvas"):
-            # Add transparency controls for newly added spectra
-            if hasattr(self, "overlay_transparency_vars") and newly_added:
-                self._add_spectrum_controls(newly_added)
-
-            # Update the plot with all items
-            self.update_overlay_plot(
-                range(self.overlay_listbox.size()), from_overlay_list=True
-            )
-
-    def _add_spectrum_controls(self, spectrum_names):
-        """Add transparency controls for newly added spectra."""
-        if not hasattr(self, "overlay_transparency_vars"):
-            return
-
-        # Find the scrollable frame - it's the first child of the control_canvas
-        if (
-            not hasattr(self, "control_canvas")
-            or not self.control_canvas.winfo_children()
-        ):
-            return
-
-        scrollable_frame = self.control_canvas.winfo_children()[0]
-
-        # Get the style for color
-        style = ttk.Style()
-
-        # Get color palette
-        colors = plt.cm.tab10.colors
-
-        # Get number of existing controls to determine color index
-        existing_count = (
-            len(self.overlay_transparency_vars) - 1
-        )  # -1 for the "current" spectrum
-
-        # Create controls for each new spectrum
-        for i, spectrum_text in enumerate(spectrum_names):
-            # Skip if already has controls
-            if spectrum_text in self.overlay_transparency_vars:
-                continue
-
-            spectrum_frame = ttk.Frame(scrollable_frame)
-            spectrum_frame.pack(fill=tk.X, pady=2)
-
-            # Color indicator - use color from matplotlib color cycle
-            color_idx = (existing_count + i + 1) % len(
-                colors
-            )  # +1 because index 0 is for current spectrum
-            color_indicator = ttk.Frame(spectrum_frame, width=15, height=15)
-            color_indicator.pack(side=tk.LEFT, padx=5)
-
-            # Add style for this spectrum with its color
-            style_name = f"Spectrum{existing_count + i}.TFrame"
-            style.configure(style_name, background=self._rgb_to_hex(colors[color_idx]))
-            color_indicator.configure(style=style_name)
-
-            # Extract name from the listbox text (handle both formats)
-            if " (Score:" in spectrum_text:
-                display_name = spectrum_text.split(" (Score:")[0]
-            else:
-                display_name = spectrum_text
-
-            # Checkbox to show/hide
-            show_var = tk.BooleanVar(value=True)
-            show_check = ttk.Checkbutton(
-                spectrum_frame, text=display_name, variable=show_var
-            )
-            show_check.pack(side=tk.LEFT, padx=5)
-
-            # Transparency slider
-            ttk.Label(spectrum_frame, text="Transparency:").pack(side=tk.LEFT, padx=5)
-            spectrum_transparency_var = tk.DoubleVar(value=0.3)  # Default transparency
-            spectrum_transparency_scale = ttk.Scale(
-                spectrum_frame,
-                from_=0.0,
-                to=0.9,
-                variable=spectrum_transparency_var,
-                orient=tk.HORIZONTAL,
-                length=100,
-            )
-            spectrum_transparency_scale.pack(side=tk.LEFT, padx=5)
-
-            # Store in dictionary with spectrum text as key
-            self.overlay_transparency_vars[spectrum_text] = {
-                "var": spectrum_transparency_var,
-                "show": show_var,
-                "name": display_name,
-                "color": colors[color_idx],
-            }
-
-            # Create update function that updates the plot
-            def update_overlay(*args):
-                self.update_overlay_plot(
-                    range(self.overlay_listbox.size()), from_overlay_list=True
-                )
-
-            # Add trace to update plot when changed
-            spectrum_transparency_var.trace_add("write", update_overlay)
-            show_var.trace_add("write", update_overlay)
-
-    def update_overlay_plot(self, selected_indices, from_overlay_list=False):
-        """Update the overlay plot with current settings."""
-        if not hasattr(self, "overlay_fig"):
-            return
-
-        # Store current axis limits if they exist
-        xlim = None
-        ylim = None
-        if hasattr(self, "overlay_fig") and self.overlay_fig.axes:
-            try:
-                current_ax = self.overlay_fig.axes[0]
-                xlim = current_ax.get_xlim()
-                ylim = current_ax.get_ylim()
-            except Exception:
-                pass
-
-        # Instead of clearing the figure, just clear the axes
-        fig = self.overlay_fig
-        if fig.axes:
-            ax = fig.axes[0]
-            ax.clear()
-        else:
-            ax = fig.add_subplot(111)
-
-        # Store initial axis limits if not already stored
-        if not hasattr(self, "_initial_axis_limits"):
-            self._initial_axis_limits = None
-
-        # Track if any items have been plotted for legend
-        has_items_to_display = False
-
-        # Get current spectrum
-        if self.raman.processed_spectra is not None:
-            current_intensity = self.raman.processed_spectra
-            current_wavenumbers = self.raman.current_wavenumbers
-        else:
-            current_intensity = self.raman.current_spectra
-            current_wavenumbers = self.raman.current_wavenumbers
-
-        if current_intensity is None or current_wavenumbers is None:
-            ax.text(
-                0.5,
-                0.5,
-                "No spectrum loaded",
-                ha="center",
-                va="center",
-                transform=ax.transAxes,
-            )
-            self.overlay_canvas.draw()
-            return
-
-        # Check if we should plot the current spectrum
-        if hasattr(self, "overlay_transparency_vars"):
-            transparency_vars = self.overlay_transparency_vars
-            if (
-                "current" in transparency_vars
-                and transparency_vars["current"]["show"].get()
-            ):
-                # Normalize if requested
-                if self.overlay_normalize.get():
-                    current_max = np.max(current_intensity)
-                    current_intensity = (
-                        current_intensity / current_max
-                        if current_max > 0
-                        else current_intensity
-                    )
-
-                # Plot current spectrum with its transparency value
-                alpha = (
-                    1.0 - transparency_vars["current"]["var"].get()
-                )  # Convert to opacity
-                ax.plot(
-                    current_wavenumbers,
-                    current_intensity,
-                    label="Current Spectrum",
-                    linewidth=2,
-                    color="blue",
-                    alpha=alpha,
-                )
-                has_items_to_display = True
-
-        # Get the list of spectra to plot
-        if from_overlay_list:
-            # Get spectra from overlay_listbox
-            if isinstance(selected_indices, range):
-                # Convert range to list for better handling
-                selected_indices = list(selected_indices)
-
-            # Get all spectrum items from overlay listbox
-            spectrum_items = [self.overlay_listbox.get(i) for i in selected_indices]
-        else:
-            # Get spectra from matches_listbox
-            spectrum_items = [self.matches_listbox.get(i) for i in selected_indices]
-
-        # Keep track of colors used for consistent coloring
-        colors = plt.cm.tab10.colors
-        color_map = {}
-
-        # Plot selected spectra from database
-        for idx, match_text in enumerate(spectrum_items):
-            # Skip if this spectrum should be hidden (check the show/hide checkbox)
-            if hasattr(self, "overlay_transparency_vars"):
-                if (
-                    match_text in self.overlay_transparency_vars
-                    and not self.overlay_transparency_vars[match_text]["show"].get()
-                ):
-                    continue
-
-            # Extract name from the listbox text (handle both formats)
-            if " (Score:" in match_text:
-                match_name = match_text.split(" (Score:")[0]
-            else:
-                match_name = match_text
-
-            # If we have match_data_map, use it to get the original filename
-            if hasattr(self, "match_data_map") and match_text in self.match_data_map:
-                file_name, _ = self.match_data_map[match_text]
-            else:
-                file_name = match_name
-
-            # Get spectrum data from database
-            if file_name in self.raman.database:
-                db_data = self.raman.database[file_name]
-
-                # Handle both old and new data formats
-                if "spectrum" in db_data:
-                    # New format
-                    db_wavenumbers = db_data["spectrum"]["wavenumbers"]
-                    db_intensity = db_data["spectrum"]["intensity"]
-                else:
-                    # Old format
-                    db_wavenumbers = db_data["wavenumbers"]
-                    db_intensity = db_data["intensities"]
-
-                # Normalize if requested
-                if self.overlay_normalize.get():
-                    db_max = np.max(db_intensity)
-                    db_intensity = db_intensity / db_max if db_max > 0 else db_intensity
-
-                # Get display name from metadata if available
-                display_name = match_name
-                if "metadata" in db_data and "NAME" in db_data["metadata"]:
-                    display_name = db_data["metadata"]["NAME"]
-
-                # Get transparency and color settings
-                alpha = 1.0  # Default
-                color = None  # Default
-
-                if (
-                    hasattr(self, "overlay_transparency_vars")
-                    and match_text in self.overlay_transparency_vars
-                ):
-                    # Get transparency from slider
-                    transparency = self.overlay_transparency_vars[match_text][
-                        "var"
-                    ].get()
-                    alpha = 1.0 - transparency  # Convert to opacity
-
-                    # Get color if defined
-                    if "color" in self.overlay_transparency_vars[match_text]:
-                        color = self.overlay_transparency_vars[match_text]["color"]
-                else:
-                    # Assign a color based on index
-                    color_idx = (idx + 1) % len(
-                        colors
-                    )  # +1 because index 0 is for current spectrum
-                    color = colors[color_idx]
-
-                # Make sure we have a color
-                if color is None:
-                    color_idx = (idx + 1) % len(
-                        colors
-                    )  # +1 because index 0 is for current spectrum
-                    color = colors[color_idx]
-
-                # Store color mapping for legend
-                color_map[display_name] = color
-
-                # Plot with individual transparency
-                ax.plot(
-                    db_wavenumbers,
-                    db_intensity,
-                    label=display_name,
-                    color=color,
-                    alpha=alpha,
-                )
-                has_items_to_display = True
-
-        ax.set_xlabel("Wavenumber (cm⁻¹)")
-        ax.set_ylabel(
-            "Intensity (Normalized)"
-            if self.overlay_normalize.get()
-            else "Intensity (a.u.)"
-        )
-        ax.set_title("Spectra Overlay")
-
-        # Only add legend if there are items to display
-        if has_items_to_display:
-            ax.legend()
-
-        ax.grid(True, linestyle=":", color="gray", alpha=0.6)
-
-        # Draw the canvas first to establish the default view
-        self.overlay_canvas.draw()
-
-        # Store initial axis limits if not already stored
-        if self._initial_axis_limits is None:
-            self._initial_axis_limits = (ax.get_xlim(), ax.get_ylim())
-
-        # Restore previous limits if they exist
-        if xlim is not None and ylim is not None:
-            ax.set_xlim(xlim)
-            ax.set_ylim(ylim)
-            self.overlay_canvas.draw()
-
-        # Set up event handling for home button
-        def on_limits_changed(event):
-            if event.name == "xlim_changed" or event.name == "ylim_changed":
-                # Get current limits
-                current_xlim = ax.get_xlim()
-                current_ylim = ax.get_ylim()
-
-                # Get initial limits
-                init_xlim, init_ylim = self._initial_axis_limits
-
-                # Check if this is a home button press (limits match initial)
-                if np.allclose(current_xlim, init_xlim) and np.allclose(
-                    current_ylim, init_ylim
-                ):
-                    # Use the larger range for each axis
-                    x_range = max(
-                        current_xlim[1] - current_xlim[0], init_xlim[1] - init_xlim[0]
-                    )
-                    y_range = max(
-                        current_ylim[1] - current_ylim[0], init_ylim[1] - init_ylim[0]
-                    )
-
-                    # Set new limits
-                    ax.set_xlim(init_xlim[0], init_xlim[0] + x_range)
-                    ax.set_ylim(init_ylim[0], init_ylim[0] + y_range)
-                    self.overlay_canvas.draw()
-
-        # Connect the event handlers
-        ax.callbacks.connect("xlim_changed", on_limits_changed)
-        ax.callbacks.connect("ylim_changed", on_limits_changed)
-
-    def apply_savgol_smoothing(self):
-        """Apply Savitzky-Golay smoothing to the current spectrum."""
-        if self.raman.current_spectra is None:
-            messagebox.showerror("Error", "No spectrum loaded.")
-            return
-        try:
-            window_length = int(self.var_sg_window.get())
-            polyorder = int(self.var_sg_poly.get())
-            # Ensure window_length is odd and >= 5
-            if window_length < 5 or window_length % 2 == 0:
-                messagebox.showerror(
-                    "Error", "Window length must be an odd integer >= 5."
-                )
-                return
-            if polyorder < 2 or polyorder >= window_length:
-                messagebox.showerror(
-                    "Error",
-                    "Polynomial order must be >= 2 and less than window length.",
-                )
-                return
-            # Apply smoothing to the processed spectrum if it exists, else to the raw spectrum
-            if self.raman.processed_spectra is not None:
-                smoothed = savgol_filter(
-                    self.raman.processed_spectra, window_length, polyorder
-                )
-                self.raman.processed_spectra = smoothed
-            else:
-                smoothed = savgol_filter(
-                    self.raman.current_spectra, window_length, polyorder
-                )
-                self.raman.processed_spectra = smoothed
-            self.update_plot(
-                include_background=self.var_show_background.get(),
-                include_peaks=self.var_show_peaks.get(),
-            )
-        except Exception as e:
-            messagebox.showerror(
-                "Smoothing Error", f"Failed to apply smoothing: {str(e)}"
-            )
-
-    def preview_savgol_smoothing(self):
-        """Preview Savitzky-Golay smoothing on the plot without modifying the data."""
-        if self.raman.current_spectra is None:
-            messagebox.showerror("Error", "No spectrum loaded.")
-            return
-        try:
-            window_length = int(self.var_sg_window.get())
-            polyorder = int(self.var_sg_poly.get())
-            if window_length < 5 or window_length % 2 == 0:
-                messagebox.showerror(
-                    "Error", "Window length must be an odd integer >= 5."
-                )
-                return
-            if polyorder < 2 or polyorder >= window_length:
-                messagebox.showerror(
-                    "Error",
-                    "Polynomial order must be >= 2 and less than window length.",
-                )
-                return
-            # Use processed spectrum if it exists, else raw
-            if self.raman.processed_spectra is not None:
-                spectrum = self.raman.processed_spectra
-            else:
-                spectrum = self.raman.current_spectra
-            smoothed = savgol_filter(spectrum, window_length, polyorder)
-            # Plot preview: overlay smoothed spectrum in orange
-            self.ax.clear()
-            self.ax.plot(
-                self.raman.current_wavenumbers,
-                spectrum,
-                color="blue",
-                label="Original",
-                linewidth=1.5,
-            )
-            self.ax.plot(
-                self.raman.current_wavenumbers,
-                smoothed,
-                color="orange",
-                label="S-G Preview",
-                linewidth=1.5,
-                linestyle="--",
-            )
-            self.ax.set_xlabel("Wavenumber (cm⁻¹)")
-            self.ax.set_ylabel("Intensity (a.u.)")
-            self.ax.set_title("Savitzky-Golay Smoothing Preview")
-            self.ax.legend()
-            self.ax.grid(True, linestyle=":", color="gray", alpha=0.6)
-            self.canvas.draw()
-        except Exception as e:
-            messagebox.showerror(
-                "Smoothing Preview Error", f"Failed to preview smoothing: {str(e)}"
-            )
-
-    def create_advanced_analysis_tab(self):
-        """Create content for the advanced analysis tab."""
-        # Configure button styles with hover effects
-        style = ttk.Style()
-        
-        # Normal state - Blue color scheme
-        style.configure("PeakFitting.TButton", 
-                       background="#4a7a96", 
-                       foreground="white",
-                       borderwidth=1,
-                       focuscolor='none',
-                       relief="raised")
-        
-        # Hover state - Darker blue
-        style.map("PeakFitting.TButton",
-                 background=[('active', '#365a73'),   # Darker blue on hover
-                           ('pressed', '#2a4559')])    # Even darker on press
-        
-        # Create helper function to add hover effects
-        def create_button_with_hover(parent, text, command, style_name):
-            """Create a button with enhanced hover effects."""
-            button = ttk.Button(parent, text=text, command=command, style=style_name)
-            
-            # Additional hover effects using tkinter events
-            def on_enter(event):
-                button.configure(cursor="hand2")
-                
-            def on_leave(event):
-                button.configure(cursor="")
-                
-            button.bind("<Enter>", on_enter)
-            button.bind("<Leave>", on_leave)
-            
-            return button
-
-        # Create buttons with hover effects
-        peak_fitting_btn = create_button_with_hover(
-            self.tab_peak_fitting,
-            "Open Peak Fitting Window",
-            self.open_peak_fitting,
-            "PeakFitting.TButton"
-        )
-        peak_fitting_btn.pack(fill=tk.X, pady=10, padx=5)
-
-        batch_fitting_btn = create_button_with_hover(
-            self.tab_peak_fitting,
-            "Open Batch Peak Fitting",
-            self.open_batch_peak_fitting,
-            "PeakFitting.TButton"
-        )
-        batch_fitting_btn.pack(fill=tk.X, pady=10, padx=5)
-
-        map_analysis_btn = create_button_with_hover(
-            self.tab_peak_fitting,
-            "2D Map Analysis",
-            self.open_2d_map_analysis,
-            "PeakFitting.TButton"
-        )
-        map_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
-
-        group_analysis_btn = create_button_with_hover(
-            self.tab_peak_fitting,
-            "Raman Group Analysis",
-            self.open_raman_group_analysis,
-            "PeakFitting.TButton"
-        )
-        group_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
-        
-        polarization_btn = create_button_with_hover(
-            self.tab_peak_fitting,
-            "Raman Polarization Analysis",
-            self.open_polarization_analysis,
-            "PeakFitting.TButton"
-        )
-        polarization_btn.pack(fill=tk.X, pady=10, padx=5)
-
-    def open_polarization_analysis(self):
-        """Open the Raman polarization analysis window."""
-        try:
-            print("Opening Polarization Analysis window...")
-            from raman_polarization_analyzer import RamanPolarizationAnalyzer
-            
-            # Create a new top-level window
-            polarization_window = tk.Toplevel(self.root)
-            polarization_window.title("Raman Polarization Analysis")
-            polarization_window.geometry("1200x800")
-            
-            # Create the analyzer instance
-            analyzer = RamanPolarizationAnalyzer(polarization_window)
-            
-            # Store the analyzer instance in the window to prevent garbage collection
-            polarization_window.analyzer = analyzer
-            
-            # Add a protocol to handle window close properly
-            def on_window_close():
-                # Clean up any resources if needed
-                if hasattr(polarization_window, 'analyzer'):
-                    del polarization_window.analyzer
-                polarization_window.destroy()
-                
-            polarization_window.protocol("WM_DELETE_WINDOW", on_window_close)
-            
-            print("Polarization Analysis window opened successfully")
-        except Exception as e:
-            print(f"Error opening Polarization Analysis window: {str(e)}")
-            import traceback
-            traceback.print_exc()  # Print full traceback for debugging
-            messagebox.showerror(
-                "Error", f"Failed to open polarization analysis window: {str(e)}"
-            )
-            
-    def open_batch_peak_fitting(self):
-        """Open the batch peak fitting window."""
-        try:
-            from batch_peak_fitting import BatchPeakFittingWindow
-
-            BatchPeakFittingWindow(self.root, self)
-        except Exception as e:
-            messagebox.showerror(
-                "Error", f"Failed to open batch peak fitting window: {str(e)}"
-            )
-
-    def open_2d_map_analysis(self):
-        """Open the 2D Map Analysis window."""
-        try:
-            from map_analysis_2d import TwoDMapAnalysisWindow
-
-            TwoDMapAnalysisWindow(self.root, self)
-        except Exception as e:
-            messagebox.showerror(
-                "Error", f"Failed to open 2D Map Analysis window: {str(e)}"
-            )
-
-    def open_raman_group_analysis(self):
-        """Open the Raman Group Analysis window."""
-        try:
-            from raman_group_analysis import RamanGroupAnalysisWindow
-
-            RamanGroupAnalysisWindow(self.root, self)
-        except Exception as e:
-            messagebox.showerror(
-                "Error", f"Failed to open Raman Group Analysis window: {str(e)}"
-            )
-
-    def get_mineral_display_name(self, mineral_key):
-        """
-        Get the display name for a mineral from the database.
-        Uses the NAME field from metadata if available, otherwise falls back to the mineral key.
-        """
-        try:
-            mineral_data = self.raman.database[mineral_key]
-            if "metadata" in mineral_data and "NAME" in mineral_data["metadata"]:
-                return mineral_data["metadata"]["NAME"]
-        except Exception:
-            pass
-        return mineral_key
-
-
-
     def launch_mineral_database_browser(self):
         """Launch the mineral database browser within the same process."""
         try:
@@ -6843,918 +4699,535 @@ class RamanAnalysisApp:
             import traceback
             traceback.print_exc()  # Print the full traceback for debugging
     
-    def analyze_mixed_minerals(self):
-        """Analyze a spectrum containing multiple minerals using simultaneous multi-component fitting with vibrational mode guidance."""
-        # Create a new window
-        window = tk.Toplevel(self.root)
-        window.title("Mixed Mineral Analysis")
-        window.geometry("1200x800")
-
-        # Create main container
-        main_frame = ttk.Frame(window)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        # Create left panel for controls - increase width to accommodate buttons
-        control_panel = ttk.Frame(main_frame, width=350)
-        control_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        control_panel.pack_propagate(False)
-
-        # Store selected minerals and their spectra
-        selected_minerals = {}
-        mineral_weights = {}
-        # Dictionary to store display names
-        mineral_display_names = {}
-
-
-        # Create figure with subplots
-        fig = Figure(figsize=(10, 8))
-        gs = fig.add_gridspec(4, 1, height_ratios=[1, 1, 1, 1], hspace=0.3)
-
-        # Create axes
-        ax1 = fig.add_subplot(gs[0])  # Original spectrum
-        ax2 = fig.add_subplot(gs[1])  # Combined fit
-        ax3 = fig.add_subplot(gs[2])  # Residual
-        ax4 = fig.add_subplot(gs[3])  # Vibrational mode analysis
-        
-        # Add more padding to all plots
-        fig.subplots_adjust(left=0.12, right=0.95, top=0.95, bottom=0.08)
-
-
-
-
-
-        # Create right panel for plots
-        plot_panel = ttk.Frame(main_frame)
-        plot_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Create canvas
-        canvas = FigureCanvasTkAgg(fig, master=plot_panel)
-        canvas.draw()
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-
-        # Add toolbar
-        toolbar = NavigationToolbar2Tk(canvas, plot_panel)
-        toolbar.update()
-        # No redundant canvas packing here
-
-
-
-        current_spectrum = self.raman.processed_spectra
-        current_wavenumbers = self.raman.current_wavenumbers
-
-        # Fallback if processed spectrum is None or empty
-        if (
-            current_spectrum is None or
-            current_wavenumbers is None or
-            not hasattr(current_spectrum, '__len__') or
-            not hasattr(current_wavenumbers, '__len__') or
-            len(current_spectrum) == 0 or
-            len(current_wavenumbers) == 0
-        ):
-            current_spectrum = self.raman.current_spectra
-            current_wavenumbers = self.raman.current_wavenumbers
-
-
-
-        # Get current spectrum data
-        # current_spectrum = self.raman.processed_spectra
-        # current_wavenumbers = self.raman.current_wavenumbers
-
-        # Plot original spectrum
-        ax1.plot(current_wavenumbers, current_spectrum, "b-", label="Original Spectrum")
-        # No title for cleaner look
-        ax1.set_xlabel("Wavenumber (cm⁻¹)")
-        ax1.set_ylabel("Intensity")
-        ax1.grid(True, linestyle=":", alpha=0.6)
-        ax1.legend()
-
-
-
-
-        # Data check: Prevent plotting if data is missing
-        if (
-            current_spectrum is not None and current_wavenumbers is not None
-            and hasattr(current_spectrum, '__len__') and hasattr(current_wavenumbers, '__len__')
-            and len(current_spectrum) > 0 and len(current_wavenumbers) > 0
-            and len(current_spectrum) == len(current_wavenumbers)
-        ):
-            ax1.plot(current_wavenumbers, current_spectrum, "b-", label="Original Spectrum")
-        else:
-            ax1.text(
-                0.5, 0.5, "No spectrum data available",
-                ha='center', va='center', transform=ax1.transAxes, fontsize=14, color='red'
+    def launch_raman_database_browser(self):
+        """Launch the advanced Raman database browser."""
+        try:
+            from raman_database_browser import RamanDatabaseGUI
+            
+            # Create the Raman database browser GUI with this window as parent
+            db_gui = RamanDatabaseGUI(parent=self.root)
+            
+            # The GUI window is created in the RamanDatabaseGUI constructor
+            # No need for additional window management here
+            
+        except ImportError as e:
+            messagebox.showerror(
+                "Import Error", 
+                f"Failed to import Raman database browser module: {str(e)}\n\n"
+                "Make sure 'raman_database_browser.py' is in the same directory."
             )
-            print("Nothing to plot: spectrum or wavenumbers missing or mismatched.")
-    
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to launch Raman database browser: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print the full traceback for debugging
 
-
-        # Store selected minerals and their spectra
-        selected_minerals = {}
-        mineral_weights = {}
-
-        # Add button frame - moved before minerals frame for better visibility
-        btn_frame = ttk.Frame(control_panel)
-        btn_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # Use grid layout for buttons to ensure they're all visible
-        ttk.Button(btn_frame, text="Add Mineral", command=lambda: add_mineral()).grid(
-            row=0, column=0, padx=5, pady=5, sticky="ew"
-        )
-        ttk.Button(
-            btn_frame, text="Remove Mineral", command=lambda: remove_mineral()
-        ).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        ttk.Button(
-            btn_frame, text="Search Residual", command=lambda: dtw_search_on_residual()
-        ).grid(row=1, column=0, padx=5, pady=5, sticky="ew")
-        ttk.Button(
-            btn_frame,
-            text="Analyze Vibrations",
-            command=lambda: update_vibration_analysis(),
-        ).grid(row=1, column=1, padx=5, pady=5, sticky="ew")
-
-        # Configure grid columns to have equal width
-
-        btn_frame.columnconfigure(0, weight=1)
-        btn_frame.columnconfigure(1, weight=1)
-
-        # Create selected minerals listbox
-        minerals_frame = ttk.LabelFrame(control_panel, text="Selected Minerals")
-        minerals_frame.pack(fill=tk.X, padx=5, pady=5)
-        selected_minerals_listbox = tk.Listbox(minerals_frame, height=6)
-        selected_minerals_listbox.pack(fill=tk.X, expand=True)
-
-        # Add fit metrics frame to display R², RMSE, etc.
-        metrics_frame = ttk.LabelFrame(control_panel, text="Fit Quality Metrics")
-        metrics_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # Grid for metrics
-        ttk.Label(metrics_frame, text="Overall R²:").grid(
-            row=0, column=0, sticky="w", padx=5, pady=2
-        )
-        r2_var = tk.StringVar(value="N/A")
-        ttk.Label(metrics_frame, textvariable=r2_var).grid(
-            row=0, column=1, sticky="e", padx=5, pady=2
-        )
-
-        ttk.Label(metrics_frame, text="RMSE:").grid(
-            row=1, column=0, sticky="w", padx=5, pady=2
-        )
-        rmse_var = tk.StringVar(value="N/A")
-        ttk.Label(metrics_frame, textvariable=rmse_var).grid(
-            row=1, column=1, sticky="e", padx=5, pady=2
-        )
-
-        # Add mineral contributions frame
-        contrib_frame = ttk.LabelFrame(control_panel, text="Mineral Contributions")
-        contrib_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        # Create a text widget to display mineral contributions
-        contrib_text = tk.Text(contrib_frame, height=6, width=30, wrap=tk.WORD)
-        contrib_text.pack(fill=tk.BOTH, expand=True)
-        contrib_text.config(state=tk.DISABLED)
-
-        
-        # Define vibration groups for all operations
-        vib_groups = ["Silicate", "Carbonate", "Phosphate", "Sulfate", "Hydroxide", 
-                      "Arsenate", "Oxide", "Sulfide", "Sulfosalt", "Vanadate", 
-                      "Borate", "OH/H₂O", "Oxalate"]
-        
-        # Add a frame for vibration display control
-        vib_display_frame = ttk.LabelFrame(control_panel, text="Vibrational Mode Display")
-        vib_display_frame.pack(fill=tk.X, expand=True, padx=5, pady=5)
-        
-        # Create a canvas with scrollbar for the checkboxes to allow for scrolling
-        checkbox_canvas = tk.Canvas(vib_display_frame, height=120, width=300)
-        checkbox_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        checkbox_scrollbar = ttk.Scrollbar(vib_display_frame, orient="vertical", 
-                                         command=checkbox_canvas.yview)
-        checkbox_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Configure the canvas
-        checkbox_canvas.configure(yscrollcommand=checkbox_scrollbar.set)
-        checkbox_canvas.bind('<Configure>', 
-                          lambda e: checkbox_canvas.configure(scrollregion=checkbox_canvas.bbox("all")))
-        
-        # Create a frame inside the canvas to hold checkboxes
-        checkbox_frame = ttk.Frame(checkbox_canvas)
-        checkbox_frame.columnconfigure(0, weight=1)
-        checkbox_frame.columnconfigure(1, weight=1)
-        checkbox_frame.columnconfigure(2, weight=1)
-        checkbox_canvas.create_window((0, 0), window=checkbox_frame, anchor="nw", width=checkbox_canvas.winfo_width())
-
-        def update_frame_width(event):
-            checkbox_canvas.itemconfig(
-                1,  # First item is the window
-                width=event.width  # Set width to canvas width
-            )
+    def apply_savgol_smoothing(self):
+        """Apply Savitzky-Golay smoothing to the current spectrum."""
+        if self.raman.current_spectra is None:
+            messagebox.showwarning("Warning", "No spectrum loaded.")
+            return
             
-        checkbox_canvas.bind("<Configure>", update_frame_width)
-        
-        # Create variables to track checkbox states
-        vib_group_vars = {}
-        for i, group in enumerate(vib_groups):
-            var = tk.BooleanVar(value=False)  # Default all to deselected
-            vib_group_vars[group] = var
+        try:
+            # Default parameters - can be made configurable
+            window_length = 11
+            polyorder = 3
             
-            # Calculate row and column for 2-column layout
-            row = i // 3
-            column = i % 3
+            # Apply smoothing
+            from scipy.signal import savgol_filter
+            smoothed = savgol_filter(self.raman.current_spectra, window_length, polyorder)
             
-            ttk.Checkbutton(
-                checkbox_frame, 
-                text=group, 
-                variable=var,
-                command=lambda g=group: update_vibration_analysis()
-            ).grid(row=row, column=column, sticky="ew", padx=5, pady=2)
+            # Update the current spectrum
+            self.raman.current_spectra = smoothed
+            self.raman.processed_spectra = smoothed
             
-        # Add select all/none buttons
-        select_btn_frame = ttk.Frame(vib_display_frame)
-        select_btn_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        def select_all_vibrations():
-            for var in vib_group_vars.values():
-                var.set(True)
-            update_vibration_analysis()
+            # Update the plot
+            self.update_plot()
             
-        def deselect_all_vibrations():
-            for var in vib_group_vars.values():
-                var.set(False)
-            update_vibration_analysis()
+            messagebox.showinfo("Success", f"Applied Savitzky-Golay smoothing (window={window_length}, order={polyorder})")
             
-        ttk.Button(select_btn_frame, text="Select All", command=select_all_vibrations).grid(
-            row=0, column=0, padx=5, pady=2, sticky="ew")
-        ttk.Button(select_btn_frame, text="Deselect All", command=deselect_all_vibrations).grid(
-            row=0, column=1, padx=5, pady=2, sticky="ew")
-        
-        select_btn_frame.columnconfigure(0, weight=1)
-        select_btn_frame.columnconfigure(1, weight=1)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to apply smoothing: {str(e)}")
 
-        # # Add a frame for vibration-based search
-        # vib_search_frame = ttk.LabelFrame(
-        #     control_panel, text="Search by Vibrational Group"
-        # )
-        # vib_search_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # # Define the vibration groups for search
-        # vib_groups = ["Silicate", "Carbonate", "Phosphate", "Sulfate", "Hydroxide", "Arsenate", "Oxide", "Sulfide", "Sulfosalt", "Vanadate", "Borate", "OH/H₂O", "Oxalate"]
-        # vib_group_var = tk.StringVar()
-        # vib_group_var.set(vib_groups[0])
-
-        # # Add a dropdown for vibration group selection
-        # ttk.Label(vib_search_frame, text="Vibration Group:").pack(
-        #     anchor="w", padx=5, pady=2
-        # )
-        # ttk.Combobox(
-        #     vib_search_frame,
-        #     textvariable=vib_group_var,
-        #     values=vib_groups,
-        #     state="readonly",
-        # ).pack(fill=tk.X, padx=5, pady=2)
-
-        # # Add search button
-        # ttk.Button(
-        #     vib_search_frame,
-        #     text="Search by Vibration",
-        #     command=lambda: search_by_vibration_group(vib_group_var.get()),
-        # ).pack(fill=tk.X, padx=5, pady=5)
-
-        def update_fit():
-            if not selected_minerals:
-                # Clear metrics if no minerals selected
-                r2_var.set("N/A")
-                rmse_var.set("N/A")
-                contrib_text.config(state=tk.NORMAL)
-                contrib_text.delete(1.0, tk.END)
-                contrib_text.config(state=tk.DISABLED)
-                return
-
-            A = np.column_stack([spectrum for spectrum in selected_minerals.values()])
-            b = current_spectrum
-            try:
-                from scipy.optimize import nnls
-
-                weights, residual = nnls(A, b)
-                for i, mineral_name in enumerate(selected_minerals.keys()):
-                    mineral_weights[mineral_name] = weights[i]
-                fit = np.sum(
-                    [w * s for w, s in zip(weights, selected_minerals.values())], axis=0
-                )
-                residual = current_spectrum - fit
-
-                # Calculate fit quality metrics
-                # R² calculation (coefficient of determination)
-                ss_total = np.sum((current_spectrum - np.mean(current_spectrum)) ** 2)
-                ss_residual = np.sum(residual**2)
-                r_squared = 1 - (ss_residual / ss_total)
-
-                # RMSE calculation
-                rmse = np.sqrt(np.mean(residual**2))
-
-                # Update metric variables
-                r2_var.set(f"{r_squared:.4f}")
-                rmse_var.set(f"{rmse:.2f}")
-
-                # Update mineral contributions text
-                contrib_text.config(state=tk.NORMAL)
-                contrib_text.delete(1.0, tk.END)
-
-                # Calculate total weight for percentage
-                total_weight = sum(weights)
-
-                # Add header
-                contrib_text.insert(tk.END, "Mineral\tWeight\t%\n", "header")
-                contrib_text.tag_configure("header", font=("TkDefaultFont", 9, "bold"))
-
-                # Add each mineral's contribution
-                for i, (mineral_name, weight) in enumerate(
-                    zip(selected_minerals.keys(), weights)
-                ):
-                    percentage = (
-                        (weight / total_weight) * 100 if total_weight > 0 else 0
-                    )
-                    display_name = self.get_mineral_display_name(mineral_name)
-                    display_name = (
-                        display_name[:15] + "..."
-                        if len(display_name) > 15
-                        else display_name
-                    )
-                    contrib_text.insert(
-                        tk.END, f"{display_name}\t{weight:.2f}\t{percentage:.1f}%\n"
-                    )
-
-                contrib_text.config(state=tk.DISABLED)
-
-                # Update plots
-                ax2.clear()
-                ax2.plot(
-                    current_wavenumbers,
-                    current_spectrum,
-                    "b-",
-                    label="Original",
-                    alpha=0.5,
-                )
-                ax2.plot(current_wavenumbers, fit, "r-", label=f"Combined Fit (R² = {r_squared:.4f})")
-                for mineral_key, spectrum in selected_minerals.items():
-                    weight = mineral_weights[mineral_key]
-                    display_name = self.get_mineral_display_name(mineral_key)
-                    ax2.plot(
-                        current_wavenumbers,
-                        weight * spectrum,
-                        "--",
-                        label=f"{display_name} ({weight:.2f})",
-                        alpha=0.7,
-                    )
-                # No title for cleaner look (R² value will be in legend)
-                ax2.set_xlabel("Wavenumber (cm⁻¹)")
-                ax2.set_ylabel("Intensity")
-                ax2.grid(True, linestyle=":", alpha=0.6)
-                ax2.legend()
-
-                ax3.clear()
-                ax3.plot(current_wavenumbers, residual, "g-", label="Residual")
-                # No title for cleaner look
-                ax3.set_xlabel("Wavenumber (cm⁻¹)")
-                ax3.set_ylabel("Intensity")
-                ax3.grid(True, linestyle=":", alpha=0.6)
-                ax3.legend()
-                canvas.draw()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to update fit: {str(e)}")
-
-        def update_vibration_analysis():
-            """Update the vibrational mode analysis plot based on selected minerals."""
-            if not selected_minerals:
-                messagebox.showinfo("Info", "Please add at least one mineral first.")
-                return
-
-            ax4.clear()
-
-            # Define common mineral vibrational regions
-            mineral_regions = [
-                # Silicate vibrations
-                ("Silicate", 450, 550, "Si-O-Si 3MR Stretch"),
-                ("Silicate", 600, 680, "Si-O-Si"),
-                ("Silicate", 850, 1000, "Si-O Stretch Q$^{2}$,Q$^{3}$"),
-                ("Silicate", 1050, 1200, "Si-O-Si Stretch Q$^{0}$"),
-                # Carbonate vibrations
-                ("Carbonate", 700, 740, "CO$_3$ Bend v$_2$ "),
-                ("Carbonate", 1050, 1090, "CO$_3$ Stretch v$_4$"),
-                # Phosphate vibrations
-                ("Phosphate", 550, 620, "PO$_4$ Bend v$_4$"),
-                ("Phosphate", 950, 970, "PO$_4$ Stretch v$_1$"),
-                ("Phosphate", 1030, 1080, "PO$_4$ Asym"),
-                # Sulfate vibrations
-                ("Sulfate", 450, 500, "SO$_4$ Bend v$_2$"),
-                ("Sulfate", 975, 1010, "SO$_4$ Stretch v$_1$"),
-                ("Sulfate", 1100, 1150, "SO$_4$ Asym v$_3$"),
-                # Arsenate vibrations
-                ("Arsenate", 420, 460, "AsO$_4$ Bend v$_2$"),
-                ("Arsenate", 810, 855, "AsO$_4$ Stretch v$_1$"),
-                ("Arsenate", 780, 880, "AsO$_3$ Stretch v$_3$"),
-                # Oxide vibrations
-                ("Oxide", 300, 350, "Metal-O Stretch"),
-                ("Oxide", 400, 450, "Metal-O-Metal Bend"),
-                ("Oxide", 500, 600, "M-O Lattice"),
-                # Hydroxide vibrations
-                ("Hydroxide", 3500, 3650, "OH Stretch"),
-                ("Hydroxide", 600, 900, "M-OH Bend"),
-                ("Hydroxide", 1600, 1650, "HOH Bend"),
-                # Sulfide vibrations
-                ("Sulfide", 300, 400, "Metal-S Stretch"),
-                ("Sulfide", 200, 280, "S-S Stretch"),
-                ("Sulfide", 350, 420, "M-S-M Bend"),
-                # Sulfosalt vibrations
-                ("Sulfosalt", 300, 360, "Sb-S Stretch"),
-                ("Sulfosalt", 330, 380, "As-S Stretch"),
-                ("Sulfosalt", 250, 290, "S-S Stretch"),
-                # Vanadate vibrations
-                ("Vanadate", 800, 860, "V-O Stretch v$_1$"),
-                ("Vanadate", 780, 820, "V-O-V Asym v$_3$"),
-                ("Vanadate", 400, 450, "V-O Bend v$_4$"),
-                # Borate vibrations
-                ("Borate", 650, 700, "BO$_3$ Bend"),
-                ("Borate", 880, 950, "BO$_3$ Stretch"),
-                ("Borate", 1300, 1400, "BO$_3$ Asym"),
-                # Water vibrations
-                ("OH/H₂O", 3200, 3500, "H$_2$O Stretch"),
-                ("OH/H₂O", 1600, 1650, "H$_2$O Bend"),
-                ("OH/H₂O", 500, 800, "H$_2$O Libration"),
-                # Oxalate vibrations
-                ("Oxalate", 1455, 1490, "C-O Stretch"),
-                ("Oxalate", 900, 920, "C-C Stretch"),
-                ("Oxalate", 850, 870, "O-C-O Bend"),
-            ]
-
-            # Plot original spectrum with lower opacity
-            ax4.plot(
-                current_wavenumbers, current_spectrum, "k-", alpha=0.3, label="Original"
-            )
-
-            # Use different colors for different mineral groups
-            group_colors = {
-                "Silicate": "blue",
-                "Carbonate": "green",
-                "Phosphate": "red",
-                "Sulfate": "purple",
-                "Arsenate": "orange",
-                "Oxide": "brown",
-                "Hydroxide": "cyan",
-                "Sulfide": "olive",
-                "Sulfosalt": "pink",
-                "Vanadate": "indigo",
-                "Borate": "gold",
-                "OH/H₂O": "lightblue",
-                "Oxalate": "darkgreen",
-            }
-            # Filter mineral regions based on checkbox selection
-            filtered_regions = [region for region in mineral_regions
-                               if region[0] in vib_group_vars and vib_group_vars[region[0]].get()]
-
-            # Add shaded regions for selected vibrational modes
-            for group, start, end, label in filtered_regions:
-                color = group_colors.get(group, "gray")
-                ax4.axvspan(start, end, alpha=0.2, color=color)
-                # Add text at the center of each region
-                center = (start + end) / 2
-                ax4.text(
-                    center,
-                    ax4.get_ylim()[1] * 0.9,
-                    label,
-                    fontsize=8,
-                    ha="center",
-                    va="top",
-                    rotation=90,
-                    bbox=dict(facecolor="white", alpha=0.7, edgecolor="none"),
-                )
-
-            # Add a legend for mineral groups - only for selected groups
-            from matplotlib.patches import Patch
+    def preview_savgol_smoothing(self):
+        """Preview Savitzky-Golay smoothing with adjustable parameters."""
+        if self.raman.current_spectra is None:
+            messagebox.showwarning("Warning", "No spectrum loaded.")
+            return
             
-            selected_groups = [group for group in group_colors.keys() 
-                              if group in vib_group_vars and vib_group_vars[group].get()]
+        try:
+            from scipy.signal import savgol_filter
             
-            if selected_groups:
-                legend_elements = [
-                    Patch(facecolor=group_colors[group], alpha=0.2, label=group)
-                    for group in selected_groups
-                ]
-                ax4.legend(handles=legend_elements, loc="upper right")
-
-            # No title for cleaner look
-            ax4.set_xlabel("Wavenumber (cm⁻¹)")
-            ax4.set_ylabel("Intensity")
-            ax4.grid(True, linestyle=":", alpha=0.6)
-
-            canvas.draw()
-        
-
-        
-        def add_mineral():
+            # Create preview window
+            preview_window = tk.Toplevel(self.root)
+            preview_window.title("Savitzky-Golay Smoothing Preview")
+            preview_window.geometry("800x600")
             
-            matches = self._perform_search("correlation", 5, 0.5)
-            if not matches:
-                messagebox.showwarning("Warning", "No good matches found.")
-                return
-            select_window = tk.Toplevel(window)
-            select_window.title("Select Mineral")
-            select_window.geometry("400x300")
-            match_frame = ttk.Frame(select_window)
-            match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            match_listbox = tk.Listbox(match_frame)
-            match_listbox.pack(fill=tk.BOTH, expand=True)
-            for match_name, score in matches:
-                display_name = self.get_mineral_display_name(match_name)
-                match_listbox.insert(tk.END, f"{display_name} (Score: {score:.2f})")    
-
-            def on_select():
-                selection = match_listbox.curselection()
-                if not selection:
-                    return
-                match_name = matches[selection[0]][0]
-                if match_name in selected_minerals:
-                    messagebox.showwarning(
-                        "Warning", "This mineral is already selected."
-                    )
-                    return
-                match_data = self.raman.database[match_name]
-                match_spectrum = match_data["intensities"]
-                match_wavenumbers = match_data["wavenumbers"]
-                match_spectrum_interp = np.interp(
-                    current_wavenumbers, match_wavenumbers, match_spectrum
-                )
-                selected_minerals[match_name] = match_spectrum_interp
-                mineral_weights[match_name] = 1.0
-                display_name = self.get_mineral_display_name(match_name)
-                selected_minerals_listbox.insert(tk.END, display_name)
-                update_fit()
-                select_window.destroy()
-
-            ttk.Button(select_window, text="Select", command=on_select).pack(pady=5)
-
-        def remove_mineral():
-            selection = selected_minerals_listbox.curselection()
-            if not selection:
-                return
-            display_name = selected_minerals_listbox.get(selection[0])  # Add this line
-
-            mineral_key = None
-            for key in list(selected_minerals.keys()):
-                if self.get_mineral_display_name(key) == display_name:
-                    mineral_key = key
-                    break
-            if mineral_key is not None:
-                del selected_minerals[mineral_key]
-                del mineral_weights[mineral_key]
-                selected_minerals_listbox.delete(selection[0])
-                update_fit()
-
-        def dtw_search_on_residual():
-            """Search for a second phase in the residual spectrum using DTW."""
-            if not selected_minerals:
-                messagebox.showwarning(
-                    "Warning", "Please add at least one mineral first."
-                )
-                return
-
-            # Get the residual spectrum
-            A = np.column_stack([spectrum for spectrum in selected_minerals.values()])
-            b = current_spectrum
-            try:
-                from scipy.optimize import nnls
-
-                weights, nnls_residual = nnls(A, b)
-                # Calculate the actual residual spectrum
-                fit = np.sum(
-                    [w * s for w, s in zip(weights, selected_minerals.values())], axis=0
-                )
-                residual_spectrum = current_spectrum - fit
-
-                # Initialize matches list
-                matches = []
-                
-                # Update residual plot to highlight that we're searching on it
-                ax3.clear()
-                ax3.plot(
-                    current_wavenumbers,
-                    residual_spectrum,
-                    "g-",
-                    label="Residual (Searching...)",
-                    linewidth=2,
-                )
-                # No title for cleaner look
-                ax3.set_xlabel("Wavenumber (cm⁻¹)")
-                ax3.set_ylabel("Intensity")
-                ax3.grid(True, linestyle=":", alpha=0.6)
-                ax3.legend()
-                canvas.draw()
-                
-                # Force immediate GUI update
-                window.update()
-                
-                # Define function to display search results
-                def display_search_results():
-                    # Create selection window
-                    select_window = tk.Toplevel(window)
-                    select_window.title("Select Mineral from Residual")
-                    select_window.geometry("400x300")
-                    match_frame = ttk.Frame(select_window)
-                    match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-                    match_listbox = tk.Listbox(match_frame)
-                    match_listbox.pack(fill=tk.BOTH, expand=True)
-
-                    # Add a title to explain what we're doing
-                    ttk.Label(
-                        match_frame,
-                        text="Minerals found in the residual spectrum:",
-                        font=("TkDefaultFont", 9, "bold"),
-                    ).pack(side=tk.TOP, pady=(0, 5))
-
-                    for match_name, score in matches:
-                        display_name = self.get_mineral_display_name(match_name)
-                        match_listbox.insert(tk.END, f"{display_name} (Score: {score:.2f})")
-
-                    def on_select():
-                        selection = match_listbox.curselection()
-                        if not selection:
-                            return
-                        match_name = matches[selection[0]][0]
-                        if match_name in selected_minerals:
-                            messagebox.showwarning(
-                                "Warning", "This mineral is already selected."
-                            )
-                            return
-                        match_data = self.raman.database[match_name]
-                        match_spectrum = match_data["intensities"]
-                        match_wavenumbers = match_data["wavenumbers"]
-                        match_spectrum_interp = np.interp(
-                            current_wavenumbers, match_wavenumbers, match_spectrum
-                        )
-                        selected_minerals[match_name] = match_spectrum_interp
-                        mineral_weights[match_name] = 1.0
-                        display_name = self.get_mineral_display_name(match_name)
-                        selected_minerals_listbox.insert(tk.END, display_name)
-                        update_fit()
-                        select_window.destroy()
-
-                    ttk.Button(select_window, text="Select", command=on_select).pack(pady=5)
-                
-                # Define function to process search results
-                def show_results():
-                    # Still no results, show warning
-                    if not matches:
-                        messagebox.showwarning(
-                            "Warning", "No good matches found in residual."
-                        )
-                        # Restore original residual plot
-                        ax3.clear()
-                        ax3.plot(
-                            current_wavenumbers, residual_spectrum, "g-", label="Residual"
-                        )
-                        # No title for cleaner look
-                        ax3.set_xlabel("Wavenumber (cm⁻¹)")
-                        ax3.set_ylabel("Intensity")
-                        ax3.grid(True, linestyle=":", alpha=0.6)
-                        ax3.legend()
-                        canvas.draw()
-                        return
-                    else:
-                        # Create selection window with search results
-                        display_search_results()
-                
-                # Define the search thread function
-                def search_thread_function():
-                    nonlocal matches
-                    # Perform the search on the residual spectrum
-                    # Use correlation search which works with the spectrum parameter
-                    matches = self.ml_based_search(5, 0.5, spectrum=residual_spectrum)
-
-                    # If no results, try with a lower threshold
-                    if not matches:
-                        matches = self.ml_based_search(
-                            5, 0.3, spectrum=residual_spectrum
-                        )
+            # Control frame
+            control_frame = ttk.Frame(preview_window)
+            control_frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            # Parameters
+            ttk.Label(control_frame, text="Window Length:").grid(row=0, column=0, padx=5, pady=5)
+            window_var = tk.IntVar(value=11)
+            window_spin = tk.Spinbox(control_frame, from_=5, to=51, increment=2, 
+                                   textvariable=window_var, width=10)
+            window_spin.grid(row=0, column=1, padx=5, pady=5)
+            
+            ttk.Label(control_frame, text="Polynomial Order:").grid(row=0, column=2, padx=5, pady=5)
+            poly_var = tk.IntVar(value=3)
+            poly_spin = tk.Spinbox(control_frame, from_=1, to=5, 
+                                 textvariable=poly_var, width=10)
+            poly_spin.grid(row=0, column=3, padx=5, pady=5)
+            
+            # Define apply function first (needed for the top button)
+            def apply_from_preview():
+                """Apply the smoothing with current parameters."""
+                try:
+                    window_length = window_var.get()
+                    polyorder = poly_var.get()
                     
-                    # Process results in the main thread
-                    window.after(0, show_results)
-                
-                # Start the search thread
-                import threading
-                search_thread = threading.Thread(target=search_thread_function)
-                search_thread.daemon = True
-                search_thread.start()
-                
-                # Return early - the thread will handle the rest
+                    # Ensure parameters are valid
+                    if window_length % 2 == 0:
+                        window_length += 1
+                    if polyorder >= window_length:
+                        polyorder = window_length - 1
+                    
+                    # Apply smoothing
+                    smoothed = savgol_filter(self.raman.current_spectra, window_length, polyorder)
+                    
+                    # Update the current spectrum
+                    self.raman.current_spectra = smoothed
+                    self.raman.processed_spectra = smoothed
+                    
+                    # Update the main plot
+                    self.update_plot()
+                    
+                    preview_window.destroy()
+                    messagebox.showinfo("Success", f"Applied Savitzky-Golay smoothing (window={window_length}, order={polyorder})")
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to apply smoothing: {str(e)}")
+            
+            # Add Apply Smoothing button to the top control frame
+            apply_button = ttk.Button(control_frame, text="Apply Smoothing", command=apply_from_preview)
+            apply_button.grid(row=0, column=4, padx=10, pady=5)
+            
+            # Create matplotlib figure for preview
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+            
+            fig = Figure(figsize=(10, 6), dpi=100)
+            ax = fig.add_subplot(111)
+            
+            # Initial plot
+            original_line, = ax.plot(self.raman.current_wavenumbers, self.raman.current_spectra, 
+                                   'b-', label='Original', alpha=0.7)
+            smoothed_line, = ax.plot(self.raman.current_wavenumbers, self.raman.current_spectra, 
+                                   'r-', label='Smoothed', linewidth=2)
+            
+            ax.set_xlabel('Wavenumber (cm⁻¹)')
+            ax.set_ylabel('Intensity (a.u.)')
+            ax.set_title('Savitzky-Golay Smoothing Preview')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            canvas = FigureCanvasTkAgg(fig, preview_window)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            
+            toolbar = NavigationToolbar2Tk(canvas, preview_window)
+            toolbar.update()
+            
+            def update_preview():
+                """Update the preview with current parameters."""
+                try:
+                    window_length = window_var.get()
+                    polyorder = poly_var.get()
+                    
+                    # Ensure window length is odd and valid
+                    if window_length % 2 == 0:
+                        window_length += 1
+                        window_var.set(window_length)
+                    
+                    # Ensure polyorder < window_length
+                    if polyorder >= window_length:
+                        polyorder = window_length - 1
+                        poly_var.set(polyorder)
+                    
+                    # Apply smoothing
+                    smoothed = savgol_filter(self.raman.current_spectra, window_length, polyorder)
+                    
+                    # Update plot
+                    smoothed_line.set_ydata(smoothed)
+                    canvas.draw()
+                    
+                except Exception as e:
+                    print(f"Preview error: {e}")
+            
+            # Bind parameter changes to update
+            window_var.trace('w', lambda *args: update_preview())
+            poly_var.trace('w', lambda *args: update_preview())
+            
+            # Update initial preview
+            update_preview()
+            
+            # Button frame
+            button_frame = ttk.Frame(preview_window)
+            button_frame.pack(fill=tk.X, padx=10, pady=5)
+            
+            ttk.Button(button_frame, text="Apply", command=apply_from_preview).pack(side=tk.LEFT, padx=5)
+            ttk.Button(button_frame, text="Cancel", command=preview_window.destroy).pack(side=tk.LEFT, padx=5)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open smoothing preview: {str(e)}")
+
+    def get_mineral_display_name(self, mineral_key):
+        """
+        Get the display name for a mineral from the database.
+        Uses the NAME field from metadata if available, otherwise falls back to the mineral key.
+        """
+        try:
+            mineral_data = self.raman.database[mineral_key]
+            if "metadata" in mineral_data and "NAME" in mineral_data["metadata"]:
+                return mineral_data["metadata"]["NAME"]
+        except Exception:
+            pass
+        return mineral_key
+
+    def analyze_mixed_minerals(self):
+        """Launch intelligent mixed mineral analysis for the current spectrum."""
+        if self.raman.current_spectra is None:
+            messagebox.showwarning("No Data", "Please load a spectrum first.")
+            return
+        
+        # Check if processed spectrum exists and recommend its use
+        has_processed = (hasattr(self.raman, 'processed_spectra') and 
+                        self.raman.processed_spectra is not None and
+                        len(self.raman.processed_spectra) > 0)
+        
+        if not has_processed:
+            response = messagebox.askyesno("Recommend Processing First", 
+                "For best mixed mineral analysis results, it's recommended to:\n\n"
+                "1. Go to the Process tab\n"
+                "2. Subtract background\n"
+                "3. Apply smoothing if needed\n"
+                "4. Then run Mixed Mineral Analysis\n\n"
+                "Continue without processing (less accurate results)?")
+            if not response:
                 return
+            
+        try:
+            # Try to import and launch the intelligent mixed mineral analysis
+            try:
+                import mixed_mineral_analysis
+                mixed_mineral_analysis.main(self)
+            except ImportError:
+                # Use enhanced mixed mineral analysis
+                try:
+                    from mixed_mineral_enhancement import EnhancedMixedMineralAnalysis
+                    
+                    # Launch the new intelligent analysis interface
+                    analyzer = EnhancedMixedMineralAnalysis(self)
+                    analyzer.launch_analysis()
+                    
+                except ImportError:
+                    # Final fallback - simple message
+                    messagebox.showinfo("Mixed Mineral Analysis", 
+                        "Mixed mineral analysis functionality is not currently available.\n\n"
+                        "This feature requires additional modules to be installed.\n"
+                        "You can still use the regular search functions to identify individual minerals.")
+                        
+        except Exception as e:
+            messagebox.showerror("Error", f"Error launching mixed mineral analysis: {str(e)}")
+            import traceback
+            print("Full error traceback:")
+            traceback.print_exc()
+
+    def launch_multi_spectrum_manager(self):
+        """Launch the Multi-Spectrum Manager window."""
+        try:
+            print("Opening Multi-Spectrum Manager window...")
+            from multi_spectrum_manager import MultiSpectrumManager
+            
+            # Create the Multi-Spectrum Manager instance with this window as parent
+            manager = MultiSpectrumManager(parent=self.root)
+            
+            print("Multi-Spectrum Manager window opened successfully")
+        except ImportError as e:
+            messagebox.showerror(
+                "Import Error", 
+                f"Failed to import Multi-Spectrum Manager module: {str(e)}\n\n"
+                "Please ensure the multi_spectrum_manager.py file is in the same directory."
+            )
+        except Exception as e:
+            print(f"Error opening Multi-Spectrum Manager window: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for debugging
+            messagebox.showerror(
+                "Error", f"Failed to open Multi-Spectrum Manager window: {str(e)}"
+            )
+
+    def create_advanced_analysis_tab(self):
+        """Create content for the advanced analysis tab."""
+        # Configure button styles with hover effects
+        style = ttk.Style()
+        
+        # Normal state - Blue color scheme
+        style.configure("AdvancedAnalysis.TButton", 
+                       background="#4a7a96", 
+                       foreground="white",
+                       borderwidth=1,
+                       focuscolor='none',
+                       relief="raised")
+        
+        # Hover state - Darker blue
+        style.map("AdvancedAnalysis.TButton",
+                 background=[('active', '#365a73'),   # Darker blue on hover
+                           ('pressed', '#2a4559')])    # Even darker on press
+        
+        # Create helper function to add hover effects
+        def create_button_with_hover(parent, text, command, style_name):
+            """Create a button with enhanced hover effects."""
+            button = ttk.Button(parent, text=text, command=command, style=style_name)
+            
+            # Additional hover effects using tkinter events
+            def on_enter(event):
+                button.configure(cursor="hand2")
                 
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to calculate residual: {str(e)}")
-                return
+            def on_leave(event):
+                button.configure(cursor="")
+                
+            button.bind("<Enter>", on_enter)
+            button.bind("<Leave>", on_leave)
+            
+            return button
 
-            # Create selection window
-            select_window = tk.Toplevel(window)
-            select_window.title("Select Mineral from Residual")
-            select_window.geometry("400x300")
-            match_frame = ttk.Frame(select_window)
-            match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            match_listbox = tk.Listbox(match_frame)
-            match_listbox.pack(fill=tk.BOTH, expand=True)
+        # Create buttons with hover effects
+        peak_fitting_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Open Peak Fitting Window",
+            self.open_peak_fitting,
+            "AdvancedAnalysis.TButton"
+        )
+        peak_fitting_btn.pack(fill=tk.X, pady=10, padx=5)
 
-            # Add a title to explain what we're doing
-            ttk.Label(
-                match_frame,
-                text="Minerals found in the residual spectrum:",
-                font=("TkDefaultFont", 9, "bold"),
-            ).pack(side=tk.TOP, pady=(0, 5))
+        batch_fitting_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Open Batch Peak Fitting",
+            self.open_batch_peak_fitting,
+            "AdvancedAnalysis.TButton"
+        )
+        batch_fitting_btn.pack(fill=tk.X, pady=10, padx=5)
 
-            for match_name, score in matches:
-                display_name = self.get_mineral_display_name(match_name)
-                match_listbox.insert(tk.END, f"{display_name} (Score: {score:.2f})")
+        map_analysis_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "2D Map Analysis",
+            self.open_2d_map_analysis,
+            "AdvancedAnalysis.TButton"
+        )
+        map_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
 
-            def on_select():
-                selection = match_listbox.curselection()
-                if not selection:
-                    return
-                match_name = matches[selection[0]][0]
-                if match_name in selected_minerals:
-                    messagebox.showwarning(
-                        "Warning", "This mineral is already selected."
-                    )
-                    return
-                match_data = self.raman.database[match_name]
-                match_spectrum = match_data["intensities"]
-                match_wavenumbers = match_data["wavenumbers"]
-                match_spectrum_interp = np.interp(
-                    current_wavenumbers, match_wavenumbers, match_spectrum
+        group_analysis_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Raman Cluster Analysis",
+            self.open_raman_cluster_analysis,
+            "AdvancedAnalysis.TButton"
+        )
+        group_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
+        
+        frequency_analysis_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Hey-Celestian Frequency Analysis",
+            self.open_hey_celestian_frequency_analyzer,
+            "AdvancedAnalysis.TButton"
+        )
+        frequency_analysis_btn.pack(fill=tk.X, pady=10, padx=5)
+        
+        polarization_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Raman Polarization Analysis",
+            self.open_polarization_analysis,
+            "AdvancedAnalysis.TButton"
+        )
+        polarization_btn.pack(fill=tk.X, pady=10, padx=5)
+        
+        # Add separator for specialized strain analysis tools
+        separator = ttk.Separator(self.tab_peak_fitting, orient='horizontal')
+        separator.pack(fill=tk.X, pady=15, padx=5)
+        
+        ttk.Label(self.tab_peak_fitting, text="Specialized Strain Analysis", 
+                 font=('Arial', 10, 'bold')).pack(pady=(5, 10))
+        
+        stress_strain_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Stress/Strain Analysis",
+            self.open_stress_strain_analysis,
+            "AdvancedAnalysis.TButton"
+        )
+        stress_strain_btn.pack(fill=tk.X, pady=5, padx=5)
+        
+        chemical_strain_btn = create_button_with_hover(
+            self.tab_peak_fitting,
+            "Chemical Strain Analysis",
+            self.open_chemical_strain_analysis,
+            "AdvancedAnalysis.TButton"
+        )
+        chemical_strain_btn.pack(fill=tk.X, pady=5, padx=5)
+
+    def open_batch_peak_fitting(self):
+        """Open the batch peak fitting window."""
+        try:
+            from batch_peak_fitting import BatchPeakFittingWindow
+            BatchPeakFittingWindow(self.root, self)
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"Failed to open batch peak fitting window: {str(e)}"
+            )
+
+    def open_2d_map_analysis(self):
+        """Open the 2D Map Analysis window."""
+        try:
+            from map_analysis_2d import TwoDMapAnalysisWindow
+            TwoDMapAnalysisWindow(self.root, self)
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"Failed to open 2D Map Analysis window: {str(e)}"
+            )
+
+    def open_raman_cluster_analysis(self):
+        """Open the Raman Cluster Analysis window."""
+        try:
+            from raman_cluster_analysis import RamanClusterAnalysisWindow
+            RamanClusterAnalysisWindow(self.root, self)
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"Failed to open Raman Cluster Analysis window: {str(e)}"
+            )
+    
+    def open_hey_celestian_frequency_analyzer(self):
+        """Open the Hey-Celestian Frequency Analyzer window."""
+        try:
+            from hey_celestian_frequency_analyzer import open_hey_celestian_frequency_analyzer
+            
+            # Check if mineral database is available
+            if not hasattr(self, 'mineral_database') or self.mineral_database is None:
+                messagebox.showwarning(
+                    "Warning", 
+                    "Mineral database not available. Please ensure the database is loaded."
                 )
-                selected_minerals[match_name] = match_spectrum_interp
-                mineral_weights[match_name] = 1.0
-                display_name = self.get_mineral_display_name(match_name)
-                selected_minerals_listbox.insert(tk.END, display_name)
-                update_fit()
-                select_window.destroy()
+                return
+            
+            open_hey_celestian_frequency_analyzer(self.root, self.mineral_database)
+        except ImportError as e:
+            messagebox.showerror(
+                "Error", f"Failed to open Hey-Celestian Frequency Analyzer: {str(e)}"
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"Error opening Hey-Celestian Frequency Analyzer: {str(e)}"
+            )
 
-                # Reset the residual plot
-                ax3.clear()
-                ax3.plot(current_wavenumbers, residual_spectrum, "g-", label="Residual")
-                # No title for cleaner look
-                ax3.set_xlabel("Wavenumber (cm⁻¹)")
-                ax3.set_ylabel("Intensity")
-                ax3.grid(True, linestyle=":", alpha=0.6)
-                ax3.legend()
-                canvas.draw()
-
-            ttk.Button(select_window, text="Select", command=on_select).pack(pady=5)
-
-        # def search_by_vibration_group(group_name):
-        #     """Search for minerals based on characteristic vibration bands for selected group."""
-        #     # TODO: need to make sure this searches the Hey Classification instead of vibrational mode
-        #     # Define vibration ranges for each group
-        #     vibration_bands = {
-        #         "Silicate": [(450, 550), (600, 680), (850, 1000), (1050, 1200)],
-        #         "Carbonate": [(700, 740), (1050, 1090)],
-        #         "Phosphate": [(550, 620), (950, 970), (1030, 1080)],
-        #         "Sulfate": [(450, 500), (975, 1010), (1100, 1150)],
-        #         "Hydroxide": [(3500, 3650), (600, 900), (1600, 1650)],
-        #         "Arsenate": [(420, 460), (810, 855), (780, 880)],
-        #         "Oxide": [(300, 350), (400, 450), (500, 600)],
-        #         "Sulfide": [(300, 400), (200, 280), (350, 420)],
-        #         "Sulfosalt": [(300, 360), (330, 380), (250, 290)],
-        #         "Vanadate": [(800, 860), (780, 820), (400, 450)],
-        #         "Borate": [(650, 700), (880, 950), (1300, 1400)],
-        #         "OH/H₂O": [(3200, 3500), (1600, 1650), (500, 800)],
-        #         "Oxalate": [(1455, 1490), (900, 920), (850, 870)],
-        #     }
-
-        #     if group_name not in vibration_bands:
-        #         messagebox.showwarning(
-        #             "Warning", f"No vibration bands defined for {group_name}."
-        #         )
-        #         return
-
-        #     # Create a peak list based on the vibration bands midpoints
-        #     peak_positions = []
-        #     for band_start, band_end in vibration_bands[group_name]:
-        #         peak_positions.append((band_start + band_end) / 2)
-
-        #     # Use filtered search with peak positions
-        #     try:
-        #         # Get a higher number of potential matches with a lower threshold
-        #         matches = self._filtered_search(
-        #             peak_positions=peak_positions,
-        #             peak_tolerance=20,  # Higher tolerance for vibration band matching
-        #             chemical_family="",  # No chemical family filter
-        #             threshold=0.3,  # Lower threshold for more results
-        #             hey_classification=True,
-        #         )
-
-        #         # Sort by score and limit
-        #         matches.sort(key=lambda x: x[1], reverse=True)
-        #         matches = matches[:10]  # Get top 10
-
-        #         if not matches:
-        #             messagebox.showwarning(
-        #                 "No Matches",
-        #                 f"No matches found for {group_name} vibration bands.",
-        #             )
-        #             return
-
-        #         # Create selection window
-        #         select_window = tk.Toplevel(window)
-        #         select_window.title(f"Select {group_name} Mineral")
-        #         select_window.geometry("400x300")
-
-        #         # Add explanation label
-        #         ttk.Label(
-        #             select_window,
-        #             text=f"Minerals with {group_name.lower()} vibration bands:",
-        #             font=("TkDefaultFont", 10, "bold"),
-        #         ).pack(pady=(10, 5))
-
-        #         # Create frame for list
-        #         match_frame = ttk.Frame(select_window)
-        #         match_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        #         # Create listbox with scrollbar
-        #         match_listbox = tk.Listbox(match_frame)
-        #         scrollbar = ttk.Scrollbar(
-        #             match_frame, orient=tk.VERTICAL, command=match_listbox.yview
-        #         )
-        #         match_listbox.config(yscrollcommand=scrollbar.set)
-
-        #         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        #         match_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        #         # Populate listbox
-        #         for match_name, score in matches:
-        #             match_listbox.insert(tk.END, f"{match_name} (Score: {score:.2f})")
-
-        #         def on_select():
-        #             selection = match_listbox.curselection()
-        #             if not selection:
-        #                 return
-        #             match_name = matches[selection[0]][0]
-        #             if match_name in selected_minerals:
-        #                 messagebox.showwarning(
-        #                     "Warning", "This mineral is already selected."
-        #                 )
-        #                 return
-
-        #             match_data = self.raman.database[match_name]
-        #             match_spectrum = match_data["intensities"]
-        #             match_wavenumbers = match_data["wavenumbers"]
-        #             match_spectrum_interp = np.interp(
-        #                 current_wavenumbers, match_wavenumbers, match_spectrum
-        #             )
-        #             selected_minerals[match_name] = match_spectrum_interp
-        #             mineral_weights[match_name] = 1.0
-        #             selected_minerals_listbox.insert(tk.END, match_name)
-        #             update_fit()
-        #             select_window.destroy()
-
-        #         # Add buttons
-        #         btn_frame = ttk.Frame(select_window)
-        #         btn_frame.pack(fill=tk.X, pady=5)
-
-        #         ttk.Button(btn_frame, text="Select", command=on_select).pack(
-        #             side=tk.LEFT, padx=5
-        #         )
-        #         ttk.Button(
-        #             btn_frame, text="Cancel", command=select_window.destroy
-        #         ).pack(side=tk.RIGHT, padx=5)
-
-        #     except Exception as e:
-        #         messagebox.showerror(
-        #             "Search Error", f"Error searching by vibration group: {str(e)}"
-        #         )
-
-
-# --- Main Execution ---
-def main():
-    """Main function to run the application."""
-
-    # Close any existing matplotlib figures
-    plt.close("all")
-
-    root = tk.Tk()
-    # Optional: Apply a theme
-    try:
-        style = ttk.Style(root)
-        # Available themes: 'clam', 'alt', 'default', 'classic'
-        # Some systems might have 'vista', 'xpnative'
-        available_themes = style.theme_names()
-        # print(f"Available themes: {available_themes}")
-        if "clam" in available_themes:
-            style.theme_use("clam")
-        elif "vista" in available_themes:
-            style.theme_use("vista")
-    except Exception as e:
-        print(f"Could not set theme: {e}")
-
-    app = RamanAnalysisApp(root)
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    main()
-
+    def open_polarization_analysis(self):
+        """Open the Raman polarization analysis window."""
+        try:
+            print("Opening Polarization Analysis window...")
+            from raman_polarization_analyzer import RamanPolarizationAnalyzer
+            
+            # Create a new top-level window
+            polarization_window = tk.Toplevel(self.root)
+            polarization_window.title("Raman Polarization Analysis")
+            polarization_window.geometry("1200x800")
+            
+            # Create the analyzer instance
+            analyzer = RamanPolarizationAnalyzer(polarization_window)
+            
+            # Store the analyzer instance in the window to prevent garbage collection
+            polarization_window.analyzer = analyzer
+            
+            # Add a protocol to handle window close properly
+            def on_window_close():
+                # Clean up any resources if needed
+                if hasattr(polarization_window, 'analyzer'):
+                    del polarization_window.analyzer
+                polarization_window.destroy()
+                
+            polarization_window.protocol("WM_DELETE_WINDOW", on_window_close)
+            
+            print("Polarization Analysis window opened successfully")
+        except Exception as e:
+            print(f"Error opening Polarization Analysis window: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for debugging
+            messagebox.showerror(
+                "Error", f"Failed to open polarization analysis window: {str(e)}"
+            )
+    
+    def open_stress_strain_analysis(self):
+        """Open the Stress/Strain Analysis window."""
+        try:
+            print("Opening Stress/Strain Analysis window...")
+            from stress_strain_analyzer import StressStrainAnalyzer
+            
+            # Create a new top-level window
+            strain_window = tk.Toplevel(self.root)
+            strain_window.title("Raman Stress/Strain Analysis")
+            strain_window.geometry("1200x800")
+            
+            # Create the analyzer instance
+            analyzer = StressStrainAnalyzer(strain_window)
+            
+            # Store the analyzer instance in the window to prevent garbage collection
+            strain_window.analyzer = analyzer
+            
+            # Add a protocol to handle window close properly
+            def on_window_close():
+                # Clean up any resources if needed
+                if hasattr(strain_window, 'analyzer'):
+                    del strain_window.analyzer
+                strain_window.destroy()
+                
+            strain_window.protocol("WM_DELETE_WINDOW", on_window_close)
+            
+            print("Stress/Strain Analysis window opened successfully")
+        except Exception as e:
+            print(f"Error opening Stress/Strain Analysis window: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for debugging
+            messagebox.showerror(
+                "Error", f"Failed to open stress/strain analysis window: {str(e)}"
+            )
+    
+    def open_chemical_strain_analysis(self):
+        """Open the Chemical Strain Analysis window."""
+        try:
+            print("Opening Chemical Strain Analysis window...")
+            from chemical_strain_analyzer import ChemicalStrainAnalysisApp
+            
+            # Create a new top-level window
+            chemical_window = tk.Toplevel(self.root)
+            chemical_window.title("Raman Chemical Strain Analysis")
+            chemical_window.geometry("1400x900")
+            
+            # Create the analyzer instance
+            analyzer = ChemicalStrainAnalysisApp(chemical_window)
+            
+            # Store the analyzer instance in the window to prevent garbage collection
+            chemical_window.analyzer = analyzer
+            
+            # Add a protocol to handle window close properly
+            def on_window_close():
+                # Clean up any resources if needed
+                if hasattr(chemical_window, 'analyzer'):
+                    del chemical_window.analyzer
+                chemical_window.destroy()
+                
+            chemical_window.protocol("WM_DELETE_WINDOW", on_window_close)
+            
+            print("Chemical Strain Analysis window opened successfully")
+        except Exception as e:
+            print(f"Error opening Chemical Strain Analysis window: {str(e)}")
+            import traceback
+            traceback.print_exc()  # Print full traceback for debugging
+            messagebox.showerror(
+                "Error", f"Failed to open chemical strain analysis window: {str(e)}"
+            )

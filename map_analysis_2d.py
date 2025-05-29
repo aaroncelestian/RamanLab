@@ -2073,11 +2073,10 @@ class TwoDMapAnalysisWindow:
     def load_template(self):
         """Load a single template spectrum."""
         if not self.map_data:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
         
-        filepath = filedialog.askopenfilename(
-            filetypes=[
+        filepath = filedialog.askopenfilename(parent=self.window, filetypes=[
                 ("Spectrum files", "*.csv;*.txt"),
                 ("CSV files", "*.csv"),
                 ("Text files", "*.txt"),
@@ -2091,9 +2090,7 @@ class TwoDMapAnalysisWindow:
         
         # Get template name
         name = Path(filepath).stem
-        custom_name = simpledialog.askstring("Template Name", 
-                                          "Enter a name for this template:", 
-                                          initialvalue=name)
+        custom_name = simpledialog.askstring("Template Name", "Enter a name for this template:", initialvalue=name, parent=self.window)
         
         if custom_name:
             name = custom_name
@@ -2103,17 +2100,17 @@ class TwoDMapAnalysisWindow:
         
         if success:
             self.update_template_listbox()
-            messagebox.showinfo("Success", f"Template '{name}' loaded successfully.")
+            messagebox.showinfo("Success", f"Template '{name}' loaded successfully.", parent=self.window)
         else:
-            messagebox.showerror("Error", f"Failed to load template from {filepath}")
+            messagebox.showerror("Error", f"Failed to load template from {filepath}", parent=self.window)
     
     def load_template_directory(self):
         """Load all template spectra from a directory."""
         if not self.map_data:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
         
-        directory = filedialog.askdirectory(title="Select Template Directory")
+        directory = filedialog.askdirectory(parent=self.window, title="Select Template Directory")
         
         if not directory:
             return
@@ -2123,9 +2120,9 @@ class TwoDMapAnalysisWindow:
         
         if count > 0:
             self.update_template_listbox()
-            messagebox.showinfo("Success", f"Loaded {count} templates successfully.")
+            messagebox.showinfo("Success", f"Loaded {count} templates successfully.", parent=self.window)
         else:
-            messagebox.showerror("Error", f"No templates loaded from {directory}")
+            messagebox.showerror("Error", f"No templates loaded from {directory}", parent=self.window)
     
     def update_template_listbox(self):
         """Update the template listbox with current templates."""
@@ -2174,11 +2171,11 @@ class TwoDMapAnalysisWindow:
     def fit_templates_to_map(self):
         """Fit templates to map spectra."""
         if self.map_data is None:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
             
         if not hasattr(self.map_data, 'template_manager') or self.map_data.template_manager.get_template_count() == 0:
-            messagebox.showerror("Error", "Please load at least one template first.")
+            messagebox.showerror("Error", "Please load at least one template first.", parent=self.window)
             return
             
         # Get fitting options
@@ -2251,7 +2248,7 @@ class TwoDMapAnalysisWindow:
                     message += f"\n\nCosmic ray filtering stats:\n"
                     message += f"• Filtered: {filtered} of {total} spectra ({percentage:.1f}%)"
                 
-                messagebox.showinfo("Success", message)
+                messagebox.showinfo("Success", message, parent=self.window)
                 
                 # Get reference to the combobox to update its values if needed
                 feature_combo = None
@@ -2275,7 +2272,7 @@ class TwoDMapAnalysisWindow:
                 if hasattr(self, 'template_map_ax'):
                     self.update_template_coefficient_map()
             else:
-                messagebox.showerror("Error", "Failed to fit templates to map.")
+                messagebox.showerror("Error", "Failed to fit templates to map.", parent=self.window)
         
         # Start the thread
         import threading
@@ -2287,7 +2284,7 @@ class TwoDMapAnalysisWindow:
         """Load map data from files."""
         try:
             # Open directory selection dialog
-            data_dir = filedialog.askdirectory(title="Select Data Directory")
+            data_dir = filedialog.askdirectory(parent=self.window, title="Select Data Directory")
             if not data_dir:
                 return
             
@@ -2306,8 +2303,7 @@ class TwoDMapAnalysisWindow:
                 self.template_listbox.delete(0, tk.END)
             
             # Offer to save processed data for faster loading next time
-            if messagebox.askyesno("Save Processed Data", 
-                                 "Would you like to save the processed data for faster loading next time?"):
+            if messagebox.askyesno("Save Processed Data", "Would you like to save the processed data for faster loading next time?", parent=self.window):
                 self.save_processed_data()
             
             # Reset cursor
@@ -2316,18 +2312,17 @@ class TwoDMapAnalysisWindow:
         except Exception as e:
             # Reset cursor
             self.window.config(cursor="")
-            messagebox.showerror("Error", f"Failed to load map data: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load map data: {str(e, parent=self.window)}", parent=self.window)
     
     def save_processed_data(self):
         """Save the processed map data to a pickle file for faster loading."""
         if self.map_data is None:
-            messagebox.showinfo("Info", "No map data to save.")
+            messagebox.showinfo("Info", "No map data to save.", parent=self.window)
             return
             
         try:
             # Open file dialog to get save location
-            save_path = filedialog.asksaveasfilename(
-                defaultextension=".pkl",
+            save_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".pkl",
                 filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
                 title="Save Processed Map Data"
             )
@@ -2345,19 +2340,18 @@ class TwoDMapAnalysisWindow:
             # Reset cursor
             self.window.config(cursor="")
             
-            messagebox.showinfo("Success", f"Map data saved to {save_path}")
+            messagebox.showinfo("Success", f"Map data saved to {save_path}", parent=self.window)
             
         except Exception as e:
             # Reset cursor
             self.window.config(cursor="")
-            messagebox.showerror("Error", f"Failed to save map data: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save map data: {str(e, parent=self.window)}", parent=self.window)
     
     def load_processed_data(self):
         """Load processed map data from a pickle file for faster loading."""
         try:
             # Open file dialog to get load location
-            load_path = filedialog.askopenfilename(
-                defaultextension=".pkl",
+            load_path = filedialog.askopenfilename(parent=self.window, defaultextension=".pkl",
                 filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
                 title="Load Processed Map Data"
             )
@@ -2381,12 +2375,12 @@ class TwoDMapAnalysisWindow:
             # Reset cursor
             self.window.config(cursor="")
             
-            messagebox.showinfo("Success", f"Map data loaded from {load_path}")
+            messagebox.showinfo("Success", f"Map data loaded from {load_path}", parent=self.window)
             
         except Exception as e:
             # Reset cursor
             self.window.config(cursor="")
-            messagebox.showerror("Error", f"Failed to load map data: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load map data: {str(e, parent=self.window)}", parent=self.window)
     
     def run_pca(self):
         """Run PCA analysis on the data."""
@@ -2397,13 +2391,13 @@ class TwoDMapAnalysisWindow:
             
             # Get data
             if self.map_data is None:
-                messagebox.showerror("Error", "No map data loaded. Please load data first.")
+                messagebox.showerror("Error", "No map data loaded. Please load data first.", parent=self.window)
                 return
             
             # Prepare data for PCA
             data = self._prepare_data_for_analysis()
             if data is None or len(data) == 0:
-                messagebox.showerror("Error", "No data available for analysis.")
+                messagebox.showerror("Error", "No data available for analysis.", parent=self.window)
                 return
             
             # Show progress indicator
@@ -2430,12 +2424,12 @@ class TwoDMapAnalysisWindow:
             # Reset cursor
             self.window.config(cursor="")
             
-            messagebox.showinfo("Success", "PCA analysis completed successfully.")
+            messagebox.showinfo("Success", "PCA analysis completed successfully.", parent=self.window)
             
         except Exception as e:
             # Reset cursor
             self.window.config(cursor="")
-            messagebox.showerror("Error", f"Failed to run PCA: {str(e)}")
+            messagebox.showerror("Error", f"Failed to run PCA: {str(e, parent=self.window)}", parent=self.window)
             import traceback
             print(f"PCA error details: {traceback.format_exc()}")
     
@@ -2497,13 +2491,13 @@ class TwoDMapAnalysisWindow:
             
             # Get data
             if self.map_data is None:
-                messagebox.showerror("Error", "No map data loaded. Please load data first.")
+                messagebox.showerror("Error", "No map data loaded. Please load data first.", parent=self.window)
                 return
                 
             # Prepare data for NMF
             data = self._prepare_data_for_analysis()
             if data is None or len(data) == 0:
-                messagebox.showerror("Error", "No data available for analysis.")
+                messagebox.showerror("Error", "No data available for analysis.", parent=self.window)
                 return
             
             # Show progress indicator
@@ -2533,12 +2527,12 @@ class TwoDMapAnalysisWindow:
             # Reset cursor
             self.window.config(cursor="")
             
-            messagebox.showinfo("Success", "NMF analysis completed successfully.")
+            messagebox.showinfo("Success", "NMF analysis completed successfully.", parent=self.window)
             
         except Exception as e:
             # Reset cursor
             self.window.config(cursor="")
-            messagebox.showerror("Error", f"Failed to run NMF: {str(e)}")
+            messagebox.showerror("Error", f"Failed to run NMF: {str(e, parent=self.window)}", parent=self.window)
             import traceback
             print(f"NMF error details: {traceback.format_exc()}")
     
@@ -2619,12 +2613,12 @@ class TwoDMapAnalysisWindow:
             
             # Get data and labels
             if self.map_data is None:
-                messagebox.showerror("Error", "No map data loaded. Please load data first.")
+                messagebox.showerror("Error", "No map data loaded. Please load data first.", parent=self.window)
                 return
                 
             # Check if prediction map exists
             if not hasattr(self, 'prediction_map') or self.prediction_map is None:
-                messagebox.showinfo("Info", "Please run a prediction first using the 'Predict Map' button in the left panel.")
+                messagebox.showinfo("Info", "Please run a prediction first using the 'Predict Map' button in the left panel.", parent=self.window)
                 return
             
             # Show progress indicator
@@ -2646,7 +2640,7 @@ class TwoDMapAnalysisWindow:
                     print(f"Using NMF components with shape: {X.shape}")
                 else:
                     self.window.config(cursor="")
-                    messagebox.showinfo("Info", "No PCA/NMF components available. Run PCA or NMF first.")
+                    messagebox.showinfo("Info", "No PCA/NMF components available. Run PCA or NMF first.", parent=self.window)
                     return
             else:
                 # Use raw data instead
@@ -2674,8 +2668,7 @@ class TwoDMapAnalysisWindow:
                 # Double-check if dimensions match now
                 if len(X) != len(labels):
                     self.window.config(cursor="")
-                    messagebox.showerror("Error", 
-                                       f"Dimension mismatch after fix attempt: X={len(X)}, labels={len(labels)}.\n\n"
+                    messagebox.showerror("Error", f"Dimension mismatch after fix attempt: X={len(X, parent=self.window)}, labels={len(labels)}.\n\n"
                                        f"Please try running PCA/NMF and prediction again in sequence.")
                     return
             
@@ -2712,8 +2705,7 @@ class TwoDMapAnalysisWindow:
             # Reset cursor
             self.window.config(cursor="")
             
-            messagebox.showinfo("Success", 
-                              f"Random Forest training completed.\nAccuracy: {accuracy:.2%}")
+            messagebox.showinfo("Success", f"Random Forest training completed.\nAccuracy: {accuracy:.2%}", parent=self.window)
             
         except Exception as e:
             # Reset cursor
@@ -2721,7 +2713,7 @@ class TwoDMapAnalysisWindow:
             import traceback
             error_details = traceback.format_exc()
             print(f"Error in train_rf: {e}\n{error_details}")
-            messagebox.showerror("Error", f"Failed to train Random Forest: {str(e)}\n\nCheck console for details.")
+            messagebox.showerror("Error", f"Failed to train Random Forest: {str(e, parent=self.window)}\n\nCheck console for details.", parent=self.window)
     
     def update_map(self, prediction=False):
         """Update the 2D map visualization."""
@@ -3315,7 +3307,7 @@ class TwoDMapAnalysisWindow:
             self.canvas.draw()
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to update map: {str(e)}")
+            messagebox.showerror("Error", f"Failed to update map: {str(e, parent=self.window)}", parent=self.window)
             import traceback
             print(f"Error updating map: {traceback.format_exc()}")
     
@@ -3845,12 +3837,12 @@ class TwoDMapAnalysisWindow:
         self.ml_tab.pack_propagate(False)
     
     def browse_class_a_dir(self):
-        path = filedialog.askdirectory(title="Select Class A (Positive) Directory")
+        path = filedialog.askdirectory(parent=self.window, title="Select Class A (Positive) Directory")
         if path:
             self.class_a_dir.set(path)
 
     def browse_class_b_dir(self):
-        path = filedialog.askdirectory(title="Select Class B (Negative) Directory")
+        path = filedialog.askdirectory(parent=self.window, title="Select Class B (Negative) Directory")
         if path:
             self.class_b_dir.set(path)
 
@@ -3865,14 +3857,14 @@ class TwoDMapAnalysisWindow:
         class_a_dir = self.class_a_dir.get()
         class_b_dir = self.class_b_dir.get()
         if not class_a_dir or not class_b_dir:
-            messagebox.showerror("Error", "Please select both Class A and Class B directories.")
+            messagebox.showerror("Error", "Please select both Class A and Class B directories.", parent=self.window)
             return
         
         # Gather files
         a_files = glob.glob(os.path.join(class_a_dir, '*.txt'))
         b_files = glob.glob(os.path.join(class_b_dir, '*.txt'))
         if not a_files or not b_files:
-            messagebox.showerror("Error", "No .txt files found in one or both directories.")
+            messagebox.showerror("Error", "No .txt files found in one or both directories.", parent=self.window)
             return
         
         # Use the same target wavenumbers as the map
@@ -3963,7 +3955,7 @@ class TwoDMapAnalysisWindow:
                 y.append(label)
         
         if not X or not y:
-            messagebox.showerror("Error", "Failed to load spectra for training.")
+            messagebox.showerror("Error", "Failed to load spectra for training.", parent=self.window)
             return
         
         X = np.array(X)
@@ -4020,11 +4012,11 @@ class TwoDMapAnalysisWindow:
         elif self.rf_model:
             model_to_use = self.rf_model
         else:
-            messagebox.showerror("Error", "Please train a model first or load a model from the Model Tools tab.")
+            messagebox.showerror("Error", "Please train a model first or load a model from the Model Tools tab.", parent=self.window)
             return
             
         if not self.map_data:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
             
         # Get the map data
@@ -4078,8 +4070,7 @@ class TwoDMapAnalysisWindow:
                         expected_features = X.shape[1]  # Update expected features
                         
                     # Show success message and continue
-                    messagebox.showinfo("Feature Reduction Applied", 
-                                      f"Successfully applied {reduction_method} to reduce features from {X.shape[1]} to {expected_features}.\nProceeding with prediction...")
+                    messagebox.showinfo("Feature Reduction Applied", f"Successfully applied {reduction_method} to reduce features from {X.shape[1]} to {expected_features}.\nProceeding with prediction...", parent=self.window)
                     
                 except Exception as e:
                     error_msg += f"❌ Failed to apply {reduction_method}: {str(e)}\n\n"
@@ -4119,7 +4110,7 @@ class TwoDMapAnalysisWindow:
                 error_msg += f"• Check if you have saved PCA results that can reduce to {expected_features} features\n\n"
                 error_msg += f"Quick fix: Go to the 'Analyze' tab → 'Advanced Analysis' → run PCA with {expected_features} components, then try prediction again."
                 
-                messagebox.showerror("Feature Mismatch Error", error_msg)
+                messagebox.showerror("Feature Mismatch Error", error_msg, parent=self.window)
                 return
             
         # If we made it here, either features matched or reduction was applied successfully
@@ -4165,8 +4156,7 @@ class TwoDMapAnalysisWindow:
         
         # Check if dimensions match
         if grid_y * grid_x != total_points:
-            messagebox.showwarning("Size Mismatch", 
-                f"Map dimensions ({grid_y}×{grid_x}={grid_y*grid_x}) don't match prediction size ({total_points}).\n"
+            messagebox.showwarning("Size Mismatch", f"Map dimensions ({grid_y}×{grid_x}={grid_y*grid_x}, parent=self.window) don't match prediction size ({total_points}).\n"
                 f"Adjusting to best fit.")
             
             # Recalculate grid_x to fit the available data
@@ -4211,8 +4201,7 @@ class TwoDMapAnalysisWindow:
         self._update_analysis_summary(summary)
         
         # Show a notification to prompt the user
-        messagebox.showinfo("Prediction Complete", 
-                           "Map prediction completed successfully.\n\nPlease select 'Class Distribution' from the feature dropdown to visualize the results.")
+        messagebox.showinfo("Prediction Complete", "Map prediction completed successfully.\n\nPlease select 'Class Distribution' from the feature dropdown to visualize the results.", parent=self.window)
     
     def _prepare_data_for_analysis(self):
         """Prepare and reshape map data for analysis."""
@@ -4971,8 +4960,7 @@ class TwoDMapAnalysisWindow:
         """Export analysis summary to a text file."""
         from tkinter import filedialog
         
-        file_path = filedialog.asksaveasfilename(
-            defaultextension=".txt",
+        file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".txt",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
             title="Export Analysis Summary"
         )
@@ -4981,9 +4969,9 @@ class TwoDMapAnalysisWindow:
             try:
                 with open(file_path, 'w') as f:
                     f.write(content)
-                messagebox.showinfo("Success", f"Analysis summary exported to {file_path}")
+                messagebox.showinfo("Success", f"Analysis summary exported to {file_path}", parent=self.window)
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to export summary: {str(e)}")
+                messagebox.showerror("Error", f"Failed to export summary: {str(e, parent=self.window)}", parent=self.window)
     
     def _update_analysis_summary(self, content):
         """Update the analysis summary content and status label."""
@@ -5014,12 +5002,11 @@ class TwoDMapAnalysisWindow:
     def save_pca_results(self):
         """Save PCA results to file."""
         if self.pca is None or self.pca_components is None:
-            messagebox.showwarning("Warning", "No PCA results to save.")
+            messagebox.showwarning("Warning", "No PCA results to save.", parent=self.window)
             return
         
         try:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".pkl",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".pkl",
                 filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
                 title="Save PCA Results"
             )
@@ -5032,20 +5019,19 @@ class TwoDMapAnalysisWindow:
                 }
                 with open(file_path, 'wb') as f:
                     pickle.dump(results, f)
-                messagebox.showinfo("Success", "PCA results saved successfully.")
+                messagebox.showinfo("Success", "PCA results saved successfully.", parent=self.window)
         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save PCA results: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save PCA results: {str(e, parent=self.window)}", parent=self.window)
     
     def save_nmf_results(self):
         """Save NMF results to file."""
         if self.nmf is None or self.nmf_components is None:
-            messagebox.showwarning("Warning", "No NMF results to save.")
+            messagebox.showwarning("Warning", "No NMF results to save.", parent=self.window)
             return
         
         try:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".pkl",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".pkl",
                 filetypes=[("Pickle files", "*.pkl"), ("All files", "*.*")],
                 title="Save NMF Results"
             )
@@ -5058,19 +5044,19 @@ class TwoDMapAnalysisWindow:
                 }
                 with open(file_path, 'wb') as f:
                     pickle.dump(results, f)
-                messagebox.showinfo("Success", "NMF results saved successfully.")
+                messagebox.showinfo("Success", "NMF results saved successfully.", parent=self.window)
         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save NMF results: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save NMF results: {str(e, parent=self.window)}", parent=self.window)
     
     def save_nmf_spectra(self):
         """Save the top 5 NMF component spectra to CSV files."""
         if self.nmf is None or self.nmf_components is None:
-            messagebox.showwarning("Warning", "No NMF results to save.")
+            messagebox.showwarning("Warning", "No NMF results to save.", parent=self.window)
             return
         
         if not hasattr(self, 'map_data') or self.map_data is None:
-            messagebox.showwarning("Warning", "No map data available.")
+            messagebox.showwarning("Warning", "No map data available.", parent=self.window)
             return
         
         try:
@@ -5224,10 +5210,10 @@ class TwoDMapAnalysisWindow:
                 </html>
                 """)
             
-            messagebox.showinfo("Success", f"NMF spectra saved to {nmf_results_dir}\n\nAn HTML report has also been created for easy viewing.")
+            messagebox.showinfo("Success", f"NMF spectra saved to {nmf_results_dir}\n\nAn HTML report has also been created for easy viewing.", parent=self.window)
             
             # Ask if user wants to open the folder
-            if messagebox.askyesno("Open Folder", "Do you want to open the NMF Results folder?"):
+            if messagebox.askyesno("Open Folder", "Do you want to open the NMF Results folder?", parent=self.window):
                 import subprocess
                 import platform
                 
@@ -5240,19 +5226,18 @@ class TwoDMapAnalysisWindow:
                     subprocess.run(["xdg-open", nmf_results_dir])
                     
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save NMF spectra: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save NMF spectra: {str(e, parent=self.window)}", parent=self.window)
             import traceback
             print(f"Error details: {traceback.format_exc()}")
     
     def save_rf_model(self):
         """Save Random Forest model to file with metadata."""
         if self.rf_model is None:
-            messagebox.showwarning("Warning", "No Random Forest model to save.")
+            messagebox.showwarning("Warning", "No Random Forest model to save.", parent=self.window)
             return
         
         try:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".joblib",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".joblib",
                 filetypes=[("Joblib files", "*.joblib"), ("All files", "*.*")],
                 title="Save Random Forest Model"
             )
@@ -5315,16 +5300,15 @@ class TwoDMapAnalysisWindow:
                     wn_range = model_package['metadata']['wavenumber_range']
                     info_msg += f"• Wavenumber range: {wn_range[0]:.1f} - {wn_range[1]:.1f} cm⁻¹"
                 
-                messagebox.showinfo("Success", info_msg)
+                messagebox.showinfo("Success", info_msg, parent=self.window)
         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to save Random Forest model: {str(e)}")
+            messagebox.showerror("Error", f"Failed to save Random Forest model: {str(e, parent=self.window)}", parent=self.window)
     
     def load_rf_model(self):
         """Load Random Forest model from file."""
         try:
-            file_path = filedialog.askopenfilename(
-                defaultextension=".joblib",
+            file_path = filedialog.askopenfilename(parent=self.window, defaultextension=".joblib",
                 filetypes=[("Joblib files", "*.joblib"), ("All files", "*.*")],
                 title="Load Random Forest Model"
             )
@@ -5409,10 +5393,10 @@ class TwoDMapAnalysisWindow:
                     if hasattr(self, 'rf_canvas'):
                         self.rf_canvas.draw()
                 
-                messagebox.showinfo("Success", info_msg)
+                messagebox.showinfo("Success", info_msg, parent=self.window)
         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load Random Forest model: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load Random Forest model: {str(e, parent=self.window)}", parent=self.window)
     
     def export_class_a_spectra(self):
         """Export Class A spectra files and positions to a folder and CSV."""
@@ -5423,7 +5407,7 @@ class TwoDMapAnalysisWindow:
 
         # Check if prediction_map exists
         if not hasattr(self, 'prediction_map') or self.prediction_map is None:
-            messagebox.showerror("Error", "No prediction map available. Please run prediction first.")
+            messagebox.showerror("Error", "No prediction map available. Please run prediction first.", parent=self.window)
             return
 
         # Get x/y positions
@@ -5454,7 +5438,7 @@ class TwoDMapAnalysisWindow:
                         class_a_files.append(spectrum.filename)
         
         if not class_a_x:
-            messagebox.showinfo("Export Class A Spectra", "No Class A points found.")
+            messagebox.showinfo("Export Class A Spectra", "No Class A points found.", parent=self.window)
             return
         
         data_dir = self.map_data.data_dir if hasattr(self.map_data, 'data_dir') else os.getcwd()
@@ -5475,14 +5459,12 @@ class TwoDMapAnalysisWindow:
                 shutil.copy2(src_path, dest_path)
                 copied_count += 1
         
-        messagebox.showinfo("Export Class A Spectra", 
-                           f"Exported {copied_count} Class A spectra files to {dest_dir}\nPositions saved to {csv_path}")
+        messagebox.showinfo("Export Class A Spectra", f"Exported {copied_count} Class A spectra files to {dest_dir}\nPositions saved to {csv_path}", parent=self.window)
     
     def export_results(self):
         """Export analysis results to CSV file."""
         try:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".csv",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".csv",
                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
                 title="Export Results"
             )
@@ -5513,17 +5495,16 @@ class TwoDMapAnalysisWindow:
                 
                 # Save to CSV
                 pd.DataFrame(results).to_csv(file_path, index=False)
-                messagebox.showinfo("Success", "Results exported successfully.")
+                messagebox.showinfo("Success", "Results exported successfully.", parent=self.window)
         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to export results: {str(e)}")
+            messagebox.showerror("Error", f"Failed to export results: {str(e, parent=self.window)}", parent=self.window)
     
     def generate_report(self):
         """Generate a comprehensive analysis report with plots in both PDF and HTML formats."""
         try:
             # Ask for file path without extension
-            file_path = filedialog.asksaveasfilename(
-                defaultextension="",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension="",
                 filetypes=[("Report files", "*.pdf;*.html"), ("All files", "*.*")],
                 title="Save Analysis Report (will create both PDF and HTML)"
             )
@@ -5550,7 +5531,7 @@ class TwoDMapAnalysisWindow:
                 active_model = self.rf_model
             
             if not (has_pca or has_nmf or has_rf):
-                messagebox.showwarning("Warning", "No analysis results available to generate report.")
+                messagebox.showwarning("Warning", "No analysis results available to generate report.", parent=self.window)
                 return
             
             # Generate timestamp
@@ -5960,16 +5941,15 @@ class TwoDMapAnalysisWindow:
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write("\n".join(html_content))
             
-            messagebox.showinfo("Success", 
-                              f"Analysis reports generated successfully:\n"
+            messagebox.showinfo("Success", f"Analysis reports generated successfully:\n"
                               f"• PDF: {pdf_path}\n"
-                              f"• HTML: {html_path}")
+                              f"• HTML: {html_path}", parent=self.window)
         
         except Exception as e:
             import traceback
             print(f"Error generating report: {e}")
             print(traceback.format_exc())
-            messagebox.showerror("Error", f"Failed to generate report: {str(e)}")
+            messagebox.showerror("Error", f"Failed to generate report: {str(e)}", parent=self.window)
     
     def update_results_visualization(self):
         """Update the visualizations in the Results tab with new layout."""
@@ -5988,11 +5968,11 @@ class TwoDMapAnalysisWindow:
                 active_model = self.rf_model
             
             if not (has_pca or has_nmf):
-                messagebox.showinfo("Info", "Please run PCA or NMF analysis first.")
+                messagebox.showinfo("Info", "Please run PCA or NMF analysis first.", parent=self.window)
                 return
                 
             if not has_rf:
-                messagebox.showinfo("Info", "Please train a Random Forest model or load a model from the Model Tools tab.")
+                messagebox.showinfo("Info", "Please train a Random Forest model or load a model from the Model Tools tab.", parent=self.window)
                 return
             
             # Clear the figure
@@ -6213,7 +6193,7 @@ class TwoDMapAnalysisWindow:
             import traceback
             print(f"Error updating results visualization: {e}")
             print(traceback.format_exc())
-            messagebox.showerror("Error", f"Failed to update visualizations: {str(e)}")
+            messagebox.showerror("Error", f"Failed to update visualizations: {str(e, parent=self.window)}", parent=self.window)
 
     def show_simple_classification_results(self, df, class_col, prob_col=None):
         """Show a simple bar chart of classification results when map data is not available."""
@@ -6264,22 +6244,22 @@ class TwoDMapAnalysisWindow:
                     initialvalue=os.path.join(os.getcwd(), "unknown_spectra_results.csv")
                 )
                 if not csv_path or not os.path.exists(csv_path):
-                    messagebox.showerror("Error", f"CSV file not found: {csv_path}")
+                    messagebox.showerror("Error", f"CSV file not found: {csv_path}", parent=self.window)
                     return
                     
                 self.csv_results = pd.read_csv(csv_path)
                 if len(self.csv_results) == 0:
-                    messagebox.showerror("Error", "CSV file is empty")
+                    messagebox.showerror("Error", "CSV file is empty", parent=self.window)
                     return
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to load CSV file: {str(e)}")
+                messagebox.showerror("Error", f"Failed to load CSV file: {str(e, parent=self.window)}", parent=self.window)
                 return
         
         # Check if we have the necessary columns
         required_columns = ['x', 'y', 'Prediction']
         missing_columns = [col for col in required_columns if col not in self.csv_results.columns]
         if missing_columns:
-            messagebox.showerror("Error", f"CSV is missing required columns: {', '.join(missing_columns)}")
+            messagebox.showerror("Error", f"CSV is missing required columns: {', '.join(missing_columns, parent=self.window)}", parent=self.window)
             return
         
         # Print debug info
@@ -6544,7 +6524,7 @@ class TwoDMapAnalysisWindow:
             title = "Max Intensity Heatmap"
             
         else:
-            messagebox.showerror("Error", f"Invalid visualization choice or missing data: {choice}")
+            messagebox.showerror("Error", f"Invalid visualization choice or missing data: {choice}", parent=self.window)
             return
             
         # Remove existing colorbar if present (except for the Class Scatter Plot case which handles it)
@@ -6598,21 +6578,20 @@ class TwoDMapAnalysisWindow:
         self.canvas.draw()
         
         # Ask if user wants to export the visualization
-        if messagebox.askyesno("Export Visualization", "Would you like to save this visualization as an image?"):
+        if messagebox.askyesno("Export Visualization", "Would you like to save this visualization as an image?", parent=self.window):
             try:
-                file_path = filedialog.asksaveasfilename(
-                    defaultextension=".png",
+                file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".png",
                     filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
                     title="Save Visualization"
                 )
                 if file_path:
                     self.fig.savefig(file_path, dpi=150, bbox_inches='tight')
-                    messagebox.showinfo("Success", f"Visualization saved to {file_path}")
+                    messagebox.showinfo("Success", f"Visualization saved to {file_path}", parent=self.window)
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to save visualization: {str(e)}")
+                messagebox.showerror("Error", f"Failed to save visualization: {str(e, parent=self.window)}", parent=self.window)
                 
         # Ask if user wants to open the CSV in a spreadsheet
-        if messagebox.askyesno("Open CSV", "Would you like to open the CSV file to examine the full data?"):
+        if messagebox.askyesno("Open CSV", "Would you like to open the CSV file to examine the full data?", parent=self.window):
             try:
                 csv_path = self.csv_results.get('Full Path', self.csv_results['Filename']).iloc[0]
                 csv_dir = os.path.dirname(csv_path)
@@ -6630,7 +6609,7 @@ class TwoDMapAnalysisWindow:
                 else:  # Linux
                     subprocess.run(['xdg-open', csv_path], check=True)
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to open CSV: {str(e)}")
+                messagebox.showerror("Error", f"Failed to open CSV: {str(e, parent=self.window)}", parent=self.window)
     
     def create_template_analysis_tab(self):
         """Create the template analysis tab with its controls."""
@@ -6832,12 +6811,12 @@ class TwoDMapAnalysisWindow:
     def show_template_analysis(self):
         """Show template analysis for the selected point."""
         if not self.map_data:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
         
         # Check if we have any templates
         if self.map_data.template_manager.get_template_count() == 0:
-            messagebox.showerror("Error", "Please load at least one template spectrum first.")
+            messagebox.showerror("Error", "Please load at least one template spectrum first.", parent=self.window)
             return
         
         # Get X and Y positions
@@ -6850,13 +6829,13 @@ class TwoDMapAnalysisWindow:
                 x_pos = self.map_data.x_positions[0] if self.map_data.x_positions else 0
                 y_pos = self.map_data.y_positions[0] if self.map_data.y_positions else 0
         except (ValueError, IndexError):
-            messagebox.showerror("Error", "Please enter valid X and Y positions.")
+            messagebox.showerror("Error", "Please enter valid X and Y positions.", parent=self.window)
             return
         
         # Get the spectrum at the specified position
         spectrum = self.map_data.get_spectrum(x_pos, y_pos)
         if spectrum is None:
-            messagebox.showerror("Error", f"No spectrum found at position ({x_pos}, {y_pos}).")
+            messagebox.showerror("Error", f"No spectrum found at position ({x_pos}, {y_pos}, parent=self.window).", parent=self.window)
             return
         
         # Switch to the template analysis tab - find it by text
@@ -7024,7 +7003,7 @@ class TwoDMapAnalysisWindow:
     def export_template_analysis(self):
         """Export template analysis to a file."""
         if not self.map_data:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
         
         # Get current X and Y positions
@@ -7037,17 +7016,16 @@ class TwoDMapAnalysisWindow:
                 x_pos = self.map_data.x_positions[0] if self.map_data.x_positions else 0
                 y_pos = self.map_data.y_positions[0] if self.map_data.y_positions else 0
         except (ValueError, IndexError):
-            messagebox.showerror("Error", "Please enter valid X and Y positions.")
+            messagebox.showerror("Error", "Please enter valid X and Y positions.", parent=self.window)
             return
         
         # Check if we have a template fit for this point
         if not hasattr(self.map_data, 'template_coefficients') or (x_pos, y_pos) not in self.map_data.template_coefficients:
-            messagebox.showerror("Error", "No template fit available for this point.")
+            messagebox.showerror("Error", "No template fit available for this point.", parent=self.window)
             return
         
         # Get file path for export
-        filepath = filedialog.asksaveasfilename(
-            defaultextension=".csv",
+        filepath = filedialog.asksaveasfilename(parent=self.window, defaultextension=".csv",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
             title="Export Template Analysis"
         )
@@ -7076,23 +7054,23 @@ class TwoDMapAnalysisWindow:
             df = pd.DataFrame(data)
             df.to_csv(filepath, index=False)
             
-            messagebox.showinfo("Success", f"Template analysis exported to {filepath}")
+            messagebox.showinfo("Success", f"Template analysis exported to {filepath}", parent=self.window)
         
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to export template analysis: {str(e)}")
+            messagebox.showerror("Error", f"Failed to export template analysis: {str(e, parent=self.window)}", parent=self.window)
             import traceback
             print(f"Error exporting template analysis: {traceback.format_exc()}")
 
     def remove_template(self):
         """Remove the selected template spectrum."""
         if not self.map_data:
-            messagebox.showerror("Error", "Please load map data first.")
+            messagebox.showerror("Error", "Please load map data first.", parent=self.window)
             return
         
         # Check if a template is selected
         selection = self.template_listbox.curselection()
         if not selection:
-            messagebox.showinfo("Info", "Please select a template to remove.")
+            messagebox.showinfo("Info", "Please select a template to remove.", parent=self.window)
             return
         
         # Get the selected index
@@ -7102,11 +7080,10 @@ class TwoDMapAnalysisWindow:
         template_name = self.map_data.template_manager.get_template_names()[index]
         
         # Confirm removal
-        confirm = messagebox.askyesno(
-            "Confirm Removal", 
+        confirm = messagebox.askyesno("Confirm Removal", 
             f"Remove template '{template_name}'?\n\n"
             "Note: This will reset any template fits that have been calculated."
-        )
+        , parent=self.window)
         
         if not confirm:
             return
@@ -7125,9 +7102,9 @@ class TwoDMapAnalysisWindow:
             # Update template combo
             self.update_template_combo()
             
-            messagebox.showinfo("Success", f"Template '{template_name}' removed successfully.")
+            messagebox.showinfo("Success", f"Template '{template_name}' removed successfully.", parent=self.window)
         else:
-            messagebox.showerror("Error", f"Failed to remove template '{template_name}'.")
+            messagebox.showerror("Error", f"Failed to remove template '{template_name}'.", parent=self.window)
     
     def on_template_map_click(self, event):
         """Handle click event on the template coefficient map."""
@@ -7322,11 +7299,11 @@ class TwoDMapAnalysisWindow:
     def show_total_template_contributions(self):
         """Show a dialog with the total template contributions across the entire map."""
         if not hasattr(self, 'map_data') or self.map_data is None:
-            messagebox.showinfo("Info", "Load map data first.")
+            messagebox.showinfo("Info", "Load map data first.", parent=self.window)
             return
         
         if not hasattr(self.map_data, 'template_coefficients') or not self.map_data.template_coefficients:
-            messagebox.showinfo("Info", "Fit templates to map first.")
+            messagebox.showinfo("Info", "Fit templates to map first.", parent=self.window)
             return
         
         # Calculate the total contributions
@@ -7335,7 +7312,7 @@ class TwoDMapAnalysisWindow:
         )
         
         if not contributions:
-            messagebox.showinfo("Info", "No template contributions found.")
+            messagebox.showinfo("Info", "No template contributions found.", parent=self.window)
             return
         
         # Create a new dialog window
@@ -7411,24 +7388,22 @@ class TwoDMapAnalysisWindow:
         
         # Add export button
         def export_plot():
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".png",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".png",
                 filetypes=[("PNG files", "*.png"), ("PDF files", "*.pdf"), ("All files", "*.*")],
                 title="Save Plot"
             )
             if file_path:
                 try:
                     fig.savefig(file_path, dpi=300, bbox_inches='tight')
-                    messagebox.showinfo("Success", f"Plot saved to {file_path}")
+                    messagebox.showinfo("Success", f"Plot saved to {file_path}", parent=self.window)
                 except Exception as e:
-                    messagebox.showerror("Error", f"Failed to save plot: {str(e)}")
+                    messagebox.showerror("Error", f"Failed to save plot: {str(e, parent=self.window)}", parent=self.window)
         
         ttk.Button(button_frame, text="Export Plot", command=export_plot).pack(side=tk.LEFT, padx=5)
         
         # Add export data button
         def export_data():
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".csv",
+            file_path = filedialog.asksaveasfilename(parent=self.window, defaultextension=".csv",
                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
                 title="Save Data"
             )
@@ -7441,9 +7416,9 @@ class TwoDMapAnalysisWindow:
                         'Contribution': values
                     })
                     df.to_csv(file_path, index=False)
-                    messagebox.showinfo("Success", f"Data saved to {file_path}")
+                    messagebox.showinfo("Success", f"Data saved to {file_path}", parent=self.window)
                 except Exception as e:
-                    messagebox.showerror("Error", f"Failed to save data: {str(e)}")
+                    messagebox.showerror("Error", f"Failed to save data: {str(e, parent=self.window)}", parent=self.window)
         
         ttk.Button(button_frame, text="Export Data", command=export_data).pack(side=tk.LEFT, padx=5)
         

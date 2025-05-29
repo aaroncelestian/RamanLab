@@ -47,6 +47,9 @@ def main():
     # Create the application instance
     app = RamanAnalysisApp(root)
     
+    # Create the menu bar (this ensures the help menu with version checking is available)
+    app.create_menu_bar()
+    
     # Start the main event loop
     root.mainloop()
 
