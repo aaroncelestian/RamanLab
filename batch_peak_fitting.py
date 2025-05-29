@@ -69,6 +69,16 @@ class BatchPeakFittingWindow:
         # Set up window close event
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
         
+        self.peak_visibility_vars = []
+        self.batch_results = []
+        self.spectra_files = []
+        self.reference_peaks = None
+        self.current_spectrum_index = -1
+        self._stop_batch = False
+        
+        # Track manually skipped files
+        self.manually_skipped_files = set()  # Set of file paths that are manually skipped
+    
     def create_menu_bar(self):
         """Create the menu bar with File and Help menus."""
         self.menu_bar = Menu(self.window)
@@ -353,6 +363,25 @@ class BatchPeakFittingWindow:
         model_combo = ttk.Combobox(model_frame, textvariable=self.current_model, 
                                  values=["Gaussian", "Lorentzian", "Pseudo-Voigt", "Asymmetric Voigt"])
         model_combo.pack(fill=tk.X, pady=2)
+        
+        # Parameter constraint controls
+        constraint_frame = ttk.LabelFrame(model_frame, text="Parameter Constraints", padding=3)
+        constraint_frame.pack(fill=tk.X, pady=3)
+        
+        self.fix_positions = tk.BooleanVar(value=False)
+        self.fix_widths = tk.BooleanVar(value=False)
+        
+        ttk.Checkbutton(constraint_frame, text="Fix Peak Positions", 
+                       variable=self.fix_positions).pack(anchor=tk.W, pady=1)
+        ttk.Checkbutton(constraint_frame, text="Fix Peak Widths", 
+                       variable=self.fix_widths).pack(anchor=tk.W, pady=1)
+        
+        # Add tooltips/info
+        info_label = ttk.Label(constraint_frame, 
+                              text="Fixing parameters improves stability but reduces flexibility",
+                              font=("", 8, "italic"), foreground="gray")
+        info_label.pack(anchor=tk.W, pady=(2,0))
+        
         ttk.Button(model_frame, text="Fit Peaks", command=self.fit_peaks).pack(fill=tk.X, pady=2)
 
         # In Peak Controls tab, add Fit Ranges entry
@@ -366,6 +395,20 @@ class BatchPeakFittingWindow:
         fit_range_entry_tooltip.pack(anchor=tk.W)
         # Add Update ROI button
         ttk.Button(fit_range_frame, text="Update ROI", command=self.update_roi_regions).pack(fill=tk.X, pady=2)
+
+        # File management controls
+        file_mgmt_frame = ttk.LabelFrame(controls_frame, text="File Management", padding=5)
+        file_mgmt_frame.pack(fill=tk.X, pady=2)
+        
+        # Skip/Unskip file button with dynamic text
+        self.skip_button = ttk.Button(file_mgmt_frame, text="⚠ Skip This File", command=self.toggle_skip_current_file)
+        self.skip_button.pack(fill=tk.X, pady=2)
+        
+        # Add tooltip/info
+        skip_info_label = ttk.Label(file_mgmt_frame, 
+                                   text="Excluded files won't appear in Fit Results or trend analysis",
+                                   font=("", 8, "italic"), foreground="gray")
+        skip_info_label.pack(anchor=tk.W, pady=(0,2))
 
         # --- Tab 3: Batch Processing ---
         batch_tab = ttk.Frame(self.left_notebook)
@@ -795,6 +838,228 @@ class BatchPeakFittingWindow:
             # Load the spectrum
             self.load_spectrum(new_index)
     
+    
+    def detect_encoding_robust(self, file_path):
+        """
+        Detect file encoding robustly for cross-platform compatibility.
+        
+        Parameters:
+        -----------
+        file_path : str or Path
+            Path to the file
+            
+        Returns:
+        --------
+        str
+            Detected encoding
+        """
+        try:
+            import chardet
+            # Read a sample of the file to detect encoding
+            with open(file_path, 'rb') as f:
+                raw_data = f.read(10000)  # Read first 10KB
+                result = chardet.detect(raw_data)
+                if result['encoding'] is None:
+                    return 'utf-8'  # Default to utf-8 if detection fails
+                return result['encoding']
+        except ImportError:
+            # If chardet is not available, try common encodings
+            encodings_to_try = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1']
+            for encoding in encodings_to_try:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        f.read(1000)  # Try to read a small portion
+                    return encoding
+                except UnicodeDecodeError:
+                    continue
+            return 'utf-8'  # Final fallback
+        except Exception:
+            return 'utf-8'  # Default fallback
+    
+    def load_spectrum_robust(self, file_path):
+        """
+        Load spectrum file with robust encoding detection and error handling.
+        
+        Parameters:
+        -----------
+        file_path : str or Path
+            Path to the spectrum file
+            
+        Returns:
+        --------
+        tuple
+            (wavenumbers, intensities) or (None, None) if failed
+        """
+        import pandas as pd
+        import numpy as np
+        
+        # Try multiple methods in order of preference
+        methods = [
+            self._try_numpy_loadtxt,
+            self._try_pandas_csv,
+            self._try_manual_parsing
+        ]
+        
+        for method in methods:
+            try:
+                wavenumbers, intensities = method(file_path)
+                if wavenumbers is not None and intensities is not None:
+                    return wavenumbers, intensities
+            except Exception as e:
+                continue
+        
+        return None, None
+    
+    def _try_numpy_loadtxt(self, file_path):
+        """Try loading with numpy loadtxt with encoding detection."""
+        import numpy as np
+        
+        # Detect encoding
+        encoding = self.detect_encoding_robust(file_path)
+        
+        # Try multiple delimiter options
+        delimiters = [None, '\t', ',', ';', ' ']
+        
+        for delimiter in delimiters:
+            try:
+                # numpy loadtxt doesn't directly support encoding, so we need to handle it differently
+                # First, read and decode the file content
+                with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                    lines = f.readlines()
+                
+                # Filter out comment lines and empty lines
+                data_lines = []
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        data_lines.append(line)
+                
+                if not data_lines:
+                    continue
+                
+                # Parse the data
+                data = []
+                for line in data_lines:
+                    if delimiter is None:
+                        # Auto-detect delimiter
+                        for delim in ['\t', ',', ';', ' ']:
+                            parts = line.split(delim)
+                            if len(parts) >= 2:
+                                try:
+                                    wn = float(parts[0].strip())
+                                    intensity = float(parts[1].strip())
+                                    data.append([wn, intensity])
+                                    break
+                                except ValueError:
+                                    continue
+                    else:
+                        parts = line.split(delimiter)
+                        if len(parts) >= 2:
+                            try:
+                                wn = float(parts[0].strip())
+                                intensity = float(parts[1].strip())
+                                data.append([wn, intensity])
+                            except ValueError:
+                                continue
+                
+                if len(data) > 0:
+                    data_array = np.array(data)
+                    return data_array[:, 0], data_array[:, 1]
+                    
+            except Exception:
+                continue
+        
+        return None, None
+    
+    def _try_pandas_csv(self, file_path):
+        """Try loading with pandas with robust encoding detection."""
+        import pandas as pd
+        import numpy as np
+        
+        # Try multiple encoding and delimiter combinations
+        encodings_to_try = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1', 'utf-16']
+        delimiters_to_try = [None, '\t', ',', ';', ' ']
+        
+        # First, try to detect encoding
+        detected_encoding = self.detect_encoding_robust(file_path)
+        encodings_to_try.insert(0, detected_encoding)
+        
+        for encoding in encodings_to_try:
+            for delimiter in delimiters_to_try:
+                try:
+                    df = pd.read_csv(file_path, 
+                                   sep=delimiter,
+                                   engine='python', 
+                                   header=None, 
+                                   comment='#',
+                                   encoding=encoding,
+                                   on_bad_lines='skip')
+                    
+                    if len(df) > 0 and len(df.columns) >= 2:
+                        # Use first two numeric columns
+                        numeric_cols = df.select_dtypes(include=[np.number]).columns
+                        if len(numeric_cols) >= 2:
+                            wavenumbers = df[numeric_cols[0]].values
+                            intensities = df[numeric_cols[1]].values
+                            return wavenumbers, intensities
+                        elif len(df.columns) >= 2:
+                            # Try to convert first two columns to numeric
+                            try:
+                                wavenumbers = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
+                                intensities = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
+                                # Remove NaN values
+                                valid_mask = ~(np.isnan(wavenumbers) | np.isnan(intensities))
+                                if np.sum(valid_mask) > 0:
+                                    return wavenumbers[valid_mask], intensities[valid_mask]
+                            except:
+                                continue
+                
+                except Exception:
+                    continue
+        
+        return None, None
+    
+    def _try_manual_parsing(self, file_path):
+        """Try manual parsing with robust encoding detection."""
+        import numpy as np
+        
+        encodings_to_try = ['utf-8', 'latin1', 'cp1252', 'iso-8859-1', 'utf-16']
+        detected_encoding = self.detect_encoding_robust(file_path)
+        encodings_to_try.insert(0, detected_encoding)
+        
+        for encoding in encodings_to_try:
+            try:
+                with open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                    wavenumbers = []
+                    intensities = []
+                    
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        
+                        # Try different delimiters
+                        for delimiter in ['\t', ',', ';', ' ']:
+                            parts = line.split(delimiter)
+                            if len(parts) >= 2:
+                                try:
+                                    wn = float(parts[0].strip())
+                                    intensity = float(parts[1].strip())
+                                    wavenumbers.append(wn)
+                                    intensities.append(intensity)
+                                    break
+                                except ValueError:
+                                    continue
+                    
+                    if len(wavenumbers) > 0:
+                        return np.array(wavenumbers), np.array(intensities)
+            
+            except Exception:
+                continue
+        
+        return None, None
+
+
     def load_spectrum(self, index):
         """Load a spectrum from the list."""
         if not self.spectra_files or index < 0 or index >= len(self.spectra_files):
@@ -804,14 +1069,33 @@ class BatchPeakFittingWindow:
         try:
             # Load the spectrum data
             file_path = self.spectra_files[index]
-            data = np.loadtxt(file_path)
+            # Load spectrum with robust encoding detection
+            wavenumbers, intensities = self.load_spectrum_robust(file_path)
+            if wavenumbers is None or intensities is None:
+                raise Exception(f"Failed to load data from {file_path}")
+            data = np.column_stack((wavenumbers, intensities))
             self.wavenumbers = data[:, 0]
             self.spectra = data[:, 1]
             self.original_spectra = np.copy(self.spectra)
             
             # Update current spectrum index and label
             self.current_spectrum_index = index
-            self.current_spectrum_label.config(text=f"Current: {os.path.basename(file_path)}")
+            # Update status
+            filename = os.path.basename(self.spectra_files[index])
+            # Check if this file is manually skipped
+            current_file_path = self.spectra_files[index]
+            is_skipped = current_file_path in self.manually_skipped_files
+            
+            if is_skipped:
+                self.current_spectrum_label.config(text=f"Spectrum {index + 1}/{len(self.spectra_files)}: {filename} [SKIPPED]")
+                # Update skip button text
+                if hasattr(self, 'skip_button'):
+                    self.skip_button.config(text="✓ Unskip This File")
+            else:
+                self.current_spectrum_label.config(text=f"Spectrum {index + 1}/{len(self.spectra_files)}: {filename}")
+                # Update skip button text
+                if hasattr(self, 'skip_button'):
+                    self.skip_button.config(text="⚠ Skip This File")
             
             # Initialize peak fitting variables if they don't exist
             if not hasattr(self, 'peaks'):
@@ -1088,7 +1372,16 @@ class BatchPeakFittingWindow:
         n_peaks = None
         all_params = []
         all_covs = []  # Add storage for covariance matrices
+        
+        # Filter out manually skipped files
+        filtered_results = []
         for result in self.batch_results:
+            # Skip manually skipped files
+            if result.get('manually_skipped', False):
+                continue
+            filtered_results.append(result)
+        
+        for result in filtered_results:
             # Check if this is a failed fit
             fit_failed = result.get('fit_failed', False)
             fit_params = result.get('fit_params')
@@ -1107,7 +1400,7 @@ class BatchPeakFittingWindow:
         if n_peaks is None:
             return None, None, None, None
         
-        x = np.arange(len(self.batch_results))
+        x = np.arange(len(filtered_results))
         trends = []
         uncertainties = []  # Add storage for uncertainties
         
@@ -1138,24 +1431,23 @@ class BatchPeakFittingWindow:
                         pos_vals[i] = pos
                         amp_vals[i] = amp
                         wid_vals[i] = wid
-                        # Calculate uncertainties from covariance matrix
-                        if cov is not None:
-                            start_idx = peak_idx * params_per_peak
-                            pos_errs[i] = 1.96 * np.sqrt(cov[start_idx+1, start_idx+1])  # 95% confidence interval
-                            amp_errs[i] = 1.96 * np.sqrt(cov[start_idx, start_idx])
-                            wid_errs[i] = 1.96 * np.sqrt(cov[start_idx+2, start_idx+2])
+                        # Skip uncertainty calculation for constrained fits
+                        # The covariance matrix dimensions don't match when parameters are fixed
+                        # For now, set uncertainties to None to avoid crashes
+                        pos_errs[i] = None
+                        amp_errs[i] = None
+                        wid_errs[i] = None
                     elif model_type == "Pseudo-Voigt":
                         amp, pos, wid, eta = params[peak_idx]
                         pos_vals[i] = pos
                         amp_vals[i] = amp
                         wid_vals[i] = wid
                         eta_vals[i] = eta
-                        if cov is not None:
-                            start_idx = peak_idx * params_per_peak
-                            pos_errs[i] = 1.96 * np.sqrt(cov[start_idx+1, start_idx+1])
-                            amp_errs[i] = 1.96 * np.sqrt(cov[start_idx, start_idx])
-                            wid_errs[i] = 1.96 * np.sqrt(cov[start_idx+2, start_idx+2])
-                            eta_errs[i] = 1.96 * np.sqrt(cov[start_idx+3, start_idx+3])
+                        # Skip uncertainty calculation for constrained fits
+                        pos_errs[i] = None
+                        amp_errs[i] = None
+                        wid_errs[i] = None
+                        eta_errs[i] = None
                     elif model_type == "Asymmetric Voigt":
                         amp, pos, wid_left, wid_right, eta = params[peak_idx]
                         pos_vals[i] = pos
@@ -1163,13 +1455,12 @@ class BatchPeakFittingWindow:
                         wid_left_vals[i] = wid_left
                         wid_right_vals[i] = wid_right
                         eta_vals[i] = eta
-                        if cov is not None:
-                            start_idx = peak_idx * params_per_peak
-                            pos_errs[i] = 1.96 * np.sqrt(cov[start_idx+1, start_idx+1])
-                            amp_errs[i] = 1.96 * np.sqrt(cov[start_idx, start_idx])
-                            wid_left_errs[i] = 1.96 * np.sqrt(cov[start_idx+2, start_idx+2])
-                            wid_right_errs[i] = 1.96 * np.sqrt(cov[start_idx+3, start_idx+3])
-                            eta_errs[i] = 1.96 * np.sqrt(cov[start_idx+4, start_idx+4])
+                        # Skip uncertainty calculation for constrained fits
+                        pos_errs[i] = None
+                        amp_errs[i] = None
+                        wid_left_errs[i] = None
+                        wid_right_errs[i] = None
+                        eta_errs[i] = None
             
             trends.append({
                 'pos': np.array(pos_vals),
@@ -1217,13 +1508,43 @@ class BatchPeakFittingWindow:
         # Only plot peaks whose checkboxes are checked
         visible_peaks = [i for i in range(n_peaks) if i < len(self.peak_visibility_vars) and self.peak_visibility_vars[i].get()]
 
-        # Count how many spectra had failed fits
-        failed_fits_count = sum(1 for result in self.batch_results if result.get('fit_failed', False))
-        if failed_fits_count > 0:
+        # Count how many spectra had failed fits (excluding manually skipped)
+        failed_fits_count = sum(1 for result in self.batch_results 
+                               if result.get('fit_failed', False) and not result.get('manually_skipped', False))
+        # Count how many spectra were manually refined
+        manually_refined_count = sum(1 for result in self.batch_results 
+                                   if result.get('manually_refined', False) and not result.get('manually_skipped', False))
+        # Count how many spectra were manually skipped
+        manually_skipped_count = sum(1 for result in self.batch_results if result.get('manually_skipped', False))
+        
+        if failed_fits_count > 0 or manually_refined_count > 0 or manually_skipped_count > 0:
+            status_text = []
+            if failed_fits_count > 0:
+                status_text.append(f"{failed_fits_count} failed fits excluded")
+            if manually_skipped_count > 0:
+                status_text.append(f"{manually_skipped_count} files manually skipped")
+            if manually_refined_count > 0:
+                status_text.append(f"{manually_refined_count} manually refined (★)")
+            
             for ax in axes:
-                ax.text(0.02, 0.98, f"Note: {failed_fits_count} failed fits excluded", 
+                ax.text(0.02, 0.98, "; ".join(status_text), 
                        transform=ax.transAxes, fontsize=8, va='top', ha='left', 
-                       color='red', bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
+                       color='blue', bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
+
+        # Add information about constraints if any are active
+        constraints_active = False
+        if hasattr(self, 'fix_positions') and hasattr(self, 'fix_widths'):
+            constraints_active = self.fix_positions.get() or self.fix_widths.get()
+        
+        if constraints_active and show_95:
+            # Add a note that uncertainty bands are disabled when constraints are used
+            constraint_text = "Note: 95% confidence bands disabled when parameter constraints are active"
+            axes[3].text(0.02, 0.02, constraint_text, 
+                        transform=axes[3].transAxes, fontsize=8, va='bottom', ha='left', 
+                        color='orange', style='italic',
+                        bbox=dict(facecolor='white', alpha=0.8, edgecolor='orange'))
+
+        # Create arrays to track which points are manually refined
 
         for peak_idx in visible_peaks:
             color = f"C{peak_idx}"
@@ -1240,6 +1561,7 @@ class BatchPeakFittingWindow:
                 
                 # Plot points
                 axes[0].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
+                
                 
                 # Draw smooth confidence bands without vertical lines
                 if show_95:
@@ -1295,6 +1617,7 @@ class BatchPeakFittingWindow:
                 
                 axes[1].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
                 
+                
                 if show_95:
                     # Find consecutive groups of points
                     groups = []
@@ -1344,6 +1667,7 @@ class BatchPeakFittingWindow:
                     
                     axes[2].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1} Left', color=color, alpha=0.7)
                     
+                    
                     if show_95:
                         groups = []
                         current_group = []
@@ -1381,6 +1705,7 @@ class BatchPeakFittingWindow:
                     yerr_valid = yerr_right[valid_mask_right]
                     
                     axes[2].plot(x_valid, y_valid, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
+                    
                     
                     if show_95:
                         groups = []
@@ -1468,6 +1793,7 @@ class BatchPeakFittingWindow:
                     
                     axes[3].plot(x_valid, y_valid, 'o', label=f'Peak {peak_idx+1}', color=color)
                     
+                    
                     if show_95:
                         groups = []
                         current_group = []
@@ -1545,6 +1871,8 @@ class BatchPeakFittingWindow:
             ax.text(0.02, 0.98, f"Note: {failed_fits_count} failed fits excluded", 
                    transform=ax.transAxes, fontsize=8, va='top', ha='left', 
                    color='red', bbox=dict(facecolor='white', alpha=0.8, edgecolor='lightgray'))
+        
+        # Create arrays to track which points are manually refined
         
         for peak_idx in visible_peaks:
             color = f"C{peak_idx}"
@@ -1691,22 +2019,11 @@ class BatchPeakFittingWindow:
                                 yg = y_valid[group]
                                 yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
                                 
-                                if len(yerrg) != len(xg):
-                                    continue
-                                    
-                                x_interp = np.linspace(xg[0], xg[-1], 100)
-                                y_interp = np.interp(x_interp, xg, yg)
-                                upper_bound = np.interp(x_interp, xg, yg + yerrg)
-                                lower_bound = np.interp(x_interp, xg, yg - yerrg)
-                                
-                                ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
-                    
-                    if np.any(valid_mask_right):
                         x_valid = x[valid_mask_right]
-                        y_valid = y_right[valid_mask_right]
-                        yerr_valid = yerr_right[valid_mask_right]
-                        
-                        ax.plot(x_valid, y_valid, '^', label=f'Peak {peak_idx+1} Right', color=color, alpha=0.7)
+                        if np.any(manually_refined_valid):
+                            x_refined = x_valid[manually_refined_valid]
+                            y_refined = y_valid[manually_refined_valid]
+                            ax.plot(x_refined, y_refined, '*', color=color, markersize=10, markeredgecolor='black', markeredgewidth=0.5)
                         
                         if show_95:
                             groups = []
@@ -1770,13 +2087,12 @@ class BatchPeakFittingWindow:
                                 xg = x_valid[group]
                                 yg = y_valid[group]
                                 yerrg = [e for i, e in enumerate(yerr_valid) if i in group and e is not None]
-                                
-                                if len(yerrg) != len(xg):
-                                    continue
-                                    
                                 x_interp = np.linspace(xg[0], xg[-1], 100)
                                 y_interp = np.interp(x_interp, xg, yg)
                                 upper_bound = np.interp(x_interp, xg, yg + yerrg)
+                                lower_bound = np.interp(x_interp, xg, yg - yerrg)
+                                
+                                ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
                                 lower_bound = np.interp(x_interp, xg, yg - yerrg)
                                 
                                 ax.fill_between(x_interp, lower_bound, upper_bound, color=color, alpha=0.2)
@@ -1865,12 +2181,29 @@ class BatchPeakFittingWindow:
         toolbar.update()
 
     def export_results(self):
-        """Export the batch processing results to a CSV file."""
+        """Export batch processing results to CSV."""
         if not self.batch_results:
             messagebox.showwarning("No Results", "No batch processing results to export.")
             return
             
         try:
+            # Check if there are any manually skipped files
+            skipped_count = sum(1 for result in self.batch_results if result.get('manually_skipped', False))
+            
+            include_skipped = True
+            if skipped_count > 0:
+                response = messagebox.askyesnocancel(
+                    "Export Options",
+                    f"Found {skipped_count} manually skipped file(s).\n\n"
+                    "Include skipped files in export?\n\n"
+                    "• Yes: Include all files (skipped files marked as failed)\n"
+                    "• No: Exclude skipped files from export\n"
+                    "• Cancel: Cancel export"
+                )
+                if response is None:  # Cancel
+                    return
+                include_skipped = response
+            
             # Ask for file location
             file_path = filedialog.asksaveasfilename(
                 defaultextension=".csv",
@@ -1884,12 +2217,21 @@ class BatchPeakFittingWindow:
             # Prepare data for export
             data = []
             for result in self.batch_results:
+                # Skip manually skipped files if user chose not to include them
+                if not include_skipped and result.get('manually_skipped', False):
+                    continue
+                    
                 # Start with basic file info
                 row = {'File': os.path.basename(result['file'])}
                 
-                # Check if this was a failed fit
+                # Check if this was a failed fit or manually skipped
                 fit_failed = result.get('fit_failed', False)
-                row['Fit_Success'] = 'No' if fit_failed else 'Yes'
+                manually_skipped = result.get('manually_skipped', False)
+                
+                if manually_skipped:
+                    row['Fit_Success'] = 'Skipped'
+                else:
+                    row['Fit_Success'] = 'No' if fit_failed else 'Yes'
                 
                 if not fit_failed and result['fit_params'] is not None:
                     # Get model type
@@ -2191,6 +2533,10 @@ class BatchPeakFittingWindow:
                 self.fit_failed = True
                 return
             
+            # Show constraint information
+            constraint_info = self.get_constraint_info_text()
+            print(f"Fitting {len(peaks_in_roi)} peaks with {model_type} model - {constraint_info}")
+            
             # HARD CAP for Asymmetric Voigt
             if model_type == "Asymmetric Voigt" and len(peaks_in_roi) > 8:
                 messagebox.showerror("Too Many Peaks", "Asymmetric Voigt fitting is limited to 8 peaks for stability. Please reduce the number of detected peaks (e.g., by increasing the prominence or height threshold).")
@@ -2213,63 +2559,103 @@ class BatchPeakFittingWindow:
                 x_fit = self.wavenumbers
                 y_fit = self.spectra
             
-            # Prepare initial parameters
+            # Prepare initial parameters and constraints
             initial_params = []
             bounds_lower = []
             bounds_upper = []
             
-            for peak in peaks_in_roi:
-                # Initial amplitude
+            # Track which parameters are fixed
+            fixed_params = {}  # index -> fixed_value
+            param_mapping = []  # Maps optimization parameter index to full parameter index
+            full_param_count = 0
+            
+            for peak_idx, peak in enumerate(peaks_in_roi):
+                base_idx = peak_idx * params_per_peak
+                
+                # Amplitude (never fixed)
                 initial_params.append(peak['intensity'])
                 bounds_lower.append(0)
                 bounds_upper.append(np.inf)
+                param_mapping.append(base_idx)  # amplitude at position 0 of each peak
                 
-                # Initial position
-                initial_params.append(peak['position'])
-                bounds_lower.append(self.wavenumbers[0])
-                bounds_upper.append(self.wavenumbers[-1])
+                # Position (may be fixed)
+                if self.fix_positions.get():
+                    fixed_params[base_idx + 1] = peak['position']
+                else:
+                    initial_params.append(peak['position'])
+                    bounds_lower.append(self.wavenumbers[0])
+                    bounds_upper.append(self.wavenumbers[-1])
+                    param_mapping.append(base_idx + 1)
                 
+                # Width parameters (may be fixed)
                 if model_type == "Gaussian" or model_type == "Lorentzian":
-                    # Initial width
-                    initial_params.append(10)  # Default width
-                    bounds_lower.append(0.1)
-                    bounds_upper.append(100)
+                    if self.fix_widths.get():
+                        fixed_params[base_idx + 2] = 10.0  # Default fixed width
+                    else:
+                        initial_params.append(10)  # Default width
+                        bounds_lower.append(0.1)
+                        bounds_upper.append(100)
+                        param_mapping.append(base_idx + 2)
+                        
                 elif model_type == "Pseudo-Voigt":
-                    # Initial width and eta
-                    initial_params.append(10)  # Default width
+                    if self.fix_widths.get():
+                        fixed_params[base_idx + 2] = 10.0  # Default fixed width
+                    else:
+                        initial_params.append(10)  # Default width
+                        bounds_lower.append(0.1)
+                        bounds_upper.append(100)
+                        param_mapping.append(base_idx + 2)
+                    
+                    # Eta parameter (never fixed for now)
                     initial_params.append(0.5)  # Default eta
-                    bounds_lower.extend([0.1, 0])
-                    bounds_upper.extend([100, 1])
+                    bounds_lower.append(0)
+                    bounds_upper.append(1)
+                    param_mapping.append(base_idx + 3)
+                    
                 elif model_type == "Asymmetric Voigt":
-                    # Initial left width, right width, eta
-                    initial_params.append(10)  # Default left width (sigma_l)
-                    initial_params.append(10)  # Default right width (sigma_r)
+                    if self.fix_widths.get():
+                        fixed_params[base_idx + 2] = 10.0  # Default fixed left width
+                        fixed_params[base_idx + 3] = 10.0  # Default fixed right width
+                    else:
+                        initial_params.append(10)  # Default left width
+                        initial_params.append(10)  # Default right width
+                        bounds_lower.extend([0.1, 0.1])
+                        bounds_upper.extend([100, 100])
+                        param_mapping.extend([base_idx + 2, base_idx + 3])
+                    
+                    # Eta parameter (never fixed for now)
                     initial_params.append(0.5)  # Default eta
-                    bounds_lower.extend([0.1, 0.1, 0])
-                    bounds_upper.extend([100, 100, 1])
+                    bounds_lower.append(0)
+                    bounds_upper.append(1)
+                    param_mapping.append(base_idx + 4)
+                    
+                full_param_count += params_per_peak
 
-            # Check initial parameter count for Asymmetric Voigt
-            if model_type == "Asymmetric Voigt" and len(initial_params) % 5 != 0:
-                messagebox.showerror("Parameter Error", f"Initial parameter list for Asymmetric Voigt is not a multiple of 5 (got {len(initial_params)}). This indicates a bug or mismatch. Please clear peaks and try again.")
-                self.fit_failed = True
-                return
-            
-            # Define combined model function
-            def combined_model(x, *params):
+            # Define combined model function that handles fixed parameters
+            def combined_model_with_constraints(x, *opt_params):
+                """Model function that reconstructs full parameter set including fixed values."""
+                # Reconstruct full parameter array
+                full_params = [0.0] * full_param_count
+                
+                # Fill in optimized parameters
+                for opt_idx, full_idx in enumerate(param_mapping):
+                    full_params[full_idx] = opt_params[opt_idx]
+                
+                # Fill in fixed parameters
+                for fixed_idx, fixed_val in fixed_params.items():
+                    full_params[fixed_idx] = fixed_val
+                
+                # Calculate model using full parameter set
                 result = np.zeros_like(x)
-                for i in range(0, len(params), params_per_peak):
-                    # Make sure we have enough parameters for this peak
-                    if i + params_per_peak <= len(params):
-                        peak_params = params[i:i+params_per_peak]
+                for i in range(0, len(full_params), params_per_peak):
+                    if i + params_per_peak <= len(full_params):
+                        peak_params = full_params[i:i+params_per_peak]
                         try:
-                            # Add the contribution of this peak to the result
                             peak_result = model_func(x, *peak_params)
-                            result = result + peak_result  # Use explicit addition instead of +=
+                            result = result + peak_result
                         except Exception as e:
                             print(f"Error in model_func at i={i} with params {peak_params}: {e}")
                             continue
-                    else:
-                        print(f"Skipping peak at i={i}, not enough parameters left")
                 return result
             
             # Add a counter for function evaluations (NLLS cycles)
@@ -2278,7 +2664,7 @@ class BatchPeakFittingWindow:
             # Wrap the model function to count evaluations
             def counting_model(x, *params):
                 self.func_eval_count += 1
-                return combined_model(x, *params)
+                return combined_model_with_constraints(x, *params)
             
             # Perform fit
             try:
@@ -2315,13 +2701,22 @@ class BatchPeakFittingWindow:
                     # Fallback: use initial guess, no covariance, flag as failed
                     popt = np.array(initial_params)
                     pcov = None
-                    self.fit_params = popt
+                    
+                    # Reconstruct full parameters for storage
+                    full_popt = [0.0] * full_param_count
+                    for opt_idx, full_idx in enumerate(param_mapping):
+                        if opt_idx < len(popt):
+                            full_popt[full_idx] = popt[opt_idx]
+                    for fixed_idx, fixed_val in fixed_params.items():
+                        full_popt[fixed_idx] = fixed_val
+                    
+                    self.fit_params = np.array(full_popt)
                     self.fit_cov = pcov
                     self.nlls_cycles = 0  # No successful cycles
                     
                     # Try to calculate fit result and residuals with initial parameters
                     try:
-                        self.fit_result = combined_model(self.wavenumbers, *popt)
+                        self.fit_result = combined_model_with_constraints(self.wavenumbers, *popt)
                         self.residuals = self.spectra - self.fit_result
                     except Exception as e3:
                         print(f"Failed to calculate fit with initial parameters: {str(e3)}")
@@ -2334,21 +2729,67 @@ class BatchPeakFittingWindow:
                     self.update_plot()
                     self.update_peak_visibility_controls()
                     return
-                    
-            # Robust check for Asymmetric Voigt
-            if model_type == "Asymmetric Voigt":
-                if len(popt) % 5 != 0:
-                    messagebox.showerror("Fit Error", f"Fit failed: number of fit parameters ({len(popt)}) is not a multiple of 5. Try reducing the number of peaks or adjusting initial guesses.")
-                    self.fit_failed = True
-                    return
-                    
-            # Store results
-            self.fit_params = popt
+            
+            # Reconstruct full parameter set from optimized parameters
+            full_popt = [0.0] * full_param_count
+            for opt_idx, full_idx in enumerate(param_mapping):
+                full_popt[full_idx] = popt[opt_idx]
+            for fixed_idx, fixed_val in fixed_params.items():
+                full_popt[fixed_idx] = fixed_val
+            
+            # Create full initial parameters for validation
+            full_initial_params = [0.0] * full_param_count
+            opt_idx = 0
+            for peak_idx, peak in enumerate(peaks_in_roi):
+                base_idx = peak_idx * params_per_peak
+                full_initial_params[base_idx] = peak['intensity']  # amplitude
+                full_initial_params[base_idx + 1] = peak['position']  # position
+                
+                if model_type in ["Gaussian", "Lorentzian"]:
+                    full_initial_params[base_idx + 2] = 10.0  # width
+                elif model_type == "Pseudo-Voigt":
+                    full_initial_params[base_idx + 2] = 10.0  # width
+                    full_initial_params[base_idx + 3] = 0.5   # eta
+                elif model_type == "Asymmetric Voigt":
+                    full_initial_params[base_idx + 2] = 10.0  # left width
+                    full_initial_params[base_idx + 3] = 10.0  # right width
+                    full_initial_params[base_idx + 4] = 0.5   # eta
+                
+            # Validate fit parameters for realism before accepting the fit
+            if not self.validate_fit_parameters(np.array(full_popt), np.array(full_initial_params), model_type, peaks_in_roi):
+                print("Fit validation failed - parameters are unrealistic")
+                self.fit_failed = True
+                self.fit_params = np.array(full_initial_params)
+                self.fit_cov = None
+                self.nlls_cycles = self.func_eval_count
+                
+                # Calculate fit result with initial parameters for display
+                try:
+                    # Convert initial parameters to optimized parameter format
+                    initial_opt_params = []
+                    for full_idx in param_mapping:
+                        initial_opt_params.append(full_initial_params[full_idx])
+                    self.fit_result = combined_model_with_constraints(self.wavenumbers, *initial_opt_params)
+                    if hasattr(self, 'original_spectra') and hasattr(self, 'background') and self.background is not None:
+                        background_subtracted = np.subtract(self.original_spectra, self.background)
+                        self.residuals = np.subtract(background_subtracted, self.fit_result)
+                    else:
+                        self.residuals = np.subtract(self.spectra, self.fit_result)
+                except Exception:
+                    self.fit_result = np.zeros_like(self.wavenumbers)
+                    self.residuals = np.copy(self.spectra)
+                
+                self.update_plot()
+                self.update_peak_visibility_controls()
+                return
+            
+            # Store results using full parameter set
+            self.fit_params = np.array(full_popt)
             self.fit_cov = pcov
             
             # Calculate fit result and residuals
             try:
-                self.fit_result = combined_model(self.wavenumbers, *popt)
+                self.fit_result = combined_model_with_constraints(self.wavenumbers, *popt)
                 
                 # Calculate residuals (difference between background-subtracted data and fit)
                 # Use background-subtracted spectrum for residuals calculation
@@ -2362,9 +2803,13 @@ class BatchPeakFittingWindow:
                     self.residuals = np.subtract(self.spectra, self.fit_result)
                 
                 # Calculate and store R² values for each peak
-                self.peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, popt, model_type)
+                self.peak_r_squared = self.calculate_peak_r_squared(self.spectra, self.fit_result, self.fit_params, model_type)
                 
                 self.fit_failed = False
+                
+                # Check if this spectrum is part of batch results and update it
+                self.update_batch_results_if_present()
+                
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to calculate fit results: {str(e)}")
                 self.fit_failed = True
@@ -2740,7 +3185,11 @@ class BatchPeakFittingWindow:
             all_spectra = []
             all_wavenumbers = None
             for file_path in current_files[::skip]:
-                data = np.loadtxt(file_path)
+                # Load spectrum with robust encoding detection
+                wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                if wavenumbers is None or intensities is None:
+                    raise Exception(f"Failed to load data from {file_path}")
+                data = np.column_stack((wavenumbers, intensities))
                 wavenumbers = data[:, 0]
                 spectrum = data[:, 1]
                 if all_wavenumbers is None:
@@ -2860,7 +3309,11 @@ class BatchPeakFittingWindow:
             all_spectra = []
             all_wavenumbers = None
             for file_path in current_files:
-                data = np.loadtxt(file_path)
+                # Load spectrum with robust encoding detection
+                wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                if wavenumbers is None or intensities is None:
+                    raise Exception(f"Failed to load data from {file_path}")
+                data = np.column_stack((wavenumbers, intensities))
                 wavenumbers = data[:, 0]
                 spectrum = data[:, 1]
                 if all_wavenumbers is None:
@@ -2878,7 +3331,8 @@ class BatchPeakFittingWindow:
             # Create mask for X-axis range
             mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
             wavenumbers_masked = all_wavenumbers[mask]
-            spectra_array = np.array(all_spectra)
+            # Apply mask to spectra data as well to match the wavenumber range
+            spectra_array = np.array(all_spectra)[:, mask]
             
             # Apply color adjustments
             contrast = self.heatmap_contrast.get()
@@ -3103,11 +3557,15 @@ class BatchPeakFittingWindow:
         for ax in self.ax_stats.flatten():
             ax.clear()
 
-        # Calculate R² for each spectrum in batch results
+        # Filter out manually skipped files
+        filtered_results = [(i, result) for i, result in enumerate(self.batch_results) 
+                           if not result.get('manually_skipped', False)]
+
+        # Calculate R² for each spectrum in filtered batch results
         r2_values = []
-        for i, result in enumerate(self.batch_results):
+        for original_index, result in filtered_results:
             if result.get('fit_failed', True) or result['fit_result'] is None or result['fit_params'] is None:
-                r2_values.append((i, 0))  # Default to 0 for failed fits
+                r2_values.append((original_index, 0))  # Default to 0 for failed fits
                 continue
                 
             # Load the original spectrum data from file
@@ -3165,10 +3623,10 @@ class BatchPeakFittingWindow:
                 else:
                     r2 = 0
                 
-                r2_values.append((i, r2))
+                r2_values.append((original_index, r2))
             except Exception as e:
-                print(f"Error calculating R² for spectrum {i}: {e}")
-                r2_values.append((i, 0))
+                print(f"Error calculating R² for spectrum {original_index}: {e}")
+                r2_values.append((original_index, 0))
         
         # Sort by R² value
         r2_values.sort(key=lambda x: x[1])
@@ -3583,3 +4041,393 @@ class BatchPeakFittingWindow:
         """Show general help for the application."""
         title, text = self.help_texts["General"]
         self.show_help_dialog(title, text)
+
+    def validate_fit_parameters(self, popt, initial_params, model_type, peaks_in_roi):
+        """
+        Validate if fit parameters are realistic and physically meaningful.
+        
+        Parameters:
+        -----------
+        popt : array-like
+            Fitted parameters
+        initial_params : array-like
+            Initial parameter guesses
+        model_type : str
+            Peak model type
+        peaks_in_roi : list
+            List of detected peaks within ROI
+            
+        Returns:
+        --------
+        bool
+            True if parameters are realistic, False otherwise
+        """
+        try:
+            # Determine parameters per peak
+            if model_type in ["Gaussian", "Lorentzian"]:
+                params_per_peak = 3
+            elif model_type == "Pseudo-Voigt":
+                params_per_peak = 4
+            elif model_type == "Asymmetric Voigt":
+                params_per_peak = 5
+            else:
+                params_per_peak = 3
+            
+            n_peaks = len(popt) // params_per_peak
+            wavenumber_range = self.wavenumbers[-1] - self.wavenumbers[0]
+            
+            for i in range(n_peaks):
+                start_idx = i * params_per_peak
+                
+                # Extract parameters for this peak
+                if model_type in ["Gaussian", "Lorentzian"]:
+                    amp, pos, wid = popt[start_idx:start_idx+3]
+                    initial_amp, initial_pos, initial_wid = initial_params[start_idx:start_idx+3]
+                elif model_type == "Pseudo-Voigt":
+                    amp, pos, wid, eta = popt[start_idx:start_idx+4]
+                    initial_amp, initial_pos, initial_wid, initial_eta = initial_params[start_idx:start_idx+4]
+                    # Validate eta parameter (must be between 0 and 1)
+                    if eta < 0 or eta > 1:
+                        print(f"Peak {i+1}: Invalid eta value {eta:.3f} (must be 0-1)")
+                        return False
+                elif model_type == "Asymmetric Voigt":
+                    amp, pos, wid_left, wid_right, eta = popt[start_idx:start_idx+5]
+                    initial_amp, initial_pos, initial_wid_left, initial_wid_right, initial_eta = initial_params[start_idx:start_idx+5]
+                    # Validate eta parameter
+                    if eta < 0 or eta > 1:
+                        print(f"Peak {i+1}: Invalid eta value {eta:.3f} (must be 0-1)")
+                        return False
+                    # Validate asymmetric widths
+                    if wid_left <= 0 or wid_right <= 0:
+                        print(f"Peak {i+1}: Invalid widths - left: {wid_left:.3f}, right: {wid_right:.3f}")
+                        return False
+                    # Check for extremely asymmetric peaks (one side > 10x the other)
+                    if wid_left / wid_right > 10 or wid_right / wid_left > 10:
+                        print(f"Peak {i+1}: Extremely asymmetric widths - left: {wid_left:.3f}, right: {wid_right:.3f}")
+                        return False
+                    wid = (wid_left + wid_right) / 2  # Use average for general width checks
+                
+                # 1. Check for negative or zero amplitudes
+                if amp <= 0:
+                    print(f"Peak {i+1}: Invalid amplitude {amp:.3f} (must be positive)")
+                    return False
+                
+                # 2. Check if peak position is within reasonable bounds
+                if pos < self.wavenumbers[0] or pos > self.wavenumbers[-1]:
+                    print(f"Peak {i+1}: Position {pos:.1f} outside data range [{self.wavenumbers[0]:.1f}, {self.wavenumbers[-1]:.1f}]")
+                    return False
+                
+                # 3. Check for extremely narrow or wide peaks
+                min_width = wavenumber_range * 0.001  # 0.1% of total range
+                max_width = wavenumber_range * 0.5    # 50% of total range
+                if model_type == "Asymmetric Voigt":
+                    if wid_left < min_width or wid_right < min_width:
+                        print(f"Peak {i+1}: Width too narrow - left: {wid_left:.3f}, right: {wid_right:.3f} (min: {min_width:.3f})")
+                        return False
+                    if wid_left > max_width or wid_right > max_width:
+                        print(f"Peak {i+1}: Width too wide - left: {wid_left:.3f}, right: {wid_right:.3f} (max: {max_width:.3f})")
+                        return False
+                else:
+                    if wid < min_width or wid > max_width:
+                        print(f"Peak {i+1}: Width {wid:.3f} outside reasonable range [{min_width:.3f}, {max_width:.3f}]")
+                        return False
+                
+                # 4. Check if peak position has drifted too far from initial guess
+                max_drift = wavenumber_range * 0.1  # Allow 10% of total range drift
+                position_drift = abs(pos - initial_pos)
+                if position_drift > max_drift:
+                    print(f"Peak {i+1}: Position drifted too far - initial: {initial_pos:.1f}, fitted: {pos:.1f}, drift: {position_drift:.1f}")
+                    return False
+                
+                # 5. Check for unrealistic amplitude changes (more than 100x change)
+                amp_ratio = amp / initial_amp if initial_amp > 0 else float('inf')
+                if amp_ratio > 100 or amp_ratio < 0.01:
+                    print(f"Peak {i+1}: Unrealistic amplitude change - initial: {initial_amp:.1f}, fitted: {amp:.1f}, ratio: {amp_ratio:.3f}")
+                    return False
+                
+                # 6. Check for unrealistic width changes (more than 50x change)
+                initial_wid = initial_wid if model_type != "Asymmetric Voigt" else (initial_wid_left + initial_wid_right) / 2
+                wid_ratio = wid / initial_wid if initial_wid > 0 else float('inf')
+                if wid_ratio > 50 or wid_ratio < 0.02:
+                    print(f"Peak {i+1}: Unrealistic width change - initial: {initial_wid:.3f}, fitted: {wid:.3f}, ratio: {wid_ratio:.3f}")
+                    return False
+            
+            # 7. Calculate overall fit quality and reject if R² is too low
+            try:
+                # Create the combined model to evaluate R²
+                def combined_model_temp(x, *params):
+                    result = np.zeros_like(x)
+                    for j in range(0, len(params), params_per_peak):
+                        if j + params_per_peak <= len(params):
+                            peak_params = params[j:j+params_per_peak]
+                            if model_type == "Gaussian":
+                                peak_result = self.gaussian(x, *peak_params)
+                            elif model_type == "Lorentzian":
+                                peak_result = self.lorentzian(x, *peak_params)
+                            elif model_type == "Pseudo-Voigt":
+                                peak_result = self.pseudo_voigt(x, *peak_params)
+                            elif model_type == "Asymmetric Voigt":
+                                peak_result = self.asymmetric_voigt(x, *peak_params)
+                            else:
+                                peak_result = self.gaussian(x, *peak_params)
+                            result = result + peak_result
+                    return result
+                
+                # Calculate fit within ROI if specified
+                fit_ranges_str = self.var_fit_ranges.get().strip()
+                roi_ranges = []
+                if fit_ranges_str:
+                    try:
+                        for part in fit_ranges_str.split(','):
+                            if '-' in part:
+                                min_w, max_w = map(float, part.split('-'))
+                                roi_ranges.append((min_w, max_w))
+                    except:
+                        pass
+                
+                # Create mask for ROI
+                if roi_ranges:
+                    mask = np.zeros_like(self.wavenumbers, dtype=bool)
+                    for min_w, max_w in roi_ranges:
+                        new_mask = (self.wavenumbers >= min_w) & (self.wavenumbers <= max_w)
+                        mask = mask | new_mask
+                    wavenumbers_roi = self.wavenumbers[mask]
+                    spectra_roi = self.spectra[mask]
+                else:
+                    wavenumbers_roi = self.wavenumbers
+                    spectra_roi = self.spectra
+                
+                # Calculate fitted data and R²
+                fitted_data = combined_model_temp(wavenumbers_roi, *popt)
+                r_squared = self.calculate_r_squared(spectra_roi, fitted_data)
+                
+                # Reject fits with very low R² (less than 0.5)
+                min_r_squared = 0.5
+                if r_squared < min_r_squared:
+                    print(f"Overall fit quality too low: R² = {r_squared:.3f} (minimum: {min_r_squared})")
+                    return False
+                
+            except Exception as e:
+                print(f"Error calculating fit quality: {str(e)}")
+                return False
+            
+            # 8. Check for overlapping peaks (peaks too close together)
+            # REMOVED: Allow peaks to overlap or be close together 
+            # This section was causing fits to be rejected when peaks were legitimately close
+
+            # If all checks pass, the fit is considered realistic
+            return True
+            
+        except Exception as e:
+            print(f"Error in fit validation: {str(e)}")
+            return False
+    
+    def update_batch_results_if_present(self):
+        """
+        Update batch results if the current spectrum is part of the batch processing results.
+        This allows manual refinement of individual spectra to be reflected in the batch trends.
+        """
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return
+            
+        if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
+            return
+            
+        if self.current_spectrum_index >= len(self.spectra_files):
+            return
+            
+        # Get the current file path
+        current_file = self.spectra_files[self.current_spectrum_index]
+        
+        # Find this file in batch results
+        for i, result in enumerate(self.batch_results):
+            if result.get('file') == current_file:
+                # Update the batch result with current fit
+                self.batch_results[i] = {
+                    'file': current_file,
+                    'peaks': self.peaks.copy() if hasattr(self, 'peaks') else [],
+                    'fit_failed': self.fit_failed,
+                    'fit_params': np.copy(self.fit_params) if hasattr(self, 'fit_params') and self.fit_params is not None else None,
+                    'fit_cov': np.copy(self.fit_cov) if hasattr(self, 'fit_cov') and self.fit_cov is not None else None,
+                    'background': np.copy(self.background) if hasattr(self, 'background') and self.background is not None else None,
+                    'fit_result': np.copy(self.fit_result) if hasattr(self, 'fit_result') and self.fit_result is not None else None,
+                    'original_spectra': np.copy(self.original_spectra) if hasattr(self, 'original_spectra') else None,
+                    'peak_r_squared': self.peak_r_squared.copy() if hasattr(self, 'peak_r_squared') and self.peak_r_squared is not None else [],
+                    'nlls_cycles': getattr(self, 'nlls_cycles', 0),
+                    'manually_refined': True  # Flag to indicate manual refinement
+                }
+                
+                # Update the trends plot to reflect changes
+                self.update_trends_plot()
+                self.update_fit_stats_plot()
+                
+                # Show confirmation message
+                filename = os.path.basename(current_file)
+                print(f"Updated batch results for {filename} with manual refinement")
+                
+                # Update status in batch tab if visible
+                if hasattr(self, 'batch_status_text'):
+                    try:
+                        self.batch_status_text.config(state=tk.NORMAL)
+                        self.batch_status_text.insert(tk.END, f"Manually refined: {filename}\n")
+                        self.batch_status_text.see(tk.END)
+                        self.batch_status_text.config(state=tk.DISABLED)
+                    except:
+                        pass
+                
+                break
+    
+    def get_constraint_info_text(self):
+        """Return a descriptive text about current constraints for display in status."""
+        if not hasattr(self, 'fix_positions') or not hasattr(self, 'fix_widths'):
+            return "No constraints"
+        
+        constraints = []
+        if self.fix_positions.get():
+            constraints.append("positions fixed")
+        if self.fix_widths.get():
+            constraints.append("widths fixed")
+        
+        if constraints:
+            return f"Constraints: {', '.join(constraints)}"
+        else:
+            return "No constraints"
+    
+    def skip_current_file(self):
+        """Manually skip the current file from trend analysis and batch results."""
+        if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
+            messagebox.showwarning("No File Selected", "Please select a spectrum file first.")
+            return
+            
+        if self.current_spectrum_index >= len(self.spectra_files):
+            messagebox.showwarning("Invalid Selection", "No valid spectrum file selected.")
+            return
+            
+        # Get the current file path
+        current_file = self.spectra_files[self.current_spectrum_index]
+        filename = os.path.basename(current_file)
+        
+        # Confirm the action
+        response = messagebox.askyesno(
+            "Skip File", 
+            f"Skip '{filename}' from trend analysis?\n\n"
+            "This file will be excluded from:\n"
+            "• Fit Results plots\n"
+            "• Fit Statistics\n"
+            "• Exported data\n\n"
+            "The file will remain in the file list but marked as skipped."
+        )
+        
+        if not response:
+            return
+            
+        # Add to skipped files set
+        self.manually_skipped_files.add(current_file)
+        
+        # Update batch results if this file exists there
+        for i, result in enumerate(self.batch_results):
+            if result.get('file') == current_file:
+                self.batch_results[i]['manually_skipped'] = True
+                break
+        else:
+            # If not in batch results, add it as skipped
+            self.batch_results.append({
+                'file': current_file,
+                'peaks': [],
+                'fit_failed': True,
+                'fit_params': None,
+                'fit_cov': None,
+                'background': None,
+                'fit_result': None,
+                'original_spectra': None,
+                'peak_r_squared': [],
+                'nlls_cycles': 0,
+                'manually_refined': False,
+                'manually_skipped': True
+            })
+        
+        # Update the current spectrum display to show it's skipped
+        self.current_spectrum_label.config(text=f"Spectrum {self.current_spectrum_index + 1}/{len(self.spectra_files)}: {filename} [SKIPPED]")
+        
+        # Update trends plot to exclude this file
+        self.update_trends_plot()
+        self.update_fit_stats_plot()
+        
+        # Log the action
+        if hasattr(self, 'batch_status_text'):
+            try:
+                self.batch_status_text.config(state=tk.NORMAL)
+                self.batch_status_text.insert(tk.END, f"Manually skipped: {filename}\n")
+                self.batch_status_text.see(tk.END)
+                self.batch_status_text.config(state=tk.DISABLED)
+            except:
+                pass
+        
+        print(f"Manually skipped: {filename}")
+        messagebox.showinfo("File Skipped", f"'{filename}' has been excluded from trend analysis.")
+    
+    def unskip_current_file(self):
+        """Remove the current file from the manually skipped list."""
+        if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
+            return
+            
+        if self.current_spectrum_index >= len(self.spectra_files):
+            return
+            
+        current_file = self.spectra_files[self.current_spectrum_index]
+        filename = os.path.basename(current_file)
+        
+        # Remove from skipped files set
+        self.manually_skipped_files.discard(current_file)
+        
+        # Update batch results
+        for result in self.batch_results:
+            if result.get('file') == current_file:
+                result['manually_skipped'] = False
+                break
+        
+        # Update display
+        self.current_spectrum_label.config(text=f"Spectrum {self.current_spectrum_index + 1}/{len(self.spectra_files)}: {filename}")
+        
+        # Update plots
+        self.update_trends_plot()
+        self.update_fit_stats_plot()
+        
+        print(f"Un-skipped: {filename}")
+
+    def toggle_skip_current_file(self):
+        """Toggle the skip status of the current file."""
+        if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
+            messagebox.showwarning("No File Selected", "Please select a spectrum file first.")
+            return
+            
+        if self.current_spectrum_index >= len(self.spectra_files):
+            messagebox.showwarning("Invalid Selection", "No valid spectrum file selected.")
+            return
+            
+        current_file = self.spectra_files[self.current_spectrum_index]
+        filename = os.path.basename(current_file)
+        
+        # Toggle skip status
+        if current_file in self.manually_skipped_files:
+            self.manually_skipped_files.discard(current_file)
+            self.skip_button.config(text="⚠ Unskip This File")
+        else:
+            self.manually_skipped_files.add(current_file)
+            self.skip_button.config(text="⚠ Skip This File")
+        
+        # Update batch results
+        for result in self.batch_results:
+            if result.get('file') == current_file:
+                result['manually_skipped'] = current_file in self.manually_skipped_files
+                break
+        
+        # Update display
+        self.current_spectrum_label.config(text=f"Spectrum {self.current_spectrum_index + 1}/{len(self.spectra_files)}: {filename}")
+        
+        # Update trends plot to exclude this file
+        self.update_trends_plot()
+        self.update_fit_stats_plot()
+        
+        print(f"Skipped status changed for: {filename}")
+        messagebox.showinfo("File Skipped Status", f"'{filename}' is now {'skipped' if current_file in self.manually_skipped_files else 'unskipped'}.")
