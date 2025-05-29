@@ -1,0 +1,20 @@
+ClaritySpectra Version 2.6.2
+Release Date: May 27, 2025
+
+📊 Multi-Spectrum Manager Comprehensive Update
+
+🔬 **Transforming ClaritySpectra into a Complete Multi-Spectrum Data Playground**
+
+This version transforms ClaritySpectra into a comprehensive 
+multi-spectrum data playground for Raman spectrum analysis. 
+
+Major Features:
+- Complete Multi-Spectrum Manager overhaul
+- Persistent loaded spectra pane
+- Professional tabbed interface
+- Complete spectrum control suite
+- Enhanced user experience with real-time feedback
+- Fixed UI issues and improved workflow
+
+This version transforms ClaritySpectra into a comprehensive 
+multi-spectrum data playground for Raman spectrum analysis. 

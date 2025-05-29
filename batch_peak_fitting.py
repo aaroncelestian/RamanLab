@@ -19,6 +19,11 @@ import os
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.patches as mpatches
 
+# Import the density analysis module
+import sys
+sys.path.append('Density')
+from raman_density_analysis import RamanDensityAnalyzer
+
 class BatchPeakFittingWindow:
     """Window for batch processing of Raman spectra with peak fitting."""
     
@@ -78,6 +83,11 @@ class BatchPeakFittingWindow:
         
         # Track manually skipped files
         self.manually_skipped_files = set()  # Set of file paths that are manually skipped
+        
+        # Initialize density analyzer
+        self.density_analyzer = RamanDensityAnalyzer()
+        self.density_results = []
+        self.whewellite_calibration_value = None
     
     def create_menu_bar(self):
         """Create the menu bar with File and Help menus."""
@@ -208,6 +218,21 @@ class BatchPeakFittingWindow:
                 "• The bottom row shows the worst fits (lowest R²)\n\n"
                 "Each plot displays the original spectrum, background, and fit result.\n"
                 "R² values indicate the goodness of fit within the ROI regions."
+            ),
+            "Density Analysis": (
+                "Density Analysis Help",
+                "This tab provides quantitative density analysis for correlation with micro-CT:\n\n"
+                "• Calibration: Use a whewellite reference spectrum to calibrate the analysis\n"
+                "• Single Spectrum: Analyze the currently selected spectrum for crystalline density\n"
+                "• Batch Analysis: Process all loaded spectra to generate density profiles\n"
+                "• Line Scan: Analyze spatial line scan data for density variation\n\n"
+                "The Crystalline Density Index (CDI) quantifies the ratio of crystalline to organic content.\n"
+                "Apparent density values can be directly correlated with micro-CT measurements.\n\n"
+                "Key Features:\n"
+                "• Automatic baseline correction using asymmetric least squares\n"
+                "• COM peak analysis at 1462 cm⁻¹\n"
+                "• Organic matrix and void space quantification\n"
+                "• Export density profiles for micro-CT correlation"
             )
         }
         
@@ -313,7 +338,29 @@ class BatchPeakFittingWindow:
         peak_tab = ttk.Frame(self.left_notebook)
         self.left_notebook.add(peak_tab, text="Peaks")
 
-        controls_frame = ttk.LabelFrame(peak_tab, text="Peak Fitting Controls", padding=10)
+        # Create a canvas and scrollbar for scrollable content
+        canvas = tk.Canvas(peak_tab)
+        scrollbar_peaks = ttk.Scrollbar(peak_tab, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar_peaks.set)
+
+        # Pack scrollbar first, then canvas to eliminate gap
+        scrollbar_peaks.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        # Bind mousewheel to canvas for smooth scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind("<MouseWheel>", _on_mousewheel)
+
+        controls_frame = ttk.LabelFrame(scrollable_frame, text="Peak Fitting Controls", padding=10)
         controls_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         # Background controls
@@ -334,7 +381,11 @@ class BatchPeakFittingWindow:
         # Add/Delete buttons
         button_frame = ttk.Frame(manual_frame)
         button_frame.pack(fill=tk.X, pady=2)
-        ttk.Button(button_frame, text="Click to Add Peak", command=self.enable_peak_addition).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        
+        # Store reference to the manual peak button for styling
+        self.manual_peak_button = ttk.Button(button_frame, text="Click to Add Peak", command=self.enable_peak_addition)
+        self.manual_peak_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        
         ttk.Button(button_frame, text="Delete Peak", command=self.show_peak_deletion_dialog).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
         # Peak detection controls
@@ -766,6 +817,103 @@ class BatchPeakFittingWindow:
             command=self.export_individual_fit_stats
         )
         
+        # Density Analysis tab
+        density_frame = ttk.Frame(self.viz_notebook)
+        self.viz_notebook.add(density_frame, text="Density Analysis")
+        
+        # Create main paned window for density analysis
+        density_paned = ttk.PanedWindow(density_frame, orient=tk.HORIZONTAL)
+        density_paned.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Left panel for controls
+        density_controls_frame = ttk.Frame(density_paned, width=300)
+        density_paned.add(density_controls_frame, weight=1)
+        
+        # Create canvas and scrollbar for scrollable content
+        density_canvas = tk.Canvas(density_controls_frame)
+        density_scrollbar = ttk.Scrollbar(density_controls_frame, orient="vertical", command=density_canvas.yview)
+        density_scrollable_frame = ttk.Frame(density_canvas)
+        
+        density_scrollable_frame.bind(
+            "<Configure>",
+            lambda e: density_canvas.configure(scrollregion=density_canvas.bbox("all"))
+        )
+        
+        density_canvas.create_window((0, 0), window=density_scrollable_frame, anchor="nw")
+        density_canvas.configure(yscrollcommand=density_scrollbar.set)
+        
+        density_scrollbar.pack(side="right", fill="y")
+        density_canvas.pack(side="left", fill="both", expand=True)
+        
+        # Bind mousewheel for scrolling
+        def _on_density_mousewheel(event):
+            density_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        density_canvas.bind("<MouseWheel>", _on_density_mousewheel)
+        
+        # Calibration controls
+        calib_frame = ttk.LabelFrame(density_scrollable_frame, text="Calibration", padding=10)
+        calib_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(calib_frame, text="Load whewellite reference spectrum to calibrate analysis:").pack(anchor=tk.W, pady=2)
+        ttk.Button(calib_frame, text="Load Whewellite Reference", 
+                  command=self.load_whewellite_calibration).pack(fill=tk.X, pady=2)
+        
+        self.calib_status_label = ttk.Label(calib_frame, text="Status: Not calibrated", 
+                                           foreground="red")
+        self.calib_status_label.pack(anchor=tk.W, pady=2)
+        
+        # Single spectrum analysis
+        single_frame = ttk.LabelFrame(density_scrollable_frame, text="Single Spectrum Analysis", padding=10)
+        single_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(single_frame, text="Analyze Current Spectrum", 
+                  command=self.analyze_current_spectrum_density).pack(fill=tk.X, pady=2)
+        
+        self.single_results_text = tk.Text(single_frame, height=6, width=40, wrap=tk.WORD, 
+                                          font=("Courier", 9))
+        single_scroll = ttk.Scrollbar(single_frame, orient=tk.VERTICAL, 
+                                     command=self.single_results_text.yview)
+        self.single_results_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=2)
+        single_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
+        self.single_results_text.config(yscrollcommand=single_scroll.set)
+        
+        # Batch analysis controls
+        batch_density_frame = ttk.LabelFrame(density_scrollable_frame, text="Batch Analysis", padding=10)
+        batch_density_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(batch_density_frame, text="Analyze All Spectra", 
+                  command=self.analyze_all_spectra_density).pack(fill=tk.X, pady=2)
+        ttk.Button(batch_density_frame, text="Export Density Results", 
+                  command=self.export_density_results).pack(fill=tk.X, pady=2)
+        
+        # Results summary
+        results_frame = ttk.LabelFrame(density_scrollable_frame, text="Batch Results Summary", padding=10)
+        results_frame.pack(fill=tk.X, pady=5)
+        
+        self.density_summary_text = tk.Text(results_frame, height=8, width=40, wrap=tk.WORD, 
+                                           font=("Courier", 9))
+        summary_scroll = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, 
+                                      command=self.density_summary_text.yview)
+        self.density_summary_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=2)
+        summary_scroll.pack(side=tk.RIGHT, fill=tk.Y, pady=2)
+        self.density_summary_text.config(yscrollcommand=summary_scroll.set)
+        
+        # Right panel for plot
+        density_plot_frame = ttk.Frame(density_paned)
+        density_paned.add(density_plot_frame, weight=2)
+        
+        # Create the density analysis plot
+        self.fig_density, self.ax_density = plt.subplots(2, 2, figsize=(10, 8))
+        self.canvas_density = FigureCanvasTkAgg(self.fig_density, master=density_plot_frame)
+        self.canvas_density.draw()
+        self.canvas_density.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Add toolbar for density plot
+        density_toolbar_frame = ttk.Frame(density_plot_frame)
+        density_toolbar_frame.pack(fill=tk.X)
+        self.toolbar_density = NavigationToolbar2Tk(self.canvas_density, density_toolbar_frame)
+        self.toolbar_density.update()
+        
         # Create status bar at the bottom of the window
         self.status_bar = ttk.Label(self.window, text="Press F1 for help with the current tab", relief=tk.SUNKEN, anchor=tk.W, padding=(10, 2))
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
@@ -773,6 +921,7 @@ class BatchPeakFittingWindow:
     def add_files(self):
         """Add files to the batch processing list."""
         files = filedialog.askopenfilenames(
+            parent=self.window,
             title="Select Raman Spectra Files",
             filetypes=[("Text Files", "*.txt"), ("CSV Files", "*.csv"), ("All Files", "*.*")]
         )
@@ -1139,23 +1288,23 @@ class BatchPeakFittingWindow:
             self.update_plot()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load spectrum: {str(e)}")
+            messagebox.showerror("Error", f"Failed to load spectrum: {str(e)}", parent=self.window)
             self.clear_plot()
     
     def set_reference(self):
         """Set the current spectrum as the reference for batch processing."""
         if not hasattr(self, 'peaks') or not self.peaks:
-            messagebox.showwarning("No Peaks", "Please detect and fit peaks first.")
+            messagebox.showwarning("No Peaks", "Please detect and fit peaks first.", parent=self.window)
             return
             
         self.reference_peaks = self.peaks.copy()
         self.reference_background = self.background.copy() if self.background is not None else None
-        messagebox.showinfo("Reference Set", "Current spectrum set as reference for batch processing.")
+        messagebox.showinfo("Reference Set", "Current spectrum set as reference for batch processing.", parent=self.window)
     
     def apply_to_all(self):
         """Apply the current peak fitting parameters to all spectra."""
         if not self.reference_peaks:
-            messagebox.showwarning("No Reference", "Please set a reference spectrum first.")
+            messagebox.showwarning("No Reference", "Please set a reference spectrum first.", parent=self.window)
             return
         
         self._stop_batch = False  # Reset stop flag
@@ -1178,7 +1327,7 @@ class BatchPeakFittingWindow:
                 self.batch_status_text.insert(tk.END, "Batch processing stopped by user.\n")
                 self.batch_status_text.see(tk.END)
                 self.window.update()
-                messagebox.showinfo("Stopped", "Batch processing was stopped by the user.")
+                messagebox.showinfo("Stopped", "Batch processing was stopped by the user.", parent=self.window)
                 break
         
             # Reset fit_failed flag for this iteration
@@ -1303,7 +1452,7 @@ class BatchPeakFittingWindow:
         if not self._stop_batch:
             self.batch_status_text.insert(tk.END, "\nBatch processing completed successfully.\n")
             self.batch_status_text.see(tk.END)
-            messagebox.showinfo("Complete", "Batch processing completed.")
+            messagebox.showinfo("Complete", "Batch processing completed.", parent=self.window)
             
         # Make text widget read-only again
         self.batch_status_text.config(state=tk.DISABLED)
@@ -1373,34 +1522,30 @@ class BatchPeakFittingWindow:
         all_params = []
         all_covs = []  # Add storage for covariance matrices
         
-        # Filter out manually skipped files
-        filtered_results = []
+        # Don't filter out manually skipped files - preserve original indexing
+        # This maintains the time series integrity for kinetic studies
         for result in self.batch_results:
-            # Skip manually skipped files
-            if result.get('manually_skipped', False):
-                continue
-            filtered_results.append(result)
-        
-        for result in filtered_results:
-            # Check if this is a failed fit
+            # Check if this is a manually skipped file or failed fit
+            manually_skipped = result.get('manually_skipped', False)
             fit_failed = result.get('fit_failed', False)
             fit_params = result.get('fit_params')
             fit_cov = result.get('fit_cov')  # Get covariance matrix
             
-            if not fit_failed and fit_params is not None:
+            if not manually_skipped and not fit_failed and fit_params is not None:
                 if n_peaks is None:
                     n_peaks = len(fit_params) // params_per_peak
                 all_params.append(np.array(fit_params).reshape(-1, params_per_peak))
                 all_covs.append(fit_cov)  # Store covariance matrix
             else:
-                # For failed fits, append None to maintain array index correspondence
+                # For failed fits or manually skipped files, append None to maintain array index correspondence
                 all_params.append(None)
                 all_covs.append(None)
         
         if n_peaks is None:
             return None, None, None, None
         
-        x = np.arange(len(filtered_results))
+        # Use original spectrum numbering (0, 1, 2, ...) to preserve time series
+        x = np.arange(len(self.batch_results))
         trends = []
         uncertainties = []  # Add storage for uncertainties
         
@@ -1520,9 +1665,9 @@ class BatchPeakFittingWindow:
         if failed_fits_count > 0 or manually_refined_count > 0 or manually_skipped_count > 0:
             status_text = []
             if failed_fits_count > 0:
-                status_text.append(f"{failed_fits_count} failed fits excluded")
+                status_text.append(f"{failed_fits_count} failed fits (shown as gaps)")
             if manually_skipped_count > 0:
-                status_text.append(f"{manually_skipped_count} files manually skipped")
+                status_text.append(f"{manually_skipped_count} files manually skipped (shown as gaps)")
             if manually_refined_count > 0:
                 status_text.append(f"{manually_refined_count} manually refined (★)")
             
@@ -2183,7 +2328,7 @@ class BatchPeakFittingWindow:
     def export_results(self):
         """Export batch processing results to CSV."""
         if not self.batch_results:
-            messagebox.showwarning("No Results", "No batch processing results to export.")
+            messagebox.showwarning("No Results", "No batch processing results to export.", parent=self.window)
             return
             
         try:
@@ -2198,7 +2343,8 @@ class BatchPeakFittingWindow:
                     "Include skipped files in export?\n\n"
                     "• Yes: Include all files (skipped files marked as failed)\n"
                     "• No: Exclude skipped files from export\n"
-                    "• Cancel: Cancel export"
+                    "• Cancel: Cancel export",
+                    parent=self.window
                 )
                 if response is None:  # Cancel
                     return
@@ -2206,6 +2352,7 @@ class BatchPeakFittingWindow:
             
             # Ask for file location
             file_path = filedialog.asksaveasfilename(
+                parent=self.window,
                 defaultextension=".csv",
                 filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
                 title="Save Batch Results"
@@ -2296,10 +2443,10 @@ class BatchPeakFittingWindow:
             df = pd.DataFrame(data)
             df.to_csv(file_path, index=False)
             
-            messagebox.showinfo("Export Complete", f"Results saved to {file_path}")
+            messagebox.showinfo("Export Complete", f"Results saved to {file_path}", parent=self.window)
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to export results: {str(e)}")
+            messagebox.showerror("Error", f"Failed to export results: {str(e)}", parent=self.window)
     
     def on_closing(self):
         """Handle window closing event."""
@@ -2330,7 +2477,7 @@ class BatchPeakFittingWindow:
             self.update_plot()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to subtract background: {str(e)}")
+            messagebox.showerror("Error", f"Failed to subtract background: {str(e)}", parent=self.window)
     
     def find_peaks(self):
         """Find peaks in the current spectrum."""
@@ -2361,7 +2508,7 @@ class BatchPeakFittingWindow:
             
             # Ensure we have valid data
             if spectra_data is None or len(spectra_data) == 0:
-                messagebox.showerror("Error", "No spectrum data available")
+                messagebox.showerror("Error", "No spectrum data available", parent=self.window)
                 return
                 
             # Import scipy find_peaks function safely inside the try block
@@ -2374,7 +2521,7 @@ class BatchPeakFittingWindow:
                     prominence=prominence
                 )
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to execute scipy.signal.find_peaks: {str(e)}")
+                messagebox.showerror("Error", f"Failed to execute scipy.signal.find_peaks: {str(e)}", parent=self.window)
                 return
             
             # Store peak positions and intensities
@@ -2394,7 +2541,7 @@ class BatchPeakFittingWindow:
             import traceback
             error_details = traceback.format_exc()
             print(f"Error in find_peaks: {error_details}")
-            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}")
+            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}", parent=self.window)
     
     def gaussian(self, x, a, x0, sigma):
         """Gaussian peak function."""
@@ -2476,7 +2623,7 @@ class BatchPeakFittingWindow:
         """Fit peaks to the current spectrum using the selected model."""
         try:
             if not self.peaks:
-                messagebox.showwarning("No Peaks", "Please detect peaks first.")
+                messagebox.showwarning("No Peaks", "Please detect peaks first.", parent=self.window)
                 return
             
             # Get model type
@@ -2509,7 +2656,7 @@ class BatchPeakFittingWindow:
                             min_w, max_w = map(float, part.split('-'))
                             roi_ranges.append((min_w, max_w))
                 except Exception as e:
-                    messagebox.showerror("Fit Range Error", f"Could not parse fit ranges: {fit_ranges_str}\nError: {e}")
+                    messagebox.showerror("Fit Range Error", f"Could not parse fit ranges: {fit_ranges_str}\nError: {e}", parent=self.window)
                     self.fit_failed = True
                     return
             
@@ -2529,7 +2676,7 @@ class BatchPeakFittingWindow:
                             break
             
             if not peaks_in_roi:
-                messagebox.showwarning("No Peaks in ROI", "No peaks found within the specified ROI ranges.")
+                messagebox.showwarning("No Peaks in ROI", "No peaks found within the specified ROI ranges.", parent=self.window)
                 self.fit_failed = True
                 return
             
@@ -2539,7 +2686,7 @@ class BatchPeakFittingWindow:
             
             # HARD CAP for Asymmetric Voigt
             if model_type == "Asymmetric Voigt" and len(peaks_in_roi) > 8:
-                messagebox.showerror("Too Many Peaks", "Asymmetric Voigt fitting is limited to 8 peaks for stability. Please reduce the number of detected peaks (e.g., by increasing the prominence or height threshold).")
+                messagebox.showerror("Too Many Peaks", "Asymmetric Voigt fitting is limited to 8 peaks for stability. Please reduce the number of detected peaks (e.g., by increasing the prominence or height threshold).", parent=self.window)
                 self.fit_failed = True
                 return
 
@@ -2725,7 +2872,7 @@ class BatchPeakFittingWindow:
                         self.residuals = np.copy(self.spectra)
                     
                     self.fit_failed = True
-                    messagebox.showwarning("Fit Failed", f"Failed to fit peaks after two attempts. Using initial guess for this spectrum.\n\nFirst error: {str(e1)}\nSecond error: {str(e2)}")
+                    messagebox.showwarning("Fit Failed", f"Failed to fit peaks after two attempts. Using initial guess for this spectrum.\n\nFirst error: {str(e1)}\nSecond error: {str(e2)}", parent=self.window)
                     self.update_plot()
                     self.update_peak_visibility_controls()
                     return
@@ -2811,7 +2958,7 @@ class BatchPeakFittingWindow:
                 self.update_batch_results_if_present()
                 
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to calculate fit results: {str(e)}")
+                messagebox.showerror("Error", f"Failed to calculate fit results: {str(e)}", parent=self.window)
                 self.fit_failed = True
                 return
             
@@ -2820,7 +2967,7 @@ class BatchPeakFittingWindow:
             self.update_peak_visibility_controls()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to fit peaks: {str(e)}")
+            messagebox.showerror("Error", f"Failed to fit peaks: {str(e)}", parent=self.window)
             self.fit_failed = True
     
     def update_plot(self):
@@ -3059,49 +3206,176 @@ class BatchPeakFittingWindow:
             import traceback
             error_details = traceback.format_exc()
             print(f"Error in update_roi_regions: {error_details}")
-            messagebox.showerror("Error", f"Failed to update ROI regions: {str(e)}")
+            messagebox.showerror("Error", f"Failed to update ROI regions: {str(e)}", parent=self.window)
 
     def enable_peak_addition(self):
-        """Enable mode to add peaks by clicking on the plot. Stays active until Esc is pressed."""
-        self.adding_peak = True
-        self.canvas_current.mpl_connect('button_press_event', self.add_peak_on_click)
-        self.canvas_current.mpl_connect('key_press_event', self._on_peak_add_key)
-        self.ax1_current.set_title('Click to add peak. Press Esc to exit peak add mode.')
-        self.canvas_current.draw()
+        """Enable/disable mode to add peaks by clicking on the plot."""
+        try:
+            # Toggle the adding peak mode
+            self.adding_peak = not getattr(self, 'adding_peak', False)
+            
+            if self.adding_peak:
+                # Enable manual peak mode
+                # Initialize peaks list if needed
+                if not hasattr(self, 'peaks'):
+                    self.peaks = []
+                    
+                # Change cursor to indicate interactive mode
+                self.canvas_current.get_tk_widget().config(cursor="crosshair")
+                
+                # Update the plot title to show instructions
+                self.ax1_current.set_title("MANUAL MODE: Click on peaks to add them • Click the red button or press ESC to finish")
+                self.canvas_current.draw()
+                
+                # Store original toolbar state if it exists
+                self.original_toolbar = getattr(self.toolbar_current, '_active', None)
+                
+                # Disable toolbar to prevent interaction conflicts
+                if hasattr(self.toolbar_current, 'mode'):
+                    self.toolbar_current.mode = ''
+                self.toolbar_current._active = None
+                
+                # Connect the event handlers
+                self.click_cid = self.canvas_current.mpl_connect('button_press_event', self.add_peak_on_click)
+                self.key_cid = self.canvas_current.mpl_connect('key_press_event', self._on_peak_add_key)
+                
+                # Update button appearance to show active state
+                self.manual_peak_button.configure(
+                    text="🛑 Stop Adding Peaks",
+                    style="Active.TButton"
+                )
+                
+                # Create a custom style for the active button if it doesn't exist
+                style = ttk.Style()
+                style.configure("Active.TButton", 
+                               foreground="white", 
+                               background="red",
+                               focuscolor="none")
+                # For better cross-platform compatibility
+                style.map("Active.TButton",
+                         background=[('active', 'darkred'),
+                                   ('pressed', 'darkred')])
+            else:
+                # Disable manual peak mode
+                self.disable_peak_addition()
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to toggle manual peak selection: {str(e)}", parent=self.window)
+            # Ensure we're not in a broken state
+            self.adding_peak = False
+            self.canvas_current.get_tk_widget().config(cursor="arrow")
 
     def _on_peak_add_key(self, event):
         if event.key == 'escape':
-            self.adding_peak = False
-            self.canvas_current.mpl_disconnect(self.canvas_current.mpl_connect('button_press_event', self.add_peak_on_click))
-            self.canvas_current.mpl_disconnect(self.canvas_current.mpl_connect('key_press_event', self._on_peak_add_key))
+            self.disable_peak_addition()
+             
+    def disable_peak_addition(self):
+        """Disable manual peak addition mode."""
+        # Restore cursor
+        self.canvas_current.get_tk_widget().config(cursor="arrow")
+         
+        # Disconnect event handlers
+        if hasattr(self, 'click_cid'):
+            self.canvas_current.mpl_disconnect(self.click_cid)
+        if hasattr(self, 'key_cid'):
+            self.canvas_current.mpl_disconnect(self.key_cid)
+         
+        # Restore toolbar
+        if hasattr(self, 'original_toolbar'):
+            self.toolbar_current._active = self.original_toolbar
+         
+        # Reset flag
+        self.adding_peak = False
+         
+        # Update title to show number of peaks
+        if hasattr(self, 'peaks') and self.peaks:
+            self.ax1_current.set_title(f'Raman Spectrum - {len(self.peaks)} Peaks Added')
+        else:
             self.ax1_current.set_title('Raman Spectrum')
-            self.canvas_current.draw()
-            
+         
+        # Reset button appearance to normal state
+        self.manual_peak_button.configure(
+            text="Click to Add Peak",
+            style="TButton"  # Reset to default style
+        )
+         
+        self.canvas_current.draw()
+    
     def add_peak_on_click(self, event):
+        """Handle click on the plot to add a peak."""
         if not getattr(self, 'adding_peak', False):
             return
         if event.button != 1:
             return
         if event.inaxes != self.ax1_current:
             return
+             
         try:
-            position = event.xdata
-            amplitude = event.ydata
-            idx = np.argmin(np.abs(self.wavenumbers - position))
+            x, y = event.xdata, event.ydata
+             
+            # Initialize peaks list if needed
+            if not hasattr(self, 'peaks'):
+                self.peaks = []
+             
+            # Find the closest index in the wavenumbers array
+            idx = np.argmin(np.abs(self.wavenumbers - x))
+             
+            # Check if a peak already exists very close to this position
+            duplicate_threshold = 5.0  # cm⁻¹
+            for existing_peak in self.peaks:
+                if abs(existing_peak['position'] - self.wavenumbers[idx]) < duplicate_threshold:
+                    # Peak already exists nearby, show message and return
+                    messagebox.showinfo("Peak Exists", 
+                                      f"A peak already exists near {self.wavenumbers[idx]:.1f} cm⁻¹.\n"
+                                      f"Existing peak at {existing_peak['position']:.1f} cm⁻¹", 
+                                      parent=self.window)
+                    return
+             
+            # Add the peak
             new_peak = {
-                'position': position,
-                'intensity': amplitude,
+                'position': self.wavenumbers[idx],
+                'intensity': y,
                 'index': idx
             }
             self.peaks.append(new_peak)
+             
+            # Update the plot
             self.update_plot()
+             
+            # Update title with current count and instructions
+            self.ax1_current.set_title(f'MANUAL MODE: {len(self.peaks)} peaks added • Click red button or press ESC to finish')
+            self.canvas_current.draw()
+             
+            # Provide visual feedback (brief highlight)
+            self.highlight_new_peak(self.wavenumbers[idx], y)
+             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to add peak: {str(e)}")
+            messagebox.showerror("Error", f"Failed to add peak: {str(e)}", parent=self.window)
+    
+    def highlight_new_peak(self, x, y):
+        """Briefly highlight a newly added peak."""
+        try:
+            # Add a temporary highlight circle
+            highlight = self.ax1_current.plot(x, y, 'yo', markersize=15, alpha=0.7)[0]
+            self.canvas_current.draw()
+             
+            # Remove the highlight after a short delay
+            self.window.after(500, lambda: self.remove_highlight(highlight))
+        except:
+            pass  # If highlighting fails, just continue
+    
+    def remove_highlight(self, highlight):
+        """Remove the temporary highlight."""
+        try:
+            highlight.remove()
+            self.canvas_current.draw()
+        except:
+            pass  # If removal fails, just continue
     
     def show_peak_deletion_dialog(self):
         """Show a dialog to select peaks for deletion."""
-        if not self.peaks:
-            messagebox.showinfo("No Peaks", "No peaks to delete.")
+        if not hasattr(self, 'peaks') or not self.peaks:
+            messagebox.showinfo("No Peaks", "No peaks to delete.", parent=self.window)
             return
             
         # Create dialog window
@@ -3133,12 +3407,11 @@ class BatchPeakFittingWindow:
             selected_indices = sorted(peak_list.curselection(), reverse=True)
             
             if not selected_indices:
-                messagebox.showinfo("No Selection", "Please select peaks to delete.")
+                messagebox.showinfo("No Selection", "Please select peaks to delete.", parent=self.window)
                 return
                 
             # Confirm deletion
-            if messagebox.askyesno("Confirm Delete", 
-                                 f"Delete {len(selected_indices)} selected peak(s)?"):
+            if messagebox.askyesno("Confirm Delete", f"Delete {len(selected_indices)} selected peak(s)?", parent=self.window):
                 # Remove selected peaks
                 for idx in selected_indices:
                     del self.peaks[idx]
@@ -3155,1152 +3428,19 @@ class BatchPeakFittingWindow:
                 dialog.destroy()
         
         ttk.Button(button_frame, text="Delete Selected", command=delete_selected).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2) 
-
-    def update_waterfall_plot(self):
-        """Update the waterfall plot."""
-        # Get current files from listbox
-        current_files = []
-        for i in range(self.file_listbox.size()):
-            filename = self.file_listbox.get(i)
-            # Find the full path in spectra_files
-            for full_path in self.spectra_files:
-                if os.path.basename(full_path) == filename:
-                    current_files.append(full_path)
-                    break
-        
-        if not current_files:
-            self.fig_waterfall.clf()
-            self.ax_waterfall = self.fig_waterfall.add_subplot(111)
-            self.ax_waterfall.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_waterfall.transAxes)
-            self.canvas_waterfall.draw()
-            return
-
-        try:
-            # Clear the figure and recreate axes to prevent shrinking
-            self.fig_waterfall.clf()
-            self.ax_waterfall = self.fig_waterfall.add_subplot(111)
-            
-            skip = int(self.waterfall_skip.get())
-            all_spectra = []
-            all_wavenumbers = None
-            for file_path in current_files[::skip]:
-                # Load spectrum with robust encoding detection
-                wavenumbers, intensities = self.load_spectrum_robust(file_path)
-                if wavenumbers is None or intensities is None:
-                    raise Exception(f"Failed to load data from {file_path}")
-                data = np.column_stack((wavenumbers, intensities))
-                wavenumbers = data[:, 0]
-                spectrum = data[:, 1]
-                if all_wavenumbers is None:
-                    all_wavenumbers = wavenumbers
-                all_spectra.append(spectrum)
-            
-            # Get X-axis range
-            try:
-                xmin = float(self.waterfall_xmin.get()) if self.waterfall_xmin.get() else all_wavenumbers[0]
-                xmax = float(self.waterfall_xmax.get()) if self.waterfall_xmax.get() else all_wavenumbers[-1]
-            except ValueError:
-                xmin = all_wavenumbers[0]
-                xmax = all_wavenumbers[-1]
-            
-            # Create mask for X-axis range
-            mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
-            wavenumbers_masked = all_wavenumbers[mask]
-            all_spectra_masked = [spectrum[mask] for spectrum in all_spectra]
-
-            # Determine color gradient
-            cmap_name = self.waterfall_cmap.get() if hasattr(self, 'waterfall_cmap') else 'all_black'
-            n_lines = len(all_spectra_masked)
-            if cmap_name == 'all_black':
-                colors = ['black'] * n_lines
-            elif cmap_name == 'black_to_darkgrey':
-                colors = [(i/(n_lines-1)*0.3, i/(n_lines-1)*0.3, i/(n_lines-1)*0.3) for i in range(n_lines)]
-            elif cmap_name == 'darkgrey_to_black':
-                colors = [((1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3) for i in range(n_lines)]
-            else:
-                try:
-                    cmap = plt.get_cmap(cmap_name)
-                    # Get user-defined colormap min/max
-                    try:
-                        color_min = float(self.waterfall_cmap_min.get())
-                        color_max = float(self.waterfall_cmap_max.get())
-                        # Clamp to [0, 1]
-                        color_min = max(0.0, min(1.0, color_min))
-                        color_max = max(0.0, min(1.0, color_max))
-                        if color_max <= color_min:
-                            color_max = color_min + 0.01  # Ensure at least a small range
-                    except Exception:
-                        color_min, color_max = 0.0, 0.85
-                    colors = [cmap(color_min + (color_max - color_min) * (i / (n_lines - 1))) for i in range(n_lines)]
-                except Exception:
-                    colors = ['black'] * n_lines
-            linewidth = float(self.waterfall_linewidth.get()) if hasattr(self, 'waterfall_linewidth') else 1.5
-            
-            # Calculate the maximum intensity for proper scaling
-            max_intensity = max(np.max(spectrum) for spectrum in all_spectra_masked)
-            # Get Y offset from entry (absolute units)
-            try:
-                offset_step = float(self.waterfall_yoffset.get())
-            except ValueError:
-                offset_step = 100  # Default if invalid value
-            
-            for i, (spectrum, color) in enumerate(zip(all_spectra_masked, colors)):
-                offset = i * offset_step
-                self.ax_waterfall.plot(wavenumbers_masked, spectrum + offset, 
-                                     label=f'Spectrum {i*skip + 1}', 
-                                     color=color, 
-                                     linewidth=linewidth)
-            
-            # Set tight limits for x and y axes
-            self.ax_waterfall.set_xlim(wavenumbers_masked[0], wavenumbers_masked[-1])
-            y_min = min(np.min(spectrum) for spectrum in all_spectra_masked)
-            y_max = max(np.max(spectrum) + (len(all_spectra_masked) - 1) * offset_step for spectrum in all_spectra_masked)
-            self.ax_waterfall.set_ylim(y_min, y_max)
-            
-            self.ax_waterfall.set_xlabel('Wavenumber (cm⁻¹)')
-            self.ax_waterfall.set_ylabel('Intensity (a.u.)')
-            self.ax_waterfall.set_title('Waterfall Plot')
-            if self.waterfall_show_grid.get():
-                self.ax_waterfall.grid(True, linestyle=':', color='gray', alpha=0.6)
-            else:
-                self.ax_waterfall.grid(False)
-            if self.waterfall_show_legend.get():
-                self.ax_waterfall.legend(loc='upper right', fontsize=8, frameon=True)
-            
-            # Ensure tight layout and maintain aspect ratio
-            self.fig_waterfall.tight_layout()
-            self.canvas_waterfall.draw()
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to update waterfall plot: {str(e)}")
-
-    def reset_heatmap_adjustments(self):
-        """Reset all heatmap color adjustments to default values."""
-        self.heatmap_contrast.set(1.0)
-        self.heatmap_brightness.set(1.0)
-        self.heatmap_gamma.set(1.0)
-        # Grid remains at its current setting when resetting colors
-        self.update_heatmap_plot()
-
-    def update_heatmap_plot(self):
-        """Update the heatmap plot."""
-        # Get current files from listbox
-        current_files = []
-        for i in range(self.file_listbox.size()):
-            filename = self.file_listbox.get(i)
-            # Find the full path in spectra_files
-            for full_path in self.spectra_files:
-                if os.path.basename(full_path) == filename:
-                    current_files.append(full_path)
-                    break
-        
-        if not current_files:
-            self.fig_heatmap.clf()
-            self.ax_heatmap = self.fig_heatmap.add_subplot(111)
-            self.ax_heatmap.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_heatmap.transAxes)
-            self.canvas_heatmap.draw()
-            return
-
-        try:
-            # Clear the figure and recreate axes to prevent shrinking
-            self.fig_heatmap.clf()
-            self.ax_heatmap = self.fig_heatmap.add_subplot(111)
-            self._heatmap_colorbar = None
-            all_spectra = []
-            all_wavenumbers = None
-            for file_path in current_files:
-                # Load spectrum with robust encoding detection
-                wavenumbers, intensities = self.load_spectrum_robust(file_path)
-                if wavenumbers is None or intensities is None:
-                    raise Exception(f"Failed to load data from {file_path}")
-                data = np.column_stack((wavenumbers, intensities))
-                wavenumbers = data[:, 0]
-                spectrum = data[:, 1]
-                if all_wavenumbers is None:
-                    all_wavenumbers = wavenumbers
-                all_spectra.append(spectrum)
-            
-            # Get X-axis range
-            try:
-                xmin = float(self.heatmap_xmin.get()) if self.heatmap_xmin.get() else all_wavenumbers[0]
-                xmax = float(self.heatmap_xmax.get()) if self.heatmap_xmax.get() else all_wavenumbers[-1]
-            except ValueError:
-                xmin = all_wavenumbers[0]
-                xmax = all_wavenumbers[-1]
-            
-            # Create mask for X-axis range
-            mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
-            wavenumbers_masked = all_wavenumbers[mask]
-            # Apply mask to spectra data as well to match the wavenumber range
-            spectra_array = np.array(all_spectra)[:, mask]
-            
-            # Apply color adjustments
-            contrast = self.heatmap_contrast.get()
-            brightness = self.heatmap_brightness.get()
-            gamma = self.heatmap_gamma.get()
-            
-            # Normalize the data
-            vmin, vmax = np.percentile(spectra_array, (2, 98))  # Use 2nd and 98th percentiles for better contrast
-            normalized_data = (spectra_array - vmin) / (vmax - vmin)
-            
-            # Apply gamma correction
-            normalized_data = np.power(normalized_data, 1/gamma)
-            
-            # Apply contrast
-            normalized_data = (normalized_data - 0.5) * contrast + 0.5
-            
-            # Apply brightness
-            normalized_data = normalized_data * brightness
-            
-            # Clip values to valid range
-            normalized_data = np.clip(normalized_data, 0, 1)
-            
-            # Create custom colormap
-            base_cmap = plt.get_cmap(self.heatmap_cmap.get())
-            custom_cmap = LinearSegmentedColormap.from_list('custom_cmap', base_cmap(np.linspace(0, 1, 256)))
-            
-            # Create the heatmap
-            im = self.ax_heatmap.imshow(
-                normalized_data,
-                aspect='auto',
-                extent=[wavenumbers_masked[0], wavenumbers_masked[-1], len(all_spectra), 0],
-                cmap=custom_cmap,
-                vmin=0,
-                vmax=1
-            )
-            
-            # Add colorbar
-            if self._heatmap_colorbar is not None:
-                self._heatmap_colorbar.remove()
-            self._heatmap_colorbar = self.fig_heatmap.colorbar(im, ax=self.ax_heatmap)
-            self._heatmap_colorbar.set_label('Intensity (a.u.)')
-            
-            self.ax_heatmap.set_xlabel('Wavenumber (cm⁻¹)')
-            self.ax_heatmap.set_ylabel('Spectrum Number')
-            self.ax_heatmap.set_title('Heatmap Plot')
-            
-            # Show or hide grid based on checkbox
-            if self.heatmap_show_grid.get():
-                self.ax_heatmap.grid(True, linestyle=':', color='gray', alpha=0.6)
-            else:
-                self.ax_heatmap.grid(False)
-            
-            # Ensure tight layout and maintain aspect ratio
-            self.fig_heatmap.tight_layout()
-            self.canvas_heatmap.draw()
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to update heatmap plot: {str(e)}")
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
     def calculate_r_squared(self, y_true, y_pred):
-        """Calculate R-squared value for a fit using safe NumPy operations."""
-        try:
-            # Convert inputs to numpy arrays
-            y_true_array = np.asarray(y_true)
-            y_pred_array = np.asarray(y_pred)
-            
-            # Make sure arrays have the same shape
-            if y_true_array.shape != y_pred_array.shape:
-                print(f"Array shape mismatch: {y_true_array.shape} vs {y_pred_array.shape}")
-                return 0.0
-                
-            # Calculate mean of true values
-            y_mean = np.mean(y_true_array)
-            
-            # Calculate sum of squared residuals
-            ss_res = np.sum(np.square(np.subtract(y_true_array, y_pred_array)))
-            
-            # Calculate total sum of squares
-            ss_tot = np.sum(np.square(np.subtract(y_true_array, y_mean)))
-            
-            # Safely calculate R-squared
-            if ss_tot > 0:
-                r2 = 1.0 - (ss_res / ss_tot)
-                return float(r2)  # Ensure we return a scalar
-            else:
-                return 0.0  # Default if ss_tot is zero
-                
-        except Exception as e:
-            print(f"Error in calculate_r_squared: {str(e)}")
-            return 0.0
-
-    def calculate_peak_r_squared(self, y_true, y_fit_total, peak_params, model_type):
-        """Calculate R-squared value for individual peaks."""
-        peak_r_squared = []
-        
-        # Check if peaks or parameters are empty
-        if not self.peaks or len(peak_params) == 0:
-            return peak_r_squared
-        
-        # Determine number of parameters per peak based on model type
-        if model_type == "Gaussian" or model_type == "Lorentzian":
-            params_per_peak = 3
-        elif model_type == "Pseudo-Voigt":
-            params_per_peak = 4
-        elif model_type == "Asymmetric Voigt":
-            params_per_peak = 5
-        else:
-            params_per_peak = 3
-            
-        n_peaks = len(peak_params) // params_per_peak
-        
-        # Continue with calculation for each peak
-        for peak_idx in range(n_peaks):
-            try:
-                # Get start index for this peak's parameters
-                i = peak_idx * params_per_peak
-                
-                # Extract peak parameters
-                if model_type == "Gaussian":
-                    peak_y = self.gaussian(self.wavenumbers, *peak_params[i:i+3])
-                    center = peak_params[i+1]
-                    width = peak_params[i+2]
-                    # FWHM for Gaussian
-                    fwhm = 2.355 * width
-                elif model_type == "Lorentzian":
-                    peak_y = self.lorentzian(self.wavenumbers, *peak_params[i:i+3])
-                    center = peak_params[i+1]
-                    width = peak_params[i+2]
-                    # FWHM for Lorentzian
-                    fwhm = 2 * width
-                elif model_type == "Pseudo-Voigt":
-                    peak_y = self.pseudo_voigt(self.wavenumbers, *peak_params[i:i+4])
-                    center = peak_params[i+1]
-                    width = peak_params[i+2]
-                    # Approximate FWHM for Pseudo-Voigt
-                    fwhm = 2 * width
-                elif model_type == "Asymmetric Voigt":
-                    peak_y = self.asymmetric_voigt(self.wavenumbers, *peak_params[i:i+5])
-                    center = peak_params[i+1]
-                    width_left = peak_params[i+2]
-                    width_right = peak_params[i+3]
-                    # Average FWHM for asymmetric peak
-                    fwhm = width_left + width_right
-                else:
-                    peak_y = self.gaussian(self.wavenumbers, *peak_params[i:i+3])
-                    center = peak_params[i+1]
-                    width = peak_params[i+2]
-                    fwhm = 2.355 * width
-                
-                # Create a mask for a region around the peak (±2*FWHM)
-                region_width = 2 * fwhm
-                min_bound = center - region_width
-                max_bound = center + region_width
-                
-                # Create mask indices for the peak region
-                mask_indices = np.where(
-                    np.logical_and(
-                        np.greater_equal(self.wavenumbers, min_bound),
-                        np.less_equal(self.wavenumbers, max_bound)
-                    )
-                )[0]
-                
-                # If mask is too narrow, widen it to ensure enough points
-                if len(mask_indices) < 10:
-                    region_width = 3 * fwhm
-                    min_bound = center - region_width
-                    max_bound = center + region_width
-                    mask_indices = np.where(
-                        np.logical_and(
-                            np.greater_equal(self.wavenumbers, min_bound),
-                            np.less_equal(self.wavenumbers, max_bound)
-                        )
-                    )[0]
-                
-                # Calculate contribution of this peak to the total fit
-                if len(mask_indices) > 3:  # Need at least a few points for meaningful R²
-                    # Get data, total fit, and individual peak in the region
-                    y_true_region = y_true[mask_indices]
-                    y_fit_region = y_fit_total[mask_indices]
-                    peak_y_region = peak_y[mask_indices]
-                    
-                    # Calculate peak's contribution to the fit in this region
-                    peak_contribution = np.sum(peak_y_region) / np.sum(y_fit_region) if np.sum(y_fit_region) > 0 else 0
-                    
-                    # Only consider regions where this peak is significant
-                    if peak_contribution > 0.2:  # At least 20% contribution
-                        # Calculate R² based on how well the total fit matches data in this region
-                        ss_res = np.sum((y_true_region - y_fit_region) ** 2)
-                        ss_tot = np.sum((y_true_region - np.mean(y_true_region)) ** 2)
-                        
-                        if ss_tot > 0:
-                            r2 = 1 - (ss_res / ss_tot)
-                            # Weight R² by peak's contribution to the total fit in this region
-                            # r2 = r2 * peak_contribution
-                        else:
-                            r2 = 0.0
-                    else:
-                        # Peak has minimal contribution here
-                        r2 = 0.0
-                else:
-                    r2 = 0.0
-                
-                peak_r_squared.append(r2)
-            except Exception as e:
-                # If any error occurs, add a default value
-                print(f"Error calculating R² for peak {peak_idx}: {e}")
-                peak_r_squared.append(0.0)
-        
-        return peak_r_squared
-
-    def update_fit_stats_plot(self):
-        """Update the fit statistics plots to show best, median, and worst fits."""
-        if not self.batch_results:
-            # Clear all subplots
-            for ax in self.ax_stats.flatten():
-                ax.clear()
-                ax.axis('off')
-            self.canvas_stats.draw()
-            return
-
-        # Clear all subplots
-        for ax in self.ax_stats.flatten():
-            ax.clear()
-
-        # Filter out manually skipped files
-        filtered_results = [(i, result) for i, result in enumerate(self.batch_results) 
-                           if not result.get('manually_skipped', False)]
-
-        # Calculate R² for each spectrum in filtered batch results
-        r2_values = []
-        for original_index, result in filtered_results:
-            if result.get('fit_failed', True) or result['fit_result'] is None or result['fit_params'] is None:
-                r2_values.append((original_index, 0))  # Default to 0 for failed fits
-                continue
-                
-            # Load the original spectrum data from file
-            try:
-                data = np.loadtxt(result['file'])
-                wavenumbers = data[:, 0]
-                original_spectrum = data[:, 1]
-                
-                # Get the background-subtracted spectrum used for fitting
-                if result['background'] is not None:
-                    background = result['background']
-                    spectrum = original_spectrum - background
-                else:
-                    spectrum = original_spectrum
-                
-                # Parse fit ranges to only calculate R² within the ROI
-                fit_ranges_str = self.var_fit_ranges.get().strip()
-                roi_ranges = []
-                if fit_ranges_str:
-                    try:
-                        for part in fit_ranges_str.split(','):
-                            if '-' in part:
-                                min_w, max_w = map(float, part.split('-'))
-                                roi_ranges.append((min_w, max_w))
-                    except:
-                        # If parsing fails, use the entire range
-                        pass
-                
-                # Create mask for ROI ranges
-                if roi_ranges:
-                    mask = np.zeros_like(wavenumbers, dtype=bool)
-                    for min_w, max_w in roi_ranges:
-                        new_mask = (wavenumbers >= min_w) & (wavenumbers <= max_w)
-                        mask = mask | new_mask
-                    
-                    # Only use points within ROI for R² calculation
-                    spectrum_roi = spectrum[mask]
-                    fit_roi = result['fit_result'][mask]
-                else:
-                    # Use entire spectrum if no ROI specified
-                    spectrum_roi = spectrum
-                    fit_roi = result['fit_result']
-                
-                # Calculate R² only for the spectrum used for fitting (background-subtracted)
-                # and only within the ROI where fitting was performed
-                if len(spectrum_roi) > 0:
-                    mean_data = np.mean(spectrum_roi)
-                    ss_tot = np.sum((spectrum_roi - mean_data) ** 2)
-                    ss_res = np.sum((spectrum_roi - fit_roi) ** 2)
-                    
-                    if ss_tot > 0:
-                        r2 = 1 - (ss_res / ss_tot)
-                    else:
-                        r2 = 0
-                else:
-                    r2 = 0
-                
-                r2_values.append((original_index, r2))
-            except Exception as e:
-                print(f"Error calculating R² for spectrum {original_index}: {e}")
-                r2_values.append((original_index, 0))
-        
-        # Sort by R² value
-        r2_values.sort(key=lambda x: x[1])
-        
-        # Get the worst, median, and best spectra indices
-        n_results = len(r2_values)
-        if n_results < 9:
-            # If fewer than 9 results, use all available
-            indices_to_show = [x[0] for x in r2_values]
-        else:
-            # Get worst 3 (lowest R²)
-            worst_indices = [x[0] for x in r2_values[:3]]
-            
-            # Get best 3 (highest R²)
-            best_indices = [x[0] for x in r2_values[-3:]]
-            best_indices.reverse()  # Show highest R² first
-            
-            # Get median 3
-            median_start = n_results // 2 - 1
-            median_indices = [x[0] for x in r2_values[median_start:median_start+3]]
-            
-            # Combine in order: best, median, worst
-            indices_to_show = best_indices + median_indices + worst_indices
-        
-        # Plot each selected spectrum
-        for i, plot_idx in enumerate(indices_to_show[:9]):  # Limit to 9 plots (3x3 grid)
-            row = i // 3
-            col = i % 3
-            
-            # Get result for this spectrum
-            result = self.batch_results[plot_idx]
-            
-            try:
-                # Load the original data
-                data = np.loadtxt(result['file'])
-                wavenumbers = data[:, 0]
-                original_spectrum = data[:, 1]
-                
-                # Get filename for title
-                filename = os.path.basename(result['file'])
-                
-                # Plot original spectrum
-                self.ax_stats[row, col].plot(wavenumbers, original_spectrum, 'k-', label='Data')
-                
-                # Plot background if available
-                if result['background'] is not None:
-                    background = result['background']
-                    self.ax_stats[row, col].plot(wavenumbers, background, 'b--', label='Background')
-                    
-                    # Calculate background-subtracted spectrum for fit plotting
-                    spectrum = original_spectrum - background
-                    # Also plot the fit result on top of background-subtracted data
-                    if result['fit_result'] is not None:
-                        # Get correct R² value for this spectrum
-                        r2 = 0
-                        for idx, r2_val in r2_values:
-                            if idx == plot_idx:
-                                r2 = r2_val
-                                break
-                        
-                        # Highlight ROI regions if specified
-                        fit_ranges_str = self.var_fit_ranges.get().strip()
-                        roi_ranges = []
-                        if fit_ranges_str:
-                            try:
-                                for part in fit_ranges_str.split(','):
-                                    if '-' in part:
-                                        min_w, max_w = map(float, part.split('-'))
-                                        roi_ranges.append((min_w, max_w))
-                                        # Add shaded region for ROI
-                                        self.ax_stats[row, col].axvspan(min_w, max_w, color='lightgrey', alpha=0.3, zorder=0)
-                            except:
-                                pass
-                        
-                        # Plot the fit on top of background-subtracted data
-                        self.ax_stats[row, col].plot(wavenumbers, result['fit_result'], 'r-', label='Fit')
-                        
-                        # Set title with filename, spectrum number and R²
-                        quality_label = "Best" if row == 0 else "Median" if row == 1 else "Worst"
-                        self.ax_stats[row, col].set_title(f"{quality_label}: {filename}\nR²={r2:.3f}", fontsize=9)
-                    else:
-                        self.ax_stats[row, col].set_title(f"Spectrum {plot_idx+1} (No fit)", fontsize=9)
-                else:
-                    # No background case
-                    if result['fit_result'] is not None:
-                        r2 = 0
-                        for idx, r2_val in r2_values:
-                            if idx == plot_idx:
-                                r2 = r2_val
-                                break
-                        self.ax_stats[row, col].plot(wavenumbers, result['fit_result'], 'r-', label='Fit')
-                        quality_label = "Best" if row == 0 else "Median" if row == 1 else "Worst"
-                        self.ax_stats[row, col].set_title(f"{quality_label}: {filename}\nR²={r2:.3f}", fontsize=9)
-                    else:
-                        self.ax_stats[row, col].set_title(f"Spectrum {plot_idx+1} (No fit)", fontsize=9)
-                
-                # Add grid
-                self.ax_stats[row, col].grid(True, linestyle=':', color='gray', alpha=0.4)
-                
-                # Set axis labels only for edge plots
-                if col == 0:
-                    self.ax_stats[row, col].set_ylabel('Intensity')
-                if row == 2:
-                    self.ax_stats[row, col].set_xlabel('Wavenumber (cm⁻¹)')
-                
-                # Add legend for first plot only (to save space)
-                if row == 0 and col == 0:
-                    self.ax_stats[row, col].legend(fontsize=8, loc='upper right')
-                
-            except Exception as e:
-                print(f"Error plotting spectrum {plot_idx}: {e}")
-                self.ax_stats[row, col].text(0.5, 0.5, f"Error loading spectrum {plot_idx+1}", 
-                                           ha='center', va='center', transform=self.ax_stats[row, col].transAxes)
-        
-        # Adjust layout
-        self.fig_stats.tight_layout()
-        self.canvas_stats.draw()
-
-    def export_fit_stats_plot(self):
-        """Export the Fit Stats plot to an image file."""
-        try:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".png",
-                filetypes=[
-                    ("PNG files", "*.png"),
-                    ("PDF files", "*.pdf"),
-                    ("SVG files", "*.svg"),
-                    ("All files", "*.*")
-                ],
-                title="Save Fit Stats Plot"
-            )
-            
-            if file_path:
-                # Get the file extension
-                ext = os.path.splitext(file_path)[1].lower()
-                
-                # Create a new figure with the same size
-                fig = plt.figure(figsize=(12, 12))
-                axes = fig.subplots(3, 3)
-                
-                # Copy all content from the original figure
-                for i, ax in enumerate(self.ax_stats.flatten()):
-                    if not ax.has_data():
-                        axes.flatten()[i].axis('off')
-                        continue
-                        
-                    # Copy all lines
-                    for line in ax.get_lines():
-                        axes.flatten()[i].plot(line.get_xdata(), line.get_ydata(),
-                                            color=line.get_color(),
-                                            linestyle=line.get_linestyle(),
-                                            linewidth=line.get_linewidth(),
-                                            alpha=line.get_alpha(),
-                                            label=line.get_label())
-                    
-                    # Copy background patches (ROI regions)
-                    for patch in ax.patches:
-                        if isinstance(patch, mpatches.Rectangle):
-                            axes.flatten()[i].add_patch(plt.Rectangle(
-                                patch.get_xy(),
-                                patch.get_width(),
-                                patch.get_height(),
-                                color=patch.get_facecolor(),
-                                alpha=patch.get_alpha()
-                            ))
-                    
-                    # Copy text elements with consistent positioning
-                    for text in ax.texts:
-                        bbox = text.get_bbox_patch()
-                        bbox_props = {
-                            'facecolor': bbox.get_facecolor(),
-                            'edgecolor': bbox.get_edgecolor(),
-                            'alpha': bbox.get_alpha(),
-                            'boxstyle': 'round,pad=0.3'
-                        }
-                        # Position text in upper right corner
-                        axes.flatten()[i].text(0.98, 0.98, text.get_text(),
-                                            transform=axes.flatten()[i].transAxes,
-                                            verticalalignment='top',
-                                            horizontalalignment='right',
-                                            fontsize=text.get_fontsize(),
-                                            bbox=bbox_props)
-                    
-                    # Copy title and labels
-                    axes.flatten()[i].set_title(ax.get_title(), fontsize=9, pad=5)
-                    axes.flatten()[i].set_xlabel(ax.get_xlabel())
-                    axes.flatten()[i].set_ylabel(ax.get_ylabel())
-                    
-                    # Copy grid
-                    axes.flatten()[i].grid(True, linestyle=':', color='gray', alpha=0.4)
-                    
-                    # Copy legend
-                    if ax.get_legend():
-                        axes.flatten()[i].legend(loc='upper right', fontsize=7, framealpha=0.8)
-                    
-                    # Set axis limits
-                    axes.flatten()[i].set_xlim(ax.get_xlim())
-                    axes.flatten()[i].set_ylim(ax.get_ylim())
-                    
-                    # Set tick parameters
-                    axes.flatten()[i].tick_params(axis='both', which='major', labelsize=8)
-                
-                # Adjust layout
-                fig.tight_layout(pad=2.0)
-                
-                # Save with high DPI for better quality
-                fig.savefig(
-                    file_path,
-                    dpi=300,
-                    bbox_inches='tight',
-                    pad_inches=0.1,
-                    facecolor='white',
-                    edgecolor='none'
-                )
-                
-                # Close the temporary figure
-                plt.close(fig)
-                
-                messagebox.showinfo("Success", f"Plot saved successfully to:\n{file_path}")
-                
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to export plot: {str(e)}")
-
-    def reset_heatmap_range(self):
-        """Reset the X-axis range to full range."""
-        if hasattr(self, 'wavenumbers') and self.wavenumbers is not None:
-            self.heatmap_xmin.delete(0, tk.END)
-            self.heatmap_xmax.delete(0, tk.END)
-            self.heatmap_xmin.insert(0, f"{self.wavenumbers[0]:.1f}")
-            self.heatmap_xmax.insert(0, f"{self.wavenumbers[-1]:.1f}")
-            self.update_heatmap_plot()
-
-    def reset_waterfall_range(self):
-        """Reset the X-axis range to full range."""
-        if hasattr(self, 'wavenumbers') and self.wavenumbers is not None:
-            self.waterfall_xmin.delete(0, tk.END)
-            self.waterfall_xmax.delete(0, tk.END)
-            self.waterfall_xmin.insert(0, f"{self.wavenumbers[0]:.1f}")
-            self.waterfall_xmax.insert(0, f"{self.wavenumbers[-1]:.1f}")
-            # Reset Y offset to default (absolute units)
-            self.waterfall_yoffset.set(100)
-            self.update_waterfall_plot()
-
-    def on_file_select(self, event):
-        """Handle file selection in the listbox."""
-        try:
-            # Get the index of the clicked item
-            index = self.file_listbox.index(f"@{event.x},{event.y}")
-            # Load and display the selected spectrum
-            self.load_spectrum(index)
-            # Make sure this item is selected
-            self.file_listbox.selection_set(index)
-        except Exception as e:
-            # If we can't get the index from the event, use the first selected item
-            selection = self.file_listbox.curselection()
-            if selection:
-                self.load_spectrum(selection[0])
-            else:
-                self.clear_plot()
-
-    def export_individual_fit_stats(self):
-        """Export individual fit statistics plots to separate image files."""
-        try:
-            # Ask for directory to save files
-            save_dir = filedialog.askdirectory(title="Select Directory to Save Individual Plots")
-            if not save_dir:
-                return
-                
-            # Get current model type for filename
-            model_type = self.current_model.get()
-            
-            # Create a temporary figure for each metric
-            metrics = ['position', 'amplitude', 'width', 'eta']
-            for metric in metrics:
-                # Skip eta for models that don't support it
-                if metric == 'eta' and model_type not in ["Pseudo-Voigt", "Asymmetric Voigt"]:
-                    continue
-                    
-                # Create figure for this metric
-                fig, ax = plt.subplots(figsize=(8, 6))
-                self._plot_single_trends_subplot(ax, metric)
-                
-                # Add title and labels
-                ax.set_title(f'Peak {metric.capitalize()} Trends')
-                ax.set_xlabel('Spectrum Number')
-                if metric == 'position':
-                    ax.set_ylabel('Position (cm⁻¹)')
-                elif metric == 'amplitude':
-                    ax.set_ylabel('Amplitude')
-                elif metric == 'width':
-                    ax.set_ylabel('Width (cm⁻¹)')
-                elif metric == 'eta':
-                    ax.set_ylabel('Eta')
-                
-                # Save figure
-                filename = f"{model_type}_peak_{metric}.png"
-                filepath = os.path.join(save_dir, filename)
-                fig.tight_layout()
-                fig.savefig(filepath, dpi=300, bbox_inches='tight')
-                plt.close(fig)
-                
-            messagebox.showinfo("Export Complete", f"Individual plots saved to {save_dir}")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to export individual plots: {str(e)}")
-            
-    def export_curve_data_csv(self):
-        """Export all peak curve data to a CSV file."""
-        if not self.batch_results:
-            messagebox.showwarning("No Results", "No batch processing results to export.")
-            return
-            
-        try:
-            # Ask for file location
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
-                title="Save Peak Curve Data"
-            )
-            
-            if not file_path:
-                return
-                
-            # Get data from extract_trend_data which already has all the peak information we need
-            x, trends, n_peaks, uncertainties = self.extract_trend_data()
-            if x is None or trends is None or n_peaks is None:
-                messagebox.showwarning("No Data", "No trend data available to export.")
-                return
-                
-            # Get model type to determine column headers
-            model_type = self.current_model.get()
-            
-            # Prepare data frame
-            data = []
-            # First add spectrum info (index and filename)
-            for i, result in enumerate(self.batch_results):
-                filename = os.path.basename(result['file'])
-                fit_success = not result.get('fit_failed', True)
-                row = {'Spectrum': i, 'File': filename, 'Fit_Success': fit_success}
-                data.append(row)
-                
-            # Create DataFrame
-            df = pd.DataFrame(data)
-            
-            # Add column for each peak parameter
-            for peak_idx in range(n_peaks):
-                # Only include visible peaks
-                if peak_idx < len(self.peak_visibility_vars) and self.peak_visibility_vars[peak_idx].get():
-                    # Position
-                    df[f'Peak_{peak_idx+1}_Position'] = trends[peak_idx]['pos']
-                    df[f'Peak_{peak_idx+1}_Position_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['pos']]
-                    
-                    # Amplitude
-                    df[f'Peak_{peak_idx+1}_Amplitude'] = trends[peak_idx]['amp']
-                    df[f'Peak_{peak_idx+1}_Amplitude_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['amp']]
-                    
-                    # Width
-                    if model_type == "Asymmetric Voigt":
-                        df[f'Peak_{peak_idx+1}_Width_Left'] = trends[peak_idx]['wid_left']
-                        df[f'Peak_{peak_idx+1}_Width_Left_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid_left']]
-                        df[f'Peak_{peak_idx+1}_Width_Right'] = trends[peak_idx]['wid_right']
-                        df[f'Peak_{peak_idx+1}_Width_Right_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid_right']]
-                    else:
-                        df[f'Peak_{peak_idx+1}_Width'] = trends[peak_idx]['wid']
-                        df[f'Peak_{peak_idx+1}_Width_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid']]
-                    
-                    # Eta (for Pseudo-Voigt and Asymmetric Voigt)
-                    if model_type in ["Pseudo-Voigt", "Asymmetric Voigt"]:
-                        df[f'Peak_{peak_idx+1}_Eta'] = trends[peak_idx]['eta']
-                        df[f'Peak_{peak_idx+1}_Eta_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['eta']]
-            
-            # Save to CSV
-            df.to_csv(file_path, index=False)
-            
-            messagebox.showinfo("Export Complete", f"Peak curve data saved to {file_path}")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to export curve data: {str(e)}")
-
-    def on_tab_changed(self, event=None):
-        """Handle tab change events to update context-sensitive help."""
-        # Update status bar with a hint about the current tab
-        try:
-            # Determine which tab is active
-            if event and event.widget == self.left_notebook:
-                current_tab = self.left_notebook.tab(self.left_notebook.select(), "text")
-                if current_tab == "File Selection":
-                    self.status_bar.config(text="File Selection: Add or remove spectrum files. Double-click to select. Press F1 for help.")
-                elif current_tab == "Peaks":
-                    self.status_bar.config(text="Peak Controls: Subtract background, detect/add peaks, and fit with different models. Press F1 for help.")
-                elif current_tab == "Batch":
-                    self.status_bar.config(text="Batch Processing: Set reference spectrum and apply to all files. Press F1 for help.")
-                elif current_tab == "Results":
-                    self.status_bar.config(text="Results: Configure which peaks are displayed and export data. Press F1 for help.")
-            elif event and event.widget == self.viz_notebook:
-                current_tab = self.viz_notebook.tab(self.viz_notebook.select(), "text")
-                if current_tab == "Current Spectrum":
-                    self.status_bar.config(text="Current Spectrum: View selected spectrum with fit results. Press F1 for help.")
-                elif current_tab == "Waterfall":
-                    self.status_bar.config(text="Waterfall Plot: View multiple spectra stacked vertically. Press F1 for help.")
-                elif current_tab == "Heatmap":
-                    self.status_bar.config(text="Heatmap: View spectra as a color-coded intensity map. Press F1 for help.")
-                elif current_tab == "Fit Results":
-                    self.status_bar.config(text="Fit Results: View trends in peak parameters across all spectra. Press F1 for help.")
-                elif current_tab == "Fit Stats":
-                    self.status_bar.config(text="Fit Statistics: Compare fit quality across different spectra. Press F1 for help.")
-        except:
-            # Default status message if something goes wrong
-            self.status_bar.config(text="Press F1 for help with the current tab")
-
-    def show_general_help(self):
-        """Show general help for the application."""
-        title, text = self.help_texts["General"]
-        self.show_help_dialog(title, text)
-
-    def validate_fit_parameters(self, popt, initial_params, model_type, peaks_in_roi):
-        """
-        Validate if fit parameters are realistic and physically meaningful.
-        
-        Parameters:
-        -----------
-        popt : array-like
-            Fitted parameters
-        initial_params : array-like
-            Initial parameter guesses
-        model_type : str
-            Peak model type
-        peaks_in_roi : list
-            List of detected peaks within ROI
-            
-        Returns:
-        --------
-        bool
-            True if parameters are realistic, False otherwise
-        """
-        try:
-            # Determine parameters per peak
-            if model_type in ["Gaussian", "Lorentzian"]:
-                params_per_peak = 3
-            elif model_type == "Pseudo-Voigt":
-                params_per_peak = 4
-            elif model_type == "Asymmetric Voigt":
-                params_per_peak = 5
-            else:
-                params_per_peak = 3
-            
-            n_peaks = len(popt) // params_per_peak
-            wavenumber_range = self.wavenumbers[-1] - self.wavenumbers[0]
-            
-            for i in range(n_peaks):
-                start_idx = i * params_per_peak
-                
-                # Extract parameters for this peak
-                if model_type in ["Gaussian", "Lorentzian"]:
-                    amp, pos, wid = popt[start_idx:start_idx+3]
-                    initial_amp, initial_pos, initial_wid = initial_params[start_idx:start_idx+3]
-                elif model_type == "Pseudo-Voigt":
-                    amp, pos, wid, eta = popt[start_idx:start_idx+4]
-                    initial_amp, initial_pos, initial_wid, initial_eta = initial_params[start_idx:start_idx+4]
-                    # Validate eta parameter (must be between 0 and 1)
-                    if eta < 0 or eta > 1:
-                        print(f"Peak {i+1}: Invalid eta value {eta:.3f} (must be 0-1)")
-                        return False
-                elif model_type == "Asymmetric Voigt":
-                    amp, pos, wid_left, wid_right, eta = popt[start_idx:start_idx+5]
-                    initial_amp, initial_pos, initial_wid_left, initial_wid_right, initial_eta = initial_params[start_idx:start_idx+5]
-                    # Validate eta parameter
-                    if eta < 0 or eta > 1:
-                        print(f"Peak {i+1}: Invalid eta value {eta:.3f} (must be 0-1)")
-                        return False
-                    # Validate asymmetric widths
-                    if wid_left <= 0 or wid_right <= 0:
-                        print(f"Peak {i+1}: Invalid widths - left: {wid_left:.3f}, right: {wid_right:.3f}")
-                        return False
-                    # Check for extremely asymmetric peaks (one side > 10x the other)
-                    if wid_left / wid_right > 10 or wid_right / wid_left > 10:
-                        print(f"Peak {i+1}: Extremely asymmetric widths - left: {wid_left:.3f}, right: {wid_right:.3f}")
-                        return False
-                    wid = (wid_left + wid_right) / 2  # Use average for general width checks
-                
-                # 1. Check for negative or zero amplitudes
-                if amp <= 0:
-                    print(f"Peak {i+1}: Invalid amplitude {amp:.3f} (must be positive)")
-                    return False
-                
-                # 2. Check if peak position is within reasonable bounds
-                if pos < self.wavenumbers[0] or pos > self.wavenumbers[-1]:
-                    print(f"Peak {i+1}: Position {pos:.1f} outside data range [{self.wavenumbers[0]:.1f}, {self.wavenumbers[-1]:.1f}]")
-                    return False
-                
-                # 3. Check for extremely narrow or wide peaks
-                min_width = wavenumber_range * 0.001  # 0.1% of total range
-                max_width = wavenumber_range * 0.5    # 50% of total range
-                if model_type == "Asymmetric Voigt":
-                    if wid_left < min_width or wid_right < min_width:
-                        print(f"Peak {i+1}: Width too narrow - left: {wid_left:.3f}, right: {wid_right:.3f} (min: {min_width:.3f})")
-                        return False
-                    if wid_left > max_width or wid_right > max_width:
-                        print(f"Peak {i+1}: Width too wide - left: {wid_left:.3f}, right: {wid_right:.3f} (max: {max_width:.3f})")
-                        return False
-                else:
-                    if wid < min_width or wid > max_width:
-                        print(f"Peak {i+1}: Width {wid:.3f} outside reasonable range [{min_width:.3f}, {max_width:.3f}]")
-                        return False
-                
-                # 4. Check if peak position has drifted too far from initial guess
-                max_drift = wavenumber_range * 0.1  # Allow 10% of total range drift
-                position_drift = abs(pos - initial_pos)
-                if position_drift > max_drift:
-                    print(f"Peak {i+1}: Position drifted too far - initial: {initial_pos:.1f}, fitted: {pos:.1f}, drift: {position_drift:.1f}")
-                    return False
-                
-                # 5. Check for unrealistic amplitude changes (more than 100x change)
-                amp_ratio = amp / initial_amp if initial_amp > 0 else float('inf')
-                if amp_ratio > 100 or amp_ratio < 0.01:
-                    print(f"Peak {i+1}: Unrealistic amplitude change - initial: {initial_amp:.1f}, fitted: {amp:.1f}, ratio: {amp_ratio:.3f}")
-                    return False
-                
-                # 6. Check for unrealistic width changes (more than 50x change)
-                initial_wid = initial_wid if model_type != "Asymmetric Voigt" else (initial_wid_left + initial_wid_right) / 2
-                wid_ratio = wid / initial_wid if initial_wid > 0 else float('inf')
-                if wid_ratio > 50 or wid_ratio < 0.02:
-                    print(f"Peak {i+1}: Unrealistic width change - initial: {initial_wid:.3f}, fitted: {wid:.3f}, ratio: {wid_ratio:.3f}")
-                    return False
-            
-            # 7. Calculate overall fit quality and reject if R² is too low
-            try:
-                # Create the combined model to evaluate R²
-                def combined_model_temp(x, *params):
-                    result = np.zeros_like(x)
-                    for j in range(0, len(params), params_per_peak):
-                        if j + params_per_peak <= len(params):
-                            peak_params = params[j:j+params_per_peak]
-                            if model_type == "Gaussian":
-                                peak_result = self.gaussian(x, *peak_params)
-                            elif model_type == "Lorentzian":
-                                peak_result = self.lorentzian(x, *peak_params)
-                            elif model_type == "Pseudo-Voigt":
-                                peak_result = self.pseudo_voigt(x, *peak_params)
-                            elif model_type == "Asymmetric Voigt":
-                                peak_result = self.asymmetric_voigt(x, *peak_params)
-                            else:
-                                peak_result = self.gaussian(x, *peak_params)
-                            result = result + peak_result
-                    return result
-                
-                # Calculate fit within ROI if specified
-                fit_ranges_str = self.var_fit_ranges.get().strip()
-                roi_ranges = []
-                if fit_ranges_str:
-                    try:
-                        for part in fit_ranges_str.split(','):
-                            if '-' in part:
-                                min_w, max_w = map(float, part.split('-'))
-                                roi_ranges.append((min_w, max_w))
-                    except:
-                        pass
-                
-                # Create mask for ROI
-                if roi_ranges:
-                    mask = np.zeros_like(self.wavenumbers, dtype=bool)
-                    for min_w, max_w in roi_ranges:
-                        new_mask = (self.wavenumbers >= min_w) & (self.wavenumbers <= max_w)
-                        mask = mask | new_mask
-                    wavenumbers_roi = self.wavenumbers[mask]
-                    spectra_roi = self.spectra[mask]
-                else:
-                    wavenumbers_roi = self.wavenumbers
-                    spectra_roi = self.spectra
-                
-                # Calculate fitted data and R²
-                fitted_data = combined_model_temp(wavenumbers_roi, *popt)
-                r_squared = self.calculate_r_squared(spectra_roi, fitted_data)
-                
-                # Reject fits with very low R² (less than 0.5)
-                min_r_squared = 0.5
-                if r_squared < min_r_squared:
-                    print(f"Overall fit quality too low: R² = {r_squared:.3f} (minimum: {min_r_squared})")
-                    return False
-                
-            except Exception as e:
-                print(f"Error calculating fit quality: {str(e)}")
-                return False
-            
-            # 8. Check for overlapping peaks (peaks too close together)
-            # REMOVED: Allow peaks to overlap or be close together 
-            # This section was causing fits to be rejected when peaks were legitimately close
-
-            # If all checks pass, the fit is considered realistic
-            return True
-            
-        except Exception as e:
-            print(f"Error in fit validation: {str(e)}")
-            return False
-    
-    def update_batch_results_if_present(self):
-        """
-        Update batch results if the current spectrum is part of the batch processing results.
-        This allows manual refinement of individual spectra to be reflected in the batch trends.
-        """
-        if not hasattr(self, 'batch_results') or not self.batch_results:
-            return
-            
-        if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
-            return
-            
-        if self.current_spectrum_index >= len(self.spectra_files):
-            return
-            
-        # Get the current file path
-        current_file = self.spectra_files[self.current_spectrum_index]
-        
-        # Find this file in batch results
-        for i, result in enumerate(self.batch_results):
-            if result.get('file') == current_file:
-                # Update the batch result with current fit
-                self.batch_results[i] = {
-                    'file': current_file,
-                    'peaks': self.peaks.copy() if hasattr(self, 'peaks') else [],
-                    'fit_failed': self.fit_failed,
-                    'fit_params': np.copy(self.fit_params) if hasattr(self, 'fit_params') and self.fit_params is not None else None,
-                    'fit_cov': np.copy(self.fit_cov) if hasattr(self, 'fit_cov') and self.fit_cov is not None else None,
-                    'background': np.copy(self.background) if hasattr(self, 'background') and self.background is not None else None,
-                    'fit_result': np.copy(self.fit_result) if hasattr(self, 'fit_result') and self.fit_result is not None else None,
-                    'original_spectra': np.copy(self.original_spectra) if hasattr(self, 'original_spectra') else None,
-                    'peak_r_squared': self.peak_r_squared.copy() if hasattr(self, 'peak_r_squared') and self.peak_r_squared is not None else [],
-                    'nlls_cycles': getattr(self, 'nlls_cycles', 0),
-                    'manually_refined': True  # Flag to indicate manual refinement
-                }
-                
-                # Update the trends plot to reflect changes
-                self.update_trends_plot()
-                self.update_fit_stats_plot()
-                
-                # Show confirmation message
-                filename = os.path.basename(current_file)
-                print(f"Updated batch results for {filename} with manual refinement")
-                
-                # Update status in batch tab if visible
-                if hasattr(self, 'batch_status_text'):
-                    try:
-                        self.batch_status_text.config(state=tk.NORMAL)
-                        self.batch_status_text.insert(tk.END, f"Manually refined: {filename}\n")
-                        self.batch_status_text.see(tk.END)
-                        self.batch_status_text.config(state=tk.DISABLED)
-                    except:
-                        pass
-                
-                break
-    
-    def get_constraint_info_text(self):
-        """Return a descriptive text about current constraints for display in status."""
-        if not hasattr(self, 'fix_positions') or not hasattr(self, 'fix_widths'):
-            return "No constraints"
-        
-        constraints = []
-        if self.fix_positions.get():
-            constraints.append("positions fixed")
-        if self.fix_widths.get():
-            constraints.append("widths fixed")
-        
-        if constraints:
-            return f"Constraints: {', '.join(constraints)}"
-        else:
             return "No constraints"
     
     def skip_current_file(self):
         """Manually skip the current file from trend analysis and batch results."""
         if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
-            messagebox.showwarning("No File Selected", "Please select a spectrum file first.")
+            messagebox.showwarning("No File Selected", "Please select a spectrum file first.", parent=self.window)
             return
             
         if self.current_spectrum_index >= len(self.spectra_files):
-            messagebox.showwarning("Invalid Selection", "No valid spectrum file selected.")
+            messagebox.showwarning("Invalid Selection", "No valid spectrum file selected.", parent=self.window)
             return
             
         # Get the current file path
@@ -4315,7 +3455,8 @@ class BatchPeakFittingWindow:
             "• Fit Results plots\n"
             "• Fit Statistics\n"
             "• Exported data\n\n"
-            "The file will remain in the file list but marked as skipped."
+            "The file will remain in the file list but marked as skipped.",
+            parent=self.window
         )
         
         if not response:
@@ -4364,7 +3505,7 @@ class BatchPeakFittingWindow:
                 pass
         
         print(f"Manually skipped: {filename}")
-        messagebox.showinfo("File Skipped", f"'{filename}' has been excluded from trend analysis.")
+        messagebox.showinfo("File Skipped", f"'{filename}' has been excluded from trend analysis.", parent=self.window)
     
     def unskip_current_file(self):
         """Remove the current file from the manually skipped list."""
@@ -4398,11 +3539,11 @@ class BatchPeakFittingWindow:
     def toggle_skip_current_file(self):
         """Toggle the skip status of the current file."""
         if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
-            messagebox.showwarning("No File Selected", "Please select a spectrum file first.")
+            messagebox.showwarning("No File Selected", "Please select a spectrum file first.", parent=self.window)
             return
             
         if self.current_spectrum_index >= len(self.spectra_files):
-            messagebox.showwarning("Invalid Selection", "No valid spectrum file selected.")
+            messagebox.showwarning("Invalid Selection", "No valid spectrum file selected.", parent=self.window)
             return
             
         current_file = self.spectra_files[self.current_spectrum_index]
@@ -4430,4 +3571,348 @@ class BatchPeakFittingWindow:
         self.update_fit_stats_plot()
         
         print(f"Skipped status changed for: {filename}")
-        messagebox.showinfo("File Skipped Status", f"'{filename}' is now {'skipped' if current_file in self.manually_skipped_files else 'unskipped'}.")
+        messagebox.showinfo("File Skipped Status", f"'{filename}' is now {'skipped' if current_file in self.manually_skipped_files else 'unskipped'}.", parent=self.window)
+
+    def load_whewellite_calibration(self):
+        """Load a whewellite reference spectrum for calibration."""
+        file_path = filedialog.askopenfilename(parent=self.window,
+            title="Select Whewellite Reference Spectrum",
+            filetypes=[("Text Files", "*.txt"), ("CSV Files", "*.csv"), ("All Files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                # Load the spectrum data
+                wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                if wavenumbers is None or intensities is None:
+                    raise Exception(f"Failed to load data from {file_path}")
+                
+                # Preprocess the spectrum
+                wn, corrected_int = self.density_analyzer.preprocess_spectrum(wavenumbers, intensities)
+                
+                # Calculate calibration value using COM peak
+                com_idx = np.argmin(np.abs(wn - self.density_analyzer.com_peaks['main']))
+                baseline_mask = (wn >= self.density_analyzer.organic_regions['baseline'][0]) & \
+                               (wn <= self.density_analyzer.organic_regions['baseline'][1])
+                baseline_intensity = np.mean(corrected_int[baseline_mask])
+                whewellite_peak_height = corrected_int[com_idx] - baseline_intensity
+                
+                self.whewellite_calibration_value = whewellite_peak_height
+                self.calib_status_label.config(
+                    text=f"Status: Calibrated (Peak height: {whewellite_peak_height:.2f})", 
+                    foreground="green"
+                )
+                
+                # Update the analyzer's reference value
+                # Note: This would require modifying the RamanDensityAnalyzer class
+                # For now, we'll store it and use it in our calculations
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load calibration spectrum: {str(e)}", parent=self.window)
+                self.calib_status_label.config(text="Status: Not calibrated", foreground="red")
+
+    def analyze_current_spectrum_density(self):
+        """Analyze the current spectrum for density."""
+        if not hasattr(self, 'wavenumbers') or not hasattr(self, 'intensities'):
+            messagebox.showerror("Error", "No spectrum data available", parent=self.window)
+            return
+        
+        try:
+            # Preprocess the spectrum
+            wn, corrected_int = self.density_analyzer.preprocess_spectrum(self.wavenumbers, self.intensities)
+            
+            # Calculate CDI
+            cdi, metrics = self.density_analyzer.calculate_crystalline_density_index(wn, corrected_int)
+            
+            # Calculate apparent density
+            apparent_density = self.density_analyzer.calculate_apparent_density(cdi)
+            
+            # Update results display
+            self.single_results_text.delete(1.0, tk.END)
+            results_text = f"""Current Spectrum Analysis:
+============================
+Crystalline Density Index: {cdi:.4f}
+Apparent Density: {apparent_density:.4f} g/cm³
+
+Detailed Metrics:
+-----------------
+COM Peak Height: {metrics['com_peak_height']:.2f}
+Baseline Intensity: {metrics['baseline_intensity']:.2f}
+Peak Width (FWHM): {metrics['peak_width']:.2f} cm⁻¹
+Spectral Contrast: {metrics['spectral_contrast']:.4f}
+
+Interpretation:
+---------------
+"""
+            
+            if cdi > 0.5:
+                results_text += "High crystalline content (COM-rich region)\n"
+            else:
+                results_text += "Low crystalline content (organic-rich region)\n"
+                
+            self.single_results_text.insert(tk.END, results_text)
+            
+            # Update the density plot with current spectrum
+            self.update_density_plot(wn, corrected_int, cdi, apparent_density, metrics)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to analyze spectrum density: {str(e)}", parent=self.window)
+
+    def analyze_all_spectra_density(self):
+        """Analyze all spectra for density."""
+        if not self.spectra_files:
+            messagebox.showwarning("No Spectra", "No spectra to analyze.", parent=self.window)
+            return
+        
+        try:
+            self.density_results = []
+            self.density_summary_text.delete(1.0, tk.END)
+            
+            densities = []
+            cdis = []
+            filenames = []
+            
+            self.density_summary_text.insert(tk.END, "Processing all spectra...\n\n")
+            self.density_summary_text.see(tk.END)
+            self.window.update()
+            
+            for i, file_path in enumerate(self.spectra_files):
+                try:
+                    # Load the spectrum data
+                    wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                    if wavenumbers is None or intensities is None:
+                        self.density_summary_text.insert(tk.END, f"ERROR: Failed to load {os.path.basename(file_path)}\n")
+                        continue
+                    
+                    # Preprocess the spectrum
+                    wn, corrected_int = self.density_analyzer.preprocess_spectrum(wavenumbers, intensities)
+                    
+                    # Calculate CDI
+                    cdi, metrics = self.density_analyzer.calculate_crystalline_density_index(wn, corrected_int)
+                    
+                    # Calculate apparent density
+                    apparent_density = self.density_analyzer.calculate_apparent_density(cdi)
+                    
+                    # Store results
+                    result = {
+                        'filename': os.path.basename(file_path),
+                        'cdi': cdi,
+                        'density': apparent_density,
+                        'metrics': metrics
+                    }
+                    self.density_results.append(result)
+                    densities.append(apparent_density)
+                    cdis.append(cdi)
+                    filenames.append(os.path.basename(file_path))
+                    
+                    # Update summary
+                    self.density_summary_text.insert(tk.END, 
+                        f"Spectrum {i+1:3d}: {os.path.basename(file_path)[:30]:30s} "
+                        f"CDI: {cdi:.3f}  Density: {apparent_density:.3f} g/cm³\n")
+                    
+                    if i % 10 == 0:  # Update display every 10 spectra
+                        self.density_summary_text.see(tk.END)
+                        self.window.update()
+                        
+                except Exception as e:
+                    self.density_summary_text.insert(tk.END, f"ERROR: {os.path.basename(file_path)}: {str(e)}\n")
+                    continue
+            
+            if densities:
+                # Calculate statistics
+                mean_density = np.mean(densities)
+                std_density = np.std(densities)
+                min_density = np.min(densities)
+                max_density = np.max(densities)
+                mean_cdi = np.mean(cdis)
+                
+                summary_stats = f"""
+Batch Analysis Complete!
+========================
+Processed: {len(densities)}/{len(self.spectra_files)} spectra
+
+Density Statistics:
+-------------------
+Mean Density: {mean_density:.4f} ± {std_density:.4f} g/cm³
+Range: {min_density:.4f} - {max_density:.4f} g/cm³
+Mean CDI: {mean_cdi:.4f}
+
+Classification:
+---------------
+Crystalline samples (CDI > 0.5): {sum(1 for cdi in cdis if cdi > 0.5)}/{len(cdis)}
+Organic samples (CDI ≤ 0.5): {sum(1 for cdi in cdis if cdi <= 0.5)}/{len(cdis)}
+"""
+                self.density_summary_text.insert(tk.END, summary_stats)
+                
+                # Update batch density plot
+                self.update_batch_density_plot(densities, cdis, filenames)
+                
+            else:
+                self.density_summary_text.insert(tk.END, "\nNo spectra could be processed successfully.")
+                
+            self.density_summary_text.see(tk.END)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to analyze all spectra: {str(e)}", parent=self.window)
+
+    def update_density_plot(self, wavenumbers, intensities, cdi, density, metrics):
+        """Update the density analysis plot with current spectrum data."""
+        try:
+            # Clear all subplots
+            for ax in self.ax_density.flat:
+                ax.clear()
+            
+            # Plot 1: Spectrum with COM peak highlighted
+            self.ax_density[0, 0].plot(wavenumbers, intensities, 'b-', linewidth=1)
+            com_peak = self.density_analyzer.com_peaks['main']
+            self.ax_density[0, 0].axvline(x=com_peak, color='r', linestyle='--', 
+                                         label=f'COM peak ({com_peak} cm⁻¹)')
+            self.ax_density[0, 0].set_xlabel('Wavenumber (cm⁻¹)')
+            self.ax_density[0, 0].set_ylabel('Intensity')
+            self.ax_density[0, 0].set_title('Preprocessed Spectrum')
+            self.ax_density[0, 0].legend()
+            self.ax_density[0, 0].grid(True, alpha=0.3)
+            
+            # Plot 2: CDI visualization
+            colors = ['red', 'green']
+            labels = ['Organic', 'Crystalline']
+            values = [1-cdi, cdi]
+            self.ax_density[0, 1].pie(values, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+            self.ax_density[0, 1].set_title(f'Crystalline Density Index: {cdi:.3f}')
+            
+            # Plot 3: Density bar chart
+            density_types = ['Organic Matrix', 'Calculated', 'Pure COM']
+            density_values = [self.density_analyzer.densities['organic_matrix'], 
+                            density, 
+                            self.density_analyzer.densities['com_crystal']]
+            colors = ['orange', 'blue', 'red']
+            bars = self.ax_density[1, 0].bar(density_types, density_values, color=colors, alpha=0.7)
+            self.ax_density[1, 0].set_ylabel('Density (g/cm³)')
+            self.ax_density[1, 0].set_title('Density Comparison')
+            self.ax_density[1, 0].tick_params(axis='x', rotation=45)
+            
+            # Add value labels on bars
+            for bar, value in zip(bars, density_values):
+                height = bar.get_height()
+                self.ax_density[1, 0].text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                                         f'{value:.3f}', ha='center', va='bottom')
+            
+            # Plot 4: Metrics summary
+            metric_names = ['Peak Height', 'Baseline', 'Peak Width', 'Contrast']
+            metric_values = [metrics['com_peak_height'], metrics['baseline_intensity'],
+                           metrics['peak_width'], metrics['spectral_contrast']]
+            
+            self.ax_density[1, 1].barh(metric_names, metric_values, color='purple', alpha=0.7)
+            self.ax_density[1, 1].set_xlabel('Value')
+            self.ax_density[1, 1].set_title('Analysis Metrics')
+            
+            # Add value labels
+            for i, value in enumerate(metric_values):
+                self.ax_density[1, 1].text(value + max(metric_values)*0.01, i, 
+                                         f'{value:.2f}', va='center')
+            
+            self.fig_density.tight_layout()
+            self.canvas_density.draw()
+            
+        except Exception as e:
+            print(f"Error updating density plot: {e}")
+
+    def update_batch_density_plot(self, densities, cdis, filenames):
+        """Update the density analysis plot with batch results."""
+        try:
+            # Clear all subplots
+            for ax in self.ax_density.flat:
+                ax.clear()
+            
+            # Plot 1: Density vs spectrum number
+            spectrum_nums = range(1, len(densities) + 1)
+            self.ax_density[0, 0].plot(spectrum_nums, densities, 'bo-', markersize=4, linewidth=1)
+            self.ax_density[0, 0].axhline(y=np.mean(densities), color='r', linestyle='--', 
+                                         label=f'Mean: {np.mean(densities):.3f}')
+            self.ax_density[0, 0].set_xlabel('Spectrum Number')
+            self.ax_density[0, 0].set_ylabel('Density (g/cm³)')
+            self.ax_density[0, 0].set_title('Density Across All Spectra')
+            self.ax_density[0, 0].legend()
+            self.ax_density[0, 0].grid(True, alpha=0.3)
+            
+            # Plot 2: CDI vs spectrum number
+            self.ax_density[0, 1].plot(spectrum_nums, cdis, 'go-', markersize=4, linewidth=1)
+            self.ax_density[0, 1].axhline(y=0.5, color='r', linestyle='--', 
+                                         label='Classification threshold')
+            self.ax_density[0, 1].set_xlabel('Spectrum Number')
+            self.ax_density[0, 1].set_ylabel('Crystalline Density Index')
+            self.ax_density[0, 1].set_title('CDI Across All Spectra')
+            self.ax_density[0, 1].legend()
+            self.ax_density[0, 1].grid(True, alpha=0.3)
+            
+            # Plot 3: Density histogram
+            self.ax_density[1, 0].hist(densities, bins=min(20, len(densities)//2), 
+                                      alpha=0.7, color='blue', edgecolor='black')
+            self.ax_density[1, 0].axvline(x=np.mean(densities), color='r', linestyle='--', 
+                                         linewidth=2, label=f'Mean: {np.mean(densities):.3f}')
+            self.ax_density[1, 0].set_xlabel('Density (g/cm³)')
+            self.ax_density[1, 0].set_ylabel('Frequency')
+            self.ax_density[1, 0].set_title('Density Distribution')
+            self.ax_density[1, 0].legend()
+            self.ax_density[1, 0].grid(True, alpha=0.3)
+            
+            # Plot 4: CDI vs Density scatter
+            colors = ['red' if cdi <= 0.5 else 'blue' for cdi in cdis]
+            self.ax_density[1, 1].scatter(cdis, densities, c=colors, alpha=0.6, s=30)
+            self.ax_density[1, 1].axvline(x=0.5, color='gray', linestyle=':', alpha=0.7)
+            self.ax_density[1, 1].set_xlabel('Crystalline Density Index')
+            self.ax_density[1, 1].set_ylabel('Density (g/cm³)')
+            self.ax_density[1, 1].set_title('CDI vs Density Correlation')
+            self.ax_density[1, 1].grid(True, alpha=0.3)
+            
+            # Add legend
+            from matplotlib.patches import Patch
+            legend_elements = [Patch(facecolor='blue', label='Crystalline'),
+                              Patch(facecolor='red', label='Organic')]
+            self.ax_density[1, 1].legend(handles=legend_elements)
+            
+            self.fig_density.tight_layout()
+            self.canvas_density.draw()
+            
+        except Exception as e:
+            print(f"Error updating batch density plot: {e}")
+
+    def export_density_results(self):
+        """Export density analysis results to CSV."""
+        if not self.density_results:
+            messagebox.showwarning("No Results", "No density analysis results to export.", parent=self.window)
+            return
+        
+        try:
+            # Ask for file location
+            file_path = filedialog.asksaveasfilename(parent=self.window,
+                defaultextension=".csv",
+                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+                title="Save Density Results"
+            )
+            
+            if not file_path:
+                return
+            
+            # Prepare data for export
+            data = []
+            for i, result in enumerate(self.density_results):
+                row = {
+                    'Spectrum_Number': i + 1,
+                    'Filename': result['filename'],
+                    'Crystalline_Density_Index': result['cdi'],
+                    'Apparent_Density_g_cm3': result['density'],
+                    'COM_Peak_Height': result['metrics']['com_peak_height'],
+                    'Baseline_Intensity': result['metrics']['baseline_intensity'],
+                    'Peak_Width_cm1': result['metrics']['peak_width'],
+                    'Spectral_Contrast': result['metrics']['spectral_contrast']
+                }
+                data.append(row)
+            
+            # Create DataFrame and save to CSV
+            df = pd.DataFrame(data)
+            df.to_csv(file_path, index=False)
+            
+            messagebox.showinfo("Export Complete", f"Density results for {len(data)} spectra saved to {file_path}", parent=self.window)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export density results: {str(e)}", parent=self.window)

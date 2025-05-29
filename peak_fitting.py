@@ -221,8 +221,11 @@ class PeakFittingWindow:
         peak_buttons.pack(fill=tk.X, pady=5)
         ttk.Button(peak_buttons, text="Find Peaks", 
                   command=self.find_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
-        ttk.Button(peak_buttons, text="Add Peaks Manually", 
-                  command=self.enable_manual_peak_adding).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        
+        # Store reference to the manual peak button for styling
+        self.manual_peak_button = ttk.Button(peak_buttons, text="Add Peaks Manually", 
+                  command=self.enable_manual_peak_adding)
+        self.manual_peak_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         
         # Add clear and delete peaks buttons in a frame
         peak_management_frame = ttk.Frame(peak_frame)
@@ -315,7 +318,7 @@ class PeakFittingWindow:
             self.ax1.set_title(f'Raman Spectrum - Background Subtracted (λ={lam:.1e}, p={p:.4f})')
             self.canvas.draw()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to subtract background: {str(e)}")
+            messagebox.showerror("Error", f"Failed to subtract background: {str(e)}", parent=self.window)
     
     def preview_background(self):
         """Preview the background without subtracting it."""
@@ -335,7 +338,7 @@ class PeakFittingWindow:
             self.canvas.draw()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to preview background: {str(e)}")
+            messagebox.showerror("Error", f"Failed to preview background: {str(e)}", parent=self.window)
     
     def compare_background_parameters(self):
         """Compare different background parameters in a separate window."""
@@ -570,7 +573,7 @@ class PeakFittingWindow:
                 if selected >= 0:
                     apply_param_set(selected)
                 else:
-                    messagebox.showinfo("No Selection", "Please select a parameter set first.")
+                    messagebox.showinfo("No Selection", "Please select a parameter set first.", parent=self.window)
             
             # Add a close button
             ttk.Button(
@@ -580,7 +583,7 @@ class PeakFittingWindow:
             ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to compare background parameters: {str(e)}")
+            messagebox.showerror("Error", f"Failed to compare background parameters: {str(e)}", parent=self.window)
     
     def interactive_background_tuning(self):
         """Create an interactive window with sliders to adjust background parameters."""
@@ -862,7 +865,7 @@ class PeakFittingWindow:
             update_plot(True)
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to create interactive tuning window: {str(e)}")
+            messagebox.showerror("Error", f"Failed to create interactive tuning window: {str(e)}", parent=self.window)
     
     def baseline_als(self, y, lam=1e5, p=0.01, niter=10):
         """
@@ -961,7 +964,7 @@ class PeakFittingWindow:
             self.canvas.draw()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}")
+            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}", parent=self.window)
     
     def gaussian(self, x, amp, cen, wid):
         """Gaussian peak function."""
@@ -1078,7 +1081,7 @@ class PeakFittingWindow:
     def fit_peaks(self):
         """Fit the selected peaks to the spectrum."""
         if not self.peaks:
-            messagebox.showwarning("No Peaks", "Please add peaks before fitting.")
+            messagebox.showwarning("No Peaks", "Please add peaks before fitting.", parent=self.window)
             return
             
         # Get the current model
@@ -1126,6 +1129,9 @@ class PeakFittingWindow:
             self.fit_result = self.multi_peak_model(self.wavenumbers, *popt)
             self.residuals = self.spectra - self.fit_result
             
+            # Calculate individual peak R² values
+            self.peak_r_squared = self.calculate_peak_r_squared(popt, model)
+            
             # Display the results
             self.display_fit_results(popt, pcov)
             
@@ -1133,7 +1139,7 @@ class PeakFittingWindow:
             self.update_plot()
             
         except Exception as e:
-            messagebox.showerror("Fit Error", f"Error during peak fitting: {str(e)}")
+            messagebox.showerror("Fit Error", f"Error during peak fitting: {str(e)}", parent=self.window)
             
     def display_fit_results(self, params, covariance):
         """Display the fit results in a new window."""
@@ -1183,6 +1189,10 @@ class PeakFittingWindow:
             
             self.results_text.insert(tk.END, f"  Position: {cen:.2f} ± {cen_err:.2f} cm⁻¹\n")
             self.results_text.insert(tk.END, f"  Amplitude: {amp:.2f} ± {amp_err:.2f}\n")
+            
+            # Add individual peak R² if available
+            if hasattr(self, 'peak_r_squared') and i < len(self.peak_r_squared):
+                self.results_text.insert(tk.END, f"  R²: {self.peak_r_squared[i]:.4f}\n")
             
             if model_type == "Gaussian" or model_type == "Lorentzian":
                 wid = params[start_idx+2]
@@ -1348,7 +1358,7 @@ class PeakFittingWindow:
         # Check if fit_params exists and has data in a NumPy-safe way
         has_fit_results = hasattr(self, 'fit_params') and self.fit_params is not None
         if not has_fit_results or (isinstance(self.fit_params, np.ndarray) and self.fit_params.size == 0):
-            messagebox.showwarning("Warning", "No fit results to export.")
+            messagebox.showwarning("Warning", "No fit results to export.", parent=self.window)
             return
         
         # Ask for export options
@@ -1472,6 +1482,10 @@ class PeakFittingWindow:
                     "model": "Asymmetric Voigt"
                 }
             
+            # Add individual peak R² if available
+            if hasattr(self, 'peak_r_squared') and i < len(self.peak_r_squared):
+                peak_data["r_squared"] = float(self.peak_r_squared[i])
+            
             export_data["peaks"].append(peak_data)
         
         # Ask for save location
@@ -1481,6 +1495,7 @@ class PeakFittingWindow:
         default_ext = ".json" if format_type == "JSON" else ".csv" if format_type == "CSV" else ".txt"
         
         file_path = filedialog.asksaveasfilename(
+            parent=self.window,
             title="Save Fit Results",
             filetypes=file_types,
             defaultextension=default_ext
@@ -1510,7 +1525,7 @@ class PeakFittingWindow:
                 with open(peak_params_file, 'w', newline='') as f:
                     writer = csv.writer(f)
                     # Write header
-                    writer.writerow(["Peak", "Center", "Amplitude", "Width", "Area", "Model"])
+                    writer.writerow(["Peak", "Center", "Amplitude", "Width", "Area", "R_Squared", "Model"])
                     # Write peak data
                     for peak in export_data["peaks"]:
                         writer.writerow([
@@ -1519,6 +1534,7 @@ class PeakFittingWindow:
                             peak["amplitude"],
                             peak.get("width", peak.get("width_left", 0)),
                             peak["area"],
+                            peak.get("r_squared", "N/A"),
                             peak["model"]
                         ])
                 
@@ -1614,21 +1630,22 @@ class PeakFittingWindow:
             else:  # TXT
                 with open(file_path, 'w') as f:
                     f.write(f"Peak Fitting Results - {self.current_model.get()} Model\n")
-                    f.write("-" * 60 + "\n")
-                    f.write("Peak\tCenter\tAmplitude\tWidth\tArea\n")
+                    f.write("-" * 80 + "\n")
+                    f.write("Peak\tCenter\tAmplitude\tWidth\tArea\tR²\n")
                     for peak in export_data["peaks"]:
                         width = peak.get("width", f"{peak.get('width_left', 0)}/{peak.get('width_right', 0)}")
-                        f.write(f"{peak['index']}\t{peak['center']:.2f}\t{peak['amplitude']:.3f}\t{width}\t{peak['area']:.2f}\n")
+                        r_squared = peak.get("r_squared", "N/A")
+                        f.write(f"{peak['index']}\t{peak['center']:.2f}\t{peak['amplitude']:.3f}\t{width}\t{peak['area']:.2f}\t{r_squared}\n")
             
             if format_type == "CSV":
                 messagebox.showinfo("Export Successful", 
                                    f"Results exported to:\n"
                                    f"- {peak_params_file} (peak parameters)\n"
-                                   f"- {curve_data_file} (curve data)")
+                                   f"- {curve_data_file} (curve data)", parent=self.window)
             else:
-                messagebox.showinfo("Export Successful", f"Results exported to {file_path}")
+                messagebox.showinfo("Export Successful", f"Results exported to {file_path}", parent=self.window)
         except Exception as e:
-            messagebox.showerror("Export Failed", f"Failed to export results: {e}")
+            messagebox.showerror("Export Failed", f"Failed to export results: {e}", parent=self.window)
             
     def _export_to_mineral_database(self):
         """Export the fitting results to the mineral database."""
@@ -1645,7 +1662,8 @@ class PeakFittingWindow:
                 messagebox.showwarning(
                     "Module Not Found", 
                     "The mineral database module was not found.\n\n"
-                    "Please ensure mineral_database.py is in your project directory."
+                    "Please ensure mineral_database.py is in your project directory.",
+                    parent=self.window
                 )
                 return
                 
@@ -1706,11 +1724,12 @@ class PeakFittingWindow:
                     "Manual Import Required", 
                     "Please use the database GUI to manually import the peak data:\n\n"
                     "1. Add a new mineral or select an existing one\n"
-                    "2. Add each peak manually with position and symmetry"
+                    "2. Add each peak manually with position and symmetry",
+                    parent=self.window
                 )
                 
         except Exception as e:
-            messagebox.showerror("Export Failed", f"Failed to export to mineral database: {e}")
+            messagebox.showerror("Export Failed", f"Failed to export to mineral database: {e}", parent=self.window)
     
     def enable_manual_peak_adding(self):
         """Enable/disable manual peak addition mode where user can click on the plot to add peaks."""
@@ -1725,10 +1744,10 @@ class PeakFittingWindow:
                     self.peaks = []
                     
                 # Change cursor to indicate interactive mode
-                self.canvas.get_tk_widget().config(cursor="plus")
+                self.canvas.get_tk_widget().config(cursor="crosshair")
                 
                 # Update the plot title to show instructions
-                self.ax1.set_title("Click on the plot to add peaks - Press ESC or click button again to exit")
+                self.ax1.set_title("MANUAL MODE: Click on peaks to add them • Click the red button or press ESC to finish")
                 self.canvas.draw()
                 
                 # Store original toolbar state
@@ -1745,20 +1764,29 @@ class PeakFittingWindow:
                 # Connect key press event to exit peak selection mode with ESC
                 self.key_cid = self.canvas.mpl_connect('key_press_event', self.on_key_press)
                 
-                # Update button text
-                for widget in self.window.winfo_children():
-                    if isinstance(widget, ttk.Frame):
-                        for child in widget.winfo_children():
-                            if isinstance(child, ttk.Frame):
-                                for button in child.winfo_children():
-                                    if isinstance(button, ttk.Button) and button.cget('text') == "Add Peaks Manually":
-                                        button.configure(text="Stop Adding Peaks")
+                # Update button appearance to show active state
+                self.manual_peak_button.configure(
+                    text="🛑 Stop Adding Peaks",
+                    style="Active.TButton"
+                )
+                
+                # Create a custom style for the active button if it doesn't exist
+                style = ttk.Style()
+                style.configure("Active.TButton", 
+                               foreground="white", 
+                               background="red",
+                               focuscolor="none")
+                # For better cross-platform compatibility
+                style.map("Active.TButton",
+                         background=[('active', 'darkred'),
+                                   ('pressed', 'darkred')])
+                
             else:
                 # Disable manual peak mode
                 self.disable_manual_peak_adding()
                 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to toggle manual peak selection: {str(e)}")
+            messagebox.showerror("Error", f"Failed to toggle manual peak selection: {str(e)}", parent=self.window)
             # Ensure we're not in a broken state
             self.manual_peak_mode = False
             self.canvas.get_tk_widget().config(cursor="arrow")
@@ -1779,6 +1807,17 @@ class PeakFittingWindow:
             # Find the closest index in the wavenumbers array
             idx = np.abs(self.wavenumbers - x).argmin()
             
+            # Check if a peak already exists very close to this position
+            duplicate_threshold = 5.0  # cm⁻¹
+            for existing_peak in self.peaks:
+                if abs(existing_peak['position'] - self.wavenumbers[idx]) < duplicate_threshold:
+                    # Peak already exists nearby, show message and return
+                    messagebox.showinfo("Peak Exists", 
+                                      f"A peak already exists near {self.wavenumbers[idx]:.1f} cm⁻¹.\n"
+                                      f"Existing peak at {existing_peak['position']:.1f} cm⁻¹", 
+                                      parent=self.window)
+                    return
+            
             # Add the peak
             self.peaks.append({
                 'position': self.wavenumbers[idx],
@@ -1789,9 +1828,32 @@ class PeakFittingWindow:
             # Update the plot
             self.update_plot()
             
-            # Update title to show the number of peaks
-            self.ax1.set_title(f'Manual Peak Selection Mode - {len(self.peaks)} Peaks Added')
+            # Update title with current count and instructions
+            self.ax1.set_title(f'MANUAL MODE: {len(self.peaks)} peaks added • Click red button or press ESC to finish')
             self.canvas.draw()
+            
+            # Provide audio/visual feedback (brief highlight)
+            self.highlight_new_peak(self.wavenumbers[idx], self.spectra[idx])
+    
+    def highlight_new_peak(self, x, y):
+        """Briefly highlight a newly added peak."""
+        try:
+            # Add a temporary highlight circle
+            highlight = self.ax1.plot(x, y, 'yo', markersize=15, alpha=0.7)[0]
+            self.canvas.draw()
+            
+            # Remove the highlight after a short delay
+            self.window.after(500, lambda: self.remove_highlight(highlight))
+        except:
+            pass  # If highlighting fails, just continue
+    
+    def remove_highlight(self, highlight):
+        """Remove the temporary highlight."""
+        try:
+            highlight.remove()
+            self.canvas.draw()
+        except:
+            pass  # If removal fails, just continue
     
     def on_key_press(self, event):
         """Handle key press to exit manual peak selection mode."""
@@ -1810,25 +1872,23 @@ class PeakFittingWindow:
             self.canvas.mpl_disconnect(self.key_cid)
         
         # Restore toolbar
-        self.toolbar._active = self.original_toolbar
+        if hasattr(self, 'original_toolbar'):
+            self.toolbar._active = self.original_toolbar
         
         # Reset flag
         self.manual_peak_mode = False
         
         # Update title to show number of peaks
         if self.peaks:
-            self.ax1.set_title(f'Raman Spectrum - {len(self.peaks)} Peaks')
+            self.ax1.set_title(f'Raman Spectrum - {len(self.peaks)} Peaks Added')
         else:
             self.ax1.set_title('Raman Spectrum')
         
-        # Update button text
-        for widget in self.window.winfo_children():
-            if isinstance(widget, ttk.Frame):
-                for child in widget.winfo_children():
-                    if isinstance(child, ttk.Frame):
-                        for button in child.winfo_children():
-                            if isinstance(button, ttk.Button) and button.cget('text') == "Stop Adding Peaks":
-                                button.configure(text="Add Peaks Manually")
+        # Reset button appearance to normal state
+        self.manual_peak_button.configure(
+            text="Add Peaks Manually",
+            style="TButton"  # Reset to default style
+        )
         
         self.canvas.draw()
     
@@ -1856,7 +1916,7 @@ class PeakFittingWindow:
     def delete_selected_peak(self):
         """Delete the currently selected peak."""
         if not self.peaks:
-            messagebox.showinfo("No Peaks", "No peaks to delete.")
+            messagebox.showinfo("No Peaks", "No peaks to delete.", parent=self.window)
             return
             
         # Create a new window for peak selection
@@ -1909,7 +1969,7 @@ class PeakFittingWindow:
         def delete_peaks():
             selected = listbox.curselection()
             if not selected:
-                messagebox.showwarning("No Selection", "Please select at least one peak to delete.")
+                messagebox.showwarning("No Selection", "Please select at least one peak to delete.", parent=self.window)
                 return
             
             # Get the positions of peaks to delete
@@ -1925,7 +1985,7 @@ class PeakFittingWindow:
             delete_window.destroy()
             
             # Show confirmation
-            messagebox.showinfo("Success", f"{len(selected)} peak(s) deleted successfully.")
+            messagebox.showinfo("Success", f"{len(selected)} peak(s) deleted successfully.", parent=self.window)
         
         # Add delete button
         delete_button = ttk.Button(delete_window, text="Delete Selected Peaks", command=delete_peaks)
@@ -1946,3 +2006,120 @@ class PeakFittingWindow:
         
         # Close the window
         self.window.destroy() 
+
+    def calculate_peak_r_squared(self, params, model_type):
+        """Calculate R-squared value for individual peaks."""
+        peak_r_squared = []
+        
+        # Check if peaks or parameters are empty
+        if not self.peaks or len(params) == 0:
+            return peak_r_squared
+        
+        # Determine number of parameters per peak based on model type
+        if model_type == "Gaussian" or model_type == "Lorentzian":
+            params_per_peak = 3
+        elif model_type == "Pseudo-Voigt":
+            params_per_peak = 4
+        elif model_type == "Asymmetric Voigt":
+            params_per_peak = 5
+        else:
+            params_per_peak = 3
+            
+        n_peaks = len(params) // params_per_peak
+        
+        # Continue with calculation for each peak
+        for peak_idx in range(n_peaks):
+            try:
+                # Get start index for this peak's parameters
+                i = peak_idx * params_per_peak
+                
+                # Extract peak parameters
+                if model_type == "Gaussian":
+                    peak_y = self.gaussian(self.wavenumbers, *params[i:i+3])
+                    center = params[i+1]
+                    width = params[i+2]
+                    # FWHM for Gaussian
+                    fwhm = 2.355 * width
+                elif model_type == "Lorentzian":
+                    peak_y = self.lorentzian(self.wavenumbers, *params[i:i+3])
+                    center = params[i+1]
+                    width = params[i+2]
+                    # FWHM for Lorentzian
+                    fwhm = 2 * width
+                elif model_type == "Pseudo-Voigt":
+                    peak_y = self.pseudo_voigt(self.wavenumbers, *params[i:i+4])
+                    center = params[i+1]
+                    width = params[i+2]
+                    # Approximate FWHM for Pseudo-Voigt
+                    fwhm = 2 * width
+                elif model_type == "Asymmetric Voigt":
+                    peak_y = self.asymmetric_voigt(self.wavenumbers, *params[i:i+5])
+                    center = params[i+1]
+                    width_left = params[i+2]
+                    width_right = params[i+3]
+                    # Average FWHM for asymmetric peak
+                    fwhm = width_left + width_right
+                else:
+                    peak_y = self.gaussian(self.wavenumbers, *params[i:i+3])
+                    center = params[i+1]
+                    width = params[i+2]
+                    fwhm = 2.355 * width
+                
+                # Create a mask for a region around the peak (±2*FWHM)
+                region_width = 2 * fwhm
+                min_bound = center - region_width
+                max_bound = center + region_width
+                
+                # Create mask indices for the peak region
+                mask_indices = np.where(
+                    np.logical_and(
+                        np.greater_equal(self.wavenumbers, min_bound),
+                        np.less_equal(self.wavenumbers, max_bound)
+                    )
+                )[0]
+                
+                # If mask is too narrow, widen it to ensure enough points
+                if len(mask_indices) < 10:
+                    region_width = 3 * fwhm
+                    min_bound = center - region_width
+                    max_bound = center + region_width
+                    mask_indices = np.where(
+                        np.logical_and(
+                            np.greater_equal(self.wavenumbers, min_bound),
+                            np.less_equal(self.wavenumbers, max_bound)
+                        )
+                    )[0]
+                
+                # Calculate contribution of this peak to the total fit
+                if len(mask_indices) > 3:  # Need at least a few points for meaningful R²
+                    # Get data, total fit, and individual peak in the region
+                    y_true_region = self.spectra[mask_indices]
+                    y_fit_region = self.fit_result[mask_indices]
+                    peak_y_region = peak_y[mask_indices]
+                    
+                    # Calculate peak's contribution to the fit in this region
+                    peak_contribution = np.sum(peak_y_region) / np.sum(y_fit_region) if np.sum(y_fit_region) > 0 else 0
+                    
+                    # Only consider regions where this peak is significant
+                    if peak_contribution > 0.2:  # At least 20% contribution
+                        # Calculate R² based on how well the total fit matches data in this region
+                        ss_res = np.sum((y_true_region - y_fit_region) ** 2)
+                        ss_tot = np.sum((y_true_region - np.mean(y_true_region)) ** 2)
+                        
+                        if ss_tot > 0:
+                            r2 = 1 - (ss_res / ss_tot)
+                        else:
+                            r2 = 0.0
+                    else:
+                        # Peak has minimal contribution here
+                        r2 = 0.0
+                else:
+                    r2 = 0.0
+                
+                peak_r_squared.append(r2)
+            except Exception as e:
+                # If any error occurs, add a default value
+                print(f"Error calculating R² for peak {peak_idx}: {e}")
+                peak_r_squared.append(0.0)
+        
+        return peak_r_squared
