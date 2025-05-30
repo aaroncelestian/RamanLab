@@ -143,8 +143,12 @@ class BatchPeakFittingWindow:
                 "  for baseline correction, then click Subtract Background\n\n"
                 "• Manual Peak Control: Add peaks by clicking on the spectrum\n"
                 "  or delete selected peaks\n\n"
-                "• Peak Detection: Set height, distance, and prominence thresholds\n"
-                "  to automatically find peaks, or click Clear Peaks to start over\n\n"
+                "• Peak Detection (Interactive): Use sliders to adjust peak detection parameters:\n"
+                "  - Height: Minimum peak height (0 = Auto detection)\n"
+                "  - Distance: Minimum distance between peaks (0 = Auto detection)\n"
+                "  - Prominence: Minimum peak prominence (0 = Auto detection)\n"
+                "  Enable 'Auto-detect peaks as sliders change' for real-time peak detection\n"
+                "  Use 'Reset to Auto' to return all parameters to automatic detection\n\n"
                 "• Peak Model: Select the mathematical model to use for peak fitting\n"
                 "  (Gaussian, Lorentzian, Pseudo-Voigt, or Asymmetric Voigt)\n\n"
                 "• Fit Ranges: Specify wavenumber ranges for ROI (region of interest)\n"
@@ -309,12 +313,18 @@ class BatchPeakFittingWindow:
         main_container = ttk.Frame(self.window, padding=10)
         main_container.pack(fill=tk.BOTH, expand=True)
         
-        # --- LEFT PANE: Replace with Notebook Tabs ---
-        self.left_panel_width = 350
-        self.left_panel_container = ttk.Frame(main_container, width=self.left_panel_width)
-        self.left_panel_container.pack(side=tk.LEFT, fill=tk.Y)
-        self.left_panel_container.pack_propagate(False)
-
+        # Use PanedWindow to eliminate unused space and allow user control
+        self.main_paned = ttk.PanedWindow(main_container, orient=tk.HORIZONTAL)
+        self.main_paned.pack(fill=tk.BOTH, expand=True)
+        
+        # --- LEFT PANE: Controls Panel ---
+        self.left_panel_container = ttk.Frame(self.main_paned)
+        self.main_paned.add(self.left_panel_container, weight=1)  # Left panel gets 1 weight unit
+        
+        # --- RIGHT PANE: Plot Area ---
+        self.right_panel_container = ttk.Frame(self.main_paned) 
+        self.main_paned.add(self.right_panel_container, weight=3)  # Right panel gets 3 weight units (75% of space)
+        
         # Create notebook for tabs
         self.left_notebook = ttk.Notebook(self.left_panel_container)
         self.left_notebook.pack(fill=tk.BOTH, expand=True)
@@ -354,12 +364,18 @@ class BatchPeakFittingWindow:
         scrollbar_peaks = ttk.Scrollbar(peak_tab, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
+        # Configure scrollable frame to expand with canvas width
+        def configure_scrollable_frame(event):
+            # Update scroll region when content changes
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Make scrollable frame width match canvas width
+            canvas_width = event.width
+            canvas.itemconfig(canvas_window, width=canvas_width)
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", configure_scrollable_frame)
+
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar_peaks.set)
 
         # Pack scrollbar first, then canvas to eliminate gap
@@ -371,11 +387,11 @@ class BatchPeakFittingWindow:
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         canvas.bind("<MouseWheel>", _on_mousewheel)
 
-        controls_frame = ttk.LabelFrame(scrollable_frame, text="Peak Fitting Controls", padding=10)
+        controls_frame = ttk.LabelFrame(scrollable_frame, text="Peak Fitting Controls", padding=5)  # Reduced padding from 10 to 5
         controls_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
         # Background controls
-        bg_frame = ttk.LabelFrame(controls_frame, text="Background", padding=5)
+        bg_frame = ttk.LabelFrame(controls_frame, text="Background", padding=3)  # Reduced padding from 5 to 3
         bg_frame.pack(fill=tk.X, pady=2)
         ttk.Label(bg_frame, text="λ (smoothness):").pack(anchor=tk.W)
         self.var_lambda = tk.StringVar(value="1e5")
@@ -386,7 +402,7 @@ class BatchPeakFittingWindow:
         ttk.Button(bg_frame, text="Subtract Background", command=self.subtract_background).pack(fill=tk.X, pady=2)
 
         # Manual peak controls
-        manual_frame = ttk.LabelFrame(controls_frame, text="Manual Peak Control", padding=5)
+        manual_frame = ttk.LabelFrame(controls_frame, text="Manual Peak Control", padding=3)  # Reduced padding from 5 to 3
         manual_frame.pack(fill=tk.X, pady=2)
         
         # Add/Delete buttons
@@ -399,27 +415,69 @@ class BatchPeakFittingWindow:
         
         ttk.Button(button_frame, text="Delete Peak", command=self.show_peak_deletion_dialog).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        # Peak detection controls
-        peak_frame = ttk.LabelFrame(controls_frame, text="Peak Detection", padding=5)
+        # Peak detection controls with interactive sliders
+        peak_frame = ttk.LabelFrame(controls_frame, text="Peak Detection (Interactive)", padding=3)  # Reduced padding from 5 to 3
         peak_frame.pack(fill=tk.X, pady=2)
-        ttk.Label(peak_frame, text="Height:").pack(anchor=tk.W)
-        self.var_height = tk.StringVar(value="Auto")
-        ttk.Entry(peak_frame, textvariable=self.var_height).pack(fill=tk.X, pady=2)
-        ttk.Label(peak_frame, text="Distance:").pack(anchor=tk.W)
-        self.var_distance = tk.StringVar(value="Auto")
-        ttk.Entry(peak_frame, textvariable=self.var_distance).pack(fill=tk.X, pady=2)
-        ttk.Label(peak_frame, text="Prominence:").pack(anchor=tk.W)
-        self.var_prominence = tk.StringVar(value="Auto")
-        ttk.Entry(peak_frame, textvariable=self.var_prominence).pack(fill=tk.X, pady=2)
+        
+        # Height slider
+        height_container = ttk.Frame(peak_frame)
+        height_container.pack(fill=tk.X, pady=2)
+        ttk.Label(height_container, text="Height:").pack(side=tk.LEFT)
+        self.height_value_label = ttk.Label(height_container, text="Auto")
+        self.height_value_label.pack(side=tk.RIGHT)
+        
+        self.var_height = tk.DoubleVar(value=0)  # 0 represents "Auto"
+        self.height_slider = ttk.Scale(peak_frame, from_=0, to=100, orient=tk.HORIZONTAL, 
+                                     variable=self.var_height, command=lambda v: self.on_height_change(v))
+        self.height_slider.pack(fill=tk.X, pady=(0, 5))
+        
+        # Distance slider
+        distance_container = ttk.Frame(peak_frame)
+        distance_container.pack(fill=tk.X, pady=2)
+        ttk.Label(distance_container, text="Distance:").pack(side=tk.LEFT)
+        self.distance_value_label = ttk.Label(distance_container, text="Auto")
+        self.distance_value_label.pack(side=tk.RIGHT)
+        
+        self.var_distance = tk.DoubleVar(value=0)  # 0 represents "Auto"
+        self.distance_slider = ttk.Scale(peak_frame, from_=0, to=50, orient=tk.HORIZONTAL,
+                                       variable=self.var_distance, command=lambda v: self.on_distance_change(v))
+        self.distance_slider.pack(fill=tk.X, pady=(0, 5))
+        
+        # Prominence slider
+        prominence_container = ttk.Frame(peak_frame)
+        prominence_container.pack(fill=tk.X, pady=2)
+        ttk.Label(prominence_container, text="Prominence:").pack(side=tk.LEFT)
+        self.prominence_value_label = ttk.Label(prominence_container, text="Auto")
+        self.prominence_value_label.pack(side=tk.RIGHT)
+        
+        self.var_prominence = tk.DoubleVar(value=0)  # 0 represents "Auto"
+        self.prominence_slider = ttk.Scale(peak_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                         variable=self.var_prominence, command=lambda v: self.on_prominence_change(v))
+        self.prominence_slider.pack(fill=tk.X, pady=(0, 5))
+        
+        # Auto-detect checkbox
+        self.auto_detect_var = tk.BooleanVar(value=True)
+        auto_detect_cb = ttk.Checkbutton(peak_frame, text="Auto-detect peaks as sliders change", 
+                                       variable=self.auto_detect_var)
+        auto_detect_cb.pack(anchor=tk.W, pady=2)
         
         # Create a frame for the buttons
         peak_button_frame = ttk.Frame(peak_frame)
         peak_button_frame.pack(fill=tk.X, pady=2)
-        ttk.Button(peak_button_frame, text="Find Peaks", command=self.find_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
-        ttk.Button(peak_button_frame, text="Clear Peaks", command=self.clear_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        
+        # First row of buttons
+        button_row1 = ttk.Frame(peak_button_frame)
+        button_row1.pack(fill=tk.X, pady=1)
+        ttk.Button(button_row1, text="Find Peaks", command=self.find_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(button_row1, text="Clear Peaks", command=self.clear_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        
+        # Second row of buttons
+        button_row2 = ttk.Frame(peak_button_frame)
+        button_row2.pack(fill=tk.X, pady=1)
+        ttk.Button(button_row2, text="Reset to Auto", command=self.reset_peak_params).pack(fill=tk.X, padx=1)
 
         # Model selection
-        model_frame = ttk.LabelFrame(controls_frame, text="Peak Model", padding=5)
+        model_frame = ttk.LabelFrame(controls_frame, text="Peak Model", padding=3)  # Reduced padding from 5 to 3
         model_frame.pack(fill=tk.X, pady=2)
         self.current_model = tk.StringVar(value="Gaussian")
         model_combo = ttk.Combobox(model_frame, textvariable=self.current_model, 
@@ -562,9 +620,8 @@ class BatchPeakFittingWindow:
 
 
         # --- RIGHT PANEL: Visualization ---
-        right_panel = ttk.Frame(main_container)
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
-        self.viz_notebook = ttk.Notebook(right_panel)
+        # Use the right_panel_container already created in PanedWindow
+        self.viz_notebook = ttk.Notebook(self.right_panel_container)
         self.viz_notebook.pack(fill=tk.BOTH, expand=True)
 
         # Bind tab change event for visualization notebook
@@ -1297,6 +1354,9 @@ class BatchPeakFittingWindow:
             
             # Update the plot
             self.update_plot()
+            
+            # Update slider ranges based on new spectrum data
+            self.update_slider_ranges()
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load spectrum: {str(e)}", parent=self.window)
@@ -2493,33 +2553,23 @@ class BatchPeakFittingWindow:
     def find_peaks(self):
         """Find peaks in the current spectrum."""
         try:
-            # Get parameters
-            height = self.var_height.get()
-            distance = self.var_distance.get()
-            prominence = self.var_prominence.get()
+            # Get parameters from sliders
+            height_val = self.var_height.get()
+            distance_val = self.var_distance.get()
+            prominence_val = self.var_prominence.get()
             
-            # Convert parameters to float if not "Auto" - use safe conversion
-            try:
-                height = float(height) if height != "Auto" else None
-            except (ValueError, TypeError):
-                height = None
-                
-            try:
-                distance = int(float(distance)) if distance != "Auto" else None
-            except (ValueError, TypeError):
-                distance = None
-                
-            try:
-                prominence = float(prominence) if prominence != "Auto" else None
-            except (ValueError, TypeError):
-                prominence = None
+            # Convert slider values (0 = Auto, >0 = actual value)
+            height = None if height_val == 0 else height_val
+            distance = None if distance_val == 0 else int(distance_val)
+            prominence = None if prominence_val == 0 else prominence_val
             
             # Get a copy of the spectrum data to avoid modifying the original
             spectra_data = np.copy(self.spectra)
             
             # Ensure we have valid data
             if spectra_data is None or len(spectra_data) == 0:
-                messagebox.showerror("Error", "No spectrum data available", parent=self.window)
+                if hasattr(self, 'window'):  # Avoid error if called during auto-detect
+                    messagebox.showerror("Error", "No spectrum data available", parent=self.window)
                 return
                 
             # Import scipy find_peaks function safely inside the try block
@@ -2532,7 +2582,8 @@ class BatchPeakFittingWindow:
                     prominence=prominence
                 )
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to execute scipy.signal.find_peaks: {str(e)}", parent=self.window)
+                if hasattr(self, 'window'):  # Avoid error if called during auto-detect
+                    messagebox.showerror("Error", f"Failed to execute scipy.signal.find_peaks: {str(e)}", parent=self.window)
                 return
             
             # Store peak positions and intensities
@@ -2552,7 +2603,94 @@ class BatchPeakFittingWindow:
             import traceback
             error_details = traceback.format_exc()
             print(f"Error in find_peaks: {error_details}")
-            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}", parent=self.window)
+            if hasattr(self, 'window'):  # Avoid error if called during auto-detect
+                messagebox.showerror("Error", f"Failed to find peaks: {str(e)}", parent=self.window)
+
+    def on_height_change(self, value):
+        """Callback for height slider changes."""
+        val = float(value)
+        if val == 0:
+            self.height_value_label.config(text="Auto")
+        else:
+            self.height_value_label.config(text=f"{val:.1f}")
+        
+        # Auto-detect peaks if enabled with throttling
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            # Cancel any pending auto-detection
+            if hasattr(self, '_height_after_id'):
+                self.window.after_cancel(self._height_after_id)
+            # Schedule new auto-detection with delay
+            self._height_after_id = self.window.after(200, self.find_peaks)
+
+    def on_distance_change(self, value):
+        """Callback for distance slider changes."""
+        val = float(value)
+        if val == 0:
+            self.distance_value_label.config(text="Auto")
+        else:
+            self.distance_value_label.config(text=f"{int(val)}")
+        
+        # Auto-detect peaks if enabled
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            self.find_peaks()
+
+    def on_prominence_change(self, value):
+        """Callback for prominence slider changes."""
+        val = float(value)
+        if val == 0:
+            self.prominence_value_label.config(text="Auto")
+        else:
+            self.prominence_value_label.config(text=f"{val:.1f}")
+        
+        # Auto-detect peaks if enabled
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            self.find_peaks()
+
+    def reset_peak_params(self):
+        """Reset all peak detection parameters to Auto."""
+        self.var_height.set(0)
+        self.var_distance.set(0)
+        self.var_prominence.set(0)
+        self.height_value_label.config(text="Auto")
+        self.distance_value_label.config(text="Auto")
+        self.prominence_value_label.config(text="Auto")
+        
+        # Auto-detect peaks if enabled with throttling
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            # Cancel any pending auto-detection
+            for attr in ['_height_after_id', '_distance_after_id', '_prominence_after_id']:
+                if hasattr(self, attr):
+                    self.window.after_cancel(getattr(self, attr))
+            # Schedule new auto-detection with delay
+            self.window.after(200, self.find_peaks)
+    
+    def update_slider_ranges(self):
+        """Update slider ranges based on current spectrum data."""
+        if not hasattr(self, 'spectra') or self.spectra is None:
+            return
+        
+        try:
+            # Update height slider range based on spectrum intensity
+            min_intensity = np.min(self.spectra)
+            max_intensity = np.max(self.spectra)
+            intensity_range = max_intensity - min_intensity
+            
+            # Set height range from 0 to max intensity with reasonable precision
+            self.height_slider.config(to=max_intensity)
+            
+            # Update prominence slider range (typically smaller than height)
+            self.prominence_slider.config(to=intensity_range * 0.5)
+            
+            # Distance slider range depends on spectrum length
+            spectrum_length = len(self.spectra)
+            self.distance_slider.config(to=min(50, spectrum_length // 10))
+            
+        except Exception as e:
+            print(f"Error updating slider ranges: {e}")
+            # Use default ranges if calculation fails
+            self.height_slider.config(to=100)
+            self.prominence_slider.config(to=50)
+            self.distance_slider.config(to=50)
     
     def gaussian(self, x, a, x0, sigma):
         """Gaussian peak function."""

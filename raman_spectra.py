@@ -969,32 +969,47 @@ class RamanSpectra:
             first_line = data_lines[0] if data_lines else ""
             has_header = not any(c.isdigit() for c in first_line.split(likely_delimiter)[0])
             
-            # Try different parsing approaches
+            # Special handling for line scan splitter format
+            # Check if first line looks like "Wavenumber (cm-1)\tIntensity" pattern
+            if (has_header and likely_delimiter == '\t' and 
+                len(data_lines) > 0 and 
+                any(term in first_line.lower() for term in ['wavenumber', 'raman', 'cm-1', 'intensity'])):
+                print("Detected line scan splitter format")
+                # Force tab delimiter with header for this format
+                parsing_approaches = [
+                    lambda: pd.read_csv(temp_file, sep='\t', header=0),
+                    lambda: pd.read_csv(temp_file, sep='\t', header=None),
+                    lambda: pd.read_csv(temp_file, sep=likely_delimiter, header=0 if has_header else None),
+                ]
+            else:
+                # Try different parsing approaches
+                parsing_approaches = [
+                    # With header detection
+                    lambda: pd.read_csv(temp_file, sep=likely_delimiter, header=0 if has_header else None),
+                    # Force comma delimiter with header
+                    lambda: pd.read_csv(temp_file, header=0),
+                    # Force comma delimiter without header
+                    lambda: pd.read_csv(temp_file, header=None),
+                    # Force tab delimiter
+                    lambda: pd.read_csv(temp_file, sep='\t', header=None),
+                    # Force whitespace delimiter
+                    lambda: pd.read_csv(temp_file, delim_whitespace=True, header=None),
+                    # Try semicolon delimiter
+                    lambda: pd.read_csv(temp_file, sep=';', header=None),
+                    # Last resort - custom parser
+                    lambda: pd.DataFrame(np.loadtxt(temp_file, ndmin=2))
+                ]
+
             data = None
-            parsing_approaches = [
-                # With header detection
-                lambda: pd.read_csv(temp_file, sep=likely_delimiter, header=0 if has_header else None),
-                # Force comma delimiter with header
-                lambda: pd.read_csv(temp_file, header=0),
-                # Force comma delimiter without header
-                lambda: pd.read_csv(temp_file, header=None),
-                # Force tab delimiter
-                lambda: pd.read_csv(temp_file, sep='\t', header=None),
-                # Force whitespace delimiter
-                lambda: pd.read_csv(temp_file, delim_whitespace=True, header=None),
-                # Try semicolon delimiter
-                lambda: pd.read_csv(temp_file, sep=';', header=None),
-                # Last resort - custom parser
-                lambda: pd.DataFrame(np.loadtxt(temp_file, ndmin=2))
-            ]
-            
             # Try each approach until one works
-            for parse_approach in parsing_approaches:
+            for i, parse_approach in enumerate(parsing_approaches):
                 try:
                     data = parse_approach()
-                    if not data.empty:
+                    if not data.empty and data.shape[1] >= 2:
+                        print(f"Successfully parsed with approach {i+1}")
                         break
-                except:
+                except Exception as e:
+                    print(f"Parsing approach {i+1} failed: {e}")
                     continue
             
             # Clean up temporary file
@@ -1018,12 +1033,22 @@ class RamanSpectra:
             numeric_cols = []
             for i in range(data.shape[1]):
                 try:
-                    pd.to_numeric(data.iloc[:, i])
-                    numeric_cols.append(i)
-                except:
+                    # Try to convert column to numeric, ignoring errors
+                    numeric_data = pd.to_numeric(data.iloc[:, i], errors='coerce')
+                    # Check if most values are numeric (not NaN)
+                    if not numeric_data.isna().all() and (numeric_data.isna().sum() / len(numeric_data)) < 0.5:
+                        numeric_cols.append(i)
+                        print(f"Column {i} ({data.columns[i] if i < len(data.columns) else 'Unnamed'}) detected as numeric")
+                except Exception as e:
+                    print(f"Column {i} failed numeric conversion: {e}")
                     pass
             
+            print(f"Found {len(numeric_cols)} numeric columns: {numeric_cols}")
+            
             if len(numeric_cols) < 2:
+                print(f"Data shape: {data.shape}")
+                print(f"Columns: {data.columns.tolist()}")
+                print(f"First few rows:\n{data.head()}")
                 raise ImportError("Need at least two numeric columns")
             
             # Usually the first numeric column is wavenumbers
@@ -1038,12 +1063,20 @@ class RamanSpectra:
                     break
             
             # Extract data as numpy arrays
-            wavenumbers = pd.to_numeric(data.iloc[:, wavenumber_col]).values
-            intensities = pd.to_numeric(data.iloc[:, intensity_col]).values
+            wavenumbers = pd.to_numeric(data.iloc[:, wavenumber_col], errors='coerce').values
+            intensities = pd.to_numeric(data.iloc[:, intensity_col], errors='coerce').values
             
-            # Check for invalid values
+            # Remove any NaN values (which would come from header rows or invalid data)
+            valid_indices = ~(np.isnan(wavenumbers) | np.isnan(intensities))
+            wavenumbers = wavenumbers[valid_indices]
+            intensities = intensities[valid_indices]
+            
+            # Check for invalid values after cleaning
+            if len(wavenumbers) == 0 or len(intensities) == 0:
+                raise ImportError("No valid numeric data found after processing")
+                
             if np.isnan(wavenumbers).any() or np.isnan(intensities).any():
-                raise ImportError("Data contains NaN values")
+                raise ImportError("Data contains NaN values after processing")
             
             # Store the current spectrum
             self.current_wavenumbers = wavenumbers

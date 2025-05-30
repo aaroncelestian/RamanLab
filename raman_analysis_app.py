@@ -104,6 +104,14 @@ class RamanAnalysisApp:
         # Initialize selected match
         self.selected_match = tk.StringVar()
 
+        # Initialize variables for peak detection sliders
+        self.var_height = tk.StringVar(value="Auto")
+        self.var_distance = tk.StringVar(value="Auto")  
+        self.var_prominence = tk.StringVar(value="Auto")
+        
+        # Throttling for real-time peak detection
+        self.peak_update_job = None
+
         # Create GUI
         self.create_gui()
 
@@ -506,21 +514,73 @@ class RamanAnalysisApp:
         peak_frame = ttk.LabelFrame(self.tab_process, text="Peak Finding", padding=10)
         peak_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(peak_frame, text="Peak Height Threshold:").pack(anchor=tk.W)
-        self.var_height = tk.StringVar(value="Auto")
-        ttk.Entry(peak_frame, textvariable=self.var_height).pack(fill=tk.X, pady=2)
+        # Auto-detect checkbox
+        self.var_auto_detect = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            peak_frame, 
+            text="Real-time Auto-detection", 
+            variable=self.var_auto_detect
+        ).pack(anchor=tk.W, pady=(0, 5))
 
-        ttk.Label(peak_frame, text="Min. Peak Distance:").pack(anchor=tk.W)
-        self.var_distance = tk.StringVar(value="Auto")
-        ttk.Entry(peak_frame, textvariable=self.var_distance).pack(fill=tk.X, pady=2)
-
-        ttk.Label(peak_frame, text="Peak Prominence:").pack(anchor=tk.W)
-        self.var_prominence = tk.StringVar(value="Auto")
-        ttk.Entry(peak_frame, textvariable=self.var_prominence).pack(fill=tk.X, pady=2)
-
-        ttk.Button(peak_frame, text="Find Peaks", command=self.find_peaks).pack(
-            fill=tk.X, pady=5
+        # Height slider
+        ttk.Label(peak_frame, text="Peak Height Threshold (0 = Auto):").pack(anchor=tk.W)
+        self.var_height_slider = tk.DoubleVar(value=0.0)
+        self.height_slider = ttk.Scale(
+            peak_frame, 
+            from_=0, to=1000, 
+            orient=tk.HORIZONTAL, 
+            variable=self.var_height_slider,
+            command=lambda val: self.on_height_change(val)
         )
+        self.height_slider.pack(fill=tk.X, pady=(2, 5))
+        
+        # Distance slider
+        ttk.Label(peak_frame, text="Min. Peak Distance (0 = Auto):").pack(anchor=tk.W)
+        self.var_distance_slider = tk.DoubleVar(value=0.0)
+        self.distance_slider = ttk.Scale(
+            peak_frame, 
+            from_=0, to=50, 
+            orient=tk.HORIZONTAL, 
+            variable=self.var_distance_slider,
+            command=lambda val: self.on_distance_change(val)
+        )
+        self.distance_slider.pack(fill=tk.X, pady=(2, 5))
+        
+        # Prominence slider
+        ttk.Label(peak_frame, text="Peak Prominence (0 = Auto):").pack(anchor=tk.W)
+        self.var_prominence_slider = tk.DoubleVar(value=0.0)
+        self.prominence_slider = ttk.Scale(
+            peak_frame, 
+            from_=0, to=500, 
+            orient=tk.HORIZONTAL, 
+            variable=self.var_prominence_slider,
+            command=lambda val: self.on_prominence_change(val)
+        )
+        self.prominence_slider.pack(fill=tk.X, pady=(2, 5))
+        
+        # Button frame for peak controls
+        peak_button_frame = ttk.Frame(peak_frame)
+        peak_button_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(
+            peak_button_frame, 
+            text="Reset to Auto", 
+            command=self.reset_peak_params
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+        
+        ttk.Button(
+            peak_button_frame, 
+            text="Clear Peaks", 
+            command=self.clear_spectrum_peaks
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Help text for peak detection
+        help_text = ("Drag sliders to adjust peak detection parameters in real-time. "
+                    "Set value to 0 for automatic detection. Real-time auto-detection "
+                    "checkbox enables/disables automatic peak finding as you adjust sliders.")
+        help_label = ttk.Label(peak_frame, text=help_text, wraplength=300, 
+                              foreground="gray", font=("TkDefaultFont", 8))
+        help_label.pack(anchor=tk.W, pady=(5, 0))
 
         # Display options frame
         display_frame = ttk.LabelFrame(
@@ -1961,6 +2021,9 @@ class RamanAnalysisApp:
             # Update the plot and metadata display
             self.update_plot()
             self.update_metadata_display()
+            
+            # Update slider ranges for peak detection
+            self.update_slider_ranges()
              
             # Update status in title bar
             filename = os.path.basename(file_path)
@@ -2125,6 +2188,9 @@ class RamanAnalysisApp:
             self.update_plot(
                 include_background=False, include_peaks=self.var_show_peaks.get()
             )
+            
+            # Update slider ranges for peak detection
+            self.update_slider_ranges()
 
             # Update status in title bar instead of showing a dialog
             current_title = self.root.title()
@@ -2152,6 +2218,9 @@ class RamanAnalysisApp:
             
             # Update the plot to show original spectrum
             self.update_plot(include_background=False, include_peaks=False)
+            
+            # Update slider ranges for peak detection
+            self.update_slider_ranges()
             
             # Update title bar to remove processing indicators
             current_title = self.root.title()
@@ -2187,15 +2256,26 @@ class RamanAnalysisApp:
 
     def find_peaks(self):
         """Find peaks in the current spectrum."""
+        if not self.var_auto_detect.get():
+            return
+            
         if self.raman.current_spectra is None:
-            messagebox.showerror("Error", "No spectrum loaded.")
             return
 
+        # Cancel any pending peak update
+        if self.peak_update_job:
+            self.root.after_cancel(self.peak_update_job)
+        
+        # Schedule peak update with throttling
+        self.peak_update_job = self.root.after(200, self._perform_peak_detection)
+
+    def _perform_peak_detection(self):
+        """Perform the actual peak detection with current parameters."""
         try:
-            # Get parameters, handling "Auto"
-            height_str = self.var_height.get().strip()
-            distance_str = self.var_distance.get().strip()
-            prominence_str = self.var_prominence.get().strip()
+            # Get parameters from sliders or text variables
+            height_val = self.var_height_slider.get() if hasattr(self, 'var_height_slider') else 0.0
+            distance_val = self.var_distance_slider.get() if hasattr(self, 'var_distance_slider') else 0.0  
+            prominence_val = self.var_prominence_slider.get() if hasattr(self, 'var_prominence_slider') else 0.0
 
             # Determine spectrum for peak finding
             spectrum_to_use = (
@@ -2205,32 +2285,10 @@ class RamanAnalysisApp:
             )
             max_intensity = np.max(spectrum_to_use)
 
-            try:
-                # Convert height to appropriate value
-                if height_str == "Auto":
-                    height = None  # Let RamanSpectra class use default 5%
-                elif height_str.endswith("%"):
-                    # Handle percentage input
-                    percentage = float(height_str.rstrip("%")) / 100.0
-                    height = percentage * max_intensity
-                else:
-                    # Handle absolute value input
-                    height_value = float(height_str)
-                    # If value is less than 1.0, treat as percentage of max intensity
-                    if height_value < 1.0 and height_value > 0:
-                        height = height_value * max_intensity
-                    else:
-                        height = height_value
-
-                # Handle other parameters similarly
-                distance = None if distance_str == "Auto" else int(distance_str)
-                prominence = None if prominence_str == "Auto" else float(prominence_str)
-            except ValueError:
-                messagebox.showerror(
-                    "Error",
-                    "Invalid peak parameters. Please enter numeric values or 'Auto'.",
-                )
-                return
+            # Convert slider values to appropriate peak detection parameters
+            height = None if height_val == 0.0 else height_val
+            distance = None if distance_val == 0.0 else int(distance_val)
+            prominence = None if prominence_val == 0.0 else prominence_val
 
             # Clear previous peaks
             self.raman.peaks = None
@@ -2246,15 +2304,14 @@ class RamanAnalysisApp:
                 include_background=self.var_show_background.get(), include_peaks=True
             )
 
-            # Update title bar with peak count instead of showing dialog
+            # Update title bar with peak count
             current_title = self.root.title()
-            base_title = current_title.split(" - ")[
-                0
-            ]  # Get the base title without additional info
+            base_title = current_title.split(" - ")[0]
             self.root.title(f"{base_title} - {len(peaks['indices'])} Peaks Detected")
 
         except Exception as e:
-            messagebox.showerror("Peak Finding Error", str(e))
+            # Silently handle errors during real-time detection
+            pass
 
     def add_to_database(self):
         """Add the current spectrum to the database."""
@@ -4774,6 +4831,9 @@ class RamanAnalysisApp:
             # Update the plot
             self.update_plot()
             
+            # Update slider ranges for peak detection
+            self.update_slider_ranges()
+            
             messagebox.showinfo("Success", f"Applied Savitzky-Golay smoothing (window={window_length}, order={polyorder})")
             
         except Exception as e:
@@ -5279,3 +5339,323 @@ class RamanAnalysisApp:
             messagebox.showerror(
                 "Error", f"Failed to open chemical strain analysis window: {str(e)}"
             )
+
+    def reset_peak_params(self):
+        """Reset peak detection parameters to automatic."""
+        self.var_height_slider.set(0.0)
+        self.var_distance_slider.set(0.0)
+        self.var_prominence_slider.set(0.0)
+        if self.var_auto_detect.get():
+            self._perform_peak_detection()
+
+    def clear_spectrum_peaks(self):
+        """Clear detected peaks from the current spectrum."""
+        self.raman.peaks = None
+        self.var_show_peaks.set(False)
+        self.update_plot()
+
+    def on_height_change(self, val):
+        """Update peak height threshold and find peaks."""
+        if hasattr(self, 'var_height_slider') and self.var_auto_detect.get():
+            self.find_peaks()
+
+    def on_distance_change(self, val):
+        """Update minimum peak distance and find peaks."""
+        if hasattr(self, 'var_distance_slider') and self.var_auto_detect.get():
+            self.find_peaks()
+
+    def on_prominence_change(self, val):
+        """Update peak prominence and find peaks."""
+        if hasattr(self, 'var_prominence_slider') and self.var_auto_detect.get():
+            self.find_peaks()
+            
+    def update_slider_ranges(self):
+        """Update slider ranges based on current spectrum intensity."""
+        if not hasattr(self, 'height_slider') or self.raman.current_spectra is None:
+            return
+            
+        try:
+            # Determine spectrum for analysis
+            spectrum_to_use = (
+                self.raman.processed_spectra
+                if self.raman.processed_spectra is not None
+                else self.raman.current_spectra
+            )
+            
+            max_intensity = np.max(spectrum_to_use)
+            
+            # Update height slider range (0 to max intensity)
+            self.height_slider.configure(to=max_intensity)
+            
+            # Update prominence slider range (0 to 50% of max intensity)
+            self.prominence_slider.configure(to=max_intensity * 0.5)
+            
+        except Exception:
+            # If there's any error, use default ranges
+            pass
+
+    def display_search_results(self, matches):
+        """Display search results with comparison plots in a new window."""
+        if not matches:
+            messagebox.showinfo("Search Results", "No matches found.")
+            return
+
+        # Create a new window for results
+        results_window = tk.Toplevel(self.root)
+        results_window.title("Search Results - Detailed View")
+        results_window.geometry("1000x700")
+
+        # Store reference to the results window
+        self.results_window = results_window
+
+        # Create main container
+        main_container = ttk.Frame(results_window)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Create left panel for results list
+        left_panel = ttk.Frame(main_container, width=300)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 10))
+        left_panel.pack_propagate(False)
+
+        # Create right panel for plots
+        right_panel = ttk.Frame(main_container)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        # Create listbox for matches
+        matches_frame = ttk.LabelFrame(left_panel, text="Search Matches", padding=5)
+        matches_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        matches_frame.columnconfigure(0, weight=1)
+        matches_frame.rowconfigure(0, weight=1)
+
+        # Add scrollbar to matches list
+        scrollbar = ttk.Scrollbar(matches_frame)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # Create listbox
+        self.matches_listbox = tk.Listbox(
+            matches_frame,
+            yscrollcommand=scrollbar.set,
+            selectmode=tk.BROWSE,
+            height=15
+        )
+        self.matches_listbox.grid(row=0, column=0, sticky="nsew")
+        scrollbar.config(command=self.matches_listbox.yview)
+
+        # Store original match data for reference
+        self.match_data_map = {}
+
+        # Populate listbox with matches
+        for match in matches:
+            if isinstance(match, tuple):
+                name, score = match
+                # Get mineral name from metadata if available
+                mineral_name = name
+                if (
+                    name in self.raman.database
+                    and "metadata" in self.raman.database[name]
+                ):
+                    metadata = self.raman.database[name]["metadata"]
+                    if "NAME" in metadata and metadata["NAME"]:
+                        mineral_name = metadata["NAME"]
+
+                display_text = f"{mineral_name} (Score: {score:.3f})"
+                self.matches_listbox.insert(tk.END, display_text)
+                self.match_data_map[display_text] = (name, score)
+            elif isinstance(match, dict):
+                name = match["name"]
+                score = match["score"]
+                mineral_name = name
+                if (
+                    name in self.raman.database
+                    and "metadata" in self.raman.database[name]
+                ):
+                    metadata = self.raman.database[name]["metadata"]
+                    if "NAME" in metadata and metadata["NAME"]:
+                        mineral_name = metadata["NAME"]
+
+                display_text = f"{mineral_name} (Score: {score:.3f})"
+                self.matches_listbox.insert(tk.END, display_text)
+                self.match_data_map[display_text] = (name, score)
+
+        # Create control buttons
+        controls_frame = ttk.Frame(left_panel)
+        controls_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(
+            controls_frame,
+            text="View Metadata",
+            command=self.show_selected_metadata
+        ).pack(fill=tk.X, pady=2)
+
+        ttk.Button(
+            controls_frame,
+            text="Add to Database",
+            command=self.add_selected_mineral_to_database
+        ).pack(fill=tk.X, pady=2)
+
+        # Create comparison plot
+        comparison_frame = ttk.LabelFrame(right_panel, text="Spectrum Comparison", padding=5)
+        comparison_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Create matplotlib figure
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        
+        fig = Figure(figsize=(7, 6))
+        canvas = FigureCanvasTkAgg(fig, master=comparison_frame)
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Add toolbar
+        toolbar_frame = ttk.Frame(comparison_frame)
+        toolbar_frame.pack(fill=tk.X)
+        toolbar = NavigationToolbar2Tk(canvas, toolbar_frame)
+        toolbar.update()
+
+        # Store references
+        self.results_fig = fig
+        self.results_canvas = canvas
+
+        # Bind the selection event
+        self.matches_listbox.bind("<<ListboxSelect>>", self.on_search_match_select)
+
+        # Automatically select the first match
+        if self.matches_listbox.size() > 0:
+            self.matches_listbox.selection_set(0)
+            self.matches_listbox.see(0)
+            self.on_search_match_select()
+
+    def on_search_match_select(self, event=None):
+        """Handle selection of a match in the search results window."""
+        if not hasattr(self, 'matches_listbox'):
+            return
+            
+        selected_indices = self.matches_listbox.curselection()
+        if not selected_indices:
+            return
+
+        # Get selected match
+        selected_text = self.matches_listbox.get(selected_indices[0])
+        if selected_text not in self.match_data_map:
+            return
+
+        name, score = self.match_data_map[selected_text]
+        
+        # Plot comparison
+        self.plot_search_comparison(name, score)
+
+    def plot_search_comparison(self, selected_name, score):
+        """Plot comparison between current spectrum and selected match."""
+        if not hasattr(self, 'results_fig'):
+            return
+            
+        # Clear previous plot
+        self.results_fig.clear()
+        ax = self.results_fig.add_subplot(111)
+
+        # Get current spectrum
+        if self.raman.processed_spectra is not None:
+            current_spectrum = self.raman.processed_spectra
+        elif self.raman.current_spectra is not None:
+            current_spectrum = self.raman.current_spectra
+        else:
+            return
+
+        current_wavenumbers = self.raman.current_wavenumbers
+
+        # Plot current spectrum
+        ax.plot(current_wavenumbers, current_spectrum, 'b-', label='Current Spectrum', linewidth=1.5)
+
+        # Get and plot selected match
+        if selected_name in self.raman.database:
+            match_data = self.raman.database[selected_name]
+            match_wavenumbers = match_data['wavenumbers']
+            match_spectrum = match_data['intensities']
+            
+            # Get mineral name for display
+            mineral_name = selected_name
+            if 'metadata' in match_data and 'NAME' in match_data['metadata']:
+                mineral_name = match_data['metadata']['NAME']
+            
+            ax.plot(match_wavenumbers, match_spectrum, 'r-', 
+                   label=f'{mineral_name} (Score: {score:.3f})', linewidth=1.5, alpha=0.8)
+
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title('Spectrum Comparison')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Refresh canvas
+        self.results_canvas.draw()
+
+    def show_selected_metadata(self):
+        """Show metadata for the selected match in a new window."""
+        if not hasattr(self, 'matches_listbox'):
+            return
+            
+        selected_indices = self.matches_listbox.curselection()
+        if not selected_indices:
+            messagebox.showinfo("Selection Required", "Please select a spectrum from the list.")
+            return
+
+        selected_text = self.matches_listbox.get(selected_indices[0])
+        if selected_text not in self.match_data_map:
+            return
+
+        name, score = self.match_data_map[selected_text]
+        
+        # Get metadata
+        if name not in self.raman.database:
+            messagebox.showinfo("No Data", "No metadata available for this spectrum.")
+            return
+            
+        metadata = self.raman.database[name].get('metadata', {})
+        
+        # Create metadata window
+        metadata_window = tk.Toplevel(self.results_window)
+        metadata_window.title(f"Metadata - {name}")
+        metadata_window.geometry("500x600")
+        
+        # Create text widget
+        frame = ttk.Frame(metadata_window, padding=10)
+        frame.pack(fill=tk.BOTH, expand=True)
+        
+        text_widget = tk.Text(frame, wrap=tk.WORD)
+        text_widget.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
+        
+        scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_widget.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        text_widget.config(yscrollcommand=scrollbar.set)
+        
+        # Display metadata
+        text_widget.insert(tk.END, f"Spectrum: {name}\n")
+        text_widget.insert(tk.END, f"Match Score: {score:.4f}\n\n")
+        text_widget.insert(tk.END, "=== METADATA ===\n\n")
+        
+        for key, value in metadata.items():
+            text_widget.insert(tk.END, f"{key}: {value}\n")
+        
+        text_widget.config(state=tk.DISABLED)
+
+    def add_selected_mineral_to_database(self):
+        """Add the selected mineral spectrum to the current database."""
+        if not hasattr(self, 'matches_listbox'):
+            return
+            
+        selected_indices = self.matches_listbox.curselection()
+        if not selected_indices:
+            messagebox.showinfo("Selection Required", "Please select a spectrum from the list.")
+            return
+
+        selected_text = self.matches_listbox.get(selected_indices[0])
+        if selected_text not in self.match_data_map:
+            return
+
+        name, score = self.match_data_map[selected_text]
+        
+        # Import the spectrum data as current spectrum
+        if name in self.raman.database:
+            spectrum_data = self.raman.database[name]
+            self.raman.wavenumbers = spectrum_data['wavenumbers']
+            self.raman.current_spectra = spectrum_data['intensities']
