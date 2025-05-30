@@ -264,6 +264,17 @@ class BatchPeakFittingWindow:
         # Display help dialog
         self.show_help_dialog(title, text)
     
+    def show_general_help(self):
+        """Show general help information."""
+        if "General" in self.help_texts:
+            title, text = self.help_texts["General"]
+        else:
+            title = "General Help"
+            text = "General help information is not available."
+        
+        # Display help dialog
+        self.show_help_dialog(title, text)
+    
     def show_help_dialog(self, title, text):
         """Display a help dialog with the given title and text."""
         help_dialog = tk.Toplevel(self.window)
@@ -3916,3 +3927,548 @@ Organic samples (CDI ≤ 0.5): {sum(1 for cdi in cdis if cdi <= 0.5)}/{len(cdis)
             messagebox.showinfo("Export Complete", f"Density results for {len(data)} spectra saved to {file_path}", parent=self.window)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to export density results: {str(e)}", parent=self.window)
+    
+    def on_file_select(self, event):
+        """Handle file selection in the listbox."""
+        try:
+            # Get the index of the clicked item
+            index = self.file_listbox.index(f"@{event.x},{event.y}")
+            # Load and display the selected spectrum
+            self.load_spectrum(index)
+            # Make sure this item is selected
+            self.file_listbox.selection_set(index)
+        except Exception as e:
+            # If we can't get the index from the event, use the first selected item
+            selection = self.file_listbox.curselection()
+            if selection:
+                self.load_spectrum(selection[0])
+            else:
+                self.clear_plot()
+    
+    def on_tab_changed(self, event=None):
+        """Handle tab change events to update context-sensitive help."""
+        # Update status bar with a hint about the current tab
+        try:
+            # Determine which tab is active
+            if event and event.widget == self.left_notebook:
+                current_tab = self.left_notebook.tab(self.left_notebook.select(), "text")
+                if current_tab == "File Selection":
+                    self.status_bar.config(text="File Selection: Add or remove spectrum files. Double-click to select. Press F1 for help.")
+                elif current_tab == "Peaks":
+                    self.status_bar.config(text="Peak Controls: Subtract background, detect/add peaks, and fit with different models. Press F1 for help.")
+                elif current_tab == "Batch":
+                    self.status_bar.config(text="Batch Processing: Set reference spectrum and apply to all files. Press F1 for help.")
+                elif current_tab == "Results":
+                    self.status_bar.config(text="Results: Configure which peaks are displayed and export data. Press F1 for help.")
+            elif event and event.widget == self.viz_notebook:
+                current_tab = self.viz_notebook.tab(self.viz_notebook.select(), "text")
+                if current_tab == "Current Spectrum":
+                    self.status_bar.config(text="Current Spectrum: View selected spectrum with fit results. Press F1 for help.")
+                elif current_tab == "Waterfall":
+                    self.status_bar.config(text="Waterfall Plot: View multiple spectra stacked vertically. Press F1 for help.")
+                elif current_tab == "Heatmap":
+                    self.status_bar.config(text="Heatmap: View spectra as a color-coded intensity map. Press F1 for help.")
+                elif current_tab == "Fit Results":
+                    self.status_bar.config(text="Fit Results: View trends in peak parameters across all spectra. Press F1 for help.")
+                elif current_tab == "Fit Stats":
+                    self.status_bar.config(text="Fit Statistics: Compare fit quality across different spectra. Press F1 for help.")
+                elif current_tab == "Density Analysis":
+                    self.status_bar.config(text="Density Analysis: Quantitative analysis for correlation with micro-CT. Press F1 for help.")
+        except:
+            # Default status message if something goes wrong
+            self.status_bar.config(text="Press F1 for help with the current tab")
+    
+    def update_waterfall_plot(self):
+        """Update the waterfall plot."""
+        # Get current files from listbox
+        current_files = []
+        for i in range(self.file_listbox.size()):
+            filename = self.file_listbox.get(i)
+            # Find the full path in spectra_files
+            for full_path in self.spectra_files:
+                if os.path.basename(full_path) == filename:
+                    current_files.append(full_path)
+                    break
+        
+        if not current_files:
+            self.fig_waterfall.clf()
+            self.ax_waterfall = self.fig_waterfall.add_subplot(111)
+            self.ax_waterfall.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_waterfall.transAxes)
+            self.canvas_waterfall.draw()
+            return
+
+        try:
+            # Clear the figure and recreate axes to prevent shrinking
+            self.fig_waterfall.clf()
+            self.ax_waterfall = self.fig_waterfall.add_subplot(111)
+            
+            skip = int(self.waterfall_skip.get())
+            all_spectra = []
+            all_wavenumbers = None
+            for file_path in current_files[::skip]:
+                # Load spectrum with robust encoding detection
+                wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                if wavenumbers is None or intensities is None:
+                    raise Exception(f"Failed to load data from {file_path}")
+                data = np.column_stack((wavenumbers, intensities))
+                wavenumbers = data[:, 0]
+                spectrum = data[:, 1]
+                if all_wavenumbers is None:
+                    all_wavenumbers = wavenumbers
+                all_spectra.append(spectrum)
+            
+            # Get X-axis range
+            try:
+                xmin = float(self.waterfall_xmin.get()) if self.waterfall_xmin.get() else all_wavenumbers[0]
+                xmax = float(self.waterfall_xmax.get()) if self.waterfall_xmax.get() else all_wavenumbers[-1]
+            except ValueError:
+                xmin = all_wavenumbers[0]
+                xmax = all_wavenumbers[-1]
+            
+            # Create mask for X-axis range
+            mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
+            wavenumbers_masked = all_wavenumbers[mask]
+            all_spectra_masked = [spectrum[mask] for spectrum in all_spectra]
+
+            # Determine color gradient
+            cmap_name = self.waterfall_cmap.get() if hasattr(self, 'waterfall_cmap') else 'all_black'
+            n_lines = len(all_spectra_masked)
+            if cmap_name == 'all_black':
+                colors = ['black'] * n_lines
+            elif cmap_name == 'black_to_darkgrey':
+                colors = [(i/(n_lines-1)*0.3, i/(n_lines-1)*0.3, i/(n_lines-1)*0.3) for i in range(n_lines)]
+            elif cmap_name == 'darkgrey_to_black':
+                colors = [((1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3, (1-i/(n_lines-1))*0.3) for i in range(n_lines)]
+            else:
+                try:
+                    cmap = plt.get_cmap(cmap_name)
+                    # Get user-defined colormap min/max
+                    try:
+                        color_min = float(self.waterfall_cmap_min.get())
+                        color_max = float(self.waterfall_cmap_max.get())
+                        # Clamp to [0, 1]
+                        color_min = max(0.0, min(1.0, color_min))
+                        color_max = max(0.0, min(1.0, color_max))
+                        if color_max <= color_min:
+                            color_max = color_min + 0.01  # Ensure at least a small range
+                    except Exception:
+                        color_min, color_max = 0.0, 0.85
+                    colors = [cmap(color_min + (color_max - color_min) * (i / (n_lines - 1))) for i in range(n_lines)]
+                except Exception:
+                    colors = ['black'] * n_lines
+            linewidth = float(self.waterfall_linewidth.get()) if hasattr(self, 'waterfall_linewidth') else 1.5
+            
+            # Calculate the maximum intensity for proper scaling
+            max_intensity = max(np.max(spectrum) for spectrum in all_spectra_masked)
+            # Get Y offset from entry (absolute units)
+            try:
+                offset_step = float(self.waterfall_yoffset.get())
+            except ValueError:
+                offset_step = 100  # Default if invalid value
+            
+            for i, (spectrum, color) in enumerate(zip(all_spectra_masked, colors)):
+                offset = i * offset_step
+                self.ax_waterfall.plot(wavenumbers_masked, spectrum + offset, 
+                                     label=f'Spectrum {i*skip + 1}', 
+                                     color=color, 
+                                     linewidth=linewidth)
+            
+            # Set tight limits for x and y axes
+            self.ax_waterfall.set_xlim(wavenumbers_masked[0], wavenumbers_masked[-1])
+            y_min = min(np.min(spectrum) for spectrum in all_spectra_masked)
+            y_max = max(np.max(spectrum) + (len(all_spectra_masked) - 1) * offset_step for spectrum in all_spectra_masked)
+            self.ax_waterfall.set_ylim(y_min, y_max)
+            
+            self.ax_waterfall.set_xlabel('Wavenumber (cm⁻¹)')
+            self.ax_waterfall.set_ylabel('Intensity (a.u.)')
+            self.ax_waterfall.set_title('Waterfall Plot')
+            if self.waterfall_show_grid.get():
+                self.ax_waterfall.grid(True, linestyle=':', color='gray', alpha=0.6)
+            else:
+                self.ax_waterfall.grid(False)
+            if self.waterfall_show_legend.get():
+                self.ax_waterfall.legend(loc='upper right', fontsize=8, frameon=True)
+            
+            # Ensure tight layout and maintain aspect ratio
+            self.fig_waterfall.tight_layout()
+            self.canvas_waterfall.draw()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update waterfall plot: {str(e)}", parent=self.window)
+    
+    def reset_heatmap_adjustments(self):
+        """Reset all heatmap color adjustments to default values."""
+        self.heatmap_contrast.set(1.0)
+        self.heatmap_brightness.set(1.0)
+        self.heatmap_gamma.set(1.0)
+        self.update_heatmap_plot()
+    
+    def reset_waterfall_range(self):
+        """Reset waterfall plot X-axis range to full range."""
+        self.waterfall_xmin.delete(0, tk.END)
+        self.waterfall_xmax.delete(0, tk.END)
+        self.update_waterfall_plot()
+    
+    def reset_heatmap_range(self):
+        """Reset heatmap plot X-axis range to full range."""
+        self.heatmap_xmin.delete(0, tk.END)
+        self.heatmap_xmax.delete(0, tk.END)
+        self.update_heatmap_plot()
+    
+    def update_heatmap_plot(self):
+        """Update the heatmap plot."""
+        # Get current files from listbox
+        current_files = []
+        for i in range(self.file_listbox.size()):
+            filename = self.file_listbox.get(i)
+            # Find the full path in spectra_files
+            for full_path in self.spectra_files:
+                if os.path.basename(full_path) == filename:
+                    current_files.append(full_path)
+                    break
+        
+        if not current_files:
+            self.fig_heatmap.clf()
+            self.ax_heatmap = self.fig_heatmap.add_subplot(111)
+            self.ax_heatmap.text(0.5, 0.5, 'No spectra to plot', ha='center', va='center', transform=self.ax_heatmap.transAxes)
+            self.canvas_heatmap.draw()
+            return
+
+        try:
+            # Clear the figure and recreate axes to prevent shrinking
+            self.fig_heatmap.clf()
+            self.ax_heatmap = self.fig_heatmap.add_subplot(111)
+            self._heatmap_colorbar = None
+            all_spectra = []
+            all_wavenumbers = None
+            for file_path in current_files:
+                # Load spectrum with robust encoding detection
+                wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                if wavenumbers is None or intensities is None:
+                    raise Exception(f"Failed to load data from {file_path}")
+                data = np.column_stack((wavenumbers, intensities))
+                wavenumbers = data[:, 0]
+                spectrum = data[:, 1]
+                if all_wavenumbers is None:
+                    all_wavenumbers = wavenumbers
+                all_spectra.append(spectrum)
+            
+            # Get X-axis range
+            try:
+                xmin = float(self.heatmap_xmin.get()) if self.heatmap_xmin.get() else all_wavenumbers[0]
+                xmax = float(self.heatmap_xmax.get()) if self.heatmap_xmax.get() else all_wavenumbers[-1]
+            except ValueError:
+                xmin = all_wavenumbers[0]
+                xmax = all_wavenumbers[-1]
+            
+            # Create mask for X-axis range
+            mask = (all_wavenumbers >= xmin) & (all_wavenumbers <= xmax)
+            wavenumbers_masked = all_wavenumbers[mask]
+            # Apply mask to spectra data as well to match the wavenumber range
+            spectra_array = np.array(all_spectra)[:, mask]
+            
+            # Apply color adjustments
+            contrast = self.heatmap_contrast.get()
+            brightness = self.heatmap_brightness.get()
+            gamma = self.heatmap_gamma.get()
+            
+            # Normalize the data
+            vmin, vmax = np.percentile(spectra_array, (2, 98))  # Use 2nd and 98th percentiles for better contrast
+            normalized_data = (spectra_array - vmin) / (vmax - vmin)
+            
+            # Apply gamma correction
+            normalized_data = np.power(normalized_data, 1/gamma)
+            
+            # Apply contrast
+            normalized_data = (normalized_data - 0.5) * contrast + 0.5
+            
+            # Apply brightness
+            normalized_data = normalized_data * brightness
+            
+            # Clip values to valid range
+            normalized_data = np.clip(normalized_data, 0, 1)
+            
+            # Create custom colormap
+            base_cmap = plt.get_cmap(self.heatmap_cmap.get())
+            custom_cmap = LinearSegmentedColormap.from_list('custom_cmap', base_cmap(np.linspace(0, 1, 256)))
+            
+            # Create the heatmap
+            im = self.ax_heatmap.imshow(
+                normalized_data,
+                aspect='auto',
+                extent=[wavenumbers_masked[0], wavenumbers_masked[-1], len(all_spectra), 0],
+                cmap=custom_cmap,
+                vmin=0,
+                vmax=1
+            )
+            
+            # Add colorbar
+            if hasattr(self, '_heatmap_colorbar') and self._heatmap_colorbar is not None:
+                self._heatmap_colorbar.remove()
+            self._heatmap_colorbar = self.fig_heatmap.colorbar(im, ax=self.ax_heatmap)
+            self._heatmap_colorbar.set_label('Intensity (a.u.)')
+            
+            self.ax_heatmap.set_xlabel('Wavenumber (cm⁻¹)')
+            self.ax_heatmap.set_ylabel('Spectrum Number')
+            self.ax_heatmap.set_title('Heatmap Plot')
+            
+            # Show or hide grid based on checkbox
+            if self.heatmap_show_grid.get():
+                self.ax_heatmap.grid(True, linestyle=':', color='gray', alpha=0.6)
+            else:
+                self.ax_heatmap.grid(False)
+            
+            # Ensure tight layout and maintain aspect ratio
+            self.fig_heatmap.tight_layout()
+            self.canvas_heatmap.draw()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update heatmap plot: {str(e)}", parent=self.window)
+    
+    def export_individual_fit_stats(self):
+        """Export individual fit statistics plots to separate image files."""
+        try:
+            # Ask for directory to save files
+            save_dir = filedialog.askdirectory(parent=self.window, title="Select Directory to Save Individual Plots")
+            if not save_dir:
+                return
+                
+            # Get current model type for filename
+            model_type = self.current_model.get()
+            
+            # Create a temporary figure for each metric
+            metrics = ['position', 'amplitude', 'width', 'eta']
+            for metric in metrics:
+                # Skip eta for models that don't support it
+                if metric == 'eta' and model_type not in ["Pseudo-Voigt", "Asymmetric Voigt"]:
+                    continue
+                    
+                # Create figure for this metric
+                fig, ax = plt.subplots(figsize=(8, 6))
+                self._plot_single_trends_subplot(ax, metric)
+                
+                # Add title and labels
+                ax.set_title(f'Peak {metric.capitalize()} Trends')
+                ax.set_xlabel('Spectrum Number')
+                if metric == 'position':
+                    ax.set_ylabel('Position (cm⁻¹)')
+                elif metric == 'amplitude':
+                    ax.set_ylabel('Amplitude')
+                elif metric == 'width':
+                    ax.set_ylabel('Width (cm⁻¹)')
+                elif metric == 'eta':
+                    ax.set_ylabel('Eta')
+                
+                # Save figure
+                filename = f"{model_type}_peak_{metric}.png"
+                filepath = os.path.join(save_dir, filename)
+                fig.tight_layout()
+                fig.savefig(filepath, dpi=300, bbox_inches='tight')
+                plt.close(fig)
+                
+            messagebox.showinfo("Export Complete", f"Individual plots saved to {save_dir}", parent=self.window)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export individual plots: {str(e)}", parent=self.window)
+    
+    def export_curve_data_csv(self):
+        """Export all peak curve data to a CSV file."""
+        if not self.batch_results:
+            messagebox.showwarning("No Results", "No batch processing results to export.", parent=self.window)
+            return
+            
+        try:
+            # Ask for file location
+            file_path = filedialog.asksaveasfilename(
+                parent=self.window,
+                defaultextension=".csv",
+                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")],
+                title="Save Peak Curve Data"
+            )
+            
+            if not file_path:
+                return
+                
+            # Get data from extract_trend_data which already has all the peak information we need
+            x, trends, n_peaks, uncertainties = self.extract_trend_data()
+            if x is None or trends is None or n_peaks is None:
+                messagebox.showwarning("No Data", "No trend data available to export.", parent=self.window)
+                return
+                
+            # Get model type to determine column headers
+            model_type = self.current_model.get()
+            
+            # Prepare data frame
+            data = []
+            # First add spectrum info (index and filename)
+            for i, result in enumerate(self.batch_results):
+                filename = os.path.basename(result['file'])
+                fit_success = not result.get('fit_failed', True)
+                row = {'Spectrum': i, 'File': filename, 'Fit_Success': fit_success}
+                data.append(row)
+                
+            # Create DataFrame
+            df = pd.DataFrame(data)
+            
+            # Add column for each peak parameter
+            for peak_idx in range(n_peaks):
+                # Only include visible peaks
+                if peak_idx < len(self.peak_visibility_vars) and self.peak_visibility_vars[peak_idx].get():
+                    # Position
+                    df[f'Peak_{peak_idx+1}_Position'] = trends[peak_idx]['pos']
+                    df[f'Peak_{peak_idx+1}_Position_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['pos']]
+                    
+                    # Amplitude
+                    df[f'Peak_{peak_idx+1}_Amplitude'] = trends[peak_idx]['amp']
+                    df[f'Peak_{peak_idx+1}_Amplitude_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['amp']]
+                    
+                    # Width
+                    if model_type == "Asymmetric Voigt":
+                        df[f'Peak_{peak_idx+1}_Width_Left'] = trends[peak_idx]['wid_left']
+                        df[f'Peak_{peak_idx+1}_Width_Left_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid_left']]
+                        df[f'Peak_{peak_idx+1}_Width_Right'] = trends[peak_idx]['wid_right']
+                        df[f'Peak_{peak_idx+1}_Width_Right_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid_right']]
+                    else:
+                        df[f'Peak_{peak_idx+1}_Width'] = trends[peak_idx]['wid']
+                        df[f'Peak_{peak_idx+1}_Width_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['wid']]
+                    
+                    # Eta (for Pseudo-Voigt and Asymmetric Voigt)
+                    if model_type in ["Pseudo-Voigt", "Asymmetric Voigt"]:
+                        df[f'Peak_{peak_idx+1}_Eta'] = trends[peak_idx]['eta']
+                        df[f'Peak_{peak_idx+1}_Eta_Error'] = [err if err is not None else np.nan for err in uncertainties[peak_idx]['eta']]
+            
+            # Save to CSV
+            df.to_csv(file_path, index=False)
+            
+            messagebox.showinfo("Export Complete", f"Peak curve data saved to {file_path}", parent=self.window)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export curve data: {str(e)}", parent=self.window)
+    
+    def export_fit_stats_plot(self):
+        """Export the Fit Stats plot to an image file."""
+        try:
+            file_path = filedialog.asksaveasfilename(
+                parent=self.window,
+                defaultextension=".png",
+                filetypes=[
+                    ("PNG files", "*.png"),
+                    ("PDF files", "*.pdf"),
+                    ("SVG files", "*.svg"),
+                    ("All files", "*.*")
+                ],
+                title="Save Fit Stats Plot"
+            )
+            
+            if file_path:
+                # Save the current figure
+                self.fig_stats.savefig(
+                    file_path,
+                    dpi=300,
+                    bbox_inches='tight',
+                    pad_inches=0.1,
+                    facecolor='white',
+                    edgecolor='none'
+                )
+                
+                messagebox.showinfo("Success", f"Plot saved successfully to:\n{file_path}", parent=self.window)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export plot: {str(e)}", parent=self.window)
+    
+    def update_fit_stats_plot(self):
+        """Update the fit statistics plots to show best, median, and worst fits."""
+        if not self.batch_results:
+            # Clear all subplots
+            for ax in self.ax_stats.flatten():
+                ax.clear()
+                ax.axis('off')
+            self.canvas_stats.draw()
+            return
+
+        # Clear all subplots
+        for ax in self.ax_stats.flatten():
+            ax.clear()
+
+        # For now, just show a message that this feature is being restored
+        self.ax_stats[1, 1].text(0.5, 0.5, 'Fit Statistics Plot\n(Feature being restored)', 
+                                ha='center', va='center', transform=self.ax_stats[1, 1].transAxes)
+        
+        self.canvas_stats.draw()
+    
+    def calculate_peak_r_squared(self, y_true, y_fit_total, peak_params, model_type):
+        """Calculate R² values for individual peaks."""
+        try:
+            # For now, return empty list - this method needs to be restored from backup
+            return []
+        except Exception:
+            return []
+    
+    def validate_fit_parameters(self, popt, initial_params, model_type, peaks_in_roi):
+        """Validate fit parameters for realism."""
+        try:
+            # Basic validation - check if parameters are finite and reasonable
+            if not np.all(np.isfinite(popt)):
+                return False
+            
+            # Check if any amplitudes are negative
+            model_type = self.current_model.get()
+            if model_type in ["Gaussian", "Lorentzian"]:
+                params_per_peak = 3
+            elif model_type == "Pseudo-Voigt":
+                params_per_peak = 4
+            elif model_type == "Asymmetric Voigt":
+                params_per_peak = 5
+            else:
+                params_per_peak = 3
+            
+            n_peaks = len(popt) // params_per_peak
+            for i in range(n_peaks):
+                amp = popt[i * params_per_peak]  # Amplitude is first parameter
+                if amp < 0:
+                    return False
+            
+            return True
+        except Exception:
+            return False
+    
+    def update_batch_results_if_present(self):
+        """Update batch results if the current spectrum is part of batch results."""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return
+            
+        if not hasattr(self, 'current_spectrum_index') or self.current_spectrum_index < 0:
+            return
+            
+        if self.current_spectrum_index >= len(self.spectra_files):
+            return
+            
+        current_file = self.spectra_files[self.current_spectrum_index]
+        
+        # Find and update the result for this file
+        for i, result in enumerate(self.batch_results):
+            if result.get('file') == current_file:
+                # Update with current fit results
+                self.batch_results[i].update({
+                    'peaks': self.peaks.copy() if hasattr(self, 'peaks') else [],
+                    'fit_failed': getattr(self, 'fit_failed', True),
+                    'fit_params': np.copy(self.fit_params) if hasattr(self, 'fit_params') and self.fit_params is not None else None,
+                    'fit_cov': np.copy(self.fit_cov) if hasattr(self, 'fit_cov') and self.fit_cov is not None else None,
+                    'background': np.copy(self.background) if hasattr(self, 'background') and self.background is not None else None,
+                    'fit_result': np.copy(self.fit_result) if hasattr(self, 'fit_result') and self.fit_result is not None else None,
+                    'peak_r_squared': self.peak_r_squared.copy() if hasattr(self, 'peak_r_squared') else [],
+                    'manually_refined': True  # Mark as manually refined
+                })
+                break
+    
+    def get_constraint_info_text(self):
+        """Get text describing current parameter constraints."""
+        constraints = []
+        if hasattr(self, 'fix_positions') and self.fix_positions.get():
+            constraints.append("positions fixed")
+        if hasattr(self, 'fix_widths') and self.fix_widths.get():
+            constraints.append("widths fixed")
+        
+        if constraints:
+            return ", ".join(constraints)
+        else:
+            return "No constraints"
