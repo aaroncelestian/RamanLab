@@ -44,6 +44,14 @@ from raman_spectra import RamanSpectra
 # Import the Peak Fitting Window
 from peak_fitting import PeakFittingWindow
 
+# Import the Line Scan Splitter for data conversion
+try:
+    from line_scan_splitter import LineScanSplitterGUI
+    LINE_SCAN_SPLITTER_AVAILABLE = True
+except ImportError:
+    LINE_SCAN_SPLITTER_AVAILABLE = False
+    print("Warning: Line Scan Splitter not available. Data conversion menu will be disabled.")
+
 # Try importing reportlab for PDF generation
 try:
     from reportlab.lib.pagesizes import letter
@@ -190,6 +198,29 @@ class RamanAnalysisApp:
         )
         analysis_menu.add_command(
             label="Mixed Mineral Analysis", command=self.analyze_mixed_minerals
+        )
+
+        # Convert Data menu
+        convert_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Convert Data", menu=convert_menu)
+        if LINE_SCAN_SPLITTER_AVAILABLE:
+            convert_menu.add_command(
+                label="Line Scan Splitter", command=self.open_line_scan_splitter
+            )
+        else:
+            convert_menu.add_command(
+                label="Line Scan Splitter (Not Available)", 
+                command=lambda: messagebox.showerror(
+                    "Error", 
+                    "Line Scan Splitter is not available. Please ensure line_scan_splitter.py is in the application directory."
+                ),
+                state="disabled"
+            )
+        # Placeholder for future conversion tools
+        convert_menu.add_separator()
+        convert_menu.add_command(
+            label="More converters coming soon...", 
+            state="disabled"
         )
 
         # Database menu
@@ -5125,6 +5156,23 @@ class RamanAnalysisApp:
         except Exception as e:
             messagebox.showerror(
                 "Error", f"Error opening Hey-Celestian Frequency Analyzer: {str(e)}"
+            )
+
+    def open_line_scan_splitter(self):
+        """Open the Line Scan Splitter window for data conversion."""
+        try:
+            if LINE_SCAN_SPLITTER_AVAILABLE:
+                # Create a new instance of the LineScanSplitterGUI
+                splitter_gui = LineScanSplitterGUI()
+                splitter_gui.run()
+            else:
+                messagebox.showerror(
+                    "Error", 
+                    "Line Scan Splitter is not available. Please ensure line_scan_splitter.py is in the application directory."
+                )
+        except Exception as e:
+            messagebox.showerror(
+                "Error", f"Failed to open Line Scan Splitter: {str(e)}"
             )
 
     def open_polarization_analysis(self):
