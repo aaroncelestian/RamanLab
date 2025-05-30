@@ -1,4 +1,4 @@
-ClaritySpectra Version 2.6.2
+ClaritySpectra Version 2.6.3
 Release Date: May 27, 2025
 
 📊 Multi-Spectrum Manager Comprehensive Update

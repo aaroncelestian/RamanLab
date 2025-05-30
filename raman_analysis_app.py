@@ -416,6 +416,10 @@ class RamanAnalysisApp:
         self.create_search_tab(self.tab_search)  # Pass the parent tab as argument
         self.create_database_tab()
         self.create_advanced_analysis_tab()  # Advanced analysis functionality
+        
+        # Update metadata filter options to ensure dropdowns are populated
+        if hasattr(self, 'raman') and hasattr(self.raman, 'database'):
+            self.update_metadata_filter_options()
 
     def create_file_tab(self):
         """Create content for the file operations tab."""
@@ -1675,7 +1679,7 @@ class RamanAnalysisApp:
         )
 
         # Matching algorithm selection
-        ttk.Label(params_frame, text="Matching Algorithm:").pack(anchor=tk.W)
+        ttk.Label(params_frame, text="Matching Algorithm: (also used in Advanced Search)").pack(anchor=tk.W)
         self.var_algorithm = tk.StringVar(value="combined")
         algorithms = [
             ("Combined (Recommended)", "combined"),
@@ -1820,7 +1824,7 @@ class RamanAnalysisApp:
         threshold_frame = ttk.Frame(parent)
         threshold_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Label(threshold_frame, text="Correlation Threshold:").pack(side=tk.LEFT)
+        ttk.Label(threshold_frame, text="Similarity Threshold:").pack(side=tk.LEFT)
         self.var_adv_corr_threshold = tk.StringVar(value="0.7")
         ttk.Entry(
             threshold_frame, textvariable=self.var_adv_corr_threshold, width=8
@@ -1828,7 +1832,7 @@ class RamanAnalysisApp:
 
         threshold_hint = ttk.Label(
             threshold_frame,
-            text="Used as secondary score after peak matching",
+            text="Applied after filtering (same as Basic Search threshold)",
             font=("TkDefaultFont", 8),
         )
         threshold_hint.pack(side=tk.LEFT, padx=5)
@@ -1886,58 +1890,31 @@ class RamanAnalysisApp:
         """Update the chemical family dropdown options from database metadata."""
         # Check if the chemical_family_combo attribute exists
         if not hasattr(self, "chemical_family_combo"):
-            print("Chemical family combo not found - returning early")
             return
 
         # Get unique chemical families from database - ONLY those explicitly in metadata
         families = set()
 
-        if hasattr(self, "raman") and hasattr(self, "raman.database"):
-            print(f"Database has {len(self.raman.database)} entries")
+        if hasattr(self, "raman") and hasattr(self.raman, "database") and self.raman.database:
             for name, data in self.raman.database.items():
                 if "metadata" in data and data["metadata"]:
-                    family = data["metadata"].get("CHEMICAL FAMILY")
-                    if family and isinstance(
-                        family, str
-                    ):  # Only add non-empty, string values
+                    # Check both possible field names for Chemical Family
+                    family = data["metadata"].get("CHEMICAL FAMILY") or data["metadata"].get("Chemical Family")
+                    if family and isinstance(family, str):  # Only add non-empty, string values
                         clean_family = family.strip()
-                        families.add(clean_family)
-                        print(f"Entry '{name}' has CHEMICAL FAMILY: '{clean_family}'")
-
-                    # We're no longer extracting families from Hey Classification
-                    # This ensures only explicit Chemical Family values are shown in the filter
+                        if clean_family:  # Make sure it's not just whitespace
+                            families.add(clean_family)
 
         # Sort families for display
         sorted_families = sorted(list(families))
-
-        # Print debug info
-        print(
-            f"Found {len(sorted_families)} unique chemical families explicitly in database metadata"
-        )
-        if sorted_families:
-            print(f"Chemical families in dropdown: {sorted_families}")
 
         # Update the combobox values
         actual_dropdown_values = [""] + sorted_families
         self.chemical_family_combo["values"] = actual_dropdown_values
 
-        # Verify the values were set correctly
-        try:
-            actual_values = self.chemical_family_combo["values"]
-            print(f"Values actually in dropdown after setting: {actual_values}")
-
-            # Ensure compatibility with Tkinter handling of values
-            if isinstance(actual_values, str):
-                print("Warning: Values were converted to string by Tkinter")
-                # Attempt to fix by reapplying as a tuple
-                self.chemical_family_combo["values"] = tuple(actual_dropdown_values)
-        except Exception as e:
-            print(f"Error verifying dropdown values: {str(e)}")
-
         # Keep the current selection if it exists in the new values, otherwise reset
         current_value = self.var_chemical_family.get()
         if current_value and current_value not in sorted_families:
-            print(f"Resetting selection because '{current_value}' not in new values")
             self.var_chemical_family.set("")
 
     def update_database_stats(self):
@@ -2979,6 +2956,9 @@ class RamanAnalysisApp:
 
         # Update title bar
         self.root.title(f"ClaritySpectra: Raman Spectrum Analysis - {name}")
+        
+        # Update metadata filter options in case new chemical families are available
+        self.update_metadata_filter_options()
 
     def remove_database_item(self, name, refresh_callback=None):
         """Remove an item from the database after confirmation."""
@@ -3043,7 +3023,7 @@ class RamanAnalysisApp:
                 )
 
     def advanced_search_match(self):
-        """Perform search using advanced filters (peaks, chemical family, Hey Classification)."""
+        """Perform search using advanced filters with the selected algorithm from Basic Search."""
         if self._validate_search_conditions():
             try:
                 try:
@@ -3071,10 +3051,15 @@ class RamanAnalysisApp:
                         f"Similarity threshold must be a number. Value: '{val}'\nError: {e}",
                     )
                     return
+
+                # Get the selected algorithm from Basic Search
+                selected_algorithm = self.var_algorithm.get()
+                
                 # Store search parameters for reporting
-                self.raman.last_search_algorithm = "Advanced (Filtered)"
+                self.raman.last_search_algorithm = f"Advanced ({selected_algorithm.title()})"
                 self.raman.last_search_threshold = threshold
-                # Advanced Filters
+                
+                # Parse filters
                 peak_positions = []
                 peak_str = self.var_peak_positions.get().strip()
                 if peak_str:
@@ -3098,61 +3083,60 @@ class RamanAnalysisApp:
                             "Invalid peak tolerance. Using default (10 cm⁻¹).",
                         )
 
-                chemical_family = (
-                    self.var_chemical_family.get().strip() or None
-                )  # None if empty
-                hey_classification = (
-                    self.var_hey_classification.get().strip() or None
-                )  # None if empty
+                chemical_family = self.var_chemical_family.get().strip() or None
+                hey_classification = self.var_hey_classification.get().strip() or None
 
                 # Get chemistry elements filters
                 only_elements = None
                 required_elements = None
                 exclude_elements = None
 
-                # Process "only these elements" filter
                 only_elements_str = self.var_only_elements.get().strip()
                 if only_elements_str:
-                    only_elements = [
-                        elem.strip().upper() for elem in only_elements_str.split(",")
-                    ]
+                    only_elements = [elem.strip().upper() for elem in only_elements_str.split(",")]
 
-                # Process "required elements" filter
                 required_elements_str = self.var_required_elements.get().strip()
                 if required_elements_str:
-                    required_elements = [
-                        elem.strip().upper()
-                        for elem in required_elements_str.split(",")
-                    ]
+                    required_elements = [elem.strip().upper() for elem in required_elements_str.split(",")]
 
-                # Process "exclude elements" filter
                 exclude_elements_str = self.var_exclude_elements.get().strip()
                 if exclude_elements_str:
-                    exclude_elements = [
-                        elem.strip().upper() for elem in exclude_elements_str.split(",")
-                    ]
+                    exclude_elements = [elem.strip().upper() for elem in exclude_elements_str.split(",")]
 
-                # Show a message to indicate search criteria
+                # Show search criteria message
                 if peak_positions:
                     messagebox.showinfo(
                         "Search Criteria",
+                        f"Using {selected_algorithm.title()} algorithm with filters.\n"
                         f"Searching for spectra that contain ALL specified peaks: {', '.join([str(p) for p in peak_positions])}\n"
                         + f"With tolerance: ±{peak_tolerance} cm⁻¹",
                     )
 
-                # Perform filtered search
-                matches = self._filtered_search(
-                    peak_positions=peak_positions,
-                    peak_tolerance=peak_tolerance,
+                # First apply filters to get candidate set
+                filtered_candidates = self._apply_metadata_filters(
                     chemical_family=chemical_family,
-                    threshold=threshold,
                     hey_classification=hey_classification,
                     only_elements=only_elements,
                     required_elements=required_elements,
                     exclude_elements=exclude_elements,
+                    peak_positions=peak_positions,
+                    peak_tolerance=peak_tolerance
                 )
 
-                # Sort and limit results
+                if not filtered_candidates:
+                    messagebox.showinfo("No Results", "No spectra match the specified filters.")
+                    self._process_and_display_matches([])
+                    return
+
+                # Apply the selected algorithm to the filtered candidates
+                matches = self._apply_algorithm_to_candidates(
+                    selected_algorithm, 
+                    filtered_candidates, 
+                    n_matches, 
+                    threshold
+                )
+
+                # Sort and display results
                 matches.sort(key=lambda x: x[1], reverse=True)
                 self._process_and_display_matches(matches[:n_matches])
 
@@ -5659,3 +5643,126 @@ class RamanAnalysisApp:
             spectrum_data = self.raman.database[name]
             self.raman.wavenumbers = spectrum_data['wavenumbers']
             self.raman.current_spectra = spectrum_data['intensities']
+
+    def _apply_metadata_filters(self, chemical_family=None, hey_classification=None, 
+                               only_elements=None, required_elements=None, exclude_elements=None,
+                               peak_positions=None, peak_tolerance=10):
+        """Apply metadata and peak filters to get candidate spectra.
+        
+        Returns:
+            list: List of spectrum names that pass all filters
+        """
+        candidates = []
+        
+        for name, data in self.raman.database.items():
+            db_meta = data.get("metadata", {})
+            
+            # Apply chemical family filter
+            if chemical_family:
+                # Check both possible field names
+                db_family = db_meta.get("CHEMICAL FAMILY") or db_meta.get("Chemical Family")
+                if not db_family or db_family.lower() != chemical_family.lower():
+                    continue
+
+            # Apply Hey Classification filter
+            if hey_classification:
+                # Check both possible field names
+                db_hey_class = db_meta.get("HEY CLASSIFICATION") or db_meta.get("Hey Classification")
+                if not db_hey_class or db_hey_class.lower() != hey_classification.lower():
+                    continue
+
+            # Apply chemistry elements filters
+            chemistry_elements = db_meta.get("CHEMISTRY ELEMENTS", "")
+            if chemistry_elements:
+                elements = [elem.strip().upper() for elem in chemistry_elements.split(",")]
+
+                # Check "only these elements" filter
+                if only_elements:
+                    db_elements_set = set(elements)
+                    required_set = set(only_elements)
+                    if db_elements_set != required_set:
+                        continue
+
+                # Check "required elements" filter
+                if required_elements:
+                    db_elements_set = set(elements)
+                    required_set = set(required_elements)
+                    if not required_set.issubset(db_elements_set):
+                        continue
+
+                # Check "exclude elements" filter
+                if exclude_elements:
+                    db_elements_set = set(elements)
+                    exclude_set = set(exclude_elements)
+                    if db_elements_set.intersection(exclude_set):
+                        continue
+
+            # Apply peak position filters
+            if peak_positions:
+                db_peak_data = data.get("peaks")
+                if not db_peak_data or db_peak_data.get("wavenumbers") is None:
+                    continue
+
+                db_peaks = db_peak_data["wavenumbers"]
+                if not db_peaks.size:
+                    continue
+
+                # Check if all specified peaks are present within tolerance
+                all_peaks_found = True
+                for target_peak in peak_positions:
+                    peak_found = False
+                    for peak in db_peaks:
+                        if abs(peak - target_peak) <= peak_tolerance:
+                            peak_found = True
+                            break
+                    if not peak_found:
+                        all_peaks_found = False
+                        break
+
+                if not all_peaks_found:
+                    continue
+
+            # If we reach here, the spectrum passed all filters
+            candidates.append(name)
+            
+        return candidates
+
+    def _apply_algorithm_to_candidates(self, algorithm, candidates, n_matches, threshold):
+        """Apply the selected search algorithm to the filtered candidates.
+        
+        Args:
+            algorithm: Selected algorithm ('correlation', 'peak', 'ml', 'combined')
+            candidates: List of candidate spectrum names to search within
+            n_matches: Maximum number of matches to return
+            threshold: Similarity threshold
+            
+        Returns:
+            list: List of (name, score) tuples
+        """
+        # Temporarily filter the database to only include candidates
+        original_database = self.raman.database.copy()
+        filtered_database = {name: original_database[name] for name in candidates}
+        self.raman.database = filtered_database
+        
+        try:
+            # Use the existing search method with the filtered database
+            if algorithm == "correlation":
+                matches = self.correlation_search(n_matches * 2, threshold)  # Get more to account for filtering
+            elif algorithm == "peak":
+                matches = self.peak_based_search(n_matches * 2, threshold)
+            elif algorithm == "ml" and SKLEARN_AVAILABLE:
+                matches = self.ml_based_search(n_matches * 2, threshold)
+            elif algorithm == "ml":  # Scikit-learn not available
+                messagebox.showwarning(
+                    "Missing Library",
+                    "scikit-learn not found. Using Combined search instead.",
+                )
+                matches = self.raman.search_match(n_matches * 2, threshold)
+            else:  # combined or default
+                matches = self.raman.search_match(n_matches * 2, threshold)
+                
+        finally:
+            # Restore the original database
+            self.raman.database = original_database
+            
+        return matches

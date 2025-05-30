@@ -8,7 +8,7 @@ The ClaritySpectra Update Checker is a built-in feature that allows users to che
 
 ### 🔍 **Automatic Update Detection**
 - Checks GitHub releases for newer versions
-- Compares semantic version numbers (e.g., 2.6.2 vs 2.6.1)
+- Compares semantic version numbers (e.g., 2.6.3 vs 2.6.1)
 - Fallback to commit checking if no releases are available
 - Smart version comparison using the `packaging` library
 
@@ -115,7 +115,7 @@ The update checker is configured for the official ClaritySpectra repository:
 To use with a different repository, modify the `UpdateChecker` class:
 
 ```python
-checker = UpdateChecker(current_version="2.6.2")
+checker = UpdateChecker(current_version="2.6.3")
 checker.github_api_url = "https://api.github.com/repos/your-username/your-repo"
 checker.github_repo_url = "https://github.com/your-username/your-repo"
 ```
@@ -178,7 +178,7 @@ The update checker is integrated into the Help menu:
 ### Version Information
 - **Current Version**: Read from `version.py` file
 - **Version Display**: Shown in About dialog and update checker
-- **Version Format**: Semantic versioning (e.g., 2.6.2)
+- **Version Format**: Semantic versioning (e.g., 2.6.3)
 
 ## Future Enhancements
 

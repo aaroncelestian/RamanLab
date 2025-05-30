@@ -2,7 +2,7 @@
 """
 Multi-Spectrum Manager for ClaritySpectra
 
-@version: 2.6.2
+@version: 2.6.3
 @author: Aaron Celestian, Ph.D.
 @copyright: © 2025 Aaron Celestian. All rights reserved
 """

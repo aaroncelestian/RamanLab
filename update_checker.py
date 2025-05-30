@@ -4,7 +4,7 @@ ClaritySpectra Update Checker
 Checks for updates from the GitHub repository and provides update options.
 
 @author: AaronCelestian
-@version: 2.6.2
+@version: 2.6.3
 ClaritySpectra
 """
 
@@ -27,7 +27,7 @@ class UpdateChecker:
     Handles checking for updates and providing update options to users.
     """
     
-    def __init__(self, current_version="2.6.2"):
+    def __init__(self, current_version="2.6.3"):
         self.current_version = current_version
         self.github_api_url = "https://api.github.com/repos/aaroncelestian/ClaritySpectra"
         self.github_repo_url = "https://github.com/aaroncelestian/ClaritySpectra"
@@ -354,7 +354,7 @@ class UpdateChecker:
         threading.Thread(target=check_thread, daemon=True).start()
 
 
-def create_update_menu_item(parent_menu, current_version="2.6.2"):
+def create_update_menu_item(parent_menu, current_version="2.6.3"):
     """
     Create an update menu item for the main application.
     

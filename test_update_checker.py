@@ -4,7 +4,7 @@ Test script for ClaritySpectra Update Checker integration.
 Verifies that the update checker is properly integrated into the main application.
 
 @author: AaronCelestian
-@version: 2.6.2
+@version: 2.6.3
 ClaritySpectra
 """
 
@@ -37,7 +37,7 @@ def test_update_checker_integration():
     # Test 3: Check if UpdateChecker can be instantiated
     print("3. Testing UpdateChecker instantiation...")
     try:
-        checker = UpdateChecker("2.6.2")
+        checker = UpdateChecker("2.6.3")
         print("   ✓ UpdateChecker instantiated successfully")
     except Exception as e:
         print(f"   ✗ Failed to instantiate UpdateChecker: {e}")
@@ -95,7 +95,7 @@ def test_update_checker_integration():
     print("6. Testing basic update checker functionality...")
     try:
         # Test version comparison
-        result = checker._is_newer_version("2.6.2", "2.6.2")
+        result = checker._is_newer_version("2.6.3", "2.6.3")
         if result:
             print("   ✓ Version comparison working")
         else:
@@ -130,7 +130,7 @@ def test_standalone_update_checker():
     
     try:
         from update_checker import UpdateChecker
-        checker = UpdateChecker("2.6.2")
+        checker = UpdateChecker("2.6.3")
         
         print("Testing update check (this may take a few seconds)...")
         # Test with show_no_updates=False to avoid popup

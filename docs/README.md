@@ -2,7 +2,8 @@
 
 ClaritySpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
-**Current Version:** 2.6.2
+**Advanced Raman Spectroscopy Analysis Software**  
+**Current Version:** 2.6.3
 
 ## Features
 
