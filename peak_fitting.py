@@ -61,6 +61,9 @@ class PeakFittingWindow:
         # Create GUI
         self.create_gui()
         
+        # Update slider ranges based on spectrum data
+        self.update_slider_ranges()
+        
         # Initial plot
         self.update_plot()
         
@@ -191,30 +194,56 @@ class PeakFittingWindow:
     def create_peak_detection_tab(self):
         """Create the peak detection tab controls."""
         # Peak detection frame
-        peak_frame = ttk.LabelFrame(self.peak_detection_frame, text="Peak Detection", padding=10)
+        peak_frame = ttk.LabelFrame(self.peak_detection_frame, text="Peak Detection (Interactive)", padding=10)
         peak_frame.pack(fill=tk.X, pady=(0, 10))
         
         # Help text for peak detection
-        peak_help = tk.Text(peak_frame, height=2, width=42, wrap=tk.WORD)
+        peak_help = tk.Text(peak_frame, height=3, width=42, wrap=tk.WORD)
         peak_help.pack(fill=tk.X, pady=(0, 5))
-        peak_help.insert(tk.END, "Auto height sets threshold at 5% above background. Distance is minimum separation between peaks.")
+        peak_help.insert(tk.END, "Use sliders to adjust peak detection parameters. 0 = Auto detection. Enable auto-detect for real-time peak finding as you adjust sliders.")
         peak_help.config(state=tk.DISABLED)
         
-        # Use grid for more compact layout
-        peak_grid = ttk.Frame(peak_frame)
-        peak_grid.pack(fill=tk.X)
+        # Height slider
+        height_container = ttk.Frame(peak_frame)
+        height_container.pack(fill=tk.X, pady=2)
+        ttk.Label(height_container, text="Height:").pack(side=tk.LEFT)
+        self.height_value_label = ttk.Label(height_container, text="Auto")
+        self.height_value_label.pack(side=tk.RIGHT)
         
-        ttk.Label(peak_grid, text="Height:").grid(row=0, column=0, sticky="w", padx=2, pady=2)
-        self.var_height = tk.StringVar(value="Auto")
-        ttk.Entry(peak_grid, textvariable=self.var_height, width=10).grid(row=0, column=1, sticky="w", padx=2, pady=2)
+        self.var_height = tk.DoubleVar(value=0)  # 0 represents "Auto"
+        self.height_slider = ttk.Scale(peak_frame, from_=0, to=100, orient=tk.HORIZONTAL, 
+                                     variable=self.var_height, command=lambda v: self.on_height_change(v))
+        self.height_slider.pack(fill=tk.X, pady=(0, 5))
         
-        ttk.Label(peak_grid, text="Distance:").grid(row=1, column=0, sticky="w", padx=2, pady=2)
-        self.var_distance = tk.StringVar(value="Auto")
-        ttk.Entry(peak_grid, textvariable=self.var_distance, width=10).grid(row=1, column=1, sticky="w", padx=2, pady=2)
+        # Distance slider
+        distance_container = ttk.Frame(peak_frame)
+        distance_container.pack(fill=tk.X, pady=2)
+        ttk.Label(distance_container, text="Distance:").pack(side=tk.LEFT)
+        self.distance_value_label = ttk.Label(distance_container, text="Auto")
+        self.distance_value_label.pack(side=tk.RIGHT)
         
-        ttk.Label(peak_grid, text="Prominence:").grid(row=2, column=0, sticky="w", padx=2, pady=2)
-        self.var_prominence = tk.StringVar(value="Auto")
-        ttk.Entry(peak_grid, textvariable=self.var_prominence, width=10).grid(row=2, column=1, sticky="w", padx=2, pady=2)
+        self.var_distance = tk.DoubleVar(value=0)  # 0 represents "Auto"
+        self.distance_slider = ttk.Scale(peak_frame, from_=0, to=50, orient=tk.HORIZONTAL,
+                                       variable=self.var_distance, command=lambda v: self.on_distance_change(v))
+        self.distance_slider.pack(fill=tk.X, pady=(0, 5))
+        
+        # Prominence slider
+        prominence_container = ttk.Frame(peak_frame)
+        prominence_container.pack(fill=tk.X, pady=2)
+        ttk.Label(prominence_container, text="Prominence:").pack(side=tk.LEFT)
+        self.prominence_value_label = ttk.Label(prominence_container, text="Auto")
+        self.prominence_value_label.pack(side=tk.RIGHT)
+        
+        self.var_prominence = tk.DoubleVar(value=0)  # 0 represents "Auto"
+        self.prominence_slider = ttk.Scale(peak_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                         variable=self.var_prominence, command=lambda v: self.on_prominence_change(v))
+        self.prominence_slider.pack(fill=tk.X, pady=(0, 5))
+        
+        # Auto-detect checkbox
+        self.auto_detect_var = tk.BooleanVar(value=True)
+        auto_detect_cb = ttk.Checkbutton(peak_frame, text="Auto-detect peaks as sliders change", 
+                                       variable=self.auto_detect_var)
+        auto_detect_cb.pack(anchor=tk.W, pady=2)
         
         # Button layout with Find and Manual
         peak_buttons = ttk.Frame(peak_frame)
@@ -227,7 +256,7 @@ class PeakFittingWindow:
                   command=self.enable_manual_peak_adding)
         self.manual_peak_button.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         
-        # Add clear and delete peaks buttons in a frame
+        # Add clear, delete peaks, and reset buttons in a frame
         peak_management_frame = ttk.Frame(peak_frame)
         peak_management_frame.pack(fill=tk.X, pady=2)
         
@@ -235,6 +264,8 @@ class PeakFittingWindow:
                   command=self.clear_peaks).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
         ttk.Button(peak_management_frame, text="Delete Peak", 
                   command=self.delete_selected_peak).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(peak_management_frame, text="Reset to Auto", 
+                  command=self.reset_peak_params).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
     
     def create_peak_fitting_tab(self):
         """Create the peak fitting tab controls."""
@@ -909,34 +940,27 @@ class PeakFittingWindow:
             if self.peaks is None:
                 self.peaks = []
                 
-            # Get parameters
-            height_str = self.var_height.get().strip()
-            distance_str = self.var_distance.get().strip()
-            prominence_str = self.var_prominence.get().strip()
+            # Get parameters from sliders
+            height_val = self.var_height.get()
+            distance_val = self.var_distance.get()
+            prominence_val = self.var_prominence.get()
+            
+            # Convert slider values (0 = Auto, >0 = actual value)
+            if height_val == 0:
+                # Auto height - set to 5% above background if available
+                if self.background is not None:
+                    intensity_range = np.max(self.spectra) - np.min(self.spectra)
+                    height = np.min(self.spectra) + (0.05 * intensity_range)
+                else:
+                    height = 0.05 * np.max(self.spectra)
+            else:
+                height = height_val
+            
+            distance = None if distance_val == 0 else int(distance_val)
+            prominence = None if prominence_val == 0 else prominence_val
             
             # Determine spectrum for peak finding
             spectrum_to_use = self.spectra
-            
-            # Set auto height to 5% above background if background is available
-            if height_str == "Auto":
-                if self.background is not None:
-                    # Calculate 5% of the intensity range above background
-                    intensity_range = np.max(spectrum_to_use) - np.min(spectrum_to_use)
-                    height = np.min(spectrum_to_use) + (0.05 * intensity_range)
-                else:
-                    # Without background, use 5% of max intensity
-                    height = 0.05 * np.max(spectrum_to_use)
-            else:
-                try:
-                    # Handle numeric input
-                    height = float(height_str)
-                except ValueError:
-                    # Default if input is invalid
-                    height = 0.05 * np.max(spectrum_to_use)
-            
-            # Handle other parameters
-            distance = None if distance_str == "Auto" else int(distance_str)
-            prominence = None if prominence_str == "Auto" else float(prominence_str)
             
             # Find peaks using scipy
             from scipy.signal import find_peaks
@@ -964,7 +988,8 @@ class PeakFittingWindow:
             self.canvas.draw()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to find peaks: {str(e)}", parent=self.window)
+            if hasattr(self, 'window'):  # Avoid error if called during auto-detect
+                messagebox.showerror("Error", f"Failed to find peaks: {str(e)}", parent=self.window)
     
     def gaussian(self, x, amp, cen, wid):
         """Gaussian peak function."""
@@ -1229,30 +1254,50 @@ class PeakFittingWindow:
     
     def update_plot(self):
         """Update the plot with current data and fit."""
+        # Store current axis limits to preserve zoom level, but only if in manual peak mode
+        preserve_zoom = False
+        if hasattr(self, 'manual_peak_mode') and self.manual_peak_mode:
+            try:
+                ax1_xlim = self.ax1.get_xlim()
+                ax1_ylim = self.ax1.get_ylim()
+                ax2_xlim = self.ax2.get_xlim()
+                ax2_ylim = self.ax2.get_ylim()
+                
+                # Check if the stored limits are reasonable (not default or invalid)
+                data_xmin, data_xmax = np.min(self.wavenumbers), np.max(self.wavenumbers)
+                data_ymin, data_ymax = np.min(self.spectra), np.max(self.spectra)
+                
+                # Only preserve zoom if the current limits are within reasonable bounds of the data
+                if (ax1_xlim[0] >= data_xmin - 100 and ax1_xlim[1] <= data_xmax + 100 and
+                    ax1_xlim[0] < ax1_xlim[1] and ax1_ylim[0] < ax1_ylim[1]):
+                    preserve_zoom = True
+            except:
+                preserve_zoom = False
+        
         # Clear the axes
         self.ax1.clear()
         self.ax2.clear()
         
         # Plot original data
-        self.ax1.plot(self.wavenumbers, self.original_spectra, 'k-', alpha=0.5)
+        self.ax1.plot(self.wavenumbers, self.original_spectra, 'k-', alpha=0.5, label='Original')
         
         # Plot background if available
         if self.background is not None:
-            self.ax1.plot(self.wavenumbers, self.background, 'r--', alpha=0.5)
+            self.ax1.plot(self.wavenumbers, self.background, 'r--', alpha=0.5, label='Background')
         
         # Plot processed data
-        self.ax1.plot(self.wavenumbers, self.spectra, 'b-')
+        self.ax1.plot(self.wavenumbers, self.spectra, 'b-', label='Processed')
         
         # Plot peaks
         if self.peaks:
             peak_positions = [peak['position'] for peak in self.peaks]
             peak_intensities = [peak['intensity'] for peak in self.peaks]
-            self.ax1.plot(peak_positions, peak_intensities, 'ro')
+            self.ax1.plot(peak_positions, peak_intensities, 'ro', markersize=8, label='Peaks')
         
         # Plot fit if available
         if self.fit_result is not None:
             # Always plot the combined fit
-            self.ax1.plot(self.wavenumbers, self.fit_result, 'g-')
+            self.ax1.plot(self.wavenumbers, self.fit_result, 'g-', linewidth=2, label='Fit')
             
             # Plot individual peaks if checkbox is checked
             if self.show_individual_peaks.get():
@@ -1330,7 +1375,7 @@ class PeakFittingWindow:
                                          bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
                 
                 # Plot residuals
-                self.ax2.plot(self.wavenumbers, self.residuals, 'r-')
+                self.ax2.plot(self.wavenumbers, self.residuals, 'r-', label='Residuals')
                 # Add zero line
                 self.ax2.axhline(y=0, color='gray', linestyle='--', linewidth=0.5)
                 
@@ -1345,9 +1390,21 @@ class PeakFittingWindow:
         # Configure axes
         self.ax1.set_title('Raman Spectrum and Peak Fit')
         self.ax1.set_ylabel('Intensity (a.u.)')
+        self.ax1.legend(loc='upper right')
         
         self.ax2.set_xlabel('Wavenumber (cm⁻¹)')
         self.ax2.set_ylabel('Residuals')
+        
+        # Only restore zoom level if we're preserving it and the limits are valid
+        if preserve_zoom:
+            try:
+                self.ax1.set_xlim(ax1_xlim)
+                self.ax1.set_ylim(ax1_ylim)
+                self.ax2.set_xlim(ax2_xlim)
+                self.ax2.set_ylim(ax2_ylim)
+            except:
+                # If restoring zoom fails, let matplotlib auto-scale
+                pass
         
         # Update the figure
         self.fig.tight_layout()
@@ -1743,26 +1800,24 @@ class PeakFittingWindow:
                 if self.peaks is None:
                     self.peaks = []
                     
-                # Change cursor to indicate interactive mode
+                # Change cursor to indicate interactive mode (but only when not using toolbar)
                 self.canvas.get_tk_widget().config(cursor="crosshair")
                 
                 # Update the plot title to show instructions
-                self.ax1.set_title("MANUAL MODE: Click on peaks to add them • Click the red button or press ESC to finish")
+                self.ax1.set_title("MANUAL MODE: Click to add peaks • To zoom: use toolbar, then click zoom tool again to add peaks")
                 self.canvas.draw()
                 
-                # Store original toolbar state
+                # Store original toolbar state but DON'T disable it
                 self.original_toolbar = getattr(self.toolbar, '_active', None)
-                
-                # Disable toolbar to prevent interaction conflicts
-                if hasattr(self.toolbar, 'mode'):
-                    self.toolbar.mode = ''
-                self.toolbar._active = None
                 
                 # Connect the click event handler
                 self.click_cid = self.canvas.mpl_connect('button_press_event', self.on_plot_click)
                 
                 # Connect key press event to exit peak selection mode with ESC
                 self.key_cid = self.canvas.mpl_connect('key_press_event', self.on_key_press)
+                
+                # Connect motion event to change cursor based on toolbar state
+                self.motion_cid = self.canvas.mpl_connect('motion_notify_event', self.on_mouse_motion)
                 
                 # Update button appearance to show active state
                 self.manual_peak_button.configure(
@@ -1791,14 +1846,49 @@ class PeakFittingWindow:
             self.manual_peak_mode = False
             self.canvas.get_tk_widget().config(cursor="arrow")
     
-    def on_plot_click(self, event):
-        """Handle click on the plot to add a peak."""
+    def on_mouse_motion(self, event):
+        """Handle mouse motion to update cursor based on toolbar state."""
         if not hasattr(self, 'manual_peak_mode') or not self.manual_peak_mode:
             return
             
+        # Check if any navigation tool is active
+        if hasattr(self.toolbar, 'mode') and self.toolbar.mode:
+            # Show that toolbar tool is active, but still allow peak addition
+            if self.toolbar.mode == 'zoom rect':
+                self.canvas.get_tk_widget().config(cursor="tcross")
+            elif self.toolbar.mode == 'pan':
+                self.canvas.get_tk_widget().config(cursor="fleur")
+            else:
+                self.canvas.get_tk_widget().config(cursor="arrow")
+        else:
+            # No toolbar tool active, use crosshair for peak selection
+            self.canvas.get_tk_widget().config(cursor="crosshair")
+    
+    def on_plot_click(self, event):
+        """Handle click on the plot to add a peak."""
+        print(f"Click event received - manual_peak_mode: {getattr(self, 'manual_peak_mode', False)}")
+        
+        if not hasattr(self, 'manual_peak_mode') or not self.manual_peak_mode:
+            print("Not in manual peak mode, returning")
+            return
+            
+        # Debug toolbar state
+        toolbar_mode = getattr(self.toolbar, 'mode', None) if hasattr(self, 'toolbar') else None
+        print(f"Toolbar mode: '{toolbar_mode}'")
+        
+        # Always allow peak addition - let users decide when to use zoom vs add peaks
+        # They can click the zoom tool again to deactivate it when they want to add peaks
+        
+        print(f"Event inaxes: {event.inaxes}, ax1: {self.ax1}")
+        
         # Check if click is within the main plot area
         if event.inaxes == self.ax1:
             x, y = event.xdata, event.ydata
+            print(f"Click coordinates: x={x}, y={y}")
+            
+            if x is None or y is None:
+                print("Invalid click coordinates")
+                return
             
             # Initialize peaks list if needed
             if self.peaks is None:
@@ -1806,17 +1896,21 @@ class PeakFittingWindow:
             
             # Find the closest index in the wavenumbers array
             idx = np.abs(self.wavenumbers - x).argmin()
+            print(f"Closest wavenumber index: {idx}, value: {self.wavenumbers[idx]}")
             
             # Check if a peak already exists very close to this position
             duplicate_threshold = 5.0  # cm⁻¹
             for existing_peak in self.peaks:
                 if abs(existing_peak['position'] - self.wavenumbers[idx]) < duplicate_threshold:
+                    print(f"Duplicate peak found at {existing_peak['position']}")
                     # Peak already exists nearby, show message and return
                     messagebox.showinfo("Peak Exists", 
                                       f"A peak already exists near {self.wavenumbers[idx]:.1f} cm⁻¹.\n"
                                       f"Existing peak at {existing_peak['position']:.1f} cm⁻¹", 
                                       parent=self.window)
                     return
+            
+            print(f"Adding peak at position {self.wavenumbers[idx]}")
             
             # Add the peak
             self.peaks.append({
@@ -1825,15 +1919,24 @@ class PeakFittingWindow:
                 'index': idx
             })
             
+            print(f"Peak added, total peaks: {len(self.peaks)}")
+            
             # Update the plot
             self.update_plot()
             
-            # Update title with current count and instructions
-            self.ax1.set_title(f'MANUAL MODE: {len(self.peaks)} peaks added • Click red button or press ESC to finish')
+            # Update title with current count and instructions  
+            if toolbar_mode:
+                self.ax1.set_title(f'MANUAL MODE: {len(self.peaks)} peaks added • Click {toolbar_mode} tool again to deactivate for easier peak adding')
+            else:
+                self.ax1.set_title(f'MANUAL MODE: {len(self.peaks)} peaks added • Click to add peaks • Use toolbar to zoom/pan')
             self.canvas.draw()
             
             # Provide audio/visual feedback (brief highlight)
             self.highlight_new_peak(self.wavenumbers[idx], self.spectra[idx])
+            
+            print("Peak addition completed")
+        else:
+            print("Click outside main plot area")
     
     def highlight_new_peak(self, x, y):
         """Briefly highlight a newly added peak."""
@@ -1870,8 +1973,10 @@ class PeakFittingWindow:
             self.canvas.mpl_disconnect(self.click_cid)
         if hasattr(self, 'key_cid'):
             self.canvas.mpl_disconnect(self.key_cid)
+        if hasattr(self, 'motion_cid'):
+            self.canvas.mpl_disconnect(self.motion_cid)
         
-        # Restore toolbar
+        # Restore toolbar (no longer needed since we don't disable it)
         if hasattr(self, 'original_toolbar'):
             self.toolbar._active = self.original_toolbar
         
@@ -2123,3 +2228,97 @@ class PeakFittingWindow:
                 peak_r_squared.append(0.0)
         
         return peak_r_squared
+
+    def on_height_change(self, value):
+        """Callback for height slider changes."""
+        val = float(value)
+        if val == 0:
+            self.height_value_label.config(text="Auto")
+        else:
+            self.height_value_label.config(text=f"{val:.1f}")
+        
+        # Auto-detect peaks if enabled with throttling
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            # Cancel any pending auto-detection
+            if hasattr(self, '_height_after_id'):
+                self.window.after_cancel(self._height_after_id)
+            # Schedule new auto-detection with delay
+            self._height_after_id = self.window.after(200, self.find_peaks)
+
+    def on_distance_change(self, value):
+        """Callback for distance slider changes."""
+        val = float(value)
+        if val == 0:
+            self.distance_value_label.config(text="Auto")
+        else:
+            self.distance_value_label.config(text=f"{int(val)}")
+        
+        # Auto-detect peaks if enabled with throttling
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            # Cancel any pending auto-detection
+            if hasattr(self, '_distance_after_id'):
+                self.window.after_cancel(self._distance_after_id)
+            # Schedule new auto-detection with delay
+            self._distance_after_id = self.window.after(200, self.find_peaks)
+
+    def on_prominence_change(self, value):
+        """Callback for prominence slider changes."""
+        val = float(value)
+        if val == 0:
+            self.prominence_value_label.config(text="Auto")
+        else:
+            self.prominence_value_label.config(text=f"{val:.1f}")
+        
+        # Auto-detect peaks if enabled with throttling
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            # Cancel any pending auto-detection
+            if hasattr(self, '_prominence_after_id'):
+                self.window.after_cancel(self._prominence_after_id)
+            # Schedule new auto-detection with delay
+            self._prominence_after_id = self.window.after(200, self.find_peaks)
+
+    def reset_peak_params(self):
+        """Reset all peak detection parameters to Auto."""
+        self.var_height.set(0)
+        self.var_distance.set(0)
+        self.var_prominence.set(0)
+        self.height_value_label.config(text="Auto")
+        self.distance_value_label.config(text="Auto")
+        self.prominence_value_label.config(text="Auto")
+        
+        # Auto-detect peaks if enabled with throttling
+        if hasattr(self, 'auto_detect_var') and self.auto_detect_var.get() and hasattr(self, 'spectra') and self.spectra is not None:
+            # Cancel any pending auto-detection
+            for attr in ['_height_after_id', '_distance_after_id', '_prominence_after_id']:
+                if hasattr(self, attr):
+                    self.window.after_cancel(getattr(self, attr))
+            # Schedule new auto-detection with delay
+            self.window.after(200, self.find_peaks)
+
+    def update_slider_ranges(self):
+        """Update slider ranges based on current spectrum data."""
+        if not hasattr(self, 'spectra') or self.spectra is None:
+            return
+        
+        try:
+            # Update height slider range based on spectrum intensity
+            min_intensity = np.min(self.spectra)
+            max_intensity = np.max(self.spectra)
+            intensity_range = max_intensity - min_intensity
+            
+            # Set height range from 0 to max intensity with reasonable precision
+            self.height_slider.config(to=max_intensity)
+            
+            # Update prominence slider range (typically smaller than height)
+            self.prominence_slider.config(to=intensity_range * 0.5)
+            
+            # Distance slider range depends on spectrum length
+            spectrum_length = len(self.spectra)
+            self.distance_slider.config(to=min(50, spectrum_length // 10))
+            
+        except Exception as e:
+            print(f"Error updating slider ranges: {e}")
+            # Use default ranges if calculation fails
+            self.height_slider.config(to=100)
+            self.prominence_slider.config(to=50)
+            self.distance_slider.config(to=50)
