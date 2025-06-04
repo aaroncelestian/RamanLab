@@ -218,6 +218,42 @@ python3 main.py
    python3 main.py
    ```
 
+---
+
+## Desktop Icon Installation
+
+For easier access, you can install a desktop shortcut to launch RamanLab directly from your desktop or applications menu:
+
+### Automatic Installation (Recommended)
+
+1. **Install Desktop Icon:**
+   ```bash
+   python3 install_desktop_icon.py
+   ```
+   This will create platform-appropriate shortcuts:
+   - **Windows:** Desktop shortcut (.lnk) with icon
+   - **macOS:** Application bundle in ~/Applications
+   - **Linux:** Desktop entry and applications menu shortcut
+
+2. **Launch RamanLab:**
+   - Double-click the desktop icon or find "RamanLab" in your applications menu
+   - The launcher will automatically check dependencies before starting
+
+### Uninstall Desktop Icon
+
+To remove the desktop shortcuts:
+```bash
+python3 install_desktop_icon.py --uninstall
+```
+
+### Alternative Launcher
+
+You can also use the simple launcher script:
+```bash
+python3 launch_ramanlab.py
+```
+This launcher checks dependencies and provides helpful error messages if anything is missing.
+
 ## Dependencies
 
 - Python 3.6+
