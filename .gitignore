@@ -293,3 +293,12 @@ scratch/
 experiments/
 test_data/
 dev_*.py
+
+# Large Package Files (over 100MB GitHub limit)
+packages/*.whl
+*.whl
+
+# Large Data Files (over 100MB GitHub limit)
+__exampleData/**/mapData.pkl
+tkinter_legacy/**/*.pkl.backup
+*.pkl.backup
