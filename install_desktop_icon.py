@@ -29,7 +29,7 @@ class DesktopIconInstaller:
         self.script_dir = Path(__file__).parent.absolute()
         self.app_name = "RamanLab"
         self.app_description = "Raman Spectroscopy Analysis Suite"
-        self.main_script = self.script_dir / "main_qt6.py"
+        self.main_script = self.script_dir / "launch_ramanlab.py"
         
         # Icon files
         self.icon_ico = self.script_dir / "RamanLab_icon_HQ.ico"  # Windows

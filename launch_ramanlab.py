@@ -61,11 +61,18 @@ def main():
         # Change to the script directory to ensure relative paths work
         os.chdir(script_dir)
         
+        # Add the script directory to Python path to allow imports
+        if str(script_dir) not in sys.path:
+            sys.path.insert(0, str(script_dir))
+        
         # Import and run the main application
-        exec(open(main_app).read())
+        import main_qt6
+        exit_code = main_qt6.main()
+        sys.exit(exit_code)
         
     except KeyboardInterrupt:
         print("\n👋 RamanLab closed by user.")
+        sys.exit(0)
     except Exception as e:
         print(f"\n❌ Error launching RamanLab: {e}")
         print(f"📍 Please check the main application file: {main_app}")
