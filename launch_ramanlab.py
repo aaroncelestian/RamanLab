@@ -41,15 +41,32 @@ def main():
             result = subprocess.run([sys.executable, str(dependency_checker)], 
                                   capture_output=True, text=True)
             
-            # If dependency check fails, show the output and exit
-            if result.returncode != 0:
-                print("❌ Dependency check failed!")
-                print(result.stdout)
-                print(result.stderr)
-                print("\n💡 Please install missing dependencies before running RamanLab.")
+            # Check for critical missing dependencies in the output
+            critical_missing = []
+            if "❌ PySide6: Not installed" in result.stdout and "❌ PyQt6: Not installed" in result.stdout:
+                critical_missing.append("Qt6 GUI Framework (PySide6 or PyQt6)")
+            if "❌ scipy: Not installed" in result.stdout:
+                critical_missing.append("scipy")
+            if "❌ numpy: Not installed" in result.stdout:
+                critical_missing.append("numpy")
+            if "❌ matplotlib: Not installed" in result.stdout:
+                critical_missing.append("matplotlib")
+            
+            if critical_missing:
+                print("❌ Critical dependencies missing!")
+                print("Missing required packages:")
+                for pkg in critical_missing:
+                    print(f"   - {pkg}")
+                print("\n💡 Install missing dependencies with:")
+                if "Qt6 GUI Framework" in str(critical_missing):
+                    print("   pip install PySide6")
+                if any(pkg in str(critical_missing) for pkg in ["scipy", "numpy", "matplotlib"]):
+                    print("   pip install scipy numpy matplotlib pandas")
+                print("\n🔧 Or install all requirements:")
+                print("   pip install -r requirements_qt6.txt")
                 sys.exit(1)
             else:
-                print("✅ All dependencies satisfied!")
+                print("✅ All critical dependencies satisfied!")
                 
         except Exception as e:
             print(f"⚠️  Could not run dependency check: {e}")
