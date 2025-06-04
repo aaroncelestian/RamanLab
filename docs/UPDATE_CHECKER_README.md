@@ -1,8 +1,8 @@
-# ClaritySpectra Update Checker
+# RamanLab Update Checker
 
 ## Overview
 
-The ClaritySpectra Update Checker is a built-in feature that allows users to check for and download the latest version of ClaritySpectra directly from the GitHub repository. This feature ensures users always have access to the newest features, bug fixes, and improvements.
+The RamanLab Update Checker is a built-in feature that allows users to check for and download the latest version of RamanLab directly from the GitHub repository. This feature ensures users always have access to the newest features, bug fixes, and improvements.
 
 ## Features
 
@@ -32,7 +32,7 @@ The ClaritySpectra Update Checker is a built-in feature that allows users to che
 ## How to Use
 
 ### From the Application Menu
-1. Open ClaritySpectra
+1. Open RamanLab
 2. Go to **Help** → **Check for Updates**
 3. The update checker will automatically check for new versions
 4. If updates are available, an update dialog will appear
@@ -43,12 +43,12 @@ When an update is available, you'll see a dialog with several options:
 
 #### 📥 **Download Latest Version**
 - Opens the GitHub release page in your default web browser
-- Best for users who downloaded ClaritySpectra as a ZIP file
+- Best for users who downloaded RamanLab as a ZIP file
 - Allows manual download and installation
 
 #### 🔄 **Auto-Update (Git)**
-- Automatically updates ClaritySpectra using `git pull`
-- Only works if ClaritySpectra was cloned from GitHub
+- Automatically updates RamanLab using `git pull`
+- Only works if RamanLab was cloned from GitHub
 - Shows progress dialog during update
 - Requires restart after successful update
 
@@ -65,13 +65,13 @@ The update checker requires these additional dependencies:
 pip install requests>=2.25.0 packaging>=20.0 pyperclip>=1.8.0
 ```
 
-These are automatically included in the ClaritySpectra requirements.txt file.
+These are automatically included in the RamanLab requirements.txt file.
 
 ## Technical Details
 
 ### GitHub API Integration
 - Uses GitHub REST API v3
-- Endpoint: `https://api.github.com/repos/aaroncelestian/ClaritySpectra`
+- Endpoint: `https://api.github.com/repos/aaroncelestian/RamanLab`
 - Checks `/releases/latest` for version information
 - Falls back to `/commits` if no releases available
 
@@ -106,10 +106,10 @@ The update checker handles various error scenarios:
 ## Configuration
 
 ### GitHub Repository Settings
-The update checker is configured for the official ClaritySpectra repository:
-- **Repository**: `aaroncelestian/ClaritySpectra`
-- **API Base**: `https://api.github.com/repos/aaroncelestian/ClaritySpectra`
-- **Web URL**: `https://github.com/aaroncelestian/ClaritySpectra`
+The update checker is configured for the official RamanLab repository:
+- **Repository**: `aaroncelestian/RamanLab`
+- **API Base**: `https://api.github.com/repos/aaroncelestian/RamanLab`
+- **Web URL**: `https://github.com/aaroncelestian/RamanLab`
 
 ### Customization
 To use with a different repository, modify the `UpdateChecker` class:
@@ -158,16 +158,16 @@ If the automatic update checker fails, you can update manually:
 
 1. **For Git Users**:
    ```bash
-   cd /path/to/ClaritySpectra
+   cd /path/to/RamanLab
    git pull origin main
    ```
 
 2. **For ZIP Download Users**:
-   - Visit https://github.com/aaroncelestian/ClaritySpectra
+   - Visit https://github.com/aaroncelestian/RamanLab
    - Click "Code" → "Download ZIP"
    - Extract and replace old files
 
-## Integration with ClaritySpectra
+## Integration with RamanLab
 
 ### Menu Integration
 The update checker is integrated into the Help menu:
@@ -210,4 +210,4 @@ For issues with the update checker:
 
 ---
 
-*The ClaritySpectra Update Checker ensures you always have access to the latest features and improvements. Keep your spectral analysis tools up to date!* 
+*The RamanLab Update Checker ensures you always have access to the latest features and improvements. Keep your spectral analysis tools up to date!* 

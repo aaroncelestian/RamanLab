@@ -1,4 +1,9 @@
+# ===============================================
+# RamanLab Qt6 Project .gitignore
+# ===============================================
+
 # Python
+# -------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -16,28 +21,275 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Database files
-*.pkl
-*.csv
+# Virtual Environments
+# --------------------
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+raman_env/
+ramanlab_env/
+clarityspectra_env/
 
-# OS generated files
+# PyInstaller
+# -----------
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+# ----------------------------
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+# ----------------
+.ipynb_checkpoints
+
+# IPython
+# -------
+profile_default/
+ipython_config.py
+
+# Qt6 / PySide6 / PyQt6
+# ---------------------
+*.qmlc
+*.jsc
+.qmake.stash
+.qmake.cache
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.moc
+*.moc.cpp
+*.qm
+.#*
+*_qmlcache.qrc
+
+# Scientific Data & Databases
+# ---------------------------
+# Large database files (keep samples only)
+*.sqlite
+*.db
+*.sqlite3
+raman_database.pkl
+mineral_modes.pkl
+*.h5
+*.hdf5
+
+# Large CSV data files (project-specific)
+RRUFF_Export_with_Hey_Classification.csv
+RRUFF_Hey_Index.csv
+*_Export_*.csv
+
+# Temporary analysis files
+temp_*.pkl
+temp_*.csv
+temp_*.txt
+analysis_temp/
+output_temp/
+
+# Spectrum data files (depending on your needs)
+# Uncomment if you don't want to track large spectrum files
+# *.txt
+# *.dat
+# *.spc
+# *.dx
+# *.jdx
+
+# Generated reports and exports
+# -----------------------------
+*.pdf
+reports/
+exports/
+output/
+results/
+
+# macOS
+# -----
 .DS_Store
-.DS_Store?
+.AppleDouble
+.LSOverride
+Icon
 ._*
+.DocumentRevisions-V100
+.fseventsd
 .Spotlight-V100
+.TemporaryItems
 .Trashes
-ehthumbs.db
-Thumbs.db
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
 
-# IDE specific files
+# Windows
+# -------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+# -----
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# IDEs & Editors
+# --------------
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+.project
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+.externalToolBuilders/
+*.launch
+.pydevproject
+.cproject
+.autotools
+.factorypath
+.buildpath
+.target
+.tern-project
+.texlipse
+.springBeans
+.recommenders/
+.apt_generated/
+.cache-main
+.scala_dependencies
+.worksheet
 
-# Application specific
-*.icns .venv/
+# Spyder
+# ------
+.spyderproject
+.spyproject
+
+# Rope
+# ----
+.ropeproject
+
+# mkdocs documentation
+# --------------------
+/site
+
+# mypy
+# ----
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+# -----------------
+.pyre/
+
+# RamanLab Specific
+# -----------------
+# Configuration files with sensitive data
+config_local.py
+settings_local.py
+*.key
+*.secret
+
+# Backup files
+*_backup.py
+*_backup/
+backup_*/
+
+# Log files
+*.log
+logs/
+log/
+
+# Cache files
+cache/
+.cache/
+
+# Temporary UI files
+ui_*.py
+*_ui.py
+
+# Application specific data
+user_data/
+user_settings/
+user_preferences/
+
+# Performance profiling
+*.prof
+*.lprof
+
+# Documentation builds
+docs/_build/
+docs/build/
+
+# Example data (keep small samples only)
+# large_example_data/
+# sample_spectra/large_files/
+
+# Compiled translations
+*.mo
+
+# Installer files
+installer/
+setup/
+packaging/
+
+# Distribution archives
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# Custom ignores for development
+# ------------------------------
+TODO.md
+NOTES.md
+scratch/
+experiments/
+test_data/
+dev_*.py

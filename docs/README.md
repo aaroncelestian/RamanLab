@@ -1,6 +1,6 @@
-# ClaritySpectra - Raman Spectrum Analysis Tool
+# RamanLab - Raman Spectrum Analysis Tool
 
-ClaritySpectra is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
+RamanLab is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
 **Advanced Raman Spectroscopy Analysis Software**  
 **Current Version:** 2.6.3
@@ -134,8 +134,8 @@ If you are new to Python or want the easiest way to get started, I recommend usi
 4. **Clone or Download the Repository:**
    - In Spyder, open the built-in terminal (or use your system terminal) and run:
      ```bash
-     git clone https://github.com/aaroncelestian/ClaritySpectra.git
-     cd ClaritySpectra
+     git clone https://github.com/aaroncelestian/RamanLab.git
+     cd RamanLab
      ```
    - Alternatively, you can download the ZIP from GitHub and extract it.
    - Note, ```bash is just the terminal interface (Born Again SHell) in Spyder where you type in commands.
@@ -151,10 +151,10 @@ If you are new to Python or want the easiest way to get started, I recommend usi
    - Download the database and metadata correlation file that I made from:
      - 10.6084/m9.figshare.28928345  https://figshare.com/s/220f7de3c17172dbaae6  (Compiled database of Raman reference spectra from RRUFF.info)
                                      https://figshare.com/s/b55e31e89743d246895b  (Compiled database of Raman calculated mdoes from WURM.info)
-   - Place the file in the ClaritySpectra directory.
+   - Place the file in the RamanLab directory.
 
 7. **Open and Run the Application:**
-   - In Spyder, go to File > Open, and select `main.py` from the ClaritySpectra folder.
+   - In Spyder, go to File > Open, and select `main.py` from the RamanLab folder.
    - Click the green "Run" button (or press F5) to start the application, and it should launch.
    - If things go wrong with the program, you may need to reset the kernel (in one of the menus). This forces python to reset and you can re-run main.py
 
@@ -164,8 +164,8 @@ If you are new to Python or want the easiest way to get started, I recommend usi
 
 1. Clone the repository: (bash is your terminal window)
 ```bash
-git clone https://github.com/aaroncelestian/ClaritySpectra.git
-cd ClaritySpectra
+git clone https://github.com/aaroncelestian/RamanLab.git
+cd RamanLab
 ```
 
 2. Install dependencies:

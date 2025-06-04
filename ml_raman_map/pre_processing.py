@@ -7,9 +7,43 @@ from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 from scipy.interpolate import interp1d
 import sys
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import spsolve
 
 # Import our enhanced file reading utilities
 from ml_raman_map.file_reader_utils import read_raman_spectrum, batch_read_spectra
+
+def baseline_als(y, lam=1e5, p=0.01, niter=10):
+    """
+    Asymmetric Least Squares Smoothing for baseline correction.
+    
+    Parameters:
+    -----------
+    y : array-like
+        Input spectrum.
+    lam : float
+        Smoothness parameter (default: 1e5).
+    p : float
+        Asymmetry parameter (default: 0.01).
+    niter : int
+        Number of iterations (default: 10).
+        
+    Returns:
+    --------
+    array-like
+        Estimated baseline.
+    """
+    L = len(y)
+    D = csc_matrix(np.diff(np.eye(L), 2))
+    w = np.ones(L)
+    
+    for i in range(niter):
+        W = csc_matrix((w, (np.arange(L), np.arange(L))))
+        Z = W + lam * D.dot(D.transpose())
+        z = spsolve(Z, w * y)
+        w = p * (y > z) + (1 - p) * (y <= z)
+    
+    return z
 
 def resample_spectrum(wavenumbers, intensities, target_wavenumbers):
     """
@@ -66,7 +100,7 @@ def preprocess_spectrum(wavenumbers, intensities, target_wavenumbers=None):
     smoothed = savgol_filter(intensities, window_length=11, polyorder=3)
     
     # Simple baseline correction (can be replaced with more sophisticated methods)
-    baseline = np.percentile(smoothed, 5)
+    baseline = baseline_als(smoothed)
     corrected = smoothed - baseline
     
     # Normalize to maximum intensity

@@ -1,0 +1,26 @@
+File,x_pos,y_pos,Prediction,Confidence
+spectrum_Y001_X001.txt,1,1,Class A,0.85
+spectrum_Y001_X002.txt,2,1,Class B,0.78
+spectrum_Y001_X003.txt,3,1,Class A,0.92
+spectrum_Y001_X004.txt,4,1,Class B,0.75
+spectrum_Y001_X005.txt,5,1,Class A,0.88
+spectrum_Y002_X001.txt,1,2,Class B,0.76
+spectrum_Y002_X002.txt,2,2,Class A,0.91
+spectrum_Y002_X003.txt,3,2,Class B,0.77
+spectrum_Y002_X004.txt,4,2,Class A,0.89
+spectrum_Y002_X005.txt,5,2,Class B,0.74
+spectrum_Y003_X001.txt,1,3,Class A,0.93
+spectrum_Y003_X002.txt,2,3,Class B,0.79
+spectrum_Y003_X003.txt,3,3,Class A,0.90
+spectrum_Y003_X004.txt,4,3,Class B,0.80
+spectrum_Y003_X005.txt,5,3,Class A,0.87
+spectrum_Y004_X001.txt,1,4,Class B,0.81
+spectrum_Y004_X002.txt,2,4,Class A,0.86
+spectrum_Y004_X003.txt,3,4,Class B,0.82
+spectrum_Y004_X004.txt,4,4,Class A,0.94
+spectrum_Y004_X005.txt,5,4,Class B,0.83
+spectrum_Y005_X001.txt,1,5,Class A,0.95
+spectrum_Y005_X002.txt,2,5,Class B,0.84
+spectrum_Y005_X003.txt,3,5,Class A,0.96
+spectrum_Y005_X004.txt,4,5,Class B,0.85
+spectrum_Y005_X005.txt,5,5,Class A,0.97 

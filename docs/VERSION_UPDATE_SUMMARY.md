@@ -1,6 +1,6 @@
 # Version Update Summary
 
-## ClaritySpectra Version 2.6.3
+## RamanLab Version 2.6.3
 
 ### Version History
 - **Previous**: 2.6.2 (Enhanced peak fitting with improved UX)
@@ -16,7 +16,7 @@
 ✅ `docs/UPDATE_CHECKER_README.md` - Example version references updated to 2.6.3
 
 ## Release Summary
-**ClaritySpectra 2.6.3** is a consistency improvement release that enhances the Advanced Search functionality to use the same algorithm selection as Basic Search, providing better user experience and predictable behavior.
+**RamanLab 2.6.3** is a consistency improvement release that enhances the Advanced Search functionality to use the same algorithm selection as Basic Search, providing better user experience and predictable behavior.
 
 ### Key Achievements in 2.6.3
 
@@ -40,8 +40,8 @@
 
 ## Previous Versions
 
-### ClaritySpectra Version 2.6.1
-**Major feature release** - Complete Multi-Spectrum Manager overhaul, transforming ClaritySpectra into a comprehensive multi-spectrum data playground.
+### RamanLab Version 2.6.1
+**Major feature release** - Complete Multi-Spectrum Manager overhaul, transforming RamanLab into a comprehensive multi-spectrum data playground.
 
 ### Version Numbering Correction
 - **Previous**: x.x.1 (placeholder)
@@ -53,7 +53,7 @@
 ✅ `multi_spectrum_manager.py` - Header updated with @version: 2.6.1
 
 ### What This Version Represents
-**ClaritySpectra 2.6.1** is a major feature release that introduces the complete Multi-Spectrum Manager overhaul, transforming ClaritySpectra into a comprehensive multi-spectrum data playground.
+**RamanLab 2.6.1** is a major feature release that introduces the complete Multi-Spectrum Manager overhaul, transforming RamanLab into a comprehensive multi-spectrum data playground.
 
 ### Key Achievements in 2.6.1
 - ✅ Persistent loaded spectra pane (always visible)
@@ -66,4 +66,4 @@
 ### Release Status
 🎉 **Version 2.6.1 is officially ready for release!**
 
-This version represents a significant milestone in ClaritySpectra's evolution, providing users with professional-grade multi-spectrum analysis capabilities. 
+This version represents a significant milestone in RamanLab's evolution, providing users with professional-grade multi-spectrum analysis capabilities. 

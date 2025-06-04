@@ -79,7 +79,7 @@ def create_test_directory(output_dir, grid_size=5, class_a_center=1000, class_b_
         f.write(f"- Class B spectra have peaks centered at {class_b_center} cm^-1\n\n")
         f.write("The spectra are arranged in a checkerboard pattern (Class A and B alternate).\n")
         f.write("Filenames encode the X,Y coordinates for visualization.\n\n")
-        f.write("To use these files with ClaritySpectra:\n")
+        f.write("To use these files with RamanLab:\n")
         f.write("1. Open the 2D Map Analysis window\n")
         f.write("2. Click 'Classify Unknowns & Visualize'\n")
         f.write("3. Select this directory\n")

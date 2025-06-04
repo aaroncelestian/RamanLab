@@ -1,0 +1,50 @@
+{
+  "csv_search_paths": [
+    "Hey_class/RRUFF_Export_20250503_222156_Hey_Celestian.csv",
+    "Hey_class/hey_improved_classification.csv",
+    "RRUFF_Hey_Index.csv",
+    "Hey_class/RRUFF_Hey_Index.csv",
+    "custom_hey_classifications.csv"
+  ],
+  "column_mappings": {
+    "mineral_name": [
+      "Mineral Name",
+      "Mineral_Name", 
+      "mineral_name",
+      "Name",
+      "MINERAL_NAME"
+    ],
+    "hey_classification": [
+      "Hey-Celestian Group Name",
+      "Hey_Classification",
+      "Hey Classification",
+      "Classification",
+      "Improved Hey Classification Name",
+      "Hey-Celestian Classification"
+    ],
+    "confidence": [
+      "Hey-Celestian Confidence",
+      "Confidence",
+      "confidence",
+      "Classification_Confidence"
+    ],
+    "reasoning": [
+      "Hey-Celestian Reasoning",
+      "Reasoning",
+      "reasoning",
+      "Classification_Reasoning"
+    ]
+  },
+  "cache_timeout": 3600,
+  "auto_update": true,
+  "validation_enabled": true,
+  "fallback_classification": "Unclassified",
+  "min_confidence_threshold": 0.0,
+  "custom_settings": {
+    "enable_fuzzy_matching": true,
+    "fuzzy_threshold": 0.8,
+    "case_sensitive_matching": false,
+    "allow_partial_matches": true,
+    "log_classification_attempts": true
+  }
+} 

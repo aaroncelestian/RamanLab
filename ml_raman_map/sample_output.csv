@@ -1,0 +1,17 @@
+Filename,x_pos,y_pos,Prediction,Confidence
+sample_Y010_X010.txt,10,10,Class A,0.85
+sample_Y010_X020.txt,20,10,Class A,0.92
+sample_Y010_X030.txt,30,10,Class B,0.78
+sample_Y010_X040.txt,40,10,Class B,0.82
+sample_Y020_X010.txt,10,20,Class A,0.88
+sample_Y020_X020.txt,20,20,Class A,0.90
+sample_Y020_X030.txt,30,20,Class B,0.75
+sample_Y020_X040.txt,40,20,Class B,0.81
+sample_Y030_X010.txt,10,30,Class A,0.86
+sample_Y030_X020.txt,20,30,Class A,0.89
+sample_Y030_X030.txt,30,30,Class B,0.77
+sample_Y030_X040.txt,40,30,Class B,0.83
+sample_Y040_X010.txt,10,40,Class A,0.91
+sample_Y040_X020.txt,20,40,Class A,0.93
+sample_Y040_X030.txt,30,40,Class B,0.80
+sample_Y040_X040.txt,40,40,Class B,0.84 

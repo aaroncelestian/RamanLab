@@ -1,5 +1,5 @@
 """
-ClaritySpectra - Raman Spectroscopy Analysis Software
+RamanLab - Raman Spectroscopy Analysis Software
 
 This package provides tools for analyzing Raman spectroscopic data,
 including spectral processing, mineral identification, and database management.

@@ -2,10 +2,10 @@ import numpy as np
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
-from scipy.signal import savgol_filter
+from scipy.signal import savgol_filter, find_peaks
 from scipy.interpolate import interp1d
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 from sklearn.pipeline import Pipeline
@@ -14,6 +14,11 @@ from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 import traceback
 import re
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import spsolve
+import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
 
 # Import our enhanced file reading utilities
 try:
@@ -143,6 +148,38 @@ except ImportError:
         
         return spectra
 
+def baseline_als(y, lam=1e5, p=0.01, niter=10):
+    """
+    Asymmetric Least Squares Smoothing for baseline correction.
+    
+    Parameters:
+    -----------
+    y : array-like
+        Input spectrum.
+    lam : float
+        Smoothness parameter (default: 1e5).
+    p : float
+        Asymmetry parameter (default: 0.01).
+    niter : int
+        Number of iterations (default: 10).
+        
+    Returns:
+    --------
+    array-like
+        Estimated baseline.
+    """
+    L = len(y)
+    D = csc_matrix(np.diff(np.eye(L), 2))
+    w = np.ones(L)
+    
+    for i in range(niter):
+        W = csc_matrix((w, (np.arange(L), np.arange(L))))
+        Z = W + lam * D.dot(D.transpose())
+        z = spsolve(Z, w * y)
+        w = p * (y > z) + (1 - p) * (y <= z)
+    
+    return z
+
 class RamanSpectraClassifier:
     def __init__(self, wavenumber_range=(200, 3500), n_points=1000, 
                  positive_class_name="Class A", negative_class_name="Class B",
@@ -196,8 +233,9 @@ class RamanSpectraClassifier:
             smoothed = intensities
             
         # Baseline correction (can be enhanced with more advanced methods)
-        # Simple method: subtract minimum and normalize
-        baseline_corrected = smoothed - np.percentile(smoothed, 5)
+        # Use ALS baseline correction for better results
+        baseline = baseline_als(smoothed)
+        baseline_corrected = smoothed - baseline
         
         # Handle cases where spectrum might be all zeros after correction
         if np.max(baseline_corrected) > 0:

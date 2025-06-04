@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-ClaritySpectra Trilogy Dependencies Installer
+RamanLab Trilogy Dependencies Installer
 =============================================
 
-This script helps install the complete dependencies for ClaritySpectra's
+This script helps install the complete dependencies for RamanLab's
 crystal orientation optimization trilogy (Stages 1, 2, and 3).
 
 Usage:
@@ -157,7 +157,7 @@ def check_tkinter():
 def main():
     """Main installation function."""
     parser = argparse.ArgumentParser(
-        description="Install ClaritySpectra Trilogy Dependencies",
+        description="Install RamanLab Trilogy Dependencies",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -180,7 +180,7 @@ Examples:
     args = parser.parse_args()
     
     print("="*70)
-    print("ClaritySpectra Trilogy Dependencies Installer")
+    print("RamanLab Trilogy Dependencies Installer")
     print("="*70)
     print(f"Python: {sys.version}")
     print(f"Platform: {sys.platform}")
@@ -267,7 +267,7 @@ Examples:
             
         print("\nNext steps:")
         print("1. Verify installation: python install_trilogy_dependencies.py --check")
-        print("2. Run ClaritySpectra: python raman_polarization_analyzer.py")
+        print("2. Run RamanLab: python raman_polarization_analyzer.py")
         
     else:
         print("❌ Installation encountered errors")
