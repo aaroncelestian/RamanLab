@@ -186,4 +186,11 @@ def get_module_info(module_name):
 def get_module_features(module_name):
     """Get features list for a specific module."""
     module_info = AVAILABLE_MODULES.get(module_name, {})
-    return module_info.get('features', []) 
+    return module_info.get('features', [])
+
+# Import main widgets for easy access
+try:
+    from .crystal_structure_widget import CrystalStructureWidget
+    __all__ = ['CrystalStructureWidget']
+except ImportError:
+    __all__ = [] 

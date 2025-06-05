@@ -2956,27 +2956,43 @@ class RamanAnalysisAppQt6(QMainWindow):
 
     def launch_polarization_analysis(self):
         """Launch polarization analysis tool."""
-        if self.current_wavenumbers is None or self.current_intensities is None:
-            QMessageBox.warning(self, "No Data", "Load a spectrum first to perform polarization analysis.")
-            return
-            
         try:
             # Import and launch the polarization analysis module
-            QMessageBox.information(
+            from raman_polarization_analyzer_qt6 import RamanPolarizationAnalyzerQt6
+            
+            # Create and show the polarization analyzer window
+            self.polarization_analyzer = RamanPolarizationAnalyzerQt6()
+            
+            # If we have current spectrum data, pass it to the polarization analyzer
+            if self.current_wavenumbers is not None and self.current_intensities is not None:
+                spectrum_data = {
+                    'name': self.spectrum_file_path or 'Current Spectrum',
+                    'wavenumbers': self.current_wavenumbers,
+                    'intensities': self.processed_intensities if self.processed_intensities is not None else self.current_intensities,
+                    'source': 'main_app'
+                }
+                self.polarization_analyzer.current_spectrum = spectrum_data
+                self.polarization_analyzer.original_spectrum = spectrum_data.copy()
+                
+                # Update the spectrum plot in the polarization analyzer
+                self.polarization_analyzer.update_spectrum_plot()
+                
+                # Show success message in status bar
+                self.statusBar().showMessage("Polarization Analysis launched with current spectrum")
+            else:
+                # Show message that no spectrum is loaded
+                self.statusBar().showMessage("Polarization Analysis launched - load a spectrum to begin analysis")
+            
+            # Show the window
+            self.polarization_analyzer.show()
+            
+        except ImportError as e:
+            QMessageBox.critical(
                 self,
-                "Polarization Analysis",
-                "Launching Polarization Analysis...\n\n"
-                "This feature provides:\n"
-                "• Polarized Raman spectroscopy analysis\n"
-                "• Angular dependence measurements\n"
-                "• Crystal orientation determination\n"
-                "• Tensor component analysis"
+                "Import Error",
+                f"Failed to import polarization analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_polarization_analyzer_qt6.py is in the same directory."
             )
-            
-            # TODO: Replace with actual polarization analysis module
-            # from polarization_analysis_qt6 import launch_polarization_analysis
-            # launch_polarization_analysis(self, self.current_wavenumbers, self.processed_intensities)
-            
         except Exception as e:
             QMessageBox.critical(
                 self,
