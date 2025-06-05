@@ -2,7 +2,35 @@
 
 RamanLab is a comprehensive desktop application for analyzing and identifying Raman spectra. It provides a user-friendly interface for importing, processing, and matching Raman spectra against a database of known materials.
 
-**Current Version:** 2.5.0
+**Current Version:** 1.0.0
+
+## Quick Start
+
+Get RamanLab running in 5 minutes:
+
+```bash
+# 1. Create and activate conda environment
+conda create -n ramanlab python=3.9
+conda activate ramanlab
+
+# 2. Clone repository
+git clone https://github.com/aaroncelestian/RamanLab.git
+cd RamanLab
+
+# 3. Install dependencies
+conda install -c conda-forge PySide6 scipy matplotlib pandas numpy
+conda install -c conda-forge chardet tqdm scikit-learn dask seaborn openpyxl fastdtw emcee reportlab
+
+# 4. Launch RamanLab
+python launch_ramanlab.py
+
+# 5. Install desktop shortcut (optional)
+python install_desktop_icon.py
+```
+
+*Note: Always use `python` (not `python3`) when in the conda environment.*
+
+---
 
 ## Features
 
@@ -374,4 +402,5 @@ Natural History Museum of Los Angeles County
 
 - RRUFF database for reference spectra (www.rruff.info)
 - SLOPP and SLOPP-E for reference plastic spectra (https://rochmanlab.wordpress.com/spectral-libraries-for-microplastics-research/)
+- WURM database for DFT tensors and calculated Raman.
 - Scientific community for Raman spectroscopy resources

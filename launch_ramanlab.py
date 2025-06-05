@@ -43,7 +43,10 @@ def main():
             
             # Check for critical missing dependencies in the output
             critical_missing = []
-            if "❌ PySide6: Not installed" in result.stdout and "❌ PyQt6: Not installed" in result.stdout:
+            # Check if both Qt6 frameworks are missing (either PySide6 or PyQt6 is sufficient)
+            pyside6_missing = "❌ PySide6: Not installed" in result.stdout
+            pyqt6_missing = "❌ PyQt6: Not installed" in result.stdout
+            if pyside6_missing and pyqt6_missing:
                 critical_missing.append("Qt6 GUI Framework (PySide6 or PyQt6)")
             if "❌ scipy: Not installed" in result.stdout:
                 critical_missing.append("scipy")
