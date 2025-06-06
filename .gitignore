@@ -53,4 +53,5 @@ dist/
 # CSV data files (can be large)
 *.csv
 !sample_output.csv
-!sample_results.csv
+!sample_results.csvtkinter_legacy/ClaritySpectra_Database_20250602.pkl.backup
+*.backup

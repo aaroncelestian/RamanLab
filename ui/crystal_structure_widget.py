@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QSpinBox, QDoubleSpinBox, QCheckBox, QSlider,
     QFileDialog, QMessageBox, QTextEdit, QScrollArea, QTableWidget, 
     QTableWidgetItem, QHeaderView, QSplitter, QFrame, QProgressBar,
-    QTabWidget, QListWidget, QListWidgetItem
+    QTabWidget, QListWidget, QListWidgetItem, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QColor
@@ -519,8 +519,44 @@ class CrystalStructureWidget(QWidget):
         self.preserve_geometry_cb = QCheckBox("Preserve Crystal Geometry")
         self.preserve_geometry_cb.setChecked(True)
         self.preserve_geometry_cb.setToolTip("Preserve true crystal geometry vs. equal aspect ratios")
+        self.preserve_geometry_cb.setStyleSheet("""
+            QCheckBox {
+                font-weight: bold;
+                color: #2E7D32;
+                background-color: #E8F5E8;
+                padding: 4px;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #4CAF50;
+                border: 2px solid #2E7D32;
+            }
+        """)
         self.preserve_geometry_cb.toggled.connect(self.update_visualization_settings)
         layout.addWidget(self.preserve_geometry_cb)
+        
+        # Unit cell corner visualization (for debugging)
+        self.show_unit_cell_corners_cb = QCheckBox("Show Unit Cell Corners")
+        self.show_unit_cell_corners_cb.setChecked(False)
+        self.show_unit_cell_corners_cb.setToolTip("Show corner markers for unit cell debugging")
+        self.show_unit_cell_corners_cb.toggled.connect(self.update_visualization_settings)
+        layout.addWidget(self.show_unit_cell_corners_cb)
+        
+        # Add separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(separator)
+        
+        # Debug info button
+        debug_btn = QPushButton("Show Unit Cell Info")
+        debug_btn.clicked.connect(self.show_unit_cell_debug_info)
+        debug_btn.setStyleSheet("QPushButton { background-color: #607D8B; color: white; font-size: 10px; }")
+        layout.addWidget(debug_btn)
         
         return group
     
@@ -661,7 +697,7 @@ class CrystalStructureWidget(QWidget):
         try:
             # Parse CIF file using pymatgen
             parser = CifParser(file_path)
-            structures = parser.parse_structures(primitive=True)
+            structures = parser.parse_structures(primitive=False)  # Use conventional cell to match main app
             
             if not structures:
                 QMessageBox.warning(self, "Warning", "No structures found in CIF file.")
@@ -686,8 +722,22 @@ class CrystalStructureWidget(QWidget):
             # Emit signal
             self.structure_loaded.emit(self.current_structure)
             
-            QMessageBox.information(self, "Success", 
-                                  f"Successfully loaded crystal structure from {os.path.basename(file_path)}")
+            # Get crystal system info for the message
+            crystal_system = self.current_structure.get('crystal_system', 'Unknown')
+            lattice_params = self.current_structure.get('lattice_params', {})
+            
+            success_msg = (f"Successfully loaded crystal structure from {os.path.basename(file_path)}\n\n"
+                          f"Crystal System: {crystal_system}\n"
+                          f"Unit Cell: a={lattice_params.get('a', 0):.3f}Å, "
+                          f"b={lattice_params.get('b', 0):.3f}Å, "
+                          f"c={lattice_params.get('c', 0):.3f}Å\n"
+                          f"Angles: α={lattice_params.get('alpha', 0):.1f}°, "
+                          f"β={lattice_params.get('beta', 0):.1f}°, "
+                          f"γ={lattice_params.get('gamma', 0):.1f}°\n\n"
+                          f"✓ Crystal geometry is being preserved based on actual lattice parameters.\n"
+                          f"Check 'View' tab if unit cell appears distorted.")
+            
+            QMessageBox.information(self, "Crystal Structure Loaded", success_msg)
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error loading CIF file:\n{str(e)}")
@@ -1676,33 +1726,55 @@ class CrystalStructureWidget(QWidget):
         if not self.pymatgen_structure:
             return
             
+        # Get the actual lattice for accurate geometry
+        lattice = self.pymatgen_structure.lattice
+        
         # Unit cell corners in fractional coordinates
         frac_corners = [
             [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],  # Bottom face
             [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]   # Top face
         ]
         
-        # Convert to Cartesian coordinates using actual lattice
+        # Convert to Cartesian coordinates using actual lattice vectors
         cart_corners = []
         for frac_corner in frac_corners:
-            cart_corner = self.pymatgen_structure.lattice.get_cartesian_coords(frac_corner)
+            cart_corner = lattice.get_cartesian_coords(frac_corner)
             cart_corners.append(cart_corner)
         
-        # Unit cell edges (same connectivity)
+        # Unit cell edges with proper connectivity
         edges = [
-            # Bottom face
+            # Bottom face (z=0)
             [0, 1], [1, 2], [2, 3], [3, 0],
-            # Top face  
+            # Top face (z=1)
             [4, 5], [5, 6], [6, 7], [7, 4],
-            # Vertical edges
+            # Vertical edges connecting bottom to top
             [0, 4], [1, 5], [2, 6], [3, 7]
         ]
         
-        # Draw edges with actual lattice geometry
+        # Draw unit cell edges with the actual lattice geometry
         for edge in edges:
             p1, p2 = cart_corners[edge[0]], cart_corners[edge[1]]
             self.ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], 
-                       color='#333333', linewidth=2.5, alpha=0.8, solid_capstyle='round')
+                       color='#2E2E2E', linewidth=2.5, alpha=0.85, 
+                       solid_capstyle='round', linestyle='-')
+        
+        # Debug information about unit cell geometry
+        print(f"📐 Unit cell edges drawn with actual lattice parameters:")
+        crystal_system = self.determine_crystal_system_from_lattice(lattice)
+        print(f"   Crystal System: {crystal_system}")
+        print(f"   a={lattice.a:.3f}Å, b={lattice.b:.3f}Å, c={lattice.c:.3f}Å")
+        print(f"   α={lattice.alpha:.2f}°, β={lattice.beta:.2f}°, γ={lattice.gamma:.2f}°")
+        print(f"   Volume: {lattice.volume:.3f} Å³")
+        
+        # Add corner markers for better visualization (optional)
+        if self.visualization_settings.get('show_unit_cell_corners', False):
+            for i, corner in enumerate(cart_corners):
+                self.ax.scatter(corner[0], corner[1], corner[2], 
+                              color='red', s=30, alpha=0.7, marker='o')
+                # Label corners for debugging
+                if self.visualization_settings.get('label_unit_cell_corners', False):
+                    self.ax.text(corner[0], corner[1], corner[2], f'C{i}', 
+                               fontsize=8, color='red', alpha=0.8)
     
     def plot_crystal_axes(self):
         """Plot actual crystal lattice vectors as axes."""
@@ -1777,26 +1849,41 @@ class CrystalStructureWidget(QWidget):
         try:
             preserve_geometry = self.visualization_settings.get('preserve_geometry', True)
             
-            if preserve_geometry:
-                # Preserve crystal geometry by using actual data ranges
-                ranges = [x_range, y_range, z_range]
-                max_range = max(ranges)
+            if preserve_geometry and self.pymatgen_structure:
+                # Use actual lattice parameters to calculate true aspect ratios
+                lattice = self.pymatgen_structure.lattice
+                a_length = lattice.a
+                b_length = lattice.b
+                c_length = lattice.c
                 
-                # Calculate normalized aspect ratios
-                if max_range > 0:
-                    aspect_ratios = [r/max_range for r in ranges]
-                    # Clamp aspect ratios to prevent extreme distortions
-                    min_aspect = 0.3  # Minimum aspect ratio to prevent too much squashing
+                # Calculate aspect ratios based on actual lattice constants
+                max_length = max(a_length, b_length, c_length)
+                if max_length > 0:
+                    # Use actual lattice proportions for true crystal geometry
+                    aspect_ratios = [a_length/max_length, b_length/max_length, c_length/max_length]
+                    
+                    # Only apply minimum aspect constraint for extremely distorted cases
+                    min_aspect = 0.1  # Reduced from 0.3 to allow more accurate representation
                     aspect_ratios = [max(ar, min_aspect) for ar in aspect_ratios]
+                    
                     self.ax.set_box_aspect(aspect_ratios)
+                    
+                    # Debug information
+                    print(f"🔷 Crystal unit cell geometry:")
+                    print(f"   a = {a_length:.3f} Å, b = {b_length:.3f} Å, c = {c_length:.3f} Å")
+                    print(f"   α = {lattice.alpha:.2f}°, β = {lattice.beta:.2f}°, γ = {lattice.gamma:.2f}°")
+                    print(f"   Aspect ratios: {aspect_ratios[0]:.3f} : {aspect_ratios[1]:.3f} : {aspect_ratios[2]:.3f}")
                 else:
                     self.ax.set_box_aspect([1, 1, 1])  # Fallback to cubic
             else:
                 # Force equal aspect ratios (may distort crystal geometry)
                 self.ax.set_box_aspect([1, 1, 1])
+                if preserve_geometry is False:
+                    print("⚠️  Crystal geometry preservation is disabled - unit cell may appear distorted")
                 
         except AttributeError:
             # Fallback for older matplotlib versions
+            print("⚠️  Using fallback aspect ratio method - upgrade matplotlib for better crystal geometry")
             pass
     
     def optimize_view_bounds(self):
@@ -1854,6 +1941,7 @@ class CrystalStructureWidget(QWidget):
         self.visualization_settings['label_atoms'] = self.label_atoms_cb.isChecked()
         self.visualization_settings['label_bonds'] = self.label_bonds_cb.isChecked()
         self.visualization_settings['preserve_geometry'] = self.preserve_geometry_cb.isChecked()
+        self.visualization_settings['show_unit_cell_corners'] = self.show_unit_cell_corners_cb.isChecked()
         self.update_3d_plot()
     
     def update_atom_scale(self, value):
@@ -2434,6 +2522,47 @@ class CrystalStructureWidget(QWidget):
                 QMessageBox.information(self, "Success", "View saved successfully.")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error saving view:\n{str(e)}")
+    
+    def show_unit_cell_debug_info(self):
+        """Show debug information about the unit cell."""
+        if not self.current_structure:
+            QMessageBox.warning(self, "Warning", "No structure loaded.")
+            return
+        
+        # Create a dialog to display unit cell information
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Unit Cell Debug Information")
+        dialog.setModal(True)
+        dialog.resize(400, 300)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Add text to display unit cell information
+        info_text = QTextEdit()
+        info_text.setReadOnly(True)
+        info_text.setPlainText(f"Formula: {self.current_structure['formula']}\n"
+                               f"Space Group: {self.current_structure['space_group']}\n"
+                               f"Crystal System: {self.current_structure['crystal_system']}\n"
+                               f"Atoms: {self.current_structure['num_atoms']}\n"
+                               f"Elements: {', '.join(self.current_structure['elements'])}\n"
+                               f"Wyckoff Positions: {len(self.current_structure['wyckoff_positions'])}\n"
+                               f"Symmetry Operations: {len(self.current_structure['symmetry_operations'])}\n"
+                               f"Equivalent Sites: {len(self.current_structure['equivalent_sites'])}\n"
+                               f"Lattice Parameters:\na = {self.current_structure['lattice_params']['a']:.4f} Å\n"
+                               f"b = {self.current_structure['lattice_params']['b']:.4f} Å\n"
+                               f"c = {self.current_structure['lattice_params']['c']:.4f} Å\n"
+                               f"α = {self.current_structure['lattice_params']['alpha']:.2f}°\n"
+                               f"β = {self.current_structure['lattice_params']['beta']:.2f}°\n"
+                               f"γ = {self.current_structure['lattice_params']['gamma']:.2f}°\n"
+                               f"Volume = {self.current_structure['lattice_params']['volume']:.3f} Å³\n")
+        layout.addWidget(info_text)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
 
 
 # Test function

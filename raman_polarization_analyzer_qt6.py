@@ -349,116 +349,42 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         self.update_spectrum_plot()
     
     def setup_peak_fitting_tab(self, side_panel, content_area):
-        """Setup the Peak Fitting tab."""
-        # Side panel layout
+        """Setup the Peak Fitting tab with sub-tabs for Parameters and Assignment."""
+        # Create a tabbed interface within the Peak Fitting tab
+        peak_fitting_tabs = QTabWidget()
+        
+        # Create the two sub-tabs
+        parameters_tab = QWidget()
+        assignment_tab = QWidget()
+        
+        peak_fitting_tabs.addTab(parameters_tab, "Parameters")
+        peak_fitting_tabs.addTab(assignment_tab, "Assignment")
+        
+        # Set up the Parameters sub-tab (original Peak Fitting functionality)
+        self.setup_parameters_subtab(parameters_tab)
+        
+        # Set up the Assignment sub-tab (original Peak Analysis functionality)
+        self.setup_assignment_subtab(assignment_tab)
+        
+        # Connect subtab change signal to update reference selections when switching to Assignment tab
+        peak_fitting_tabs.currentChanged.connect(self.on_peak_fitting_subtab_changed)
+        
+        # Store reference to the peak fitting tabs widget for later access
+        self.peak_fitting_tabs = peak_fitting_tabs
+        
+        # Add the tabbed widget to the side panel
         side_layout = QVBoxLayout(side_panel)
         
-        # Title
+        # Title for the main tab
         title_label = QLabel("Peak Fitting")
         title_label.setFont(QFont("Arial", 12, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         side_layout.addWidget(title_label)
         
-        # Peak selection group
-        peak_group = QGroupBox("Peak Selection")
-        peak_layout = QVBoxLayout(peak_group)
+        # Add the sub-tabs
+        side_layout.addWidget(peak_fitting_tabs)
         
-        self.peak_selection_btn = QPushButton("Toggle Peak Selection Mode")
-        self.peak_selection_btn.clicked.connect(self.toggle_peak_selection)
-        peak_layout.addWidget(self.peak_selection_btn)
-        
-        clear_peaks_btn = QPushButton("Clear Selected Peaks")
-        clear_peaks_btn.clicked.connect(self.clear_selected_peaks)
-        peak_layout.addWidget(clear_peaks_btn)
-        
-        side_layout.addWidget(peak_group)
-        
-        # Fitting options group
-        fitting_group = QGroupBox("Fitting Options")
-        fitting_layout = QVBoxLayout(fitting_group)
-        
-        # Peak shape selection
-        shape_label = QLabel("Peak Shape:")
-        fitting_layout.addWidget(shape_label)
-        
-        self.peak_shape_combo = QComboBox()
-        self.peak_shape_combo.addItems(["Lorentzian", "Gaussian", "Voigt"])
-        fitting_layout.addWidget(self.peak_shape_combo)
-        
-        # Fit button
-        fit_btn = QPushButton("Fit Selected Peaks")
-        fit_btn.clicked.connect(self.fit_peaks)
-        fitting_layout.addWidget(fit_btn)
-        
-        side_layout.addWidget(fitting_group)
-        
-        # Peak matching group
-        matching_group = QGroupBox("Peak Matching & Labeling")
-        matching_layout = QVBoxLayout(matching_group)
-        
-        # Match peaks button
-        match_peaks_btn = QPushButton("Match with Reference Peaks")
-        match_peaks_btn.clicked.connect(self.match_peaks_with_reference)
-        matching_layout.addWidget(match_peaks_btn)
-        
-        # Tolerance setting
-        tolerance_layout = QHBoxLayout()
-        tolerance_layout.addWidget(QLabel("Tolerance (cm⁻¹):"))
-        self.tolerance_spin = QSpinBox()
-        self.tolerance_spin.setRange(5, 200)
-        self.tolerance_spin.setValue(50)
-        self.tolerance_spin.valueChanged.connect(self.update_matching_tolerance)
-        tolerance_layout.addWidget(self.tolerance_spin)
-        matching_layout.addLayout(tolerance_layout)
-        
-        # Auto-assign labels button
-        assign_labels_btn = QPushButton("Auto-Assign Peak Labels")
-        assign_labels_btn.clicked.connect(self.auto_assign_peak_labels)
-        matching_layout.addWidget(assign_labels_btn)
-        
-        # Show assignments button
-        show_assignments_btn = QPushButton("Show Peak Assignments")
-        show_assignments_btn.clicked.connect(self.show_peak_assignments)
-        matching_layout.addWidget(show_assignments_btn)
-        
-        # Show Raman activity info button
-        activity_info_btn = QPushButton("Show Raman Activity Filter")
-        activity_info_btn.clicked.connect(self.show_raman_activity_info)
-        activity_info_btn.setStyleSheet("QPushButton { background-color: #e7f3ff; }")
-        matching_layout.addWidget(activity_info_btn)
-        
-        # Debug calculated modes button
-        debug_modes_btn = QPushButton("Debug Calculated Modes")
-        debug_modes_btn.clicked.connect(self.debug_calculated_modes)
-        debug_modes_btn.setStyleSheet("QPushButton { background-color: #fff3cd; }")
-        matching_layout.addWidget(debug_modes_btn)
-        
-        # NEW: Debug database content button
-        debug_db_btn = QPushButton("Debug Database Content")
-        debug_db_btn.clicked.connect(self.debug_database_content)
-        debug_db_btn.setStyleSheet("QPushButton { background-color: #d4edda; }")
-        matching_layout.addWidget(debug_db_btn)
-        
-        side_layout.addWidget(matching_group)
-        
-        # Reference mineral group
-        ref_group = QGroupBox("Reference Mineral")
-        ref_layout = QVBoxLayout(ref_group)
-        
-        self.reference_combo = QComboBox()
-        self.reference_combo.currentTextChanged.connect(self.on_reference_mineral_changed)
-        ref_layout.addWidget(self.reference_combo)
-        
-        self.reference_status_label = QLabel("No reference selected")
-        self.reference_status_label.setStyleSheet("color: gray; font-style: italic;")
-        ref_layout.addWidget(self.reference_status_label)
-        
-        side_layout.addWidget(ref_group)
-        
-        # Add stretch
-        side_layout.addStretch()
-        
-        # Content area - matplotlib plot
+        # Content area - matplotlib plot (shared by both sub-tabs)
         content_layout = QVBoxLayout(content_area)
         
         # Create matplotlib figure and canvas
@@ -484,8 +410,271 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Connect mouse events for peak selection
         self.peak_canvas.mpl_connect('button_press_event', self.on_peak_click)
         
+        # Initialize preprocessing variables
+        self.processed_spectrum = None
+        self.baseline_corrected = False
+        self.noise_filtered = False
+        
         # Initialize empty plot
         self.update_peak_fitting_plot()
+    
+    def setup_parameters_subtab(self, parameters_tab):
+        """Setup the Parameters sub-tab (original Peak Fitting functionality)."""
+        layout = QVBoxLayout(parameters_tab)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Peak selection group
+        peak_group = QGroupBox("Peak Selection")
+        peak_layout = QVBoxLayout(peak_group)
+        
+        self.peak_selection_btn = QPushButton("🎯 Enable Peak Selection")
+        self.peak_selection_btn.clicked.connect(self.toggle_peak_selection)
+        self.peak_selection_btn.setToolTip("Enable peak selection mode:\n• Left-click peaks to select them\n• Ctrl+Click OR Right-click near peaks to remove them (within 10 cm⁻¹)")
+        peak_layout.addWidget(self.peak_selection_btn)
+        
+        # Add instruction label
+        instruction_label = QLabel("💡 After enabling selection:\n• Left-click peaks to select them\n• Ctrl+Click OR Right-click near peaks to remove them")
+        instruction_label.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+        instruction_label.setWordWrap(True)
+        peak_layout.addWidget(instruction_label)
+        
+        clear_peaks_btn = QPushButton("Clear Selected Peaks")
+        clear_peaks_btn.clicked.connect(self.clear_selected_peaks)
+        peak_layout.addWidget(clear_peaks_btn)
+        
+        # Add peak count status
+        self.peak_count_label = QLabel("Selected peaks: 0")
+        self.peak_count_label.setStyleSheet("color: #333; font-size: 11px; font-weight: bold;")
+        peak_layout.addWidget(self.peak_count_label)
+        
+        # Auto peak detection button
+        auto_detect_btn = QPushButton("Auto-Detect Peaks")
+        auto_detect_btn.clicked.connect(self.auto_detect_peaks)
+        auto_detect_btn.setStyleSheet("QPushButton { background-color: #e6f3ff; }")
+        peak_layout.addWidget(auto_detect_btn)
+        
+        layout.addWidget(peak_group)
+        
+        # Data preprocessing group
+        preprocess_group = QGroupBox("Data Preprocessing")
+        preprocess_layout = QVBoxLayout(preprocess_group)
+        
+        # Noise reduction
+        noise_layout = QHBoxLayout()
+        noise_layout.addWidget(QLabel("Smoothing:"))
+        self.smoothing_spin = QSpinBox()
+        self.smoothing_spin.setRange(0, 20)
+        self.smoothing_spin.setValue(3)
+        self.smoothing_spin.setSuffix(" pts")
+        noise_layout.addWidget(self.smoothing_spin)
+        preprocess_layout.addLayout(noise_layout)
+        
+        # Baseline correction
+        baseline_btn = QPushButton("Correct Baseline")
+        baseline_btn.clicked.connect(self.correct_baseline)
+        preprocess_layout.addWidget(baseline_btn)
+        
+        # Noise filtering
+        noise_filter_btn = QPushButton("Apply Noise Filter")
+        noise_filter_btn.clicked.connect(self.apply_noise_filter)
+        preprocess_layout.addWidget(noise_filter_btn)
+        
+        layout.addWidget(preprocess_group)
+        
+        # Fitting options group
+        fitting_group = QGroupBox("Fitting Options")
+        fitting_layout = QVBoxLayout(fitting_group)
+        
+        # Peak shape selection
+        shape_label = QLabel("Peak Shape:")
+        fitting_layout.addWidget(shape_label)
+        
+        self.peak_shape_combo = QComboBox()
+        self.peak_shape_combo.addItems(["Lorentzian", "Gaussian", "Voigt", "Pseudo-Voigt"])
+        fitting_layout.addWidget(self.peak_shape_combo)
+        
+        # Fitting range control
+        range_layout = QHBoxLayout()
+        range_layout.addWidget(QLabel("Fit Range:"))
+        self.fit_range_spin = QSpinBox()
+        self.fit_range_spin.setRange(10, 200)
+        self.fit_range_spin.setValue(50)
+        self.fit_range_spin.setSuffix(" cm⁻¹")
+        range_layout.addWidget(self.fit_range_spin)
+        fitting_layout.addLayout(range_layout)
+        
+        # Multipeak fitting checkbox
+        self.multipeak_check = QCheckBox("Multipeak Fitting")
+        self.multipeak_check.setToolTip("Fit overlapping peaks simultaneously")
+        fitting_layout.addWidget(self.multipeak_check)
+        
+        # Weak peak detection threshold
+        weak_layout = QHBoxLayout()
+        weak_layout.addWidget(QLabel("Weak Peak Threshold:"))
+        self.weak_threshold_spin = QDoubleSpinBox()
+        self.weak_threshold_spin.setRange(0.01, 1.0)
+        self.weak_threshold_spin.setValue(0.1)
+        self.weak_threshold_spin.setSingleStep(0.01)
+        self.weak_threshold_spin.setDecimals(2)
+        weak_layout.addWidget(self.weak_threshold_spin)
+        fitting_layout.addLayout(weak_layout)
+        
+        # Fit button
+        fit_btn = QPushButton("Fit Selected Peaks")
+        fit_btn.clicked.connect(self.fit_peaks)
+        fit_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
+        fitting_layout.addWidget(fit_btn)
+        
+        # Advanced multipeak fit button
+        multipeak_btn = QPushButton("Multipeak + Weak Peak")
+        multipeak_btn.clicked.connect(self.fit_overlapping_peaks)
+        multipeak_btn.setStyleSheet("QPushButton { background-color: #FF9800; color: white; }")
+        multipeak_btn.setToolTip("Fit selected peaks and automatically detect/fit additional weak peaks in the region")
+        fitting_layout.addWidget(multipeak_btn)
+        
+        layout.addWidget(fitting_group)
+        
+        # Peak analysis group (moved from original Peak Analysis)
+        analysis_group = QGroupBox("Peak Quality & Export")
+        analysis_layout = QVBoxLayout(analysis_group)
+        
+        # Peak quality assessment
+        quality_btn = QPushButton("Assess Peak Quality")
+        quality_btn.clicked.connect(self.assess_peak_quality)
+        quality_btn.setToolTip("Evaluate S/N ratio, width, and fit quality for all peaks")
+        analysis_layout.addWidget(quality_btn)
+        
+        # Peak deconvolution for overlaps
+        deconv_btn = QPushButton("Deconvolve Overlapping Peaks")
+        deconv_btn.clicked.connect(self.deconvolve_peaks)
+        deconv_btn.setToolTip("Identify and analyze overlapping peak pairs")
+        analysis_layout.addWidget(deconv_btn)
+        
+        # Export fitted parameters
+        export_params_btn = QPushButton("Export Fit Parameters")
+        export_params_btn.clicked.connect(self.export_fit_parameters)
+        export_params_btn.setToolTip("Export all fitted parameters to CSV/TXT file")
+        analysis_layout.addWidget(export_params_btn)
+        
+        layout.addWidget(analysis_group)
+        
+        # Add stretch
+        layout.addStretch()
+    
+    def setup_assignment_subtab(self, assignment_tab):
+        """Setup the Assignment sub-tab (original Peak Analysis functionality)."""
+        layout = QVBoxLayout(assignment_tab)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Quick access to fitted peaks
+        status_group = QGroupBox("Fitting Status")
+        status_layout = QVBoxLayout(status_group)
+        
+        self.fitting_status_label = QLabel("No peaks fitted")
+        self.fitting_status_label.setStyleSheet("color: gray; font-style: italic;")
+        status_layout.addWidget(self.fitting_status_label)
+        
+        # Switch to Parameters tab button
+        params_btn = QPushButton("→ Go to Parameters Tab")
+        params_btn.clicked.connect(lambda: self.switch_to_parameters_tab())
+        params_btn.setStyleSheet("QPushButton { background-color: #f0f8ff; }")
+        status_layout.addWidget(params_btn)
+        
+        layout.addWidget(status_group)
+        
+        # Peak matching group
+        matching_group = QGroupBox("Peak Matching & Labeling")
+        matching_layout = QVBoxLayout(matching_group)
+        
+        # Reference mineral selection
+        ref_layout = QHBoxLayout()
+        ref_layout.addWidget(QLabel("Reference:"))
+        self.analysis_reference_combo = QComboBox()
+        self.analysis_reference_combo.currentTextChanged.connect(self.on_reference_mineral_changed)
+        ref_layout.addWidget(self.analysis_reference_combo)
+        matching_layout.addLayout(ref_layout)
+        
+        self.analysis_reference_status_label = QLabel("No reference selected")
+        self.analysis_reference_status_label.setStyleSheet("color: gray; font-style: italic; font-size: 10px;")
+        matching_layout.addWidget(self.analysis_reference_status_label)
+        
+        # Tolerance setting
+        tolerance_layout = QHBoxLayout()
+        tolerance_layout.addWidget(QLabel("Tolerance:"))
+        self.tolerance_spin = QSpinBox()
+        self.tolerance_spin.setRange(5, 200)
+        self.tolerance_spin.setValue(50)
+        self.tolerance_spin.setSuffix(" cm⁻¹")
+        self.tolerance_spin.valueChanged.connect(self.update_matching_tolerance)
+        tolerance_layout.addWidget(self.tolerance_spin)
+        matching_layout.addLayout(tolerance_layout)
+        
+        # Match peaks button
+        match_peaks_btn = QPushButton("Match with Reference Peaks")
+        match_peaks_btn.clicked.connect(self.match_peaks_with_reference)
+        match_peaks_btn.setToolTip("Match fitted peaks with calculated reference peaks")
+        match_peaks_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        matching_layout.addWidget(match_peaks_btn)
+        
+        # Auto-assign labels button
+        assign_labels_btn = QPushButton("Auto-Assign Peak Labels")
+        assign_labels_btn.clicked.connect(self.auto_assign_peak_labels)
+        assign_labels_btn.setToolTip("Automatically assign vibrational mode labels")
+        matching_layout.addWidget(assign_labels_btn)
+        
+        # Show assignments button
+        show_assignments_btn = QPushButton("Show Peak Assignments")
+        show_assignments_btn.clicked.connect(self.show_peak_assignments)
+        show_assignments_btn.setToolTip("Display detailed peak assignment results")
+        matching_layout.addWidget(show_assignments_btn)
+        
+        layout.addWidget(matching_group)
+        
+        # Advanced analysis group
+        advanced_group = QGroupBox("Advanced Analysis")
+        advanced_layout = QVBoxLayout(advanced_group)
+        
+        # Show Raman activity info button
+        activity_info_btn = QPushButton("Raman Activity Filter")
+        activity_info_btn.clicked.connect(self.show_raman_activity_info)
+        activity_info_btn.setStyleSheet("QPushButton { background-color: #e7f3ff; }")
+        activity_info_btn.setToolTip("Information about Raman active modes")
+        advanced_layout.addWidget(activity_info_btn)
+        
+        # Debug calculated modes button
+        debug_modes_btn = QPushButton("Debug Calculated Modes")
+        debug_modes_btn.clicked.connect(self.debug_calculated_modes)
+        debug_modes_btn.setStyleSheet("QPushButton { background-color: #fff3cd; }")
+        debug_modes_btn.setToolTip("Debug information for calculated vibrational modes")
+        advanced_layout.addWidget(debug_modes_btn)
+        
+        # Debug database content button
+        debug_db_btn = QPushButton("Debug Database Content")
+        debug_db_btn.clicked.connect(self.debug_database_content)
+        debug_db_btn.setStyleSheet("QPushButton { background-color: #d4edda; }")
+        debug_db_btn.setToolTip("Debug information for mineral database content")
+        advanced_layout.addWidget(debug_db_btn)
+        
+        layout.addWidget(advanced_group)
+        
+        # Add stretch
+        layout.addStretch()
+    
+    def switch_to_parameters_tab(self):
+        """Switch to the Parameters sub-tab within Peak Fitting."""
+        # Find the Peak Fitting tab and switch to Parameters sub-tab
+        peak_fitting_tab_index = 1  # Peak Fitting is typically the second tab (index 1)
+        self.tab_widget.setCurrentIndex(peak_fitting_tab_index)
+        
+        # Switch to the Parameters sub-tab (index 0)
+        # We need to find the QTabWidget within the Peak Fitting tab
+        peak_fitting_tab = self.tab_widget.widget(peak_fitting_tab_index)
+        if hasattr(peak_fitting_tab, 'findChild'):
+            tab_widget = peak_fitting_tab.findChild(QTabWidget)
+            if tab_widget:
+                tab_widget.setCurrentIndex(0)  # Parameters tab
+    
+
     
     def setup_crystal_structure_tab(self, side_panel, content_area):
         """Setup the Crystal Structure tab using the new comprehensive module."""
@@ -1159,9 +1348,8 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
     
     def update_mineral_lists(self):
         """Update mineral lists in UI components."""
-        if hasattr(self, 'reference_combo') and self.mineral_list:
-            self.reference_combo.clear()
-            self.reference_combo.addItems(self.mineral_list)
+        # Use the comprehensive function that updates all reference mineral selections
+        self.update_reference_mineral_selections()
     
     def on_tab_changed(self, index):
         """Handle tab change events."""
@@ -1170,10 +1358,18 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Update plots when switching tabs
         if current_tab == "Spectrum Analysis" and self.current_spectrum is not None:
             self.update_spectrum_plot()
-        elif current_tab == "Peak Fitting" and self.current_spectrum is not None:
-            self.update_peak_fitting_plot()
-            if self.selected_reference_mineral and hasattr(self, 'reference_combo'):
-                self.reference_combo.setCurrentText(self.selected_reference_mineral)
+        elif current_tab == "Peak Fitting":
+            if self.current_spectrum is not None:
+                self.update_peak_fitting_plot()
+            # Update reference mineral selections across all subtabs when switching to Peak Fitting
+            # This ensures combo boxes are always populated with available minerals
+            self.update_reference_mineral_selections()
+    
+    def on_peak_fitting_subtab_changed(self, index):
+        """Handle Peak Fitting subtab change events."""
+        if index == 1:  # Assignment tab (index 1)
+            # Update reference mineral selections when switching to Assignment subtab
+            self.update_reference_mineral_selections()
     
     def on_search_change(self, text):
         """Handle mineral search text changes (legacy method for compatibility)."""
@@ -1526,15 +1722,64 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
     
     def update_reference_mineral_selections(self):
         """Update reference mineral selections across tabs."""
-        if self.selected_reference_mineral:
-            # Update Peak Fitting tab reference mineral
-            if hasattr(self, 'reference_combo'):
+        # Populate combo boxes with mineral database
+        mineral_names = []
+        if self.mineral_database:
+            mineral_names = sorted(self.mineral_database.keys())
+        
+        # Update Peak Fitting tab combo box (if it exists)
+        if hasattr(self, 'reference_combo'):
+            current_selection = self.reference_combo.currentText()
+            self.reference_combo.clear()
+            self.reference_combo.addItems(mineral_names)
+            if self.selected_reference_mineral and self.selected_reference_mineral in mineral_names:
                 self.reference_combo.setCurrentText(self.selected_reference_mineral)
-                
-            # Update status label
+            elif current_selection in mineral_names:
+                self.reference_combo.setCurrentText(current_selection)
+        
+        # Update Peak Analysis tab combo box (if it exists)
+        if hasattr(self, 'analysis_reference_combo'):
+            current_selection = self.analysis_reference_combo.currentText()
+            
+            # Temporarily disconnect signal to prevent it from overwriting our selected_reference_mineral
+            target_mineral = self.selected_reference_mineral  # Store the value we want
+            self.analysis_reference_combo.currentTextChanged.disconnect()
+            
+            self.analysis_reference_combo.clear()
+            self.analysis_reference_combo.addItems(mineral_names)
+            
+            # Reconnect the signal
+            self.analysis_reference_combo.currentTextChanged.connect(self.on_reference_mineral_changed)
+            
+            # Try exact match first
+            if target_mineral and target_mineral in mineral_names:
+                self.analysis_reference_combo.setCurrentText(target_mineral)
+            else:
+                # Try fuzzy match for cases like 'CALCITE_4' vs 'CALCITE'
+                if target_mineral:
+                    # Remove suffixes like '_4', '_R3C', etc.
+                    base_name = target_mineral.split('_')[0]
+                    
+                    # Look for the base name in mineral_names
+                    for mineral in mineral_names:
+                        if mineral.upper() == base_name.upper():
+                            self.analysis_reference_combo.setCurrentText(mineral)
+                            break
+                    else:
+                        # No match found, keep current selection if valid
+                        if current_selection in mineral_names:
+                            self.analysis_reference_combo.setCurrentText(current_selection)
+                elif current_selection in mineral_names:
+                    self.analysis_reference_combo.setCurrentText(current_selection)
+        
+        # Update status labels
+        if self.selected_reference_mineral:
             if hasattr(self, 'reference_status_label'):
                 self.reference_status_label.setText("Auto-selected from Spectrum Analysis tab")
                 self.reference_status_label.setStyleSheet("color: green; font-style: italic;")
+            if hasattr(self, 'analysis_reference_status_label'):
+                self.analysis_reference_status_label.setText("Auto-selected from Spectrum Analysis tab")
+                self.analysis_reference_status_label.setStyleSheet("color: green; font-style: italic;")
     
     # === File Operations ===
     
@@ -1644,10 +1889,10 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         self.peak_selection_mode = not self.peak_selection_mode
         
         if self.peak_selection_mode:
-            self.peak_selection_btn.setText("Exit Peak Selection Mode")
-            self.peak_selection_btn.setStyleSheet("background-color: #ffcccc;")
+            self.peak_selection_btn.setText("🚫 Exit Peak Selection")
+            self.peak_selection_btn.setStyleSheet("background-color: #ffcccc; font-weight: bold;")
         else:
-            self.peak_selection_btn.setText("Toggle Peak Selection Mode")
+            self.peak_selection_btn.setText("🎯 Enable Peak Selection")
             self.peak_selection_btn.setStyleSheet("")
     
     def clear_selected_peaks(self):
@@ -1660,9 +1905,22 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         if hasattr(self, 'calculated_peaks_shifted'):
             delattr(self, 'calculated_peaks_shifted')
         self.update_peak_fitting_plot()
+        self.update_fitting_status()
+        self.update_peak_count_display()
+    
+    def update_peak_count_display(self):
+        """Update the display showing number of selected peaks."""
+        if hasattr(self, 'peak_count_label'):
+            count = len(self.selected_peaks)
+            if count == 0:
+                self.peak_count_label.setText("Selected peaks: 0")
+                self.peak_count_label.setStyleSheet("color: #666; font-size: 11px;")
+            else:
+                self.peak_count_label.setText(f"Selected peaks: {count}")
+                self.peak_count_label.setStyleSheet("color: #2E7D32; font-size: 11px; font-weight: bold;")
     
     def on_peak_click(self, event):
-        """Handle mouse clicks for peak selection."""
+        """Handle mouse clicks for peak selection and removal."""
         if not self.peak_selection_mode or not event.inaxes:
             return
         
@@ -1675,11 +1933,42 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         if x_click is None:
             return
         
-        # Add to selected peaks
-        self.selected_peaks.append(x_click)
+        # Debug: Print event information
+        print(f"Click event - key: '{event.key}', button: {event.button}")
         
-        # Update plot
+        # Check for peak removal conditions:
+        # 1. Ctrl key is pressed OR
+        # 2. Right mouse button (button 3)
+        is_ctrl_pressed = (event.key is not None and 
+                          ('ctrl' in str(event.key).lower() or 'control' in str(event.key).lower()))
+        is_right_click = (event.button == 3)
+        
+        print(f"Debug - is_ctrl_pressed: {is_ctrl_pressed}, is_right_click: {is_right_click}")
+        
+        if is_ctrl_pressed or is_right_click:
+            # Remove nearest peak within 10 cm⁻¹
+            if self.selected_peaks:
+                # Find the nearest selected peak
+                distances = [abs(peak - x_click) for peak in self.selected_peaks]
+                min_distance = min(distances)
+                
+                # Only remove if within 10 cm⁻¹ tolerance
+                if min_distance <= 10:
+                    nearest_peak_idx = distances.index(min_distance)
+                    removed_peak = self.selected_peaks.pop(nearest_peak_idx)
+                    print(f"🗑️ Removed peak at {removed_peak:.1f} cm⁻¹ (clicked at {x_click:.1f} cm⁻¹)")
+                else:
+                    print(f"❌ No peak within 10 cm⁻¹ of click position {x_click:.1f} cm⁻¹")
+            else:
+                print("❌ No peaks selected to remove")
+        else:
+            # Normal click - add peak
+            self.selected_peaks.append(x_click)
+            print(f"➕ Added peak at {x_click:.1f} cm⁻¹")
+        
+        # Update plot and peak count
         self.update_peak_fitting_plot()
+        self.update_peak_count_display()
     
     def fit_peaks(self):
         """Fit selected peaks with chosen shape."""
@@ -1689,17 +1978,28 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         try:
             shape = self.peak_shape_combo.currentText()
-            wavenumbers = self.current_spectrum['wavenumbers']
-            intensities = self.current_spectrum['intensities']
+            
+            # Use processed spectrum if available, otherwise use original
+            if self.processed_spectrum is not None:
+                wavenumbers = self.processed_spectrum['wavenumbers']
+                intensities = self.processed_spectrum['intensities']
+            else:
+                wavenumbers = self.current_spectrum['wavenumbers']
+                intensities = self.current_spectrum['intensities']
             
             self.fitted_peaks.clear()
+            range_width = self.fit_range_spin.value()  # Use adjustable range
+            
+            # Check if multipeak fitting is requested
+            if self.multipeak_check.isChecked() and len(self.selected_peaks) > 1:
+                self.fit_overlapping_peaks()
+                return
             
             for peak_pos in self.selected_peaks:
                 # Find peak index
                 peak_idx = np.argmin(np.abs(wavenumbers - peak_pos))
                 
                 # Define fitting range around peak
-                range_width = 50  # wavenumbers
                 mask = np.abs(wavenumbers - peak_pos) <= range_width
                 
                 if np.sum(mask) < 5:  # Need at least 5 points
@@ -1708,21 +2008,47 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
                 x_fit = wavenumbers[mask]
                 y_fit = intensities[mask]
                 
-                # Initial guess
-                amplitude = np.max(y_fit)
+                # Improved initial guess
+                peak_idx_local = np.argmin(np.abs(x_fit - peak_pos))
+                amplitude = y_fit[peak_idx_local]
                 center = peak_pos
-                width = 10
+                
+                # Estimate width from data
+                half_max = amplitude / 2
+                indices_above_half = np.where(y_fit >= half_max)[0]
+                if len(indices_above_half) > 1:
+                    width_estimate = (x_fit[indices_above_half[-1]] - x_fit[indices_above_half[0]]) / 2
+                    width = max(2, min(width_estimate, 20))  # Reasonable bounds
+                else:
+                    width = 10
                 
                 try:
                     if shape == "Lorentzian":
-                        popt, _ = curve_fit(self.lorentzian, x_fit, y_fit, 
-                                          p0=[amplitude, center, width])
+                        popt, pcov = curve_fit(self.lorentzian, x_fit, y_fit, 
+                                             p0=[amplitude, center, width])
                     elif shape == "Gaussian":
-                        popt, _ = curve_fit(self.gaussian, x_fit, y_fit, 
-                                          p0=[amplitude, center, width])
+                        popt, pcov = curve_fit(self.gaussian, x_fit, y_fit, 
+                                             p0=[amplitude, center, width])
                     elif shape == "Voigt":
-                        popt, _ = curve_fit(self.voigt, x_fit, y_fit, 
-                                          p0=[amplitude, center, width, width])
+                        popt, pcov = curve_fit(self.voigt, x_fit, y_fit, 
+                                             p0=[amplitude, center, width, width])
+                    elif shape == "Pseudo-Voigt":
+                        popt, pcov = curve_fit(self.pseudo_voigt, x_fit, y_fit, 
+                                             p0=[amplitude, center, width, 0.5])
+                    
+                    # Calculate R-squared for this fit
+                    if shape == "Pseudo-Voigt":
+                        y_pred = self.pseudo_voigt(x_fit, *popt)
+                    elif shape == "Voigt":
+                        y_pred = self.voigt(x_fit, *popt)
+                    elif shape == "Gaussian":
+                        y_pred = self.gaussian(x_fit, *popt)
+                    else:
+                        y_pred = self.lorentzian(x_fit, *popt)
+                    
+                    ss_res = np.sum((y_fit - y_pred) ** 2)
+                    ss_tot = np.sum((y_fit - np.mean(y_fit)) ** 2)
+                    r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
                     
                     # Store fitted peak
                     fitted_peak = {
@@ -1730,8 +2056,17 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
                         'amplitude': popt[0],
                         'width': popt[2],
                         'shape': shape,
-                        'parameters': popt
+                        'parameters': popt,
+                        'r_squared': r_squared,
+                        'covariance': pcov
                     }
+                    
+                    # Store additional parameters for complex shapes
+                    if shape == "Pseudo-Voigt":
+                        fitted_peak['fraction'] = popt[3]
+                    elif shape == "Voigt":
+                        fitted_peak['width_g'] = popt[3]
+                    
                     self.fitted_peaks.append(fitted_peak)
                     
                 except Exception as fit_error:
@@ -1741,8 +2076,14 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             # Update plot
             self.update_peak_fitting_plot()
             
+            avg_r_squared = np.mean([p['r_squared'] for p in self.fitted_peaks]) if self.fitted_peaks else 0
+            
+            # Update fitting status
+            self.update_fitting_status()
+            
             QMessageBox.information(self, "Success", 
-                                  f"Fitted {len(self.fitted_peaks)} peaks successfully.")
+                                  f"Fitted {len(self.fitted_peaks)} peaks successfully.\n"
+                                  f"Average R² = {avg_r_squared:.4f}")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error fitting peaks: {str(e)}")
@@ -1764,6 +2105,523 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         lorentz = 1 / (1 + ((x - center) / width_l) ** 2)
         gauss = np.exp(-((x - center) / width_g) ** 2)
         return amplitude * lorentz * gauss
+    
+    @staticmethod
+    def pseudo_voigt(x, amplitude, center, width, fraction):
+        """Pseudo-Voigt profile (linear combination of Lorentzian and Gaussian)."""
+        lorentz = 1 / (1 + ((x - center) / width) ** 2)
+        gauss = np.exp(-((x - center) / width) ** 2)
+        return amplitude * (fraction * lorentz + (1 - fraction) * gauss)
+    
+    def auto_detect_peaks(self):
+        """Automatically detect peaks in the current spectrum."""
+        if self.current_spectrum is None:
+            QMessageBox.warning(self, "Warning", "Please load a spectrum first.")
+            return
+        
+        try:
+            # Get the spectrum to analyze (processed if available, otherwise original)
+            if self.processed_spectrum is not None:
+                wavenumbers = self.processed_spectrum['wavenumbers']
+                intensities = self.processed_spectrum['intensities']
+            else:
+                wavenumbers = self.current_spectrum['wavenumbers']
+                intensities = self.current_spectrum['intensities']
+            
+            # Parameters for peak detection
+            height_threshold = np.max(intensities) * self.weak_threshold_spin.value()
+            prominence = height_threshold * 0.5
+            distance = 10  # Minimum distance between peaks in data points
+            
+            # Find peaks
+            peaks, properties = find_peaks(intensities, 
+                                         height=height_threshold,
+                                         prominence=prominence,
+                                         distance=distance)
+            
+            # Convert peak indices to wavenumber positions
+            self.selected_peaks = [wavenumbers[peak] for peak in peaks]
+            
+            # Update the plot and peak count
+            self.update_peak_fitting_plot()
+            self.update_peak_count_display()
+            
+            QMessageBox.information(self, "Peak Detection", 
+                                  f"Found {len(self.selected_peaks)} peaks automatically.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in peak detection: {str(e)}")
+    
+    def correct_baseline(self):
+        """Apply baseline correction to the spectrum."""
+        if self.current_spectrum is None:
+            QMessageBox.warning(self, "Warning", "Please load a spectrum first.")
+            return
+        
+        try:
+            wavenumbers = self.current_spectrum['wavenumbers']
+            intensities = self.current_spectrum['intensities']
+            
+            # Simple baseline correction using asymmetric least squares
+            # This is a simplified version - could be enhanced with more sophisticated methods
+            baseline = self.asymmetric_least_squares(intensities)
+            corrected_intensities = intensities - baseline
+            
+            # Ensure no negative values
+            corrected_intensities = np.maximum(corrected_intensities, 0)
+            
+            # Store processed spectrum
+            self.processed_spectrum = {
+                'wavenumbers': wavenumbers,
+                'intensities': corrected_intensities,
+                'original_intensities': intensities,
+                'baseline': baseline
+            }
+            
+            self.baseline_corrected = True
+            self.update_peak_fitting_plot()
+            
+            QMessageBox.information(self, "Baseline Correction", "Baseline correction applied successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in baseline correction: {str(e)}")
+    
+    def asymmetric_least_squares(self, y, lam=1e4, p=0.001, niter=10):
+        """Asymmetric least squares smoothing for baseline correction."""
+        L = len(y)
+        D = diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+        w = np.ones(L)
+        for i in range(niter):
+            W = diags(w, 0, shape=(L, L))
+            Z = W + lam * D.dot(D.transpose())
+            z = spsolve(Z, w*y)
+            w = p * (y > z) + (1-p) * (y < z)
+        return z
+    
+    def apply_noise_filter(self):
+        """Apply noise filtering to the spectrum."""
+        if self.current_spectrum is None:
+            QMessageBox.warning(self, "Warning", "Please load a spectrum first.")
+            return
+        
+        try:
+            # Get spectrum to filter
+            if self.processed_spectrum is not None:
+                wavenumbers = self.processed_spectrum['wavenumbers']
+                intensities = self.processed_spectrum['intensities']
+            else:
+                wavenumbers = self.current_spectrum['wavenumbers']
+                intensities = self.current_spectrum['intensities']
+            
+            # Apply Savitzky-Golay filter
+            window_length = max(5, 2 * self.smoothing_spin.value() + 1)  # Must be odd
+            if window_length >= len(intensities):
+                window_length = len(intensities) - 1 if len(intensities) % 2 == 0 else len(intensities) - 2
+            
+            smoothed_intensities = savgol_filter(intensities, window_length, 3)
+            
+            # Update processed spectrum
+            if self.processed_spectrum is not None:
+                self.processed_spectrum['intensities'] = smoothed_intensities
+            else:
+                self.processed_spectrum = {
+                    'wavenumbers': wavenumbers,
+                    'intensities': smoothed_intensities,
+                    'original_intensities': intensities
+                }
+            
+            self.noise_filtered = True
+            self.update_peak_fitting_plot()
+            
+            QMessageBox.information(self, "Noise Filtering", "Noise filtering applied successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in noise filtering: {str(e)}")
+    
+    def fit_overlapping_peaks(self):
+        """Advanced fitting for overlapping peaks with automatic weak peak detection."""
+        if not self.selected_peaks or self.current_spectrum is None:
+            QMessageBox.warning(self, "Warning", "Please select peaks first.")
+            return
+        
+        try:
+            # Get spectrum to fit
+            if self.processed_spectrum is not None:
+                wavenumbers = self.processed_spectrum['wavenumbers']
+                intensities = self.processed_spectrum['intensities']
+            else:
+                wavenumbers = self.current_spectrum['wavenumbers']
+                intensities = self.current_spectrum['intensities']
+            
+            # Find the range that encompasses all selected peaks
+            min_peak = min(self.selected_peaks)
+            max_peak = max(self.selected_peaks)
+            range_width = self.fit_range_spin.value()
+            
+            # Extend range to include fitting margins
+            fit_min = min_peak - range_width
+            fit_max = max_peak + range_width
+            
+            # Create mask for fitting range
+            mask = (wavenumbers >= fit_min) & (wavenumbers <= fit_max)
+            
+            if np.sum(mask) < 10:  # Need sufficient points
+                QMessageBox.warning(self, "Warning", "Insufficient data points in fitting range.")
+                return
+            
+            x_fit = wavenumbers[mask]
+            y_fit = intensities[mask]
+            
+            # Auto-detect additional weak peaks in the fitting region
+            height_threshold = np.max(y_fit) * self.weak_threshold_spin.value()
+            prominence = height_threshold * 0.3  # Lower prominence for weak peaks
+            distance = 5  # Minimum distance between peaks in data points
+            
+            # Find peaks in the fitting region
+            peaks_indices, properties = find_peaks(y_fit, 
+                                                 height=height_threshold,
+                                                 prominence=prominence,
+                                                 distance=distance)
+            
+            # Convert peak indices to wavenumber positions within fitting range
+            detected_peaks = [x_fit[peak] for peak in peaks_indices]
+            
+            # Combine manually selected peaks with automatically detected ones
+            all_peaks = list(self.selected_peaks)
+            
+            # Add detected peaks that are not too close to manually selected ones
+            min_separation = 10  # cm⁻¹ minimum separation
+            for detected_peak in detected_peaks:
+                if not any(abs(detected_peak - selected_peak) < min_separation for selected_peak in self.selected_peaks):
+                    all_peaks.append(detected_peak)
+            
+            # Sort peaks by position
+            all_peaks.sort()
+            
+            # Update selected peaks to include newly detected ones
+            original_selected_count = len(self.selected_peaks)
+            self.selected_peaks = all_peaks
+            self.update_peak_count_display()
+            
+            print(f"Advanced Multipeak Fit: Found {len(all_peaks) - original_selected_count} additional weak peaks")
+            
+            # Build multipeak function
+            shape = self.peak_shape_combo.currentText()
+            n_peaks = len(all_peaks)
+            
+            if n_peaks < 1:
+                QMessageBox.warning(self, "Warning", "No peaks found for fitting.")
+                return
+            
+            if shape == "Lorentzian":
+                peak_func = self.lorentzian
+                n_params_per_peak = 3
+            elif shape == "Gaussian":
+                peak_func = self.gaussian
+                n_params_per_peak = 3
+            elif shape == "Voigt":
+                peak_func = self.voigt
+                n_params_per_peak = 4
+            elif shape == "Pseudo-Voigt":
+                peak_func = self.pseudo_voigt
+                n_params_per_peak = 4
+            
+            def multipeak_func(x, *params):
+                """Multi-peak function for simultaneous fitting."""
+                result = np.zeros_like(x)
+                for i in range(n_peaks):
+                    start_idx = i * n_params_per_peak
+                    if shape == "Pseudo-Voigt":
+                        amplitude, center, width, fraction = params[start_idx:start_idx+4]
+                        result += self.pseudo_voigt(x, amplitude, center, width, fraction)
+                    else:
+                        peak_params = params[start_idx:start_idx+n_params_per_peak]
+                        result += peak_func(x, *peak_params)
+                return result
+            
+            # Initial parameter guess
+            initial_params = []
+            for peak_pos in all_peaks:
+                # Find approximate amplitude at this position
+                peak_idx = np.argmin(np.abs(x_fit - peak_pos))
+                amplitude = y_fit[peak_idx]
+                
+                if shape == "Pseudo-Voigt":
+                    initial_params.extend([amplitude, peak_pos, 10, 0.5])  # amplitude, center, width, fraction
+                else:
+                    if shape == "Voigt":
+                        initial_params.extend([amplitude, peak_pos, 10, 10])  # amplitude, center, width_l, width_g
+                    else:
+                        initial_params.extend([amplitude, peak_pos, 10])  # amplitude, center, width
+            
+            # Perform fitting with bounds to prevent unrealistic parameters
+            # Set reasonable bounds for peak parameters
+            lower_bounds = []
+            upper_bounds = []
+            
+            for peak_pos in all_peaks:
+                if shape == "Pseudo-Voigt":
+                    lower_bounds.extend([0, peak_pos - 50, 1, 0])    # amplitude, center, width, fraction
+                    upper_bounds.extend([np.max(y_fit) * 2, peak_pos + 50, 100, 1])
+                elif shape == "Voigt":
+                    lower_bounds.extend([0, peak_pos - 50, 1, 1])    # amplitude, center, width_l, width_g
+                    upper_bounds.extend([np.max(y_fit) * 2, peak_pos + 50, 100, 100])
+                else:
+                    lower_bounds.extend([0, peak_pos - 50, 1])       # amplitude, center, width
+                    upper_bounds.extend([np.max(y_fit) * 2, peak_pos + 50, 100])
+            
+            # Perform fitting with bounds
+            popt, pcov = curve_fit(multipeak_func, x_fit, y_fit, p0=initial_params, 
+                                 bounds=(lower_bounds, upper_bounds), maxfev=10000)
+            
+            # Extract individual peak parameters
+            self.fitted_peaks.clear()
+            for i, peak_pos in enumerate(all_peaks):
+                start_idx = i * n_params_per_peak
+                peak_params = popt[start_idx:start_idx+n_params_per_peak]
+                
+                # Mark if this was a manually selected peak or auto-detected weak peak
+                is_manual = i < original_selected_count
+                
+                fitted_peak = {
+                    'position': peak_params[1],  # center
+                    'amplitude': peak_params[0],
+                    'width': peak_params[2],
+                    'shape': shape,
+                    'parameters': peak_params,
+                    'multipeak_fit': True,
+                    'manually_selected': is_manual,
+                    'weak_peak_detected': not is_manual
+                }
+                
+                if shape == "Pseudo-Voigt":
+                    fitted_peak['fraction'] = peak_params[3]
+                elif shape == "Voigt":
+                    fitted_peak['width_g'] = peak_params[3]
+                
+                self.fitted_peaks.append(fitted_peak)
+            
+            # Calculate R-squared for quality assessment
+            y_pred = multipeak_func(x_fit, *popt)
+            ss_res = np.sum((y_fit - y_pred) ** 2)
+            ss_tot = np.sum((y_fit - np.mean(y_fit)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot)
+            
+            # Update plot and status
+            self.update_peak_fitting_plot()
+            self.update_fitting_status()
+            
+            # Show fitting results with information about additional peaks found
+            additional_peaks = n_peaks - original_selected_count
+            if additional_peaks > 0:
+                message = (f"Fitted {n_peaks} peaks successfully:\n"
+                          f"• {original_selected_count} manually selected peaks\n"
+                          f"• {additional_peaks} additional weak peaks detected\n"
+                          f"R² = {r_squared:.4f}")
+            else:
+                message = f"Fitted {n_peaks} overlapping peaks successfully.\nR² = {r_squared:.4f}"
+            
+            QMessageBox.information(self, "Advanced Multipeak Fitting", message)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in multipeak fitting: {str(e)}")
+    
+    def assess_peak_quality(self):
+        """Assess the quality of fitted peaks."""
+        if not self.fitted_peaks:
+            QMessageBox.warning(self, "Warning", "Please fit peaks first.")
+            return
+        
+        try:
+            quality_report = "Peak Quality Assessment\n" + "="*50 + "\n\n"
+            
+            for i, peak in enumerate(self.fitted_peaks):
+                quality_report += f"Peak {i+1} at {peak['position']:.1f} cm⁻¹:\n"
+                quality_report += f"  Amplitude: {peak['amplitude']:.2f}\n"
+                quality_report += f"  Width: {peak['width']:.1f} cm⁻¹\n"
+                
+                # Assess peak quality based on various criteria
+                quality_score = 0
+                quality_issues = []
+                
+                # Width assessment
+                if peak['width'] < 2:
+                    quality_issues.append("Very narrow - may be noise")
+                elif peak['width'] > 100:
+                    quality_issues.append("Very broad - may be background")
+                else:
+                    quality_score += 1
+                
+                # Amplitude assessment
+                if peak['amplitude'] < 0:
+                    quality_issues.append("Negative amplitude - fit issue")
+                else:
+                    quality_score += 1
+                
+                # Signal-to-noise ratio estimation
+                if self.current_spectrum is not None:
+                    noise_level = np.std(self.current_spectrum['intensities'][:100])  # Estimate from first 100 points
+                    snr = peak['amplitude'] / noise_level if noise_level > 0 else float('inf')
+                    
+                    if snr < 3:
+                        quality_issues.append(f"Low S/N ratio ({snr:.1f})")
+                    elif snr > 10:
+                        quality_score += 1
+                        quality_report += f"  S/N Ratio: {snr:.1f} (Good)\n"
+                    else:
+                        quality_report += f"  S/N Ratio: {snr:.1f}\n"
+                
+                # Overall quality
+                if quality_score >= 2 and not quality_issues:
+                    quality_report += f"  Quality: Excellent\n"
+                elif quality_score >= 1 and len(quality_issues) <= 1:
+                    quality_report += f"  Quality: Good\n"
+                else:
+                    quality_report += f"  Quality: Poor\n"
+                
+                if quality_issues:
+                    quality_report += f"  Issues: {', '.join(quality_issues)}\n"
+                
+                quality_report += "\n"
+            
+            # Show quality report in a dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Peak Quality Assessment")
+            dialog.setGeometry(200, 200, 500, 400)
+            
+            layout = QVBoxLayout(dialog)
+            
+            text_edit = QTextEdit()
+            text_edit.setPlainText(quality_report)
+            text_edit.setReadOnly(True)
+            layout.addWidget(text_edit)
+            
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+            button_box.accepted.connect(dialog.accept)
+            layout.addWidget(button_box)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in quality assessment: {str(e)}")
+    
+    def deconvolve_peaks(self):
+        """Deconvolve overlapping peaks using advanced algorithms."""
+        if not self.fitted_peaks:
+            QMessageBox.warning(self, "Warning", "Please fit peaks first.")
+            return
+        
+        try:
+            # This is a placeholder for advanced deconvolution methods
+            # In a full implementation, this could include:
+            # - Non-negative matrix factorization
+            # - Richardson-Lucy deconvolution
+            # - Maximum entropy methods
+            
+            overlapping_pairs = []
+            
+            # Find potentially overlapping peaks (within 2x width of each other)
+            for i, peak1 in enumerate(self.fitted_peaks):
+                for j, peak2 in enumerate(self.fitted_peaks[i+1:], i+1):
+                    distance = abs(peak1['position'] - peak2['position'])
+                    combined_width = peak1['width'] + peak2['width']
+                    
+                    if distance < combined_width:
+                        overlap_factor = 1 - (distance / combined_width)
+                        overlapping_pairs.append({
+                            'peak1_idx': i,
+                            'peak2_idx': j,
+                            'overlap_factor': overlap_factor,
+                            'peak1_pos': peak1['position'],
+                            'peak2_pos': peak2['position']
+                        })
+            
+            if not overlapping_pairs:
+                QMessageBox.information(self, "Deconvolution", "No overlapping peaks detected.")
+                return
+            
+            # Report overlapping peaks
+            report = "Overlapping Peaks Detected:\n" + "="*40 + "\n\n"
+            
+            for pair in overlapping_pairs:
+                report += f"Peak at {pair['peak1_pos']:.1f} cm⁻¹ overlaps with peak at {pair['peak2_pos']:.1f} cm⁻¹\n"
+                report += f"Overlap factor: {pair['overlap_factor']:.2f}\n\n"
+            
+            report += "Recommendation: Use 'Advanced Multipeak Fit' for better separation of overlapping peaks."
+            
+            QMessageBox.information(self, "Peak Deconvolution", report)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error in deconvolution: {str(e)}")
+    
+    def export_fit_parameters(self):
+        """Export fitted peak parameters to a file."""
+        if not self.fitted_peaks:
+            QMessageBox.warning(self, "Warning", "No fitted peaks to export.")
+            return
+        
+        try:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Peak Parameters",
+                QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
+                "CSV files (*.csv);;Text files (*.txt);;All files (*.*)"
+            )
+            
+            if not file_path:
+                return
+            
+            # Prepare data for export
+            with open(file_path, 'w') as f:
+                # Write header
+                f.write("Peak,Position(cm-1),Amplitude,Width(cm-1),Shape,R-squared,Additional_Parameters\n")
+                
+                # Write peak data
+                for i, peak in enumerate(self.fitted_peaks):
+                    additional_params = ""
+                    if 'fraction' in peak:
+                        additional_params = f"Fraction={peak['fraction']:.3f}"
+                    elif 'width_g' in peak:
+                        additional_params = f"Width_G={peak['width_g']:.2f}"
+                    
+                    # Calculate R-squared for this peak (simplified)
+                    r_squared = "N/A"  # Would need individual fit data for accurate calculation
+                    
+                    f.write(f"{i+1},{peak['position']:.2f},{peak['amplitude']:.3f},"
+                           f"{peak['width']:.2f},{peak['shape']},{r_squared},{additional_params}\n")
+            
+            QMessageBox.information(self, "Export Complete", f"Peak parameters exported to:\n{file_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error exporting parameters: {str(e)}")
+    
+    def update_fitting_status(self):
+        """Update the fitting status label in the Peak Analysis tab."""
+        if hasattr(self, 'fitting_status_label'):
+            if self.fitted_peaks:
+                n_peaks = len(self.fitted_peaks)
+                avg_r_squared = np.mean([p.get('r_squared', 0) for p in self.fitted_peaks])
+                
+                # Color code based on quality
+                if avg_r_squared > 0.95:
+                    color = "green"
+                    quality = "Excellent"
+                elif avg_r_squared > 0.9:
+                    color = "blue"
+                    quality = "Good"
+                elif avg_r_squared > 0.8:
+                    color = "orange"
+                    quality = "Fair"
+                else:
+                    color = "red"
+                    quality = "Poor"
+                
+                status_text = f"{n_peaks} peaks fitted | Avg R² = {avg_r_squared:.3f} ({quality})"
+                self.fitting_status_label.setText(status_text)
+                self.fitting_status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+            else:
+                self.fitting_status_label.setText("No peaks fitted")
+                self.fitting_status_label.setStyleSheet("color: gray; font-style: italic;")
     
     def update_matching_tolerance(self, value):
         """Update the peak matching tolerance."""
@@ -2357,8 +3215,24 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             wavenumbers = self.current_spectrum['wavenumbers']
             intensities = self.current_spectrum['intensities']
             
-            ax.plot(wavenumbers, intensities, 'b-', linewidth=1, alpha=0.7, label='Experimental Spectrum')
+            # Plot original spectrum
+            ax.plot(wavenumbers, intensities, 'b-', linewidth=1, alpha=0.5, label='Original Spectrum')
             has_data = True
+            
+            # Plot processed spectrum if available
+            if self.processed_spectrum is not None:
+                proc_wavenumbers = self.processed_spectrum['wavenumbers']
+                proc_intensities = self.processed_spectrum['intensities']
+                ax.plot(proc_wavenumbers, proc_intensities, 'g-', linewidth=1.5, alpha=0.8, label='Processed Spectrum')
+                
+                # Plot baseline if available
+                if 'baseline' in self.processed_spectrum:
+                    baseline = self.processed_spectrum['baseline']
+                    ax.plot(wavenumbers, baseline, 'r--', linewidth=1, alpha=0.6, label='Baseline')
+                
+                # Use processed spectrum for peak operations
+                wavenumbers = proc_wavenumbers
+                intensities = proc_intensities
             
             # Plot selected peaks
             for peak_pos in self.selected_peaks:
@@ -2370,16 +3244,33 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             if self.fitted_peaks:
                 x_fit = np.linspace(np.min(wavenumbers), np.max(wavenumbers), 1000)
                 
-                for peak in self.fitted_peaks:
+                for i, peak in enumerate(self.fitted_peaks):
                     if peak['shape'] == "Lorentzian":
                         y_fit = self.lorentzian(x_fit, *peak['parameters'])
                     elif peak['shape'] == "Gaussian":
                         y_fit = self.gaussian(x_fit, *peak['parameters'])
                     elif peak['shape'] == "Voigt":
                         y_fit = self.voigt(x_fit, *peak['parameters'])
+                    elif peak['shape'] == "Pseudo-Voigt":
+                        y_fit = self.pseudo_voigt(x_fit, *peak['parameters'])
                     
-                    ax.plot(x_fit, y_fit, 'g-', linewidth=2, alpha=0.8)
-                    ax.axvline(x=peak['position'], color='green', linestyle='-', alpha=0.5)
+                    # Use different colors for multipeak fits
+                    if peak.get('multipeak_fit', False):
+                        color = plt.cm.Set1(i % 9)  # Cycle through colors
+                        alpha = 0.9
+                    else:
+                        color = 'green'
+                        alpha = 0.8
+                    
+                    ax.plot(x_fit, y_fit, color=color, linewidth=2, alpha=alpha)
+                    ax.axvline(x=peak['position'], color=color, linestyle='-', alpha=0.5)
+                    
+                    # Add R-squared annotation for high-quality fits
+                    if peak.get('r_squared', 0) > 0.95:
+                        ax.annotate(f"R²={peak['r_squared']:.3f}", 
+                                   xy=(peak['position'], peak['amplitude']), 
+                                   xytext=(5, 5), textcoords='offset points',
+                                   fontsize=8, alpha=0.7)
             
             # Plot calculated peaks (original positions) if we have them
             if hasattr(self, 'calculated_peaks') and self.calculated_peaks:
@@ -2470,7 +3361,13 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Create custom legend
         legend_elements = []
         if has_data:
-            legend_elements.append(Line2D([0], [0], color='blue', alpha=0.7, label='Experimental Spectrum'))
+            legend_elements.append(Line2D([0], [0], color='blue', alpha=0.5, label='Original Spectrum'))
+            
+            if self.processed_spectrum is not None:
+                legend_elements.append(Line2D([0], [0], color='green', linewidth=1.5, alpha=0.8, label='Processed Spectrum'))
+                
+                if 'baseline' in self.processed_spectrum:
+                    legend_elements.append(Line2D([0], [0], color='red', linestyle='--', alpha=0.6, label='Baseline'))
             
             if self.fitted_peaks:
                 legend_elements.append(Line2D([0], [0], color='green', linewidth=2, label='Fitted Peaks'))
@@ -2525,7 +3422,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         try:
             # Parse CIF file
             parser = CifParser(file_path)
-            structures = parser.get_structures()
+            structures = parser.parse_structures(primitive=False)  # Use conventional cell, not primitive
             
             if not structures:
                 QMessageBox.warning(self, "Warning", "No structures found in CIF file.")
@@ -2534,11 +3431,33 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             # Take the first structure
             structure = structures[0]
             
+            # Get crystal system using SpacegroupAnalyzer
+            try:
+                from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+                sga = SpacegroupAnalyzer(structure)
+                crystal_system = sga.get_crystal_system()
+                space_group = sga.get_space_group_symbol()
+            except Exception as e:
+                print(f"Warning: Could not determine crystal system: {e}")
+                # Fallback to lattice-based determination
+                crystal_system = self.determine_crystal_system({
+                    'a': structure.lattice.a,
+                    'b': structure.lattice.b,
+                    'c': structure.lattice.c,
+                    'alpha': structure.lattice.alpha,
+                    'beta': structure.lattice.beta,
+                    'gamma': structure.lattice.gamma
+                })
+                try:
+                    space_group = structure.get_space_group_info()[1]
+                except:
+                    space_group = "Unknown"
+            
             # Extract crystal information
             crystal_info = {
                 'formula': structure.formula,
-                'space_group': structure.get_space_group_info()[1],
-                'crystal_system': structure.crystal_system.name,
+                'space_group': space_group,
+                'crystal_system': crystal_system,
                 'lattice_params': {
                     'a': structure.lattice.a,
                     'b': structure.lattice.b,
@@ -3674,8 +4593,8 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             crystal_structure_data = self.crystal_structure
         elif hasattr(self, 'crystal_structure_widget') and self.crystal_structure_widget:
             # Try to get from the crystal structure widget
-            if hasattr(self.crystal_structure_widget, 'structure_data') and self.crystal_structure_widget.structure_data:
-                crystal_structure_data = self.crystal_structure_widget.structure_data
+            if hasattr(self.crystal_structure_widget, 'current_structure') and self.crystal_structure_widget.current_structure:
+                crystal_structure_data = self.crystal_structure_widget.current_structure
         
         if crystal_structure_data:
             # First try to use space group information (most reliable)
@@ -5093,11 +6012,26 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Error exporting properties: {str(e)}")
 
     def on_structure_loaded(self, structure_data):
-        # Placeholder for structure loaded event
+        """Handle crystal structure loaded event from the crystal structure widget."""
         print(f"Structure loaded: {structure_data.get('formula', 'Unknown')}")
+        
+        # Store the structure data so it can be accessed by other components
+        self.current_crystal_structure = structure_data
+        self.crystal_structure = structure_data  # Also store as crystal_structure for backward compatibility
+        
+        # Automatically update the tensor crystal system combo if available
+        if hasattr(self, 'tensor_crystal_system_combo') and structure_data:
+            crystal_system = structure_data.get('crystal_system', 'Unknown')
+            if crystal_system != 'Unknown':
+                # Find matching item in combo box
+                for i in range(self.tensor_crystal_system_combo.count()):
+                    if self.tensor_crystal_system_combo.itemText(i).lower() == crystal_system.lower():
+                        self.tensor_crystal_system_combo.setCurrentIndex(i)
+                        print(f"✓ Auto-updated tensor crystal system to: {crystal_system}")
+                        break
 
     def on_bonds_calculated(self, bond_data):
-        # Placeholder for bond calculation event
+        """Handle bond calculation event from the crystal structure widget."""
         print(f"Bonds calculated: {bond_data.get('count', 0)}")
 
 

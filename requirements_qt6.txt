@@ -1,72 +1,49 @@
-# RamanLab Qt6 Version - Basic Requirements
-# ===============================================
+# RamanLab Qt6 Version - Requirements
+# ===================================
+# Updated requirements with all dependencies marked as required
+# All packages listed here are necessary for full functionality
 
 # Qt6 GUI Framework
 PySide6>=6.5.0              # Official Qt6 Python bindings
 
 # Core Scientific Dependencies
-numpy>=1.16.0              # Numerical computations
-matplotlib>=3.0.0           # Plotting and visualization
-scipy>=1.2.0                # Scientific computing and optimization
-pandas>=0.25.0              # Data manipulation
+numpy>=1.21.0               # Numerical computations and arrays
+matplotlib>=3.5.0           # Plotting and visualization
+scipy>=1.7.0                # Scientific computing and optimization
+pandas>=1.3.0               # Data manipulation and analysis
 
-# Installation:
-# pip install -r requirements_qt6.txt
-
-# RamanLab Qt6 Version Requirements
-# =====================================
-
-# Qt6 GUI Framework (choose one - PySide6 is recommended)
-PySide6>=6.5.0              # Official Qt6 Python bindings (recommended)
-# PyQt6>=6.5.0              # Alternative Qt6 bindings (uncomment if preferred)
-
-# Core Scientific Dependencies (same as original)
-# ==============================================
-numpy>=1.16.0              # Numerical computations and arrays
-matplotlib>=3.0.0           # Plotting and visualization
-scipy>=1.2.0                # Scientific computing and optimization
-pandas>=0.25.0              # Data manipulation and analysis
-
-# Visualization (same as original)
-# ===============================
+# Visualization and UI
 seaborn>=0.11.0             # Statistical data visualization
 pillow>=8.0.0               # Image processing and manipulation
-mplcursors>=0.5.0           # Interactive matplotlib cursors
 
-# Data Processing and Export (same as original)
-# =============================================
-reportlab>=3.5.0            # PDF export functionality
+# Data Processing and Export
 openpyxl>=3.0.0             # Excel file support
 fastdtw>=0.3.4              # Fast Dynamic Time Warping
 
-# Advanced Analysis (same as original)
-# ===================================
-scikit-learn>=0.21.0        # Machine learning algorithms
-emcee>=3.0.0                # MCMC sampling for Bayesian analysis
+# Machine Learning and Advanced Analysis
+scikit-learn>=1.0.0         # Machine learning algorithms
+pymatgen>=2022.0.0          # Materials analysis and crystallography
 
-# Optional Deep Learning (same as original)
-# ========================================
-tensorflow>=2.12.0         # Deep learning framework (optional)
-keras>=2.12.0               # High-level neural networks API (optional)
-
-# Optional Advanced Scientific Computing
-# ======================================
-pymatgen>=2022.0.0          # Materials analysis and crystallography (optional)
-
-# Development Tools
-# =================
+# Development and Packaging Tools
 pyinstaller>=5.0.0          # Creating standalone executables
+
+# Additional Processing Libraries
+tqdm>=4.60.0                # Progress bars for long operations
 
 # Installation Notes:
 # ==================
 # 
-# RECOMMENDED INSTALLATION:
-# pip install PySide6 numpy matplotlib scipy pandas seaborn pillow mplcursors reportlab openpyxl fastdtw scikit-learn emcee
-#
-# FULL INSTALLATION:
+# INSTALLATION COMMAND:
 # pip install -r requirements_qt6.txt
 #
-# PySide6 vs PyQt6:
-# - PySide6: Official Qt bindings, LGPL license, recommended
-# - PyQt6: Third-party bindings, GPL/Commercial license
-# - Both have identical APIs, choose based on license needs 
+# INDIVIDUAL INSTALLATION:
+# pip install PySide6 numpy matplotlib scipy pandas seaborn pillow openpyxl fastdtw scikit-learn pymatgen pyinstaller tqdm
+#
+# Qt6 Framework:
+# - PySide6: Official Qt bindings, LGPL license, recommended for this project
+# - All other dependencies are required for full RamanLab functionality
+#
+# System Requirements:
+# - Python 3.8+ (Python 3.9+ recommended)
+# - 64-bit system recommended for large datasets
+# - Minimum 4GB RAM for complex analyses 

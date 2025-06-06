@@ -76,7 +76,7 @@ try:
                 
                 # Parse the CIF file
                 parser = CifParser(anatase_path)
-                structures = parser.parse_structures(primitive=True)
+                structures = parser.parse_structures(primitive=False)  # Use conventional cell
                 
                 if not structures:
                     QMessageBox.critical(self, "Error", "No structures found in anatase.cif")
