@@ -51,6 +51,265 @@ except ImportError:
             self.intensities = intensities if intensities is not None else np.random.normal(100, 10, 1000)
             self.config = config
 
+# Utility functions for Raman tensor generation
+def generate_symmetry_adapted_tensors(crystal_system: str) -> Dict[str, np.ndarray]:
+    """
+    Generate symmetry-adapted Raman tensors for a given crystal system.
+    
+    Args:
+        crystal_system (str): The crystal system (e.g., 'Cubic', 'Tetragonal', etc.)
+        
+    Returns:
+        Dict[str, np.ndarray]: Dictionary of symmetry-adapted tensors
+    """
+    # Initialize empty 3x3 tensor
+    tensor = np.zeros((3, 3))
+    
+    # Dictionary to store symmetry-adapted tensors
+    symmetry_tensors = {}
+    
+    if crystal_system == "Cubic":
+        # A1g (totally symmetric)
+        tensor = np.eye(3)
+        symmetry_tensors['A1g'] = tensor
+        
+        # Eg (doubly degenerate)
+        tensor1 = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 0]])
+        tensor2 = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -2]]) / np.sqrt(3)
+        symmetry_tensors['Eg1'] = tensor1
+        symmetry_tensors['Eg2'] = tensor2
+        
+        # T2g (triply degenerate)
+        tensor1 = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]])
+        tensor2 = np.array([[0, 0, 1], [0, 0, 0], [1, 0, 0]])
+        tensor3 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]])
+        symmetry_tensors['T2g1'] = tensor1
+        symmetry_tensors['T2g2'] = tensor2
+        symmetry_tensors['T2g3'] = tensor3
+        
+    elif crystal_system == "Tetragonal":
+        # A1g (totally symmetric)
+        tensor = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        symmetry_tensors['A1g'] = tensor
+        
+        # B1g
+        tensor = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 0]])
+        symmetry_tensors['B1g'] = tensor
+        
+        # B2g
+        tensor = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]])
+        symmetry_tensors['B2g'] = tensor
+        
+        # Eg (doubly degenerate)
+        tensor1 = np.array([[0, 0, 1], [0, 0, 0], [1, 0, 0]])
+        tensor2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]])
+        symmetry_tensors['Eg1'] = tensor1
+        symmetry_tensors['Eg2'] = tensor2
+        
+    elif crystal_system == "Orthorhombic":
+        # Ag (totally symmetric)
+        tensor = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        symmetry_tensors['Ag'] = tensor
+        
+        # B1g
+        tensor = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 0]])
+        symmetry_tensors['B1g'] = tensor
+        
+        # B2g
+        tensor = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]])
+        symmetry_tensors['B2g'] = tensor
+        
+        # B3g
+        tensor = np.array([[0, 0, 1], [0, 0, 0], [1, 0, 0]])
+        symmetry_tensors['B3g'] = tensor
+        
+    elif crystal_system == "Hexagonal":
+        # A1g (totally symmetric)
+        tensor = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        symmetry_tensors['A1g'] = tensor
+        
+        # E1g (doubly degenerate)
+        tensor1 = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]])
+        tensor2 = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 0]])
+        symmetry_tensors['E1g1'] = tensor1
+        symmetry_tensors['E1g2'] = tensor2
+        
+        # E2g (doubly degenerate)
+        tensor1 = np.array([[0, 0, 1], [0, 0, 0], [1, 0, 0]])
+        tensor2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]])
+        symmetry_tensors['E2g1'] = tensor1
+        symmetry_tensors['E2g2'] = tensor2
+        
+    elif crystal_system == "Trigonal":
+        # A1g (totally symmetric)
+        tensor = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        symmetry_tensors['A1g'] = tensor
+        
+        # Eg (doubly degenerate)
+        tensor1 = np.array([[1, 0, 0], [0, -1, 0], [0, 0, 0]])
+        tensor2 = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]])
+        symmetry_tensors['Eg1'] = tensor1
+        symmetry_tensors['Eg2'] = tensor2
+        
+    elif crystal_system == "Monoclinic":
+        # Ag (totally symmetric)
+        tensor = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        symmetry_tensors['Ag'] = tensor
+        
+        # Bg
+        tensor = np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]])
+        symmetry_tensors['Bg'] = tensor
+        
+    elif crystal_system == "Triclinic":
+        # Ag (totally symmetric)
+        tensor = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+        symmetry_tensors['Ag'] = tensor
+        
+    return symmetry_tensors
+
+def calculate_tensor_intensities(tensor: np.ndarray, scattering_geometry: str) -> Dict[str, float]:
+    """
+    Calculate Raman intensities for different polarization configurations.
+    
+    Args:
+        tensor (np.ndarray): 3x3 Raman tensor
+        scattering_geometry (str): Scattering geometry ('Backscattering', 'Right-angle', 'Forward')
+        
+    Returns:
+        Dict[str, float]: Dictionary of intensities for different polarization configurations
+    """
+    # Define polarization vectors for different configurations
+    if scattering_geometry == "Backscattering":
+        # k_i = -k_s along z-axis
+        e_i = np.array([1, 0, 0])  # Incident polarization
+        e_s = np.array([0, 1, 0])  # Scattered polarization
+    elif scattering_geometry == "Right-angle":
+        # k_i along x-axis, k_s along y-axis
+        e_i = np.array([0, 1, 0])
+        e_s = np.array([1, 0, 0])
+    else:  # Forward
+        # k_i = k_s along z-axis
+        e_i = np.array([1, 0, 0])
+        e_s = np.array([1, 0, 0])
+    
+    # Calculate intensities for different configurations
+    intensities = {}
+    
+    # xx configuration
+    e_i_xx = np.array([1, 0, 0])
+    e_s_xx = np.array([1, 0, 0])
+    I_xx = np.abs(np.dot(e_s_xx, np.dot(tensor, e_i_xx)))**2
+    intensities['xx'] = I_xx
+    
+    # xy configuration
+    e_i_xy = np.array([1, 0, 0])
+    e_s_xy = np.array([0, 1, 0])
+    I_xy = np.abs(np.dot(e_s_xy, np.dot(tensor, e_i_xy)))**2
+    intensities['xy'] = I_xy
+    
+    # xz configuration
+    e_i_xz = np.array([1, 0, 0])
+    e_s_xz = np.array([0, 0, 1])
+    I_xz = np.abs(np.dot(e_s_xz, np.dot(tensor, e_i_xz)))**2
+    intensities['xz'] = I_xz
+    
+    # yx configuration
+    e_i_yx = np.array([0, 1, 0])
+    e_s_yx = np.array([1, 0, 0])
+    I_yx = np.abs(np.dot(e_s_yx, np.dot(tensor, e_i_yx)))**2
+    intensities['yx'] = I_yx
+    
+    # yy configuration
+    e_i_yy = np.array([0, 1, 0])
+    e_s_yy = np.array([0, 1, 0])
+    I_yy = np.abs(np.dot(e_s_yy, np.dot(tensor, e_i_yy)))**2
+    intensities['yy'] = I_yy
+    
+    # yz configuration
+    e_i_yz = np.array([0, 1, 0])
+    e_s_yz = np.array([0, 0, 1])
+    I_yz = np.abs(np.dot(e_s_yz, np.dot(tensor, e_i_yz)))**2
+    intensities['yz'] = I_yz
+    
+    # zx configuration
+    e_i_zx = np.array([0, 0, 1])
+    e_s_zx = np.array([1, 0, 0])
+    I_zx = np.abs(np.dot(e_s_zx, np.dot(tensor, e_i_zx)))**2
+    intensities['zx'] = I_zx
+    
+    # zy configuration
+    e_i_zy = np.array([0, 0, 1])
+    e_s_zy = np.array([0, 1, 0])
+    I_zy = np.abs(np.dot(e_s_zy, np.dot(tensor, e_i_zy)))**2
+    intensities['zy'] = I_zy
+    
+    # zz configuration
+    e_i_zz = np.array([0, 0, 1])
+    e_s_zz = np.array([0, 0, 1])
+    I_zz = np.abs(np.dot(e_s_zz, np.dot(tensor, e_i_zz)))**2
+    intensities['zz'] = I_zz
+    
+    return intensities
+
+def determine_raman_tensor_from_data(polarization_data: Dict[str, PolarizationData], 
+                                   crystal_system: str,
+                                   scattering_geometry: str) -> Dict[str, Any]:
+    """
+    Determine Raman tensor from experimental polarization data.
+    
+    Args:
+        polarization_data (Dict[str, PolarizationData]): Dictionary of polarization data
+        crystal_system (str): Crystal system
+        scattering_geometry (str): Scattering geometry
+        
+    Returns:
+        Dict[str, Any]: Dictionary containing tensor information and analysis results
+    """
+    # Get symmetry-adapted tensors
+    symmetry_tensors = generate_symmetry_adapted_tensors(crystal_system)
+    
+    # Initialize results dictionary
+    results = {
+        'symmetry_tensors': symmetry_tensors,
+        'experimental_intensities': {},
+        'theoretical_intensities': {},
+        'best_fit_symmetry': None,
+        'best_fit_tensor': None,
+        'fit_error': float('inf')
+    }
+    
+    # Calculate experimental intensities at peak positions
+    for config, data in polarization_data.items():
+        # Find peaks
+        peaks, _ = find_peaks(data.intensities, prominence=np.max(data.intensities) * 0.1, distance=20)
+        
+        # Store peak intensities
+        results['experimental_intensities'][config] = {
+            'wavenumbers': data.wavenumbers[peaks],
+            'intensities': data.intensities[peaks]
+        }
+    
+    # Compare with theoretical predictions
+    for symmetry, tensor in symmetry_tensors.items():
+        # Calculate theoretical intensities
+        theoretical_intensities = calculate_tensor_intensities(tensor, scattering_geometry)
+        
+        # Calculate error between experimental and theoretical intensities
+        error = 0
+        for config in polarization_data.keys():
+            if config in theoretical_intensities:
+                exp_int = np.mean(results['experimental_intensities'][config]['intensities'])
+                theo_int = theoretical_intensities[config]
+                error += (exp_int - theo_int)**2
+        
+        # Update best fit if error is lower
+        if error < results['fit_error']:
+            results['fit_error'] = error
+            results['best_fit_symmetry'] = symmetry
+            results['best_fit_tensor'] = tensor
+            results['theoretical_intensities'] = theoretical_intensities
+    
+    return results
 
 class PolarizationAnalysisWidget(QWidget):
     """
@@ -437,47 +696,34 @@ class PolarizationAnalysisWidget(QWidget):
             return
         
         try:
-            configs = list(self.polarization_data.keys())
-            
-            # Get reference wavenumbers
-            ref_config = configs[0]
-            wavenumbers = self.polarization_data[ref_config].wavenumbers
-            
-            # Initialize tensor elements
-            tensor_elements = {}
-            
-            # For each configuration, treat as tensor element
-            for config in configs:
-                data = self.polarization_data[config]
-                # Interpolate to common grid
-                intensities = np.interp(wavenumbers, data.wavenumbers, data.intensities)
-                tensor_elements[config] = intensities
-            
-            # Calculate derived quantities
-            if 'xx' in configs and 'yy' in configs:
-                # Isotropic component
-                I_iso = (tensor_elements['xx'] + tensor_elements['yy']) / 2
-                tensor_elements['isotropic'] = I_iso
-            
-            if 'xx' in configs and 'xy' in configs:
-                # Anisotropic component
-                I_aniso = tensor_elements['xx'] - tensor_elements['xy']
-                tensor_elements['anisotropic'] = I_aniso
+            # Get tensor analysis results
+            results = determine_raman_tensor_from_data(
+                self.polarization_data,
+                self.current_crystal_system,
+                self.current_scattering_geometry
+            )
             
             # Store results
             self.raman_tensors = {
-                'wavenumbers': wavenumbers,
-                'tensor_elements': tensor_elements,
-                'configurations': configs,
+                'wavenumbers': next(iter(self.polarization_data.values())).wavenumbers,
+                'tensor_elements': results['theoretical_intensities'],
+                'configurations': list(self.polarization_data.keys()),
                 'crystal_system': self.current_crystal_system,
+                'best_fit_symmetry': results['best_fit_symmetry'],
+                'best_fit_tensor': results['best_fit_tensor'],
+                'fit_error': results['fit_error'],
                 'timestamp': datetime.now()
             }
             
             # Update tensor table
             self.update_tensor_table()
             
-            QMessageBox.information(self, "Success", 
-                                  f"Raman tensor analysis completed for {len(configs)} configurations.")
+            # Show results
+            QMessageBox.information(
+                self, 
+                "Success", 
+                f"Raman tensor analysis completed.\nBest fit symmetry: {results['best_fit_symmetry']}\nFit error: {results['fit_error']:.2f}"
+            )
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error determining Raman tensors: {str(e)}")

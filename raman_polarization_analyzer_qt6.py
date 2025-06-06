@@ -180,7 +180,6 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         tab_names = [
             "Spectrum Analysis",
             "Peak Fitting", 
-            "Polarization",
             "Crystal Structure",
             "Tensor Analysis & Visualization",
             "Orientation Optimization",
@@ -237,8 +236,6 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             self.setup_spectrum_analysis_tab(side_panel, content_area)
         elif tab_name == "Peak Fitting":
             self.setup_peak_fitting_tab(side_panel, content_area)
-        elif tab_name == "Polarization":
-            self.setup_polarization_tab(side_panel, content_area)
         elif tab_name == "Crystal Structure":
             self.setup_crystal_structure_tab(side_panel, content_area)
         elif tab_name == "Orientation Optimization":
@@ -490,123 +487,6 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Initialize empty plot
         self.update_peak_fitting_plot()
     
-    def setup_polarization_tab(self, side_panel, content_area):
-        """Setup the Polarization tab using the new comprehensive module."""
-        try:
-            from ui.polarization_analysis import PolarizationAnalysisWidget
-            
-            # Create the main polarization analysis widget
-            self.polarization_widget = PolarizationAnalysisWidget()
-            
-            # Replace content area with the new widget
-            content_layout = QVBoxLayout(content_area)
-            content_layout.addWidget(self.polarization_widget)
-            
-            # Hide the side panel since the new widget has its own controls
-            side_panel.hide()
-            
-            # Connect signals if needed
-            self.polarization_widget.analysis_complete.connect(self.on_polarization_analysis_complete)
-            self.polarization_widget.tensor_calculated.connect(self.on_tensor_calculated)
-            
-        except ImportError as e:
-            print(f"⚠ Could not load new polarization module: {e}")
-            # Fallback to the old implementation
-            self.setup_polarization_tab_fallback(side_panel, content_area)
-    
-    def setup_polarization_tab_fallback(self, side_panel, content_area):
-        """Fallback polarization tab setup."""
-        # Side panel layout
-        side_layout = QVBoxLayout(side_panel)
-        
-        # Title
-        title_label = QLabel("Polarization Analysis")
-        title_label.setFont(QFont("Arial", 12, QFont.Bold))
-        title_label.setAlignment(Qt.AlignCenter)
-        side_layout.addWidget(title_label)
-        
-        # Polarization configuration group
-        pol_group = QGroupBox("Polarization Configuration")
-        pol_layout = QVBoxLayout(pol_group)
-        
-        # Crystal system selection
-        system_label = QLabel("Crystal System:")
-        pol_layout.addWidget(system_label)
-        
-        self.crystal_system_combo = QComboBox()
-        crystal_systems = ["Cubic", "Tetragonal", "Hexagonal", "Orthorhombic", "Monoclinic", "Triclinic"]
-        self.crystal_system_combo.addItems(crystal_systems)
-        pol_layout.addWidget(self.crystal_system_combo)
-        
-        # Polarization angles
-        angle_label = QLabel("Polarization Angles (degrees):")
-        pol_layout.addWidget(angle_label)
-        
-        angle_layout = QHBoxLayout()
-        self.incident_angle_spin = QDoubleSpinBox()
-        self.incident_angle_spin.setRange(0, 360)
-        self.incident_angle_spin.setSuffix("°")
-        self.scattered_angle_spin = QDoubleSpinBox()
-        self.scattered_angle_spin.setRange(0, 360)
-        self.scattered_angle_spin.setSuffix("°")
-        
-        angle_layout.addWidget(QLabel("Incident:"))
-        angle_layout.addWidget(self.incident_angle_spin)
-        angle_layout.addWidget(QLabel("Scattered:"))
-        angle_layout.addWidget(self.scattered_angle_spin)
-        
-        pol_layout.addLayout(angle_layout)
-        
-        # Calculate button
-        calc_pol_btn = QPushButton("Calculate Polarization")
-        calc_pol_btn.clicked.connect(self.calculate_polarization)
-        pol_layout.addWidget(calc_pol_btn)
-        
-        side_layout.addWidget(pol_group)
-        
-        # Add stretch
-        side_layout.addStretch()
-        
-        # Content area - placeholder for now
-        content_layout = QVBoxLayout(content_area)
-        
-        pol_info_label = QLabel("Polarization analysis visualization will be implemented here")
-        pol_info_label.setAlignment(Qt.AlignCenter)
-        pol_info_label.setStyleSheet("color: gray; font-style: italic;")
-        content_layout.addWidget(pol_info_label)
-    
-    def on_polarization_analysis_complete(self, results):
-        """Handle completion of polarization analysis."""
-        print(f"✓ Polarization analysis completed with {len(results)} results")
-    
-    def on_tensor_calculated(self, tensor_data):
-        """Handle completion of tensor calculations."""
-        print(f"✓ Raman tensors calculated for {len(tensor_data)} configurations")
-    
-    def on_structure_loaded(self, structure_data):
-        """Handle crystal structure loading completion."""
-        print(f"✓ Crystal structure loaded: {structure_data.get('formula', 'Unknown')} with {structure_data.get('num_atoms', 0)} atoms")
-        
-        # Store structure data for use in other tabs
-        self.current_crystal_structure = structure_data
-        
-        # Update crystal system combo if available
-        if hasattr(self, 'crystal_system_combo') and 'crystal_system' in structure_data:
-            crystal_system = structure_data['crystal_system']
-            # Find matching item in combo box
-            for i in range(self.crystal_system_combo.count()):
-                if self.crystal_system_combo.itemText(i).lower() == crystal_system.lower():
-                    self.crystal_system_combo.setCurrentIndex(i)
-                    break
-    
-    def on_bonds_calculated(self, bond_data):
-        """Handle bond calculation completion."""
-        bond_count = bond_data.get('count', 0)
-        print(f"✓ Calculated {bond_count} bonds in crystal structure")
-        
-        # Store bond data
-        self.current_crystal_bonds = bond_data.get('bonds', [])
-    
     def setup_crystal_structure_tab(self, side_panel, content_area):
         """Setup the Crystal Structure tab using the new comprehensive module."""
         try:
@@ -672,34 +552,145 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         side_layout = QVBoxLayout(side_panel)
         
         # Title
-        title_label = QLabel("Tensor Analysis")
+        title_label = QLabel("Tensor Analysis & Visualization")
         title_label.setFont(QFont("Arial", 12, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         side_layout.addWidget(title_label)
+        
+        # Crystal system group
+        crystal_group = QGroupBox("Crystal System")
+        crystal_layout = QVBoxLayout(crystal_group)
+        
+        crystal_label = QLabel("Select Crystal System:")
+        crystal_layout.addWidget(crystal_label)
+        
+        self.tensor_crystal_system_combo = QComboBox()
+        crystal_systems = ["Cubic", "Tetragonal", "Hexagonal", "Orthorhombic", "Monoclinic", "Triclinic", "Trigonal"]
+        self.tensor_crystal_system_combo.addItems(crystal_systems)
+        self.tensor_crystal_system_combo.currentTextChanged.connect(self.on_tensor_crystal_system_changed)
+        crystal_layout.addWidget(self.tensor_crystal_system_combo)
+        
+        # Auto-detect button
+        auto_detect_btn = QPushButton("Auto-Detect from Structure")
+        auto_detect_btn.clicked.connect(self.auto_detect_crystal_system)
+        crystal_layout.addWidget(auto_detect_btn)
+        
+        side_layout.addWidget(crystal_group)
         
         # Tensor calculation group
         tensor_group = QGroupBox("Tensor Calculation")
         tensor_layout = QVBoxLayout(tensor_group)
         
+        # Calculation method
+        method_label = QLabel("Calculation Method:")
+        tensor_layout.addWidget(method_label)
+        
+        self.tensor_method_combo = QComboBox()
+        self.tensor_method_combo.addItems([
+            "Symmetry-Based",
+            "Peak Intensity Analysis", 
+            "Polarization Data",
+            "Combined Analysis"
+        ])
+        tensor_layout.addWidget(self.tensor_method_combo)
+        
         calc_tensor_btn = QPushButton("Calculate Raman Tensors")
         calc_tensor_btn.clicked.connect(self.calculate_raman_tensors)
+        calc_tensor_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
         tensor_layout.addWidget(calc_tensor_btn)
         
-        export_tensor_btn = QPushButton("Export Tensor Data")
-        tensor_layout.addWidget(export_tensor_btn)
+        # Tensor visualization options (radio buttons)
+        viz_label = QLabel("Visualization Mode:")
+        tensor_layout.addWidget(viz_label)
+        
+        self.viz_button_group = QButtonGroup()
+        
+        self.show_tensor_matrix_rb = QRadioButton("Tensor Matrices")
+        self.show_tensor_matrix_rb.setChecked(True)
+        self.viz_button_group.addButton(self.show_tensor_matrix_rb, 0)
+        tensor_layout.addWidget(self.show_tensor_matrix_rb)
+        
+        self.show_eigenvalues_rb = QRadioButton("Eigenvalues & Analysis")
+        self.viz_button_group.addButton(self.show_eigenvalues_rb, 1)
+        tensor_layout.addWidget(self.show_eigenvalues_rb)
+        
+        self.show_ellipsoids_rb = QRadioButton("3D Tensor Shapes")
+        self.viz_button_group.addButton(self.show_ellipsoids_rb, 2)
+        tensor_layout.addWidget(self.show_ellipsoids_rb)
+        
+        self.show_overview_rb = QRadioButton("Overview Summary")
+        self.viz_button_group.addButton(self.show_overview_rb, 3)
+        tensor_layout.addWidget(self.show_overview_rb)
+        
+        # Update visualization button
+        update_viz_btn = QPushButton("Update Visualization")
+        update_viz_btn.clicked.connect(self.update_tensor_visualization)
+        tensor_layout.addWidget(update_viz_btn)
+        
+        # Individual tensor windows button
+        individual_btn = QPushButton("Open Individual Tensor Windows")
+        individual_btn.clicked.connect(self.open_individual_tensor_windows)
+        individual_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        tensor_layout.addWidget(individual_btn)
         
         side_layout.addWidget(tensor_group)
+        
+        # Analysis results group
+        results_group = QGroupBox("Analysis Results")
+        results_layout = QVBoxLayout(results_group)
+        
+        show_results_btn = QPushButton("Show Detailed Results")
+        show_results_btn.clicked.connect(self.show_tensor_results)
+        results_layout.addWidget(show_results_btn)
+        
+        export_tensor_btn = QPushButton("Export Tensor Data")
+        export_tensor_btn.clicked.connect(self.export_tensor_data)
+        results_layout.addWidget(export_tensor_btn)
+        
+        export_viz_btn = QPushButton("Export Visualization")
+        export_viz_btn.clicked.connect(self.export_tensor_visualization)
+        results_layout.addWidget(export_viz_btn)
+        
+        side_layout.addWidget(results_group)
+        
+        # Peak mode assignment group
+        assignment_group = QGroupBox("Mode Assignment")
+        assignment_layout = QVBoxLayout(assignment_group)
+        
+        assign_modes_btn = QPushButton("Assign Vibrational Modes")
+        assign_modes_btn.clicked.connect(self.assign_vibrational_modes)
+        assignment_layout.addWidget(assign_modes_btn)
+        
+        show_assignments_btn = QPushButton("Show Mode Assignments")
+        show_assignments_btn.clicked.connect(self.show_mode_assignments)
+        assignment_layout.addWidget(show_assignments_btn)
+        
+        side_layout.addWidget(assignment_group)
         
         # Add stretch
         side_layout.addStretch()
         
-        # Content area - placeholder
+        # Content area - matplotlib visualization
         content_layout = QVBoxLayout(content_area)
         
-        tensor_info_label = QLabel("Tensor analysis and visualization will be implemented here")
-        tensor_info_label.setAlignment(Qt.AlignCenter)
-        tensor_info_label.setStyleSheet("color: gray; font-style: italic;")
-        content_layout.addWidget(tensor_info_label)
+        # Create matplotlib figure for tensor visualization
+        self.tensor_fig = Figure(figsize=(10, 8))
+        self.tensor_canvas = FigureCanvas(self.tensor_fig)
+        self.tensor_toolbar = NavigationToolbar(self.tensor_canvas, content_area)
+        self.apply_toolbar_styling(self.tensor_toolbar)
+        
+        content_layout.addWidget(self.tensor_toolbar)
+        content_layout.addWidget(self.tensor_canvas)
+        
+        # Store plot components
+        self.plot_components["Tensor Analysis & Visualization"].update({
+            'fig': self.tensor_fig,
+            'canvas': self.tensor_canvas,
+            'toolbar': self.tensor_toolbar
+        })
+        
+        # Initialize empty plot
+        self.initialize_tensor_plot()
     
     def setup_orientation_optimization_tab(self, side_panel, content_area):
         """Setup the Orientation Optimization tab."""
@@ -2570,6 +2561,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             
             # Store structure data
             self.crystal_structure = crystal_info
+            self.current_crystal_structure = crystal_info  # Also store as current_crystal_structure for consistency
             
             # Update crystal system combo box if it matches
             if hasattr(self, 'crystal_system_combo'):
@@ -2622,6 +2614,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             
             # Store structure data
             self.crystal_structure = crystal_info
+            self.current_crystal_structure = crystal_info  # Also store as current_crystal_structure for consistency
             
             # Update crystal system combo box
             if hasattr(self, 'crystal_system_combo'):
@@ -2644,23 +2637,44 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         alpha, beta, gamma = lattice_params['alpha'], lattice_params['beta'], lattice_params['gamma']
         
         # Tolerance for equality checks
-        tol = 0.01
+        tol = 1.0  # Increased tolerance for real crystal data
+        angle_tol = 2.0  # Tolerance for angles in degrees
         
-        # Check for cubic
-        if abs(a - b) < tol and abs(b - c) < tol and abs(alpha - 90) < tol and abs(beta - 90) < tol and abs(gamma - 90) < tol:
+        # Check for cubic: a = b = c, α = β = γ = 90°
+        if (abs(a - b) < tol and abs(b - c) < tol and 
+            abs(alpha - 90) < angle_tol and abs(beta - 90) < angle_tol and abs(gamma - 90) < angle_tol):
             return 'Cubic'
-        # Check for hexagonal
-        elif abs(a - b) < tol and abs(alpha - 90) < tol and abs(beta - 90) < tol and abs(gamma - 120) < tol:
-            return 'Hexagonal'
-        # Check for tetragonal
-        elif abs(a - b) < tol and abs(alpha - 90) < tol and abs(beta - 90) < tol and abs(gamma - 90) < tol:
+        
+        # Check for tetragonal: a = b ≠ c, α = β = γ = 90°
+        elif (abs(a - b) < tol and abs(c - a) > tol and
+              abs(alpha - 90) < angle_tol and abs(beta - 90) < angle_tol and abs(gamma - 90) < angle_tol):
             return 'Tetragonal'
-        # Check for orthorhombic
-        elif abs(alpha - 90) < tol and abs(beta - 90) < tol and abs(gamma - 90) < tol:
+        
+        # Check for orthorhombic: a ≠ b ≠ c, α = β = γ = 90°
+        elif (abs(alpha - 90) < angle_tol and abs(beta - 90) < angle_tol and abs(gamma - 90) < angle_tol):
             return 'Orthorhombic'
-        # Check for monoclinic
-        elif abs(alpha - 90) < tol and abs(gamma - 90) < tol:
+        
+        # Check for hexagonal: a = b ≠ c, α = β = 90°, γ = 120°
+        elif (abs(a - b) < tol and abs(c - a) > tol and
+              abs(alpha - 90) < angle_tol and abs(beta - 90) < angle_tol and abs(gamma - 120) < angle_tol):
+            return 'Hexagonal'
+        
+        # Check for trigonal/rhombohedral: Two cases
+        # Case 1: Rhombohedral setting: a = b = c, α = β = γ ≠ 90°
+        elif (abs(a - b) < tol and abs(b - c) < tol and
+              abs(alpha - beta) < angle_tol and abs(beta - gamma) < angle_tol and
+              abs(alpha - 90) > angle_tol):
+            return 'Trigonal'
+        
+        # Case 2: Hexagonal setting for trigonal: a = b ≠ c, α = β = 90°, γ = 120° 
+        # (This overlaps with hexagonal, so we need space group info to distinguish)
+        
+        # Check for monoclinic: α = γ = 90°, β ≠ 90°
+        elif (abs(alpha - 90) < angle_tol and abs(gamma - 90) < angle_tol and 
+              abs(beta - 90) > angle_tol):
             return 'Monoclinic'
+        
+        # Default to triclinic
         else:
             return 'Triclinic'
     
@@ -2832,82 +2846,219 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             return
         
         try:
-            # Get crystal system for tensor symmetry
-            crystal_system = self.crystal_system_combo.currentText()
+            # Get crystal system and calculation method
+            crystal_system = self.tensor_crystal_system_combo.currentText()
+            calc_method = self.tensor_method_combo.currentText()
+            
+            # Show progress
+            progress = QProgressDialog("Calculating Raman tensors...", "Cancel", 0, len(self.fitted_peaks), self)
+            progress.setWindowTitle("Tensor Calculation")
+            progress.setModal(True)
+            progress.show()
             
             # Calculate Raman tensors for each fitted peak
             raman_tensors = {}
             
-            for peak in self.fitted_peaks:
+            for i, peak in enumerate(self.fitted_peaks):
+                progress.setValue(i)
+                QApplication.processEvents()
+                
+                if progress.wasCanceled():
+                    return
+                
                 freq = peak['position']
                 intensity = peak['amplitude']
                 width = peak['width']
                 
-                # Generate appropriate tensor based on crystal system and frequency
-                tensor = self.generate_raman_tensor(crystal_system, freq, intensity)
+                # Get vibrational character if available from peak matching
+                character = 'Unknown'
+                if hasattr(self, 'peak_labels') and freq in self.peak_labels:
+                    character = self.peak_labels[freq]['character']
+                elif hasattr(self, 'matched_peaks'):
+                    # Find character from matched peaks
+                    for match in self.matched_peaks:
+                        if abs(match['experimental_peak']['position'] - freq) < 1.0:
+                            character = match['calculated_peak']['character']
+                            break
+                
+                # Generate appropriate tensor based on crystal system, character, and frequency
+                tensor = self.generate_raman_tensor_advanced(crystal_system, freq, intensity, character, calc_method)
                 
                 # Calculate tensor properties
                 tensor_props = self.analyze_tensor_properties(tensor)
                 
+                # Calculate additional properties
+                additional_props = self.calculate_additional_tensor_properties(tensor, crystal_system, character)
+                
                 raman_tensors[freq] = {
                     'tensor': tensor,
                     'properties': tensor_props,
+                    'additional_properties': additional_props,
                     'intensity': intensity,
                     'width': width,
-                    'crystal_system': crystal_system
+                    'character': character,
+                    'crystal_system': crystal_system,
+                    'calculation_method': calc_method
                 }
+            
+            progress.setValue(len(self.fitted_peaks))
+            progress.close()
             
             # Store results
             self.calculated_raman_tensors = raman_tensors
+            self.tensor_analysis_results = {
+                'crystal_system': crystal_system,
+                'calculation_method': calc_method,
+                'peak_count': len(raman_tensors),
+                'timestamp': datetime.now()
+            }
             
-            # Show results
-            self.show_tensor_results()
+            # Auto-assign vibrational mode characters
+            self.auto_assign_mode_characters()
+            
+            # Update visualization
+            self.update_tensor_visualization()
+            
+            # Show success message
+            QMessageBox.information(self, "Success", 
+                                  f"Calculated Raman tensors for {len(raman_tensors)} peaks using {calc_method} method.\nMode characters automatically assigned.")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error calculating Raman tensors: {str(e)}")
     
-    def generate_raman_tensor(self, crystal_system, frequency, intensity):
-        """Generate a Raman tensor based on crystal system and vibrational mode."""
+    def generate_raman_tensor(self, crystal_system, frequency, intensity, character=None):
+        """Generate a Raman tensor based on crystal system, frequency, intensity, and vibrational mode character."""
         # Normalize intensity for tensor scaling
         scale = intensity / 1000.0 if intensity > 0 else 0.001
         
+        # Use character if provided, otherwise fallback to frequency-based assignment
+        if character:
+            character = character.upper()
+        
         if crystal_system == "Cubic":
-            # Cubic system: only A1g modes (isotropic tensor)
-            tensor = np.array([
-                [scale, 0, 0],
-                [0, scale, 0],
-                [0, 0, scale]
-            ])
-        
-        elif crystal_system == "Hexagonal":
-            # Hexagonal system: A1g and E2g modes
-            if frequency < 500:  # Assume E2g modes at low frequency
-                tensor = np.array([
-                    [scale, 0, 0],
-                    [0, -scale, 0],
-                    [0, 0, 0]
-                ])
-            else:  # A1g modes
+            # For cubic crystals, use character to determine tensor form
+            if character and any(x in character for x in ['T2G', 'F2G']):
+                # T2g/F2g modes have pure off-diagonal components
+                # Use the three standard T2g tensor orientations
+                orientations = [
+                    np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]]),      # xy coupling
+                    np.array([[0, 0, 1], [0, 0, 0], [1, 0, 0]]),      # xz coupling
+                    np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]])       # yz coupling
+                ]
+                # Choose orientation based on frequency for variety
+                tensor = orientations[int(frequency / 300) % 3] * scale
+            elif character and 'A1G' in character:
+                # A1g modes have isotropic diagonal components
                 tensor = np.array([
                     [scale, 0, 0],
                     [0, scale, 0],
-                    [0, 0, scale * 1.2]  # c-axis enhancement
-                ])
-        
-        elif crystal_system == "Tetragonal":
-            # Tetragonal system: A1g, B1g, B2g, Eg modes
-            if frequency > 800:  # High frequency A1g
-                tensor = np.array([
-                    [scale, 0, 0],
-                    [0, scale, 0],
-                    [0, 0, scale * 1.5]
-                ])
-            else:  # Lower frequency modes
-                tensor = np.array([
-                    [scale * 0.8, 0, 0],
-                    [0, scale * 0.8, 0],
                     [0, 0, scale]
                 ])
+            else:
+                # Fallback: frequency-based assignment for cubic
+                if frequency < 500:  # Assume T2g/F2g modes at lower frequencies
+                    orientations = [
+                        np.array([[0, 1, 0], [1, 0, 0], [0, 0, 0]]),
+                        np.array([[0, 0, 1], [0, 0, 0], [1, 0, 0]]),
+                        np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0]])
+                    ]
+                    tensor = orientations[int(frequency / 200) % 3] * scale
+                else:  # A1g modes at higher frequencies
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale]
+                    ])
+        
+        elif crystal_system == "Tetragonal":
+            if character:
+                if 'A1G' in character or 'A1' in character:
+                    # A1g: diagonal with c-axis enhancement
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale * 1.2]
+                    ])
+                elif 'B1G' in character or 'B1' in character:
+                    # B1g: xy coupling dominant
+                    tensor = np.array([
+                        [scale * 0.1, scale * 0.9, 0],
+                        [scale * 0.9, scale * 0.1, 0],
+                        [0, 0, scale * 0.05]
+                    ])
+                elif 'B2G' in character or 'B2' in character:
+                    # B2g: x²-y² character
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, -scale, 0],
+                        [0, 0, scale * 0.1]
+                    ])
+                elif 'EG' in character or 'E' in character:
+                    # Eg: xz and yz coupling
+                    tensor = np.array([
+                        [scale * 0.2, 0, scale * 0.8],
+                        [0, scale * 0.2, scale * 0.8],
+                        [scale * 0.8, scale * 0.8, scale * 0.1]
+                    ])
+                else:
+                    # Default tetragonal
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale * 1.2]
+                    ])
+            else:
+                # Frequency-based fallback for tetragonal
+                if frequency > 800:
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale * 1.5]
+                    ])
+                else:
+                    tensor = np.array([
+                        [scale * 0.8, 0, 0],
+                        [0, scale * 0.8, 0],
+                        [0, 0, scale]
+                    ])
+        
+        elif crystal_system == "Hexagonal":
+            if character:
+                if 'A1G' in character or 'A1' in character:
+                    # A1g: c-axis enhancement
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale * 1.5]
+                    ])
+                elif 'E2G' in character or 'E1G' in character or 'EG' in character:
+                    # Eg modes: xy plane anisotropy
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, -scale, 0],
+                        [0, 0, scale * 0.2]
+                    ])
+                else:
+                    # Default hexagonal
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale * 1.2]
+                    ])
+            else:
+                # Frequency-based fallback for hexagonal
+                if frequency < 500:
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, -scale, 0],
+                        [0, 0, 0]
+                    ])
+                else:
+                    tensor = np.array([
+                        [scale, 0, 0],
+                        [0, scale, 0],
+                        [0, 0, scale * 1.2]
+                    ])
         
         else:
             # General case - slightly anisotropic
@@ -3498,6 +3649,1456 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         layout.addWidget(close_btn)
         
         dialog.exec()
+    
+    # === Tensor Analysis Methods ===
+    
+    def on_tensor_crystal_system_changed(self, crystal_system):
+        """Handle crystal system changes in tensor analysis tab."""
+        print(f"Crystal system changed to: {crystal_system}")
+        # If we have calculated tensors, recalculate with new crystal system
+        if hasattr(self, 'calculated_raman_tensors') and self.calculated_raman_tensors:
+            reply = QMessageBox.question(self, "Recalculate Tensors", 
+                                       f"Crystal system changed to {crystal_system}. Recalculate tensors?",
+                                       QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.calculate_raman_tensors()
+    
+    def auto_detect_crystal_system(self):
+        """Auto-detect crystal system from loaded crystal structure."""
+        # Check for crystal structure in multiple possible locations
+        crystal_structure_data = None
+        
+        if hasattr(self, 'current_crystal_structure') and self.current_crystal_structure:
+            crystal_structure_data = self.current_crystal_structure
+        elif hasattr(self, 'crystal_structure') and self.crystal_structure:
+            crystal_structure_data = self.crystal_structure
+        elif hasattr(self, 'crystal_structure_widget') and self.crystal_structure_widget:
+            # Try to get from the crystal structure widget
+            if hasattr(self.crystal_structure_widget, 'structure_data') and self.crystal_structure_widget.structure_data:
+                crystal_structure_data = self.crystal_structure_widget.structure_data
+        
+        if crystal_structure_data:
+            # First try to use space group information (most reliable)
+            space_group = crystal_structure_data.get('space_group', 'Unknown')
+            crystal_system = self.determine_crystal_system_from_space_group(space_group)
+            
+            # If space group doesn't give us the answer, use stored crystal system
+            if crystal_system == 'Unknown':
+                crystal_system = crystal_structure_data.get('crystal_system', 'Unknown')
+            
+            # If still unknown, try lattice parameters
+            if crystal_system == 'Unknown':
+                lattice_params = crystal_structure_data.get('lattice_params', {})
+                if lattice_params:
+                    crystal_system = self.determine_crystal_system(lattice_params)
+            
+            if crystal_system != 'Unknown':
+                # Find matching item in combo box
+                for i in range(self.tensor_crystal_system_combo.count()):
+                    if self.tensor_crystal_system_combo.itemText(i).lower() == crystal_system.lower():
+                        self.tensor_crystal_system_combo.setCurrentIndex(i)
+                        
+                        # Show detailed information
+                        info_msg = f"Crystal system detected: {crystal_system}"
+                        if space_group != 'Unknown':
+                            info_msg += f"\nSpace group: {space_group}"
+                        
+                        QMessageBox.information(self, "Auto-Detection", info_msg)
+                        return
+                        
+                QMessageBox.warning(self, "Auto-Detection", 
+                                  f"Crystal system '{crystal_system}' not found in available options.")
+            else:
+                QMessageBox.warning(self, "Auto-Detection", 
+                                  "Crystal system could not be determined from structure data.")
+        else:
+            QMessageBox.warning(self, "Auto-Detection", 
+                              "No crystal structure loaded. Please load a CIF file first.")
+    
+    def determine_crystal_system_from_space_group(self, space_group):
+        """Determine crystal system from space group symbol or number."""
+        if not space_group or space_group == 'Unknown':
+            return 'Unknown'
+        
+        # Clean up space group input
+        sg_str = str(space_group).strip()
+        
+        # First, try to parse as space group number
+        try:
+            sg_number = int(sg_str)
+            return self.crystal_system_from_space_group_number(sg_number)
+        except ValueError:
+            # Not a number, try symbol matching
+            pass
+        
+        # Clean up space group symbol for text matching
+        sg = sg_str.upper()
+        
+        # Space group symbol to crystal system mapping
+        # Cubic: 195-230
+        cubic_symbols = ['P23', 'F23', 'I23', 'P213', 'I213', 'PM3', 'PN3', 'FM3', 'FD3', 'IM3', 'PA3', 'IA3',
+                        'P432', 'P4232', 'F432', 'F4132', 'I432', 'P4332', 'P4132', 'I4132',
+                        'P-43M', 'F-43M', 'I-43M', 'P-43N', 'F-43C', 'I-43D',
+                        'PM-3M', 'PN-3N', 'PM-3N', 'PN-3M', 'FM-3M', 'FM-3C', 'FD-3M', 'FD-3C',
+                        'IM-3M', 'IA-3D']
+        
+        # Hexagonal: 168-194
+        hexagonal_symbols = ['P6', 'P61', 'P65', 'P62', 'P64', 'P63', 'P6-', 'P6/M', 'P63/M',
+                           'P622', 'P6122', 'P6522', 'P6222', 'P6422', 'P6322',
+                           'P6MM', 'P6CC', 'P63CM', 'P63MC', 'P6M2', 'P6C2', 'P62M', 'P62C',
+                           'P6/MMM', 'P6/MCC', 'P63/MCM', 'P63/MMC']
+        
+        # Trigonal: 143-167 (includes rhombohedral R space groups)
+        trigonal_symbols = ['P3', 'P31', 'P32', 'R3', 'P-3', 'R-3',
+                          'P312', 'P321', 'P3112', 'P3121', 'P3212', 'P3221', 'R32',
+                          'P3M1', 'P31M', 'P3C1', 'P31C', 'R3M', 'R3C',
+                          'P-31M', 'P-31C', 'P-3M1', 'P-3C1', 'R-3M', 'R-3C']
+        
+        # Tetragonal: 75-142
+        tetragonal_symbols = ['P4', 'P41', 'P42', 'P43', 'I4', 'I41', 'P-4', 'I-4', 'P4/M', 'P42/M', 'P4/N', 'P42/N', 'I4/M', 'I41/A',
+                            'P422', 'P4212', 'P4122', 'P41212', 'P4222', 'P42212', 'P4322', 'P43212', 'I422', 'I4122',
+                            'P4MM', 'P4BM', 'P42CM', 'P42NM', 'P4CC', 'P4NC', 'P42MC', 'P42BC', 'I4MM', 'I4CM', 'I41MD', 'I41CD',
+                            'P-42M', 'P-42C', 'P-421M', 'P-421C', 'P-4M2', 'P-4C2', 'P-4B2', 'P-4N2', 'I-4M2', 'I-4C2', 'I-42M', 'I-42D',
+                            'P4/MMM', 'P4/MCC', 'P4/NBM', 'P4/NNC', 'P4/MBM', 'P4/MNC', 'P4/NMM', 'P4/NCC', 'P42/MMC', 'P42/MCM', 'P42/NBC', 'P42/NNM', 'P42/MBC', 'P42/MNM', 'P42/NMC', 'P42/NCM', 'I4/MMM', 'I4/MCM', 'I41/AMD', 'I41/ACD']
+        
+        # Orthorhombic: 16-74
+        orthorhombic_symbols = ['P222', 'P2221', 'P21212', 'P212121', 'C2221', 'C222', 'F222', 'I222', 'I212121',
+                              'PMM2', 'PMC21', 'PCC2', 'PMA2', 'PCA21', 'PNC2', 'PMN21', 'PBA2', 'PNA21', 'PNN2', 'CMM2', 'CMC21', 'CCC2', 'AMM2', 'ABM2', 'AMA2', 'ABA2', 'FMM2', 'FDD2', 'IMM2', 'IBA2', 'IMA2',
+                              'PMMM', 'PNNN', 'PCCM', 'PBAN', 'PMMA', 'PNNA', 'PMNA', 'PCCA', 'PBAM', 'PCCN', 'PBCM', 'PNNM', 'PMMN', 'PBCN', 'PBCA', 'PNMA', 'CMMM', 'CCCM', 'CMMA', 'CCCA', 'FMMM', 'FDDD', 'IMMM', 'IBAM', 'IBCA', 'IMMA']
+        
+        # Monoclinic: 3-15
+        monoclinic_symbols = ['P2', 'P21', 'C2', 'PM', 'PC', 'CM', 'CC', 'P2/M', 'P21/M', 'C2/M', 'P2/C', 'P21/C', 'C2/C']
+        
+        # Check each crystal system
+        for symbol in cubic_symbols:
+            if symbol in sg or sg.startswith(symbol):
+                return 'Cubic'
+        
+        for symbol in hexagonal_symbols:
+            if symbol in sg or sg.startswith(symbol):
+                return 'Hexagonal'
+        
+        for symbol in trigonal_symbols:
+            if symbol in sg or sg.startswith(symbol):
+                return 'Trigonal'
+        
+        for symbol in tetragonal_symbols:
+            if symbol in sg or sg.startswith(symbol):
+                return 'Tetragonal'
+        
+        for symbol in orthorhombic_symbols:
+            if symbol in sg or sg.startswith(symbol):
+                return 'Orthorhombic'
+        
+        for symbol in monoclinic_symbols:
+            if symbol in sg or sg.startswith(symbol):
+                return 'Monoclinic'
+        
+        # Special handling for R space groups (rhombohedral/trigonal)
+        if sg.startswith('R'):
+            return 'Trigonal'
+        
+        # If no match found, return unknown
+        return 'Unknown'
+    
+    def crystal_system_from_space_group_number(self, sg_number):
+        """Determine crystal system from space group number (1-230)."""
+        try:
+            sg_num = int(sg_number)
+            
+            # Crystal system ranges based on International Tables
+            if 1 <= sg_num <= 2:
+                return 'Triclinic'
+            elif 3 <= sg_num <= 15:
+                return 'Monoclinic'
+            elif 16 <= sg_num <= 74:
+                return 'Orthorhombic'
+            elif 75 <= sg_num <= 142:
+                return 'Tetragonal'
+            elif 143 <= sg_num <= 167:
+                return 'Trigonal'  # This includes 167 = R-3c!
+            elif 168 <= sg_num <= 194:
+                return 'Hexagonal'
+            elif 195 <= sg_num <= 230:
+                return 'Cubic'
+            else:
+                return 'Unknown'
+                
+        except (ValueError, TypeError):
+            return 'Unknown'
+    
+    def generate_raman_tensor_advanced(self, crystal_system, frequency, intensity, character, calc_method):
+        """Generate advanced Raman tensor based on multiple parameters."""
+        # Base tensor generation - now using character parameter
+        base_tensor = self.generate_raman_tensor(crystal_system, frequency, intensity, character)
+        
+        # Modify based on calculation method
+        if calc_method == "Symmetry-Based":
+            return self.apply_symmetry_constraints(base_tensor, crystal_system, character)
+        elif calc_method == "Peak Intensity Analysis":
+            return self.apply_intensity_scaling(base_tensor, intensity, frequency)
+        elif calc_method == "Polarization Data":
+            return self.apply_polarization_data(base_tensor)
+        elif calc_method == "Combined Analysis":
+            tensor = self.apply_symmetry_constraints(base_tensor, crystal_system, character)
+            tensor = self.apply_intensity_scaling(tensor, intensity, frequency)
+            return self.apply_polarization_data(tensor)
+        else:
+            return base_tensor
+    
+    def apply_symmetry_constraints(self, tensor, crystal_system, character):
+        """Apply symmetry constraints based on crystal system and vibrational character."""
+        if character == 'Unknown':
+            return tensor
+        
+        # Generate character-specific tensors with proper symmetry
+        base_intensity = np.max(np.abs(tensor))
+        
+        if crystal_system == "Tetragonal":
+            if 'A1g' in character or character == 'Ag':
+                # A1g: isotropic in xy plane, enhanced along z
+                constrained_tensor = np.array([
+                    [base_intensity, 0, 0],
+                    [0, base_intensity, 0],
+                    [0, 0, base_intensity * 1.5]
+                ])
+                
+            elif 'B1g' in character:
+                # B1g: (x²-y²) character - creates 4-lobed dumbbell pattern
+                constrained_tensor = np.array([
+                    [base_intensity * 3.0, 0, 0],        # Strong xx component
+                    [0, -base_intensity * 3.0, 0],       # Opposite yy component (creates nodes)
+                    [0, 0, 0]                            # No zz component
+                ])
+                
+            elif 'B2g' in character:
+                # B2g: xy character - creates rotated 4-lobed pattern
+                constrained_tensor = np.array([
+                    [0, base_intensity * 2.0, 0],        # Strong xy component
+                    [base_intensity * 2.0, 0, 0],        # xy component
+                    [0, 0, base_intensity * 0.2]         # Small zz component
+                ])
+                
+            elif 'Eg' in character:
+                # Eg: doubly degenerate modes
+                constrained_tensor = np.array([
+                    [base_intensity, 0, base_intensity * 0.7],
+                    [0, base_intensity * 0.8, 0],
+                    [base_intensity * 0.7, 0, base_intensity * 0.3]
+                ])
+            else:
+                constrained_tensor = tensor.copy()
+                
+        elif crystal_system == "Hexagonal":
+            if 'A1g' in character or character == 'Ag':
+                # A1g: breathing mode along c-axis
+                constrained_tensor = np.array([
+                    [base_intensity, 0, 0],
+                    [0, base_intensity, 0],
+                    [0, 0, base_intensity * 2.0]
+                ])
+                
+            elif 'E1g' in character:
+                # E1g: mixed xy-z character
+                constrained_tensor = np.array([
+                    [base_intensity, 0, base_intensity * 0.8],
+                    [0, base_intensity, 0],
+                    [base_intensity * 0.8, 0, base_intensity * 0.5]
+                ])
+                
+            elif 'E2g' in character:
+                # E2g: (x²-y²) and xy characters
+                constrained_tensor = np.array([
+                    [base_intensity * 1.5, base_intensity * 0.5, 0],
+                    [base_intensity * 0.5, -base_intensity * 1.5, 0],
+                    [0, 0, 0]
+                ])
+            else:
+                constrained_tensor = tensor.copy()
+                
+        elif crystal_system == "Trigonal":
+            if 'A1g' in character or character == 'Ag':
+                constrained_tensor = np.array([
+                    [base_intensity, 0, 0],
+                    [0, base_intensity, 0],
+                    [0, 0, base_intensity * 1.6]
+                ])
+            elif 'Eg' in character:
+                constrained_tensor = np.array([
+                    [base_intensity * 1.3, 0, base_intensity * 0.9],
+                    [0, base_intensity * 0.7, 0],
+                    [base_intensity * 0.9, 0, base_intensity * 0.4]
+                ])
+            else:
+                constrained_tensor = tensor.copy()
+                
+        elif crystal_system == "Cubic":
+            if 'A1g' in character or character == 'Ag':
+                # Totally symmetric
+                constrained_tensor = np.diag([base_intensity, base_intensity, base_intensity])
+            elif 'T2g' in character:
+                # Triply degenerate
+                constrained_tensor = np.array([
+                    [base_intensity * 0.5, base_intensity * 1.2, base_intensity * 1.2],
+                    [base_intensity * 1.2, base_intensity * 0.5, base_intensity * 1.2],
+                    [base_intensity * 1.2, base_intensity * 1.2, base_intensity * 0.5]
+                ])
+            else:
+                constrained_tensor = tensor.copy()
+        else:
+            constrained_tensor = tensor.copy()
+        
+        return constrained_tensor
+    
+    def apply_intensity_scaling(self, tensor, intensity, frequency):
+        """Apply intensity-based scaling to tensor."""
+        # Scale tensor based on experimental intensity
+        intensity_factor = intensity / 1000.0 if intensity > 0 else 0.001
+        
+        # Frequency-dependent scaling
+        freq_factor = 1.0 + 0.001 * (frequency - 1000)  # Higher frequencies slightly enhanced
+        
+        return tensor * intensity_factor * freq_factor
+    
+    def apply_polarization_data(self, tensor):
+        """Apply polarization data constraints if available."""
+        if hasattr(self, 'depolarization_ratios') and self.depolarization_ratios:
+            # Find matching depolarization data and modify tensor accordingly
+            # This is a simplified implementation
+            avg_depol = np.mean([data['ratio'] for data in self.depolarization_ratios.values()])
+            
+            # Adjust off-diagonal elements based on depolarization
+            tensor[0, 1] *= avg_depol
+            tensor[1, 0] *= avg_depol
+            tensor[0, 2] *= avg_depol
+            tensor[2, 0] *= avg_depol
+            tensor[1, 2] *= avg_depol
+            tensor[2, 1] *= avg_depol
+        
+        return tensor
+    
+    def calculate_additional_tensor_properties(self, tensor, crystal_system, character):
+        """Calculate additional tensor properties beyond basic analysis."""
+        try:
+            # Raman scattering cross-section
+            cross_section = np.sum(tensor**2)
+            
+            # Polarizability derivatives
+            alpha_derivatives = np.diag(tensor)
+            
+            # Symmetry analysis
+            symmetry_score = self.analyze_tensor_symmetry(tensor, crystal_system)
+            
+            # Mode classification
+            mode_type = self.classify_vibrational_mode(tensor, character, crystal_system)
+            
+            # Intensity predictions for different polarization configurations
+            intensity_predictions = self.predict_polarized_intensities(tensor)
+            
+            return {
+                'cross_section': cross_section,
+                'alpha_derivatives': alpha_derivatives,
+                'symmetry_score': symmetry_score,
+                'mode_type': mode_type,
+                'intensity_predictions': intensity_predictions,
+                'tensor_volume': np.linalg.det(tensor) if np.linalg.det(tensor) != 0 else 0
+            }
+            
+        except Exception as e:
+            return {'error': f"Error calculating additional properties: {str(e)}"}
+    
+    def analyze_tensor_symmetry(self, tensor, crystal_system):
+        """Analyze how well the tensor matches expected crystal symmetry."""
+        try:
+            # Calculate symmetry measures
+            if crystal_system == "Cubic":
+                # Check isotropy
+                diag_vals = np.diag(tensor)
+                isotropy = 1.0 / (1.0 + np.std(diag_vals))
+                off_diag_penalty = np.sum(np.abs(tensor - np.diag(np.diag(tensor))))
+                return max(0, isotropy - off_diag_penalty * 0.1)
+            
+            elif crystal_system == "Hexagonal":
+                # Check for a = b ≠ c pattern
+                a_equals_b = 1.0 / (1.0 + abs(tensor[0,0] - tensor[1,1]))
+                c_different = abs(tensor[2,2] - tensor[0,0]) / (abs(tensor[2,2]) + abs(tensor[0,0]) + 1e-6)
+                return (a_equals_b + c_different) / 2.0
+            
+            else:
+                # General symmetry measure based on crystal system
+                return 0.5  # Default moderate symmetry
+                
+        except Exception:
+            return 0.0
+    
+    def classify_vibrational_mode(self, tensor, character, crystal_system):
+        """Classify the vibrational mode based on tensor properties."""
+        if character != 'Unknown':
+            return f"Assigned: {character}"
+        
+        # Classify based on tensor properties
+        eigenvals = np.linalg.eigvals(tensor)
+        max_eigenval = np.max(np.abs(eigenvals))
+        min_eigenval = np.min(np.abs(eigenvals))
+        
+        if np.allclose(eigenvals, eigenvals[0], rtol=1e-2):
+            return "Totally Symmetric (A1g-like)"
+        elif np.sum(np.abs(eigenvals) < 1e-3) >= 1:
+            return "Partially Active (Eg-like)"
+        elif max_eigenval / min_eigenval > 5:
+            return "Highly Anisotropic"
+        else:
+            return "Mixed Character"
+    
+    def predict_polarized_intensities(self, tensor):
+        """Predict intensities for different polarization configurations."""
+        try:
+            # Common polarization configurations
+            configs = {
+                'parallel_xx': tensor[0, 0]**2,
+                'parallel_yy': tensor[1, 1]**2,
+                'parallel_zz': tensor[2, 2]**2,
+                'cross_xy': tensor[0, 1]**2,
+                'cross_xz': tensor[0, 2]**2,
+                'cross_yz': tensor[1, 2]**2
+            }
+            
+            # Calculate depolarization ratio
+            parallel_avg = (configs['parallel_xx'] + configs['parallel_yy'] + configs['parallel_zz']) / 3
+            cross_avg = (configs['cross_xy'] + configs['cross_xz'] + configs['cross_yz']) / 3
+            
+            depol_ratio = cross_avg / parallel_avg if parallel_avg > 0 else 0
+            
+            configs['depolarization_ratio'] = min(depol_ratio, 0.75)  # Cap at theoretical max
+            
+            return configs
+            
+        except Exception as e:
+            return {'error': f"Error predicting intensities: {str(e)}"}
+    
+    def initialize_tensor_plot(self):
+        """Initialize the tensor visualization plot."""
+        self.tensor_fig.clear()
+        
+        # Create welcome text
+        ax = self.tensor_fig.add_subplot(111)
+        ax.text(0.5, 0.5, 'Calculate Raman tensors to see visualization\n\n'
+                           '1. Load spectrum and fit peaks\n'
+                           '2. Select crystal system\n'
+                           '3. Choose calculation method\n'
+                           '4. Click "Calculate Raman Tensors"',
+                ha='center', va='center', fontsize=12, 
+                bbox=dict(boxstyle='round,pad=1', facecolor='lightblue', alpha=0.3))
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.axis('off')
+        
+        self.tensor_fig.suptitle("Raman Tensor Analysis & Visualization", fontsize=14, fontweight='bold')
+        self.tensor_canvas.draw()
+    
+    def update_tensor_visualization(self):
+        """Update the tensor visualization based on current settings."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            self.initialize_tensor_plot()
+            return
+        
+        # Clear the figure
+        self.tensor_fig.clear()
+        
+        # Get selected visualization mode from radio buttons
+        selected_mode = self.viz_button_group.checkedId()
+        
+        # Determine subplot layout
+        n_peaks = len(self.calculated_raman_tensors)
+        if n_peaks == 0:
+            self.initialize_tensor_plot()
+            return
+        
+        # Create visualization based on selected mode
+        if selected_mode == 0:  # Tensor Matrices
+            self.plot_tensor_matrices()
+        elif selected_mode == 1:  # Eigenvalues & Analysis
+            self.plot_eigenvalue_analysis()
+        elif selected_mode == 2:  # 3D Tensor Shapes
+            self.plot_tensor_ellipsoids()
+        elif selected_mode == 3:  # Overview Summary
+            self.plot_tensor_overview()
+        else:
+            # Default fallback
+            self.plot_tensor_matrices()
+        
+        self.tensor_fig.suptitle(f"Raman Tensor Analysis - {len(self.calculated_raman_tensors)} Peaks", 
+                                fontsize=14, fontweight='bold')
+        self.tensor_canvas.draw()
+    
+    def plot_tensor_matrices(self):
+        """Plot tensor matrices as heatmaps."""
+        n_tensors = len(self.calculated_raman_tensors)
+        cols = min(3, n_tensors)
+        rows = (n_tensors + cols - 1) // cols
+        
+        for i, (freq, data) in enumerate(sorted(self.calculated_raman_tensors.items())):
+            ax = self.tensor_fig.add_subplot(rows, cols, i + 1)
+            
+            tensor = data['tensor']
+            character = data.get('character', 'Unknown')
+            
+            # Create heatmap
+            im = ax.imshow(tensor, cmap='RdBu_r', aspect='equal')
+            
+            # Add values as text
+            for row in range(3):
+                for col in range(3):
+                    ax.text(col, row, f'{tensor[row, col]:.3f}', 
+                           ha='center', va='center', fontsize=8)
+            
+            ax.set_title(f'{freq:.1f} cm⁻¹\n{character}', fontsize=10)
+            ax.set_xticks([0, 1, 2])
+            ax.set_yticks([0, 1, 2])
+            ax.set_xticklabels(['x', 'y', 'z'])
+            ax.set_yticklabels(['x', 'y', 'z'])
+            
+            # Add colorbar for first subplot
+            if i == 0:
+                self.tensor_fig.colorbar(im, ax=ax, shrink=0.6)
+    
+    def plot_eigenvalue_analysis(self):
+        """Plot eigenvalue analysis."""
+        frequencies = []
+        eigenval_data = []
+        anisotropies = []
+        
+        for freq, data in sorted(self.calculated_raman_tensors.items()):
+            frequencies.append(freq)
+            eigenvals = data['properties']['eigenvalues']
+            eigenval_data.append(eigenvals)
+            anisotropies.append(data['properties']['anisotropy'])
+        
+        ax1 = self.tensor_fig.add_subplot(2, 2, 1)
+        ax2 = self.tensor_fig.add_subplot(2, 2, 2)
+        
+        # Eigenvalue plot
+        eigenval_array = np.array(eigenval_data)
+        for i in range(3):
+            ax1.scatter(frequencies, eigenval_array[:, i], label=f'λ{i+1}', alpha=0.7)
+        
+        ax1.set_xlabel('Frequency (cm⁻¹)')
+        ax1.set_ylabel('Eigenvalue')
+        ax1.set_title('Tensor Eigenvalues')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Anisotropy plot
+        ax2.scatter(frequencies, anisotropies, color='red', alpha=0.7)
+        ax2.set_xlabel('Frequency (cm⁻¹)')
+        ax2.set_ylabel('Anisotropy')
+        ax2.set_title('Tensor Anisotropy')
+        ax2.grid(True, alpha=0.3)
+    
+    def plot_tensor_ellipsoids(self):
+        """Plot 3D Raman tensor shapes showing true angular dependence."""
+        # Clear the figure
+        self.tensor_fig.clear()
+        
+        n_tensors = len(self.calculated_raman_tensors)
+        if n_tensors == 0:
+            return
+        
+        # Create subplot grid - each tensor gets its own 3D plot
+        n_cols = min(3, n_tensors)
+        n_rows = (n_tensors + n_cols - 1) // n_cols
+        
+        for i, (freq, data) in enumerate(sorted(self.calculated_raman_tensors.items())):
+            ax = self.tensor_fig.add_subplot(n_rows, n_cols, i + 1, projection='3d')
+            
+            tensor = data['tensor']
+            character = data.get('character', 'Unknown')
+            
+            # Create angular dependence surface for Raman scattering
+            # This shows the intensity |e_incident · R · e_scattered|² as a function of direction
+            
+            # Create spherical coordinate grid
+            theta = np.linspace(0, np.pi, 40)  # polar angle
+            phi = np.linspace(0, 2*np.pi, 60)  # azimuthal angle
+            theta_grid, phi_grid = np.meshgrid(theta, phi)
+            
+            # Convert to Cartesian unit vectors
+            x_dir = np.sin(theta_grid) * np.cos(phi_grid)
+            y_dir = np.sin(theta_grid) * np.sin(phi_grid)
+            z_dir = np.cos(theta_grid)
+            
+            # Calculate Raman intensity for each direction
+            # For backscattering geometry: I ∝ |e · R · e|² where e is the unit vector
+            intensity = np.zeros_like(x_dir)
+            
+            for j in range(x_dir.shape[0]):
+                for k in range(x_dir.shape[1]):
+                    # Unit vector in this direction
+                    e_vec = np.array([x_dir[j,k], y_dir[j,k], z_dir[j,k]])
+                    
+                    # Raman amplitude: e^T · R · e (keep sign for proper visualization)
+                    raman_amplitude = np.dot(e_vec, np.dot(tensor, e_vec))
+                    
+                    # For B1g and other modes with nodes, preserve sign structure
+                    # by using the raw amplitude rather than squaring immediately
+                    if 'B1g' in character or 'B2g' in character:
+                        # Keep the sign to show node structure (4-lobed patterns)
+                        intensity[j,k] = raman_amplitude
+                    else:
+                        # For other modes, use squared intensity as normal
+                        intensity[j,k] = raman_amplitude**2
+            
+            # Handle negative or complex values
+            intensity = np.real(intensity)
+            
+            # For B1g and B2g modes, we want to show the node structure
+            if 'B1g' in character or 'B2g' in character:
+                # Keep both positive and negative values to show nodes
+                max_abs_intensity = np.max(np.abs(intensity))
+                if max_abs_intensity > 0:
+                    intensity_norm = intensity / max_abs_intensity
+                else:
+                    intensity_norm = np.ones_like(intensity) * 0.1
+                
+                # Scale radius: positive values extend outward, negative values contract inward
+                # Use absolute value for radius but preserve sign information for coloring
+                radius_scale = 0.3 + 0.7 * np.abs(intensity_norm)  # Smaller base to show nodes clearly
+            else:
+                # For other modes, handle as before
+                min_intensity = np.min(intensity)
+                if min_intensity < 0:
+                    # Shift to make all positive
+                    intensity = intensity - min_intensity
+                
+                # Normalize intensity for visualization
+                max_intensity = np.max(intensity)
+                if max_intensity > 0:
+                    intensity_norm = intensity / max_intensity
+                else:
+                    intensity_norm = np.ones_like(intensity) * 0.1
+                
+                # Scale the radius by intensity to create the 3D shape
+                radius_scale = 0.5 + 0.5 * intensity_norm  # Base radius + intensity modulation
+            
+            # Calculate surface coordinates
+            x_surface = radius_scale * x_dir
+            y_surface = radius_scale * y_dir
+            z_surface = radius_scale * z_dir
+            
+            # Color mapping based on intensity
+            if 'B1g' in character or 'B2g' in character:
+                # Use a diverging colormap for B1g/B2g to show positive (red) and negative (blue) lobes
+                colors = plt.cm.RdBu_r(0.5 + 0.5 * intensity_norm)  # Red for positive, blue for negative
+            else:
+                # Regular color mapping for other modes
+                colors = plt.cm.RdYlBu_r(0.5 + 0.5 * np.abs(intensity_norm))
+            
+            # Plot the 3D surface
+            surf = ax.plot_surface(x_surface, y_surface, z_surface, 
+                                 facecolors=colors, alpha=0.8, 
+                                 linewidth=0, antialiased=True)
+            
+            # Add wireframe for structure
+            ax.plot_wireframe(x_surface, y_surface, z_surface, 
+                            color='gray', alpha=0.3, linewidth=0.5)
+            
+            # Add coordinate system arrows
+            arrow_length = 1.2
+            ax.quiver(0, 0, 0, arrow_length, 0, 0, color='red', arrow_length_ratio=0.1, linewidth=2, alpha=0.8)
+            ax.quiver(0, 0, 0, 0, arrow_length, 0, color='green', arrow_length_ratio=0.1, linewidth=2, alpha=0.8)
+            ax.quiver(0, 0, 0, 0, 0, arrow_length, color='blue', arrow_length_ratio=0.1, linewidth=2, alpha=0.8)
+            
+            # Add tensor information
+            eigenvals = np.linalg.eigvals(tensor)
+            eigenvals_real = np.real(eigenvals)
+            tensor_trace = np.trace(tensor)
+            tensor_det = np.linalg.det(tensor)
+            
+            # Classify tensor shape
+            shape_type = self.classify_tensor_shape(tensor, eigenvals_real)
+            
+            # Set equal aspect ratio
+            max_extent = 1.5
+            ax.set_xlim(-max_extent, max_extent)
+            ax.set_ylim(-max_extent, max_extent)
+            ax.set_zlim(-max_extent, max_extent)
+            
+            # Labels and title
+            ax.set_xlabel('X', fontsize=8)
+            ax.set_ylabel('Y', fontsize=8)
+            ax.set_zlabel('Z', fontsize=8)
+            
+            title = f'{freq:.1f} cm⁻¹\n{character}\n{shape_type}'
+            ax.set_title(title, fontsize=9, fontweight='bold')
+            
+            # Add tensor properties as text
+            info_text = f'Tr={tensor_trace:.3f}\nDet={tensor_det:.3f}'
+            ax.text2D(0.02, 0.98, info_text, transform=ax.transAxes, 
+                     fontsize=7, verticalalignment='top',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        
+        # Add overall title  
+        title_text = '3D Raman Tensor Angular Dependence\n'
+        if any('B1g' in data.get('character', '') or 'B2g' in data.get('character', '') 
+               for data in self.calculated_raman_tensors.values()):
+            title_text += '(B1g/B2g: Red=Positive lobes, Blue=Negative lobes; Others: Blue=Low, Red=High intensity)'
+        else:
+            title_text += '(Color: Blue=Low, Red=High intensity)'
+        
+        self.tensor_fig.suptitle(title_text, fontsize=12, fontweight='bold')
+        
+        # Adjust layout
+        self.tensor_fig.tight_layout()
+    
+    def classify_tensor_shape(self, tensor, eigenvals):
+        """Classify the 3D shape of the Raman tensor."""
+        # Sort eigenvalues by absolute value to handle signs properly
+        abs_eigenvals = np.abs(eigenvals)
+        sorted_indices = np.argsort(abs_eigenvals)[::-1]  # Descending order
+        sorted_eigenvals = eigenvals[sorted_indices]
+        
+        # Count positive and negative eigenvalues
+        n_positive = np.sum(eigenvals > 1e-6)
+        n_negative = np.sum(eigenvals < -1e-6)
+        n_zero = np.sum(np.abs(eigenvals) <= 1e-6)
+        
+        # Tolerance for comparing eigenvalues
+        tol = 0.1
+        
+        # Classify shape based on eigenvalue structure
+        if n_zero >= 2:
+            return "Planar/Linear"
+        elif n_zero == 1:
+            if n_positive == 2:
+                return "Elliptic Cylinder"
+            elif n_negative == 2:
+                return "Hyperbolic Cylinder"
+            else:
+                return "Parabolic Cylinder"
+        elif n_positive == 3:
+            # All positive eigenvalues - various ellipsoid types
+            eigenval_0 = abs(sorted_eigenvals[0])
+            eigenval_1 = abs(sorted_eigenvals[1])
+            eigenval_2 = abs(sorted_eigenvals[2])
+            
+            # Check if all eigenvalues are approximately equal (sphere)
+            if (abs(eigenval_0 - eigenval_1) < tol * eigenval_0 and 
+                abs(eigenval_1 - eigenval_2) < tol * eigenval_1):
+                return "Sphere"
+            # Check if first two are equal (oblate - flattened)
+            elif abs(eigenval_0 - eigenval_1) < tol * eigenval_0:
+                return "Oblate Ellipsoid"
+            # Check if last two are equal (prolate - elongated)
+            elif abs(eigenval_1 - eigenval_2) < tol * eigenval_1:
+                return "Prolate Ellipsoid"
+            else:
+                return "Triaxial Ellipsoid"
+        elif n_negative == 3:
+            return "Inverted Ellipsoid"
+        elif n_positive == 2 and n_negative == 1:
+            return "Hyperboloid (1 sheet)"
+        elif n_positive == 1 and n_negative == 2:
+            return "Hyperboloid (2 sheet)"
+        elif n_positive == 1 and n_negative == 1:
+            return "Hyperbolic Paraboloid"
+        else:
+            return "Complex Shape"
+    
+    def plot_tensor_overview(self):
+        """Plot tensor overview with key properties."""
+        ax = self.tensor_fig.add_subplot(1, 1, 1)
+        
+        frequencies = []
+        traces = []
+        anisotropies = []
+        cross_sections = []
+        
+        for freq, data in sorted(self.calculated_raman_tensors.items()):
+            frequencies.append(freq)
+            traces.append(data['properties']['trace'])
+            anisotropies.append(data['properties']['anisotropy'])
+            
+            if 'additional_properties' in data:
+                cross_sections.append(data['additional_properties']['cross_section'])
+            else:
+                cross_sections.append(0)
+        
+        # Normalize data for comparison
+        if cross_sections and max(cross_sections) > 0:
+            cross_sections_norm = [x / max(cross_sections) for x in cross_sections]
+        else:
+            cross_sections_norm = [0] * len(cross_sections)
+        
+        # Plot multiple properties
+        ax.scatter(frequencies, traces, alpha=0.7, s=50, label='Trace', color='blue')
+        ax.scatter(frequencies, anisotropies, alpha=0.7, s=50, label='Anisotropy', color='red')
+        ax.scatter(frequencies, cross_sections_norm, alpha=0.7, s=50, label='Cross Section (norm)', color='green')
+        
+        ax.set_xlabel('Frequency (cm⁻¹)')
+        ax.set_ylabel('Property Value')
+        ax.set_title('Tensor Properties Overview')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    def auto_assign_mode_characters(self):
+        """Automatically assign vibrational mode characters after tensor calculation."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            return
+        
+        try:
+            # Get crystal system
+            crystal_system = self.tensor_crystal_system_combo.currentText()
+            
+            # Auto-assign modes based on tensor properties and crystal system
+            for freq, data in self.calculated_raman_tensors.items():
+                tensor = data['tensor']
+                current_character = data.get('character', 'Unknown')
+                
+                if current_character == 'Unknown':
+                    # Assign based on tensor analysis
+                    assigned_character = self.predict_mode_character(tensor, crystal_system, freq)
+                    
+                    # Update the stored data
+                    data['character'] = assigned_character
+                    
+                    # Update the tensor with proper symmetry constraints for the assigned character
+                    updated_tensor = self.apply_symmetry_constraints(tensor, crystal_system, assigned_character)
+                    data['tensor'] = updated_tensor
+                    
+        except Exception as e:
+            print(f"Error in auto-assign mode characters: {str(e)}")
+
+    def assign_vibrational_modes(self):
+        """Assign vibrational modes to calculated tensors."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            QMessageBox.warning(self, "Warning", "Please calculate Raman tensors first.")
+            return
+        
+        try:
+            # Get crystal system
+            crystal_system = self.tensor_crystal_system_combo.currentText()
+            
+            # Auto-assign modes based on tensor properties and crystal system
+            mode_assignments = {}
+            
+            for freq, data in self.calculated_raman_tensors.items():
+                tensor = data['tensor']
+                current_character = data.get('character', 'Unknown')
+                
+                if current_character == 'Unknown':
+                    # Assign based on tensor analysis
+                    assigned_character = self.predict_mode_character(tensor, crystal_system, freq)
+                    mode_assignments[freq] = assigned_character
+                    
+                    # Update the stored data
+                    data['character'] = assigned_character
+                else:
+                    mode_assignments[freq] = current_character
+            
+            # Show assignment results
+            self.show_mode_assignment_results(mode_assignments)
+            
+            # Update visualization
+            self.update_tensor_visualization()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error assigning vibrational modes: {str(e)}")
+    
+    def predict_mode_character(self, tensor, crystal_system, frequency):
+        """Predict vibrational mode character from tensor properties."""
+        eigenvals = np.linalg.eigvals(tensor)
+        eigenvals_real = np.real(eigenvals)
+        eigenvals_sorted = np.sort(np.abs(eigenvals_real))[::-1]  # Sort by magnitude, descending
+        
+        # For Anatase (Tetragonal), use known frequency ranges and tensor patterns
+        if crystal_system == "Tetragonal":
+            # Anatase-specific frequency ranges and patterns
+            if 100 <= frequency <= 150:
+                # B1g mode around 115 cm⁻¹
+                return "B1g"
+            elif 150 <= frequency <= 200:
+                # Ag mode around 158 cm⁻¹  
+                return "Ag"
+            elif 270 <= frequency <= 300:
+                # B1g mode around 283 cm⁻¹
+                return "B1g"
+            elif 800 <= frequency <= 850:
+                # Ag mode around 818 cm⁻¹
+                return "Ag"
+            elif frequency > 500:
+                # High frequency modes are typically A1g or Ag
+                if abs(tensor[2, 2]) > max(abs(tensor[0, 0]), abs(tensor[1, 1])):
+                    return "Ag"
+                else:
+                    return "B1g"
+            else:
+                # Use tensor signature to classify
+                # B1g: strong (xx - yy) character, weak zz
+                xx_yy_diff = abs(tensor[0, 0] - tensor[1, 1])
+                zz_component = abs(tensor[2, 2])
+                xy_component = abs(tensor[0, 1])
+                
+                if xx_yy_diff > 0.5 * max(abs(tensor[0, 0]), abs(tensor[1, 1])) and zz_component < 0.3 * xx_yy_diff:
+                    return "B1g"
+                elif zz_component > max(abs(tensor[0, 0]), abs(tensor[1, 1])):
+                    return "Ag"
+                elif xy_component > 0.5 * max(abs(tensor[0, 0]), abs(tensor[1, 1])):
+                    return "B2g"
+                else:
+                    return "Eg"
+        
+        elif crystal_system == "Hexagonal":
+            if abs(tensor[2, 2]) > abs(tensor[0, 0]):
+                return "A1g"
+            elif abs(tensor[0, 0] - (-tensor[0, 0])) < 0.2 * abs(tensor[0, 0]):
+                return "E2g"
+            else:
+                return "E1g"
+                
+        elif crystal_system == "Trigonal":
+            # Similar to Hexagonal but with trigonal symmetry
+            if abs(tensor[2, 2]) > abs(tensor[0, 0]):
+                return "Ag"
+            else:
+                return "Eg"
+        
+        elif crystal_system == "Cubic":
+            if np.allclose(eigenvals_sorted, [eigenvals_sorted[0]] * len(eigenvals_sorted), rtol=0.1):
+                return "A1g"
+            else:
+                return "T2g"
+        
+        else:
+            # General classification based on frequency and tensor
+            if frequency < 300:
+                return "Low-freq mode"
+            elif frequency > 1000:
+                return "High-freq mode"
+            else:
+                return "Mid-freq mode"
+    
+    def show_mode_assignment_results(self, mode_assignments):
+        """Show mode assignment results in a dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Vibrational Mode Assignments")
+        dialog.setModal(True)
+        dialog.resize(500, 400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Title
+        title_label = QLabel("Vibrational Mode Character Assignments")
+        title_label.setFont(QFont("Arial", 14, QFont.Bold))
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Create table
+        table = QTableWidget()
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["Frequency (cm⁻¹)", "Assigned Character", "Confidence"])
+        
+        table.setRowCount(len(mode_assignments))
+        for row, (freq, character) in enumerate(sorted(mode_assignments.items())):
+            table.setItem(row, 0, QTableWidgetItem(f"{freq:.1f}"))
+            table.setItem(row, 1, QTableWidgetItem(character))
+            table.setItem(row, 2, QTableWidgetItem("Auto-assigned"))
+        
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
+    
+    def show_mode_assignments(self):
+        """Show current mode assignments."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            QMessageBox.warning(self, "Warning", "No tensor data available.")
+            return
+        
+        mode_data = {}
+        for freq, data in self.calculated_raman_tensors.items():
+            mode_data[freq] = data.get('character', 'Unknown')
+        
+        self.show_mode_assignment_results(mode_data)
+    
+    def export_tensor_data(self):
+        """Export tensor data to file."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            QMessageBox.warning(self, "Warning", "No tensor data to export.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Tensor Data", 
+            QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
+            "Text files (*.txt);;JSON files (*.json);;CSV files (*.csv)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            if file_path.endswith('.json'):
+                self.export_tensor_json(file_path)
+            elif file_path.endswith('.csv'):
+                self.export_tensor_csv(file_path)
+            else:
+                self.export_tensor_txt(file_path)
+            
+            QMessageBox.information(self, "Success", "Tensor data exported successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error exporting tensor data: {str(e)}")
+    
+    def export_tensor_txt(self, file_path):
+        """Export tensor data as formatted text file."""
+        with open(file_path, 'w') as f:
+            f.write("RAMAN TENSOR ANALYSIS RESULTS\n")
+            f.write("=" * 50 + "\n\n")
+            
+            if hasattr(self, 'tensor_analysis_results'):
+                results = self.tensor_analysis_results
+                f.write(f"Crystal System: {results.get('crystal_system', 'Unknown')}\n")
+                f.write(f"Calculation Method: {results.get('calculation_method', 'Unknown')}\n")
+                f.write(f"Number of Peaks: {results.get('peak_count', 0)}\n")
+                f.write(f"Analysis Date: {results.get('timestamp', 'Unknown')}\n\n")
+            
+            for freq, data in sorted(self.calculated_raman_tensors.items()):
+                f.write(f"Peak at {freq:.1f} cm⁻¹\n")
+                f.write("-" * 30 + "\n")
+                f.write(f"Character: {data.get('character', 'Unknown')}\n")
+                f.write(f"Intensity: {data.get('intensity', 0):.3f}\n")
+                f.write(f"Width: {data.get('width', 0):.3f}\n\n")
+                
+                f.write("Raman Tensor Matrix:\n")
+                tensor = data['tensor']
+                for i in range(3):
+                    f.write("  [")
+                    for j in range(3):
+                        f.write(f"{tensor[i,j]:8.4f}")
+                    f.write("]\n")
+                f.write("\n")
+                
+                props = data['properties']
+                f.write(f"Eigenvalues: {props['eigenvalues']}\n")
+                f.write(f"Trace: {props['trace']:.4f}\n")
+                f.write(f"Anisotropy: {props['anisotropy']:.4f}\n")
+                f.write(f"Tensor Norm: {props['tensor_norm']:.4f}\n\n")
+    
+    def export_tensor_json(self, file_path):
+        """Export tensor data as JSON file."""
+        import json
+        
+        # Convert numpy arrays to lists for JSON serialization
+        export_data = {}
+        for freq, data in self.calculated_raman_tensors.items():
+            export_data[str(freq)] = {
+                'tensor': data['tensor'].tolist(),
+                'properties': {
+                    'eigenvalues': data['properties']['eigenvalues'].tolist(),
+                    'trace': float(data['properties']['trace']),
+                    'anisotropy': float(data['properties']['anisotropy']),
+                    'tensor_norm': float(data['properties']['tensor_norm'])
+                },
+                'character': data.get('character', 'Unknown'),
+                'intensity': float(data.get('intensity', 0)),
+                'width': float(data.get('width', 0)),
+                'crystal_system': data.get('crystal_system', 'Unknown')
+            }
+        
+        with open(file_path, 'w') as f:
+            json.dump(export_data, f, indent=2)
+    
+    def export_tensor_csv(self, file_path):
+        """Export tensor data as CSV file."""
+        import csv
+        
+        with open(file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            
+            # Header
+            writer.writerow([
+                'Frequency', 'Character', 'Intensity', 'Width',
+                'T_xx', 'T_xy', 'T_xz', 'T_yx', 'T_yy', 'T_yz', 'T_zx', 'T_zy', 'T_zz',
+                'Eigenval_1', 'Eigenval_2', 'Eigenval_3', 'Trace', 'Anisotropy', 'Tensor_Norm'
+            ])
+            
+            # Data rows
+            for freq, data in sorted(self.calculated_raman_tensors.items()):
+                tensor = data['tensor']
+                props = data['properties']
+                
+                row = [
+                    freq, data.get('character', 'Unknown'), data.get('intensity', 0), data.get('width', 0)
+                ]
+                
+                # Tensor elements
+                for i in range(3):
+                    for j in range(3):
+                        row.append(tensor[i, j])
+                
+                # Properties
+                eigenvals = props['eigenvalues']
+                row.extend([eigenvals[0], eigenvals[1], eigenvals[2]])
+                row.extend([props['trace'], props['anisotropy'], props['tensor_norm']])
+                
+                writer.writerow(row)
+    
+    def export_tensor_visualization(self):
+        """Export current tensor visualization."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            QMessageBox.warning(self, "Warning", "No tensor visualization to export.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Tensor Visualization",
+            QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
+            "PNG files (*.png);;PDF files (*.pdf);;SVG files (*.svg)"
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            self.tensor_fig.savefig(file_path, dpi=300, bbox_inches='tight')
+            QMessageBox.information(self, "Success", "Tensor visualization exported successfully.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error exporting visualization: {str(e)}")
+
+    def open_individual_tensor_windows(self):
+        """Open each tensor in its own dedicated window."""
+        if not hasattr(self, 'calculated_raman_tensors') or not self.calculated_raman_tensors:
+            QMessageBox.warning(self, "Warning", "Please calculate Raman tensors first.")
+            return
+        
+        # Create individual windows for each tensor
+        for freq, data in sorted(self.calculated_raman_tensors.items()):
+            self.create_individual_tensor_window(freq, data)
+
+    def create_individual_tensor_window(self, frequency, tensor_data):
+        """Create a dedicated window for a single tensor."""
+        # Create new window
+        window = QMainWindow()
+        window.setWindowTitle(f"Raman Tensor - {frequency:.1f} cm⁻¹ ({tensor_data.get('character', 'Unknown')})")
+        window.setGeometry(100, 100, 900, 700)
+        
+        # Create central widget
+        central_widget = QWidget()
+        window.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        
+        # Create tabs for different visualizations
+        tab_widget = QTabWidget()
+        layout.addWidget(tab_widget)
+        
+        # Tab 1: Tensor Matrix
+        matrix_widget = QWidget()
+        tab_widget.addTab(matrix_widget, "Tensor Matrix")
+        matrix_layout = QVBoxLayout(matrix_widget)
+        
+        matrix_fig = Figure(figsize=(6, 5))
+        matrix_canvas = FigureCanvas(matrix_fig)
+        matrix_toolbar = NavigationToolbar(matrix_canvas, matrix_widget)
+        self.apply_toolbar_styling(matrix_toolbar)
+        
+        matrix_layout.addWidget(matrix_toolbar)
+        matrix_layout.addWidget(matrix_canvas)
+        
+        # Plot tensor matrix
+        self.plot_single_tensor_matrix(matrix_fig, frequency, tensor_data)
+        matrix_canvas.draw()
+        
+        # Tab 2: 3D Shape (if B1g or other interesting symmetry)
+        shape_widget = QWidget()
+        tab_widget.addTab(shape_widget, "3D Shape")
+        shape_layout = QVBoxLayout(shape_widget)
+        
+        shape_fig = Figure(figsize=(8, 6))
+        shape_canvas = FigureCanvas(shape_fig)
+        shape_toolbar = NavigationToolbar(shape_canvas, shape_widget)
+        self.apply_toolbar_styling(shape_toolbar)
+        
+        shape_layout.addWidget(shape_toolbar)
+        shape_layout.addWidget(shape_canvas)
+        
+        # Plot 3D tensor shape
+        self.plot_single_tensor_shape(shape_fig, frequency, tensor_data)
+        shape_canvas.draw()
+        
+        # Tab 3: Properties
+        props_widget = QWidget()
+        tab_widget.addTab(props_widget, "Properties")
+        props_layout = QVBoxLayout(props_widget)
+        
+        # Create properties text
+        props_text = QTextEdit()
+        props_text.setReadOnly(True)
+        props_text.setFont(QFont("Courier", 10))
+        props_layout.addWidget(props_text)
+        
+        # Generate properties text
+        properties_text = self.generate_tensor_properties_text(frequency, tensor_data)
+        props_text.setPlainText(properties_text)
+        
+        # Add buttons for export
+        button_layout = QHBoxLayout()
+        export_matrix_btn = QPushButton("Export Matrix Plot")
+        export_shape_btn = QPushButton("Export 3D Shape")
+        export_props_btn = QPushButton("Export Properties")
+        close_btn = QPushButton("Close")
+        
+        export_matrix_btn.clicked.connect(lambda: self.export_single_plot(matrix_fig, f"tensor_matrix_{frequency:.1f}cm"))
+        export_shape_btn.clicked.connect(lambda: self.export_single_plot(shape_fig, f"tensor_shape_{frequency:.1f}cm"))
+        export_props_btn.clicked.connect(lambda: self.export_single_properties(properties_text, f"tensor_props_{frequency:.1f}cm"))
+        close_btn.clicked.connect(window.close)
+        
+        button_layout.addWidget(export_matrix_btn)
+        button_layout.addWidget(export_shape_btn)
+        button_layout.addWidget(export_props_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(close_btn)
+        layout.addLayout(button_layout)
+        
+        # Show window
+        window.show()
+        
+        # Store reference to prevent garbage collection
+        if not hasattr(self, 'individual_tensor_windows'):
+            self.individual_tensor_windows = []
+        self.individual_tensor_windows.append(window)
+
+    def plot_single_tensor_matrix(self, fig, frequency, tensor_data):
+        """Plot a single tensor matrix with detailed information."""
+        ax = fig.add_subplot(1, 1, 1)
+        
+        tensor = tensor_data['tensor']
+        character = tensor_data.get('character', 'Unknown')
+        
+        # Create enhanced heatmap
+        im = ax.imshow(tensor, cmap='RdBu_r', aspect='equal', vmin=-np.max(np.abs(tensor)), vmax=np.max(np.abs(tensor)))
+        
+        # Add values as text
+        for row in range(3):
+            for col in range(3):
+                color = 'white' if abs(tensor[row, col]) > 0.5 * np.max(np.abs(tensor)) else 'black'
+                ax.text(col, row, f'{tensor[row, col]:.4f}', 
+                       ha='center', va='center', fontsize=12, fontweight='bold', color=color)
+        
+        ax.set_title(f'Raman Tensor Matrix\n{frequency:.1f} cm⁻¹ - {character}', fontsize=14, fontweight='bold')
+        ax.set_xticks([0, 1, 2])
+        ax.set_yticks([0, 1, 2])
+        ax.set_xticklabels(['x', 'y', 'z'], fontsize=12)
+        ax.set_yticklabels(['x', 'y', 'z'], fontsize=12)
+        
+        # Add colorbar
+        cbar = fig.colorbar(im, ax=ax, shrink=0.8)
+        cbar.set_label('Tensor Element Value', fontsize=12)
+        
+        # Add eigenvalue information as text
+        eigenvals = tensor_data['properties']['eigenvalues']
+        trace = tensor_data['properties']['trace']
+        anisotropy = tensor_data['properties']['anisotropy']
+        
+        info_text = f'Eigenvalues: {eigenvals[0]:.3f}, {eigenvals[1]:.3f}, {eigenvals[2]:.3f}\n'
+        info_text += f'Trace: {trace:.3f}\n'
+        info_text += f'Anisotropy: {anisotropy:.3f}'
+        
+        ax.text(1.05, 0.5, info_text, transform=ax.transAxes, fontsize=10,
+                verticalalignment='center', bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8))
+        
+        fig.tight_layout()
+
+    def plot_single_tensor_shape(self, fig, frequency, tensor_data):
+        """Plot a single tensor 3D shape with enhanced details."""
+        ax = fig.add_subplot(1, 1, 1, projection='3d')
+        
+        tensor = tensor_data['tensor']
+        character = tensor_data.get('character', 'Unknown')
+        
+        # Create high-resolution spherical coordinate grid for detailed visualization
+        theta = np.linspace(0, np.pi, 60)  # polar angle
+        phi = np.linspace(0, 2*np.pi, 80)  # azimuthal angle
+        theta_grid, phi_grid = np.meshgrid(theta, phi)
+        
+        # Convert to Cartesian unit vectors
+        x_dir = np.sin(theta_grid) * np.cos(phi_grid)
+        y_dir = np.sin(theta_grid) * np.sin(phi_grid)
+        z_dir = np.cos(theta_grid)
+        
+        # Calculate Raman intensity for each direction
+        intensity = np.zeros_like(x_dir)
+        
+        for j in range(x_dir.shape[0]):
+            for k in range(x_dir.shape[1]):
+                # Unit vector in this direction
+                e_vec = np.array([x_dir[j,k], y_dir[j,k], z_dir[j,k]])
+                
+                # Raman amplitude: e^T · R · e (keep sign for proper visualization)
+                raman_amplitude = np.dot(e_vec, np.dot(tensor, e_vec))
+                
+                # For B1g and other modes with nodes, preserve sign structure
+                if 'B1g' in character or 'B2g' in character:
+                    intensity[j,k] = raman_amplitude
+                else:
+                    intensity[j,k] = raman_amplitude**2
+        
+        # Handle the signed intensity for B1g (preserve nodes)
+        intensity = np.real(intensity)
+        
+        if 'B1g' in character or 'B2g' in character:
+            max_abs_intensity = np.max(np.abs(intensity))
+            if max_abs_intensity > 0:
+                intensity_norm = intensity / max_abs_intensity
+            else:
+                intensity_norm = np.ones_like(intensity) * 0.1
+            radius_scale = 0.3 + 0.7 * np.abs(intensity_norm)
+            colors = plt.cm.RdBu_r(0.5 + 0.5 * intensity_norm)
+        else:
+            min_intensity = np.min(intensity)
+            if min_intensity < 0:
+                intensity = intensity - min_intensity
+            max_intensity = np.max(intensity)
+            if max_intensity > 0:
+                intensity_norm = intensity / max_intensity
+            else:
+                intensity_norm = np.ones_like(intensity) * 0.1
+            radius_scale = 0.5 + 0.5 * intensity_norm
+            colors = plt.cm.RdYlBu_r(0.5 + 0.5 * intensity_norm)
+        
+        # Calculate surface coordinates
+        x_surface = radius_scale * x_dir
+        y_surface = radius_scale * y_dir
+        z_surface = radius_scale * z_dir
+        
+        # Plot the 3D surface
+        surf = ax.plot_surface(x_surface, y_surface, z_surface, 
+                             facecolors=colors, alpha=0.9, 
+                             linewidth=0, antialiased=True)
+        
+        # Add coordinate system arrows
+        arrow_length = 1.5
+        ax.quiver(0, 0, 0, arrow_length, 0, 0, color='red', arrow_length_ratio=0.1, linewidth=3, alpha=0.9)
+        ax.quiver(0, 0, 0, 0, arrow_length, 0, color='green', arrow_length_ratio=0.1, linewidth=3, alpha=0.9)
+        ax.quiver(0, 0, 0, 0, 0, arrow_length, color='blue', arrow_length_ratio=0.1, linewidth=3, alpha=0.9)
+        
+        # Add axis labels
+        ax.text(arrow_length*1.1, 0, 0, 'X', fontsize=12, fontweight='bold', color='red')
+        ax.text(0, arrow_length*1.1, 0, 'Y', fontsize=12, fontweight='bold', color='green')
+        ax.text(0, 0, arrow_length*1.1, 'Z', fontsize=12, fontweight='bold', color='blue')
+        
+        # Set equal aspect ratio
+        max_extent = 1.8
+        ax.set_xlim(-max_extent, max_extent)
+        ax.set_ylim(-max_extent, max_extent)
+        ax.set_zlim(-max_extent, max_extent)
+        
+        # Enhanced title with character information
+        title = f'3D Raman Tensor Shape\n{frequency:.1f} cm⁻¹ - {character}'
+        if 'B1g' in character:
+            title += '\n(Red=Positive lobes, Blue=Negative lobes)'
+        ax.set_title(title, fontsize=14, fontweight='bold')
+        
+        fig.tight_layout()
+
+    def generate_tensor_properties_text(self, frequency, tensor_data):
+        """Generate detailed text description of tensor properties."""
+        tensor = tensor_data['tensor']
+        properties = tensor_data['properties']
+        character = tensor_data.get('character', 'Unknown')
+        crystal_system = tensor_data.get('crystal_system', 'Unknown')
+        
+        text = f"RAMAN TENSOR PROPERTIES\n"
+        text += f"=" * 50 + "\n\n"
+        text += f"Frequency: {frequency:.1f} cm⁻¹\n"
+        text += f"Character: {character}\n"
+        text += f"Crystal System: {crystal_system}\n"
+        text += f"Calculation Method: {tensor_data.get('calculation_method', 'Unknown')}\n\n"
+        
+        text += f"TENSOR MATRIX:\n"
+        text += f"-" * 20 + "\n"
+        for i in range(3):
+            row_text = "  ".join([f"{tensor[i,j]:8.4f}" for j in range(3)])
+            text += f"[{row_text}]\n"
+        text += "\n"
+        
+        text += f"EIGENVALUE ANALYSIS:\n"
+        text += f"-" * 20 + "\n"
+        eigenvals = properties['eigenvalues']
+        for i, eval in enumerate(eigenvals):
+            text += f"λ{i+1}: {eval:10.4f}\n"
+        text += "\n"
+        
+        text += f"TENSOR INVARIANTS:\n"
+        text += f"-" * 20 + "\n"
+        text += f"Trace (I₁):      {properties['trace']:10.4f}\n"
+        text += f"Determinant:     {properties['determinant']:10.4f}\n"
+        text += f"Anisotropy:      {properties['anisotropy']:10.4f}\n"
+        text += f"Tensor Norm:     {properties['tensor_norm']:10.4f}\n"
+        text += f"Spherical Part:  {properties['spherical_part']:10.4f}\n"
+        text += f"Deviatoric Norm: {properties['deviatoric_norm']:10.4f}\n\n"
+        
+        if 'additional_properties' in tensor_data:
+            add_props = tensor_data['additional_properties']
+            text += f"ADDITIONAL PROPERTIES:\n"
+            text += f"-" * 20 + "\n"
+            text += f"Cross Section:   {add_props.get('cross_section', 0):10.4f}\n"
+            text += f"Symmetry Score:  {add_props.get('symmetry_score', 0):10.4f}\n"
+            text += f"Mode Type:       {add_props.get('mode_type', 'Unknown')}\n\n"
+        
+        # Add symmetry-specific information
+        if character == 'B1g':
+            text += f"B1g MODE CHARACTERISTICS:\n"
+            text += f"-" * 25 + "\n"
+            text += f"• (x²-y²) symmetry character\n"
+            text += f"• Creates 4-lobed angular dependence pattern\n"
+            text += f"• Positive lobes along x-direction\n"
+            text += f"• Negative lobes along y-direction\n"
+            text += f"• Nodes at ±45° in xy-plane\n"
+            text += f"• Typical of tetragonal crystals\n\n"
+        
+        return text
+
+    def export_single_plot(self, fig, filename_base):
+        """Export a single plot to file."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, f"Export {filename_base}", 
+            QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) + f"/{filename_base}.png",
+            "PNG files (*.png);;PDF files (*.pdf);;SVG files (*.svg)"
+        )
+        
+        if file_path:
+            try:
+                fig.savefig(file_path, dpi=300, bbox_inches='tight')
+                QMessageBox.information(self, "Success", f"Plot exported to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error exporting plot: {str(e)}")
+
+    def export_single_properties(self, properties_text, filename_base):
+        """Export tensor properties to text file."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, f"Export {filename_base} Properties", 
+            QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation) + f"/{filename_base}.txt",
+            "Text files (*.txt)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(properties_text)
+                QMessageBox.information(self, "Success", f"Properties exported to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error exporting properties: {str(e)}")
+
+    def on_structure_loaded(self, structure_data):
+        # Placeholder for structure loaded event
+        print(f"Structure loaded: {structure_data.get('formula', 'Unknown')}")
+
+    def on_bonds_calculated(self, bond_data):
+        # Placeholder for bond calculation event
+        print(f"Bonds calculated: {bond_data.get('count', 0)}")
 
 
 def main():

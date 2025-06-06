@@ -729,27 +729,22 @@ class DatabaseBrowserQt6(QDialog):
         peaks_data = self.current_spectrum.get('peaks', [])
         peak_positions = []
         
-        # Handle different peak storage formats (same logic as main app)
+        # Handle different peak storage formats
         if isinstance(peaks_data, dict) and peaks_data.get("wavenumbers") is not None:
-            # Original app format
-            db_peaks = peaks_data["wavenumbers"]
-            if hasattr(db_peaks, 'tolist'):
-                peak_positions = db_peaks.tolist()
-            else:
-                peak_positions = list(db_peaks)
+            # Original app format - convert wavenumbers to indices
+            peak_wavenumbers = np.array(peaks_data["wavenumbers"])
+            peak_positions = np.searchsorted(self.current_spectrum['wavenumbers'], peak_wavenumbers)
         elif isinstance(peaks_data, (list, tuple)):
             # Check if these are wavenumber values or indices
-            spectrum_wavenumbers = self.current_spectrum.get('wavenumbers', [])
-            if (len(spectrum_wavenumbers) > 0 and 
-                all(isinstance(p, (int, float)) and 0 <= p < len(spectrum_wavenumbers) for p in peaks_data if p is not None)):
-                # Legacy format: convert indices to wavenumbers
-                spectrum_wavenumbers = np.array(spectrum_wavenumbers)
-                for peak_idx in peaks_data:
-                    if peak_idx is not None and 0 <= int(peak_idx) < len(spectrum_wavenumbers):
-                        peak_positions.append(float(spectrum_wavenumbers[int(peak_idx)]))
+            if all(isinstance(p, (int, float)) and 0 <= p < len(self.current_spectrum['wavenumbers']) for p in peaks_data if p is not None):
+                # Already indices
+                peak_positions = np.array([int(p) for p in peaks_data if p is not None], dtype=np.int64)
             else:
-                # Direct wavenumber values
-                peak_positions = [float(p) for p in peaks_data if p is not None]
+                # Direct wavenumber values - convert to indices
+                peak_wavenumbers = np.array([float(p) for p in peaks_data if p is not None])
+                peak_positions = np.searchsorted(self.current_spectrum['wavenumbers'], peak_wavenumbers)
+        else:
+            peak_positions = None
         
         return peak_positions
 
@@ -1008,7 +1003,24 @@ class DatabaseBrowserQt6(QDialog):
                 parent_app.current_wavenumbers = np.array(self.current_spectrum['wavenumbers'])
                 parent_app.current_intensities = np.array(self.current_spectrum['intensities'])
                 parent_app.processed_intensities = parent_app.current_intensities.copy()
-                parent_app.detected_peaks = np.array(self.current_spectrum['peaks']) if self.current_spectrum['peaks'] else None
+                
+                # Handle different peak storage formats
+                peaks_data = self.current_spectrum.get('peaks', [])
+                if isinstance(peaks_data, dict) and peaks_data.get("wavenumbers") is not None:
+                    # Original app format - convert wavenumbers to indices
+                    peak_wavenumbers = np.array(peaks_data["wavenumbers"])
+                    parent_app.detected_peaks = np.searchsorted(parent_app.current_wavenumbers, peak_wavenumbers)
+                elif isinstance(peaks_data, (list, tuple)):
+                    # Check if these are wavenumber values or indices
+                    if all(isinstance(p, (int, float)) and 0 <= p < len(parent_app.current_wavenumbers) for p in peaks_data if p is not None):
+                        # Already indices
+                        parent_app.detected_peaks = np.array([int(p) for p in peaks_data if p is not None], dtype=np.int64)
+                    else:
+                        # Direct wavenumber values - convert to indices
+                        peak_wavenumbers = np.array([float(p) for p in peaks_data if p is not None])
+                        parent_app.detected_peaks = np.searchsorted(parent_app.current_wavenumbers, peak_wavenumbers)
+                else:
+                    parent_app.detected_peaks = None
                 
                 # Update main app plot
                 parent_app.update_plot()

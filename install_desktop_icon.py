@@ -29,7 +29,8 @@ class DesktopIconInstaller:
         self.script_dir = Path(__file__).parent.absolute()
         self.app_name = "RamanLab"
         self.app_description = "Raman Spectroscopy Analysis Suite"
-        self.main_script = self.script_dir / "launch_ramanlab.py"
+        self.main_script = self.script_dir / "launch_ramanlab_fast.py"
+        self.fallback_script = self.script_dir / "launch_ramanlab.py"
         
         # Icon files
         self.icon_ico = self.script_dir / "RamanLab_icon_HQ.ico"  # Windows
@@ -42,11 +43,15 @@ class DesktopIconInstaller:
         print(f"📍 Platform detected: {self.platform.title()}")
         print(f"📂 Application directory: {self.script_dir}")
         
-        # Verify main script exists
+        # Verify main script exists (try fast launcher first, fallback to regular)
         if not self.main_script.exists():
-            print(f"❌ Error: Main script not found at {self.main_script}")
-            print("💡 Make sure you're running this script from the RamanLab directory.")
-            return False
+            if self.fallback_script.exists():
+                print(f"⚠️  Fast launcher not found, using regular launcher: {self.fallback_script}")
+                self.main_script = self.fallback_script
+            else:
+                print(f"❌ Error: Main script not found at {self.main_script}")
+                print("💡 Make sure you're running this script from the RamanLab directory.")
+                return False
             
         try:
             if self.platform == "windows":
@@ -159,9 +164,20 @@ pause
         with open(contents_dir / "Info.plist", 'w') as f:
             f.write(info_plist)
         
-        # Create executable script
+        # Create executable script with conda environment setup
         executable_script = f'''#!/bin/bash
 cd "{self.script_dir}"
+
+# Set up the conda environment PATH (fixes desktop launch issues)
+export PATH="/opt/anaconda3/bin:/opt/anaconda3/condabin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# Initialize conda if needed
+if [ -f "/opt/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "/opt/anaconda3/etc/profile.d/conda.sh"
+    conda activate base
+fi
+
+# Launch RamanLab with full conda environment
 "{sys.executable}" "{self.main_script}"
 '''
         
