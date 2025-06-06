@@ -55,4 +55,6 @@ dist/
 !sample_output.csv
 !sample_results.csvtkinter_legacy/ClaritySpectra_Database_20250602.pkl.backup
 *.backup
+
+# Folder that I don't want to commit
 tkinter_legacy/
