@@ -29,6 +29,8 @@ pyinstaller>=5.0.0          # Creating standalone executables
 
 # Additional Processing Libraries
 tqdm>=4.60.0                # Progress bars for long operations
+psutil>=5.8.0               # System and process utilities
+dask>=2021.0.0              # Parallel computing and data processing
 
 # Installation Notes:
 # ==================
@@ -37,7 +39,7 @@ tqdm>=4.60.0                # Progress bars for long operations
 # pip install -r requirements_qt6.txt
 #
 # INDIVIDUAL INSTALLATION:
-# pip install PySide6 numpy matplotlib scipy pandas seaborn pillow openpyxl fastdtw scikit-learn pymatgen pyinstaller tqdm
+# pip install PySide6 numpy matplotlib scipy pandas seaborn pillow openpyxl fastdtw scikit-learn pymatgen pyinstaller tqdm psutil dask
 #
 # Qt6 Framework:
 # - PySide6: Official Qt bindings, LGPL license, recommended for this project

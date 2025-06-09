@@ -99,8 +99,8 @@ class MultiSpectrumManagerQt6(QMainWindow):
         spectra_layout = QVBoxLayout(spectra_group)
         
         self.multi_spectrum_list = QListWidget()
-        # Remove fixed height, let it expand with available space
-        self.multi_spectrum_list.setMinimumHeight(120)
+        # Reduced height to give more space to controls below
+        self.multi_spectrum_list.setMinimumHeight(60)
         self.multi_spectrum_list.currentItemChanged.connect(self.on_multi_spectrum_select)
         spectra_layout.addWidget(self.multi_spectrum_list)
         

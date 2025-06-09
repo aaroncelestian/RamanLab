@@ -174,6 +174,33 @@ class SpectralDeconvolutionQt6(QDialog):
         self.interactive_mode = False
         self.click_connection = None
         
+        # Background update timer for responsive live preview
+        self.bg_update_timer = QTimer()
+        self.bg_update_timer.setSingleShot(True)
+        self.bg_update_timer.timeout.connect(self._update_background_calculation)
+        self.bg_update_delay = 150  # milliseconds
+        
+        # Peak detection timer for responsive live preview
+        self.peak_update_timer = QTimer()
+        self.peak_update_timer.setSingleShot(True)
+        self.peak_update_timer.timeout.connect(self._update_peak_detection)
+        self.peak_update_delay = 100  # milliseconds
+        
+        # Plot line references for efficient updates
+        self.spectrum_line = None
+        self.background_line = None
+        self.fitted_line = None
+        self.auto_peaks_scatter = None
+        self.manual_peaks_scatter = None
+        self.individual_peak_lines = []
+        self.filter_preview_line = None
+        
+        # Fourier analysis data storage
+        self.fft_data = None
+        self.fft_frequencies = None
+        self.fft_magnitude = None
+        self.fft_phase = None
+        
         self.setup_ui()
         self.initial_plot()
         
@@ -260,7 +287,7 @@ class SpectralDeconvolutionQt6(QDialog):
         self.bg_method_combo = QComboBox()
         self.bg_method_combo.addItems(["ALS (Asymmetric Least Squares)", "Linear", "Polynomial", "Moving Average"])
         self.bg_method_combo.currentTextChanged.connect(self.on_bg_method_changed)
-        self.bg_method_combo.currentTextChanged.connect(self.preview_background_live)
+        self.bg_method_combo.currentTextChanged.connect(self._trigger_background_update)
         bg_method_layout.addWidget(self.bg_method_combo)
         bg_layout.addLayout(bg_method_layout)
         
@@ -302,15 +329,15 @@ class SpectralDeconvolutionQt6(QDialog):
         niter_layout.addWidget(self.niter_label)
         als_params_layout.addLayout(niter_layout)
         
-        # Connect sliders to update labels and live preview
+        # Connect sliders to update labels and live preview with debouncing
         self.lambda_slider.valueChanged.connect(self.update_lambda_label)
         self.p_slider.valueChanged.connect(self.update_p_label)
         self.niter_slider.valueChanged.connect(self.update_niter_label)
         
-        # Connect sliders to live preview
-        self.lambda_slider.valueChanged.connect(self.preview_background_live)
-        self.p_slider.valueChanged.connect(self.preview_background_live)
-        self.niter_slider.valueChanged.connect(self.preview_background_live)
+        # Connect sliders to debounced live preview
+        self.lambda_slider.valueChanged.connect(self._trigger_background_update)
+        self.p_slider.valueChanged.connect(self._trigger_background_update)
+        self.niter_slider.valueChanged.connect(self._trigger_background_update)
         
         bg_layout.addWidget(self.als_params_widget)
         
@@ -377,15 +404,15 @@ class SpectralDeconvolutionQt6(QDialog):
         
         peak_layout.addLayout(params_layout)
         
-        # Connect sliders
+        # Connect sliders to update labels
         self.height_slider.valueChanged.connect(self.update_height_label)
         self.distance_slider.valueChanged.connect(self.update_distance_label)
         self.prominence_slider.valueChanged.connect(self.update_prominence_label)
         
-        # Connect sliders to live peak detection
-        self.height_slider.valueChanged.connect(self.detect_peaks_live)
-        self.distance_slider.valueChanged.connect(self.detect_peaks_live)
-        self.prominence_slider.valueChanged.connect(self.detect_peaks_live)
+        # Connect sliders to live peak detection with debouncing
+        self.height_slider.valueChanged.connect(self._trigger_peak_update)
+        self.distance_slider.valueChanged.connect(self._trigger_peak_update)
+        self.prominence_slider.valueChanged.connect(self._trigger_peak_update)
         
         # Automatic detection buttons
         auto_button_layout = QHBoxLayout()
@@ -602,6 +629,16 @@ class SpectralDeconvolutionQt6(QDialog):
         self.show_components_check.toggled.connect(self.on_display_changed)
         display_layout.addWidget(self.show_components_check)
         
+        self.show_legend_check = QCheckBox("Show Legend")
+        self.show_legend_check.setChecked(True)
+        self.show_legend_check.toggled.connect(self.on_display_changed)
+        display_layout.addWidget(self.show_legend_check)
+        
+        self.show_grid_check = QCheckBox("Show Grid")
+        self.show_grid_check.setChecked(True)
+        self.show_grid_check.toggled.connect(self.on_display_changed)
+        display_layout.addWidget(self.show_grid_check)
+        
         layout.addWidget(display_group)
         
         # Fitting
@@ -636,57 +673,131 @@ class SpectralDeconvolutionQt6(QDialog):
         return tab
         
     def create_deconvolution_tab(self):
-        """Create spectral deconvolution tab with advanced features."""
+        """Create spectral deconvolution tab with Fourier-based analysis."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Component separation
-        comp_group = QGroupBox("Component Separation")
-        comp_layout = QVBoxLayout(comp_group)
+        # Fourier Analysis
+        fourier_group = QGroupBox("Fourier Transform Analysis")
+        fourier_layout = QVBoxLayout(fourier_group)
         
-        # Number of components
-        comp_params = QFormLayout()
-        self.n_components_spin = QSpinBox()
-        self.n_components_spin.setRange(1, 10)
-        self.n_components_spin.setValue(3)
-        comp_params.addRow("Components:", self.n_components_spin)
-        comp_layout.addLayout(comp_params)
+        # Fourier transform display
+        fft_btn = QPushButton("Show Frequency Spectrum")
+        fft_btn.clicked.connect(self.show_frequency_spectrum)
+        fft_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4A90E2;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #357ABD;
+            }
+        """)
+        fourier_layout.addWidget(fft_btn)
         
-        # Separation methods
-        method_layout = QHBoxLayout()
-        overlap_btn = QPushButton("Resolve Overlaps")
-        separate_btn = QPushButton("Separate Components")
+        # Power spectral density
+        psd_btn = QPushButton("Power Spectral Density")
+        psd_btn.clicked.connect(self.show_power_spectral_density)
+        fourier_layout.addWidget(psd_btn)
         
-        overlap_btn.clicked.connect(self.resolve_overlapping_peaks)
-        separate_btn.clicked.connect(self.separate_components)
+        layout.addWidget(fourier_group)
         
-        method_layout.addWidget(overlap_btn)
-        method_layout.addWidget(separate_btn)
-        comp_layout.addLayout(method_layout)
+        # Fourier Filtering
+        filter_group = QGroupBox("Fourier Filtering")
+        filter_layout = QVBoxLayout(filter_group)
         
-        layout.addWidget(comp_group)
+        # Filter type selection
+        filter_type_layout = QHBoxLayout()
+        filter_type_layout.addWidget(QLabel("Filter Type:"))
+        self.filter_type_combo = QComboBox()
+        self.filter_type_combo.addItems(["Low-pass", "High-pass", "Band-pass", "Band-stop", "Butterworth Low-pass", "Butterworth High-pass", "Butterworth Band-pass", "Butterworth Band-stop"])
+        self.filter_type_combo.currentTextChanged.connect(self.on_filter_type_changed)
+        filter_type_layout.addWidget(self.filter_type_combo)
+        filter_layout.addLayout(filter_type_layout)
         
-        # Advanced analysis (only if ML available)
-        if ML_AVAILABLE:
-            analysis_group = QGroupBox("Advanced Analysis")
-            analysis_layout = QVBoxLayout(analysis_group)
-            
-            # PCA
-            pca_btn = QPushButton("Principal Component Analysis")
-            pca_btn.clicked.connect(self.perform_pca)
-            analysis_layout.addWidget(pca_btn)
-            
-            # NMF
-            nmf_btn = QPushButton("Non-negative Matrix Factorization")
-            nmf_btn.clicked.connect(self.perform_nmf)
-            analysis_layout.addWidget(nmf_btn)
-            
-            layout.addWidget(analysis_group)
-        else:
-            # Show info about missing ML capabilities
-            info_label = QLabel("Install scikit-learn for advanced ML features")
-            info_label.setStyleSheet("color: orange; font-style: italic;")
-            layout.addWidget(info_label)
+        # Cutoff frequency controls
+        cutoff_layout = QFormLayout()
+        
+        # Low cutoff (for band filters)
+        self.low_cutoff_slider = QSlider(Qt.Horizontal)
+        self.low_cutoff_slider.setRange(1, 50)
+        self.low_cutoff_slider.setValue(10)
+        self.low_cutoff_label = QLabel("10%")
+        low_cutoff_layout = QHBoxLayout()
+        low_cutoff_layout.addWidget(self.low_cutoff_slider)
+        low_cutoff_layout.addWidget(self.low_cutoff_label)
+        cutoff_layout.addRow("Low Cutoff:", low_cutoff_layout)
+        
+        # High cutoff
+        self.high_cutoff_slider = QSlider(Qt.Horizontal)
+        self.high_cutoff_slider.setRange(10, 90)
+        self.high_cutoff_slider.setValue(50)
+        self.high_cutoff_label = QLabel("50%")
+        high_cutoff_layout = QHBoxLayout()
+        high_cutoff_layout.addWidget(self.high_cutoff_slider)
+        high_cutoff_layout.addWidget(self.high_cutoff_label)
+        cutoff_layout.addRow("High Cutoff:", high_cutoff_layout)
+        
+        # Butterworth filter order (initially hidden)
+        self.butterworth_order_slider = QSlider(Qt.Horizontal)
+        self.butterworth_order_slider.setRange(1, 10)
+        self.butterworth_order_slider.setValue(4)
+        self.butterworth_order_label = QLabel("4")
+        butterworth_order_layout = QHBoxLayout()
+        butterworth_order_layout.addWidget(self.butterworth_order_slider)
+        butterworth_order_layout.addWidget(self.butterworth_order_label)
+        self.butterworth_order_row = cutoff_layout.addRow("Butterworth Order:", butterworth_order_layout)
+        
+        # Initially hide Butterworth order control
+        self.butterworth_order_slider.setVisible(False)
+        self.butterworth_order_label.setVisible(False)
+        
+        # Connect sliders to update labels
+        self.low_cutoff_slider.valueChanged.connect(self.update_low_cutoff_label)
+        self.high_cutoff_slider.valueChanged.connect(self.update_high_cutoff_label)
+        self.butterworth_order_slider.valueChanged.connect(self.update_butterworth_order_label)
+        
+        filter_layout.addLayout(cutoff_layout)
+        
+        # Filter buttons
+        filter_buttons_layout = QHBoxLayout()
+        
+        preview_filter_btn = QPushButton("Preview Filter")
+        preview_filter_btn.clicked.connect(self.preview_fourier_filter)
+        filter_buttons_layout.addWidget(preview_filter_btn)
+        
+        apply_filter_btn = QPushButton("Apply Filter")
+        apply_filter_btn.clicked.connect(self.apply_fourier_filter)
+        filter_buttons_layout.addWidget(apply_filter_btn)
+        
+        filter_layout.addLayout(filter_buttons_layout)
+        
+        layout.addWidget(filter_group)
+        
+        # Fourier Enhancement
+        enhance_group = QGroupBox("Fourier Enhancement")
+        enhance_layout = QVBoxLayout(enhance_group)
+        
+        # Smoothing
+        smooth_btn = QPushButton("Fourier Smoothing")
+        smooth_btn.clicked.connect(self.apply_fourier_smoothing)
+        enhance_layout.addWidget(smooth_btn)
+        
+        # Deconvolution
+        deconv_btn = QPushButton("Richardson-Lucy Deconvolution")
+        deconv_btn.clicked.connect(self.apply_richardson_lucy)
+        enhance_layout.addWidget(deconv_btn)
+        
+        # Apodization
+        apod_btn = QPushButton("Apply Apodization")
+        apod_btn.clicked.connect(self.apply_apodization)
+        enhance_layout.addWidget(apod_btn)
+        
+        layout.addWidget(enhance_group)
         
         layout.addStretch()
         return tab
@@ -701,9 +812,9 @@ class SpectralDeconvolutionQt6(QDialog):
         results_layout = QVBoxLayout(results_group)
         
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(4)
+        self.results_table.setColumnCount(5)
         self.results_table.setHorizontalHeaderLabels([
-            "Peak", "Position", "Amplitude", "Width"
+            "Peak", "Position", "Amplitude", "Width", "R²"
         ])
         self.results_table.horizontalHeader().setStretchLastSection(True)
         results_layout.addWidget(self.results_table)
@@ -727,180 +838,20 @@ class SpectralDeconvolutionQt6(QDialog):
     def initial_plot(self):
         """Create initial plot."""
         self.update_plot()
-        
-    def update_plot(self):
-        """Update all plots."""
-        # Clear all axes
-        self.ax_main.clear()
-        self.ax_residual.clear()
-        
-        # Main spectrum plot
-        self.ax_main.plot(self.wavenumbers, self.processed_intensities, 'b-', 
-                         linewidth=1.5, label='Spectrum')
-        
-        # Plot background if available
-        if self.background is not None:
-            self.ax_main.plot(self.wavenumbers, self.background, 'r--', 
-                             linewidth=1, alpha=0.7, label='Background')
-        
-        # Plot fitted peaks if available
-        if self.fit_result is not None and self.show_individual_peaks:
-            # Plot total fitted curve
-            fitted_curve = self.multi_peak_model(self.wavenumbers, *self.fit_params)
-            self.ax_main.plot(self.wavenumbers, fitted_curve, 'g-', 
-                             linewidth=2, label='Fitted')
-            
-            # Plot individual peaks
-            self.plot_individual_peaks()
-        
-        # Plot automatically detected peaks - FIX: Handle numpy array boolean check properly
-        if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
-            # Validate peak indices before plotting
-            valid_auto_peaks = self.validate_peak_indices(self.peaks)
-            if len(valid_auto_peaks) > 0:
-                auto_peak_positions = [self.wavenumbers[p] for p in valid_auto_peaks]
-                auto_peak_intensities = [self.processed_intensities[p] for p in valid_auto_peaks]
-                self.ax_main.plot(auto_peak_positions, auto_peak_intensities, 'ro', 
-                                 markersize=8, label='Auto Peaks', alpha=0.8)
-        
-        # Plot manually selected peaks - FIX: Validate indices to prevent IndexError
-        if hasattr(self, 'manual_peaks') and self.manual_peaks is not None and len(self.manual_peaks) > 0:
-            # Validate peak indices before plotting
-            valid_manual_peaks = self.validate_peak_indices(self.manual_peaks)
-            if len(valid_manual_peaks) > 0:
-                manual_peak_positions = [self.wavenumbers[p] for p in valid_manual_peaks]
-                manual_peak_intensities = [self.processed_intensities[p] for p in valid_manual_peaks]
-                self.ax_main.plot(manual_peak_positions, manual_peak_intensities, 'gs', 
-                                 markersize=10, label='Manual Peaks', alpha=0.8, markeredgecolor='darkgreen')
-        
-        # Add interactive mode indicator
-        if self.interactive_mode:
-            self.ax_main.text(0.02, 0.98, '🖱️ Interactive Mode ON\nClick to select peaks', 
-                             transform=self.ax_main.transAxes, 
-                             verticalalignment='top', fontsize=10,
-                             bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
-        
-        self.ax_main.set_xlabel('Wavenumber (cm⁻¹)')
-        self.ax_main.set_ylabel('Intensity')
-        self.ax_main.set_title('Spectrum and Peak Analysis')
-        self.ax_main.legend()
-        self.ax_main.grid(True, alpha=0.3)
-        
-        # Residuals plot
-        if self.residuals is not None:
-            self.ax_residual.plot(self.wavenumbers, self.residuals, 'k-', linewidth=1)
-            self.ax_residual.axhline(y=0, color='r', linestyle='--', alpha=0.5)
-            self.ax_residual.set_xlabel('Wavenumber (cm⁻¹)')
-            self.ax_residual.set_ylabel('Residuals')
-            self.ax_residual.set_title('Fit Residuals')
-            self.ax_residual.grid(True, alpha=0.3)
-        
-        # Update peak list if it exists
-        if hasattr(self, 'peak_list_widget'):
-            self.update_peak_list()
-        
-        self.canvas.draw()
-
-    def validate_peak_indices(self, peak_indices):
-        """Validate peak indices to ensure they're within bounds and are integers."""
-        if peak_indices is None or len(peak_indices) == 0:
-            return np.array([])
-        
-        valid_peaks = []
-        max_index = len(self.wavenumbers) - 1
-        
-        for peak_idx in peak_indices:
-            try:
-                # Convert to integer if possible
-                peak_idx = int(peak_idx)
-                
-                # Check if within bounds
-                if 0 <= peak_idx <= max_index:
-                    valid_peaks.append(peak_idx)
-                    
-            except (ValueError, TypeError):
-                # Skip invalid indices
-                continue
-        
-        return np.array(valid_peaks, dtype=int)
-
-    def plot_individual_peaks(self):
-        """Plot individual fitted peaks."""
-        # Check if we have fit parameters and any peaks to plot
-        if (self.fit_params is None or 
-            not hasattr(self.fit_params, '__len__') or 
-            len(self.fit_params) == 0):
-            return
-        
-        # Get all peaks that were used for fitting (auto + manual)
-        all_fitted_peaks = self.get_all_peaks_for_fitting()
-        if len(all_fitted_peaks) == 0:
-            return
-        
-        # Validate peaks before using them
-        validated_peaks = self.validate_peak_indices(np.array(all_fitted_peaks))
-        if len(validated_peaks) == 0:
-            return
-            
-        n_peaks = len(validated_peaks)
-        model = self.current_model
-        
-        for i in range(n_peaks):
-            start_idx = i * 3
-            if start_idx + 2 < len(self.fit_params):
-                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                
-                # Generate individual peak curve
-                if model == "Gaussian":
-                    peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
-                elif model == "Lorentzian":
-                    peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
-                elif model == "Pseudo-Voigt":
-                    peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
-                else:
-                    peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)  # Default
-                
-                # Plot individual peak - only label the first one to avoid legend clutter
-                label = 'Individual Peaks' if i == 0 else None
-                self.ax_main.plot(self.wavenumbers, peak_curve, '--', 
-                                 linewidth=1.2, alpha=0.6, color='orange',
-                                 label=label)
-
-    def plot_analysis_results(self):
-        """Plot PCA/NMF analysis results on the main plot."""
-        # Note: This method is kept for compatibility but analysis results
-        # will now be displayed on the main plot when PCA/NMF methods are called
-        pass
-
-    # Background subtraction methods
-    def on_bg_method_changed(self):
-        """Handle change in background method."""
-        method = self.bg_method_combo.currentText()
-        # Show ALS parameters only when ALS is selected
-        self.als_params_widget.setVisible(method.startswith("ALS"))
-        
-        # Clear any active background preview when method changes
-        if hasattr(self, 'background_preview_active') and self.background_preview_active:
-            self.clear_background_preview()
-
-    def update_lambda_label(self):
-        """Update the lambda label based on the slider value."""
-        value = self.lambda_slider.value()
-        self.lambda_label.setText(f"1e{value}")
-
-    def update_p_label(self):
-        """Update the p label based on the slider value."""
-        value = self.p_slider.value()
-        p_value = value / 1000.0  # Convert to 0.001-0.05 range
-        self.p_label.setText(f"{p_value:.3f}")
     
-    def update_niter_label(self):
-        """Update the iterations label based on the slider value."""
-        value = self.niter_slider.value()
-        self.niter_label.setText(str(value))
-
-    def preview_background_live(self):
-        """Live preview background subtraction with current slider values."""
+    # Debounced update methods for responsive live preview
+    def _trigger_background_update(self):
+        """Trigger debounced background update."""
+        self.bg_update_timer.stop()
+        self.bg_update_timer.start(self.bg_update_delay)
+    
+    def _trigger_peak_update(self):
+        """Trigger debounced peak detection update."""
+        self.peak_update_timer.stop()
+        self.peak_update_timer.start(self.peak_update_delay)
+    
+    def _update_background_calculation(self):
+        """Perform background calculation and update plot efficiently."""
         try:
             method = self.bg_method_combo.currentText()
             
@@ -938,19 +889,15 @@ class SpectralDeconvolutionQt6(QDialog):
             
             # Set preview flag
             self.background_preview_active = True
-            self.update_plot()
+            
+            # Efficient plot update - only update background line
+            self._update_background_line()
             
         except Exception as e:
             print(f"Background preview error: {str(e)}")
-
-    def clear_background_preview(self):
-        """Clear the background preview."""
-        self.background = None
-        self.background_preview_active = False
-        self.update_plot()
-
-    def detect_peaks_live(self):
-        """Live peak detection based on current slider values."""
+    
+    def _update_peak_detection(self):
+        """Perform live peak detection with current slider values."""
         try:
             # Get current slider values
             height_percent = self.height_slider.value()
@@ -977,14 +924,535 @@ class SpectralDeconvolutionQt6(QDialog):
             self.peaks, properties = find_peaks(self.processed_intensities, **peak_kwargs)
             
             self.update_peak_count_display()
-            self.update_plot()
+            
+            # Efficient plot update - only update peak markers
+            self._update_peak_markers()
             
         except Exception as e:
             print(f"Live peak detection error: {str(e)}")
+    
+    def _update_background_line(self):
+        """Efficiently update only the background line in the plot."""
+        if self.background is not None and self.ax_main is not None:
+            # Remove existing background line if it exists
+            if self.background_line is not None:
+                try:
+                    self.background_line.remove()
+                except:
+                    pass
+            
+            # Add new background line
+            self.background_line, = self.ax_main.plot(
+                self.wavenumbers, self.background, 'r--', 
+                linewidth=1, alpha=0.7, label='Background'
+            )
+            
+            # Update legend
+            self.ax_main.legend()
+            
+            # Redraw canvas
+            self.canvas.draw_idle()
+    
+    def _update_peak_markers(self):
+        """Efficiently update only the peak markers in the plot."""
+        # Remove existing peak markers
+        if self.auto_peaks_scatter is not None:
+            try:
+                self.auto_peaks_scatter.remove()
+            except:
+                pass
+            self.auto_peaks_scatter = None
+        
+        # Add new auto peak markers
+        if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
+            valid_auto_peaks = self.validate_peak_indices(self.peaks)
+            if len(valid_auto_peaks) > 0:
+                auto_peak_positions = [self.wavenumbers[p] for p in valid_auto_peaks]
+                auto_peak_intensities = [self.processed_intensities[p] for p in valid_auto_peaks]
+                self.auto_peaks_scatter = self.ax_main.scatter(
+                    auto_peak_positions, auto_peak_intensities, 
+                    c='red', s=64, marker='o', label='Auto Peaks', alpha=0.8, zorder=5
+                )
+        
+        # Update legend
+        self.ax_main.legend()
+        
+        # Update peak list
+        if hasattr(self, 'peak_list_widget'):
+            self.update_peak_list()
+        
+        # Redraw canvas
+        self.canvas.draw_idle()
+    
+    def _update_manual_peak_markers(self):
+        """Efficiently update only the manual peak markers in the plot."""
+        # Remove existing manual peak markers
+        if self.manual_peaks_scatter is not None:
+            try:
+                self.manual_peaks_scatter.remove()
+            except:
+                pass
+            self.manual_peaks_scatter = None
+        
+        # Add new manual peak markers
+        if hasattr(self, 'manual_peaks') and self.manual_peaks is not None and len(self.manual_peaks) > 0:
+            valid_manual_peaks = self.validate_peak_indices(self.manual_peaks)
+            if len(valid_manual_peaks) > 0:
+                manual_peak_positions = [self.wavenumbers[p] for p in valid_manual_peaks]
+                manual_peak_intensities = [self.processed_intensities[p] for p in valid_manual_peaks]
+                self.manual_peaks_scatter = self.ax_main.scatter(
+                    manual_peak_positions, manual_peak_intensities, 
+                    c='green', s=100, marker='s', label='Manual Peaks', 
+                    alpha=0.8, edgecolor='darkgreen', zorder=5
+                )
+        
+        # Update legend
+        self.ax_main.legend()
+        
+        # Update peak list
+        if hasattr(self, 'peak_list_widget'):
+            self.update_peak_list()
+        
+        # Redraw canvas
+        self.canvas.draw_idle()
+        
+    def update_plot(self):
+        """Update all plots with line reference storage for efficient updates."""
+        # Clear all axes and reset line references
+        self.ax_main.clear()
+        self.ax_residual.clear()
+        self._reset_line_references()
+        
+        # Main spectrum plot
+        self.spectrum_line, = self.ax_main.plot(self.wavenumbers, self.processed_intensities, 'b-', 
+                                              linewidth=1.5, label='Spectrum')
+        
+        # Plot background if available
+        if self.background is not None:
+            self.background_line, = self.ax_main.plot(self.wavenumbers, self.background, 'r--', 
+                                                    linewidth=1, alpha=0.7, label='Background')
+        
+        # Plot fitted peaks if available
+        if self.fit_result is not None and self.show_individual_peaks:
+            # Plot total fitted curve
+            fitted_curve = self.multi_peak_model(self.wavenumbers, *self.fit_params)
+            
+            # Calculate total R² for the global fit
+            total_r2 = self.calculate_total_r2()
+            
+            self.fitted_line, = self.ax_main.plot(self.wavenumbers, fitted_curve, 'g-', 
+                                                linewidth=2, label=f'Total Fit (R²={total_r2:.4f})')
+            
+            # Plot individual peaks
+            self.plot_individual_peaks()
+        
+        # Plot automatically detected peaks - Handle numpy array boolean check properly
+        if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
+            # Validate peak indices before plotting
+            valid_auto_peaks = self.validate_peak_indices(self.peaks)
+            if len(valid_auto_peaks) > 0:
+                auto_peak_positions = [self.wavenumbers[p] for p in valid_auto_peaks]
+                auto_peak_intensities = [self.processed_intensities[p] for p in valid_auto_peaks]
+                self.auto_peaks_scatter = self.ax_main.scatter(auto_peak_positions, auto_peak_intensities, 
+                                                             c='red', s=64, marker='o', label='Auto Peaks', 
+                                                             alpha=0.8, zorder=5)
+        
+        # Plot manually selected peaks - Validate indices to prevent IndexError
+        if hasattr(self, 'manual_peaks') and self.manual_peaks is not None and len(self.manual_peaks) > 0:
+            # Validate peak indices before plotting
+            valid_manual_peaks = self.validate_peak_indices(self.manual_peaks)
+            if len(valid_manual_peaks) > 0:
+                manual_peak_positions = [self.wavenumbers[p] for p in valid_manual_peaks]
+                manual_peak_intensities = [self.processed_intensities[p] for p in valid_manual_peaks]
+                self.manual_peaks_scatter = self.ax_main.scatter(manual_peak_positions, manual_peak_intensities, 
+                                                               c='green', s=100, marker='s', label='Manual Peaks', 
+                                                               alpha=0.8, edgecolor='darkgreen', zorder=5)
+        
+        # Add interactive mode indicator
+        if self.interactive_mode:
+            self.ax_main.text(0.02, 0.98, '🖱️ Interactive Mode ON\nClick to select peaks', 
+                             transform=self.ax_main.transAxes, 
+                             verticalalignment='top', fontsize=10,
+                             bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+        
+        self.ax_main.set_xlabel('Wavenumber (cm⁻¹)')
+        self.ax_main.set_ylabel('Intensity')
+        self.ax_main.set_title('Spectrum and Peak Analysis')
+        
+        # Show/hide legend based on checkbox
+        if hasattr(self, 'show_legend_check') and self.show_legend_check.isChecked():
+            self.ax_main.legend()
+        
+        # Show/hide grid based on checkbox
+        if hasattr(self, 'show_grid_check'):
+            self.ax_main.grid(self.show_grid_check.isChecked(), alpha=0.3)
+        else:
+            self.ax_main.grid(True, alpha=0.3)  # Default behavior
+        
+        # Residuals plot
+        if self.residuals is not None:
+            self.ax_residual.plot(self.wavenumbers, self.residuals, 'k-', linewidth=1)
+            self.ax_residual.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+            self.ax_residual.set_xlabel('Wavenumber (cm⁻¹)')
+            self.ax_residual.set_ylabel('Residuals')
+            self.ax_residual.set_title('Fit Residuals')
+            
+            # Show/hide grid based on checkbox for residuals plot too
+            if hasattr(self, 'show_grid_check'):
+                self.ax_residual.grid(self.show_grid_check.isChecked(), alpha=0.3)
+            else:
+                self.ax_residual.grid(True, alpha=0.3)  # Default behavior
+        
+        # Update peak list if it exists
+        if hasattr(self, 'peak_list_widget'):
+            self.update_peak_list()
+        
+        self.canvas.draw()
+    
+    def _reset_line_references(self):
+        """Reset all line references for clean plot updates."""
+        self.spectrum_line = None
+        self.background_line = None
+        self.fitted_line = None
+        self.auto_peaks_scatter = None
+        self.manual_peaks_scatter = None
+        self.individual_peak_lines = []
+        self.filter_preview_line = None
+
+    def validate_peak_indices(self, peak_indices):
+        """Validate peak indices to ensure they're within bounds and are integers."""
+        if peak_indices is None or len(peak_indices) == 0:
+            return np.array([])
+        
+        valid_peaks = []
+        max_index = len(self.wavenumbers) - 1
+        
+        for peak_idx in peak_indices:
+            try:
+                # Convert to integer if possible
+                peak_idx = int(peak_idx)
+                
+                # Check if within bounds
+                if 0 <= peak_idx <= max_index:
+                    valid_peaks.append(peak_idx)
+                    
+            except (ValueError, TypeError):
+                # Skip invalid indices
+                continue
+        
+        return np.array(valid_peaks, dtype=int)
+
+    def plot_individual_peaks(self):
+        """Plot individual fitted peaks with different colors and R² values."""
+        # Check if we have fit parameters and any peaks to plot
+        if (self.fit_params is None or 
+            not hasattr(self.fit_params, '__len__') or 
+            len(self.fit_params) == 0):
+            return
+        
+        # Get all peaks that were used for fitting (auto + manual)
+        all_fitted_peaks = self.get_all_peaks_for_fitting()
+        if len(all_fitted_peaks) == 0:
+            return
+        
+        # Validate peaks before using them
+        validated_peaks = self.validate_peak_indices(np.array(all_fitted_peaks))
+        if len(validated_peaks) == 0:
+            return
+            
+        n_peaks = len(validated_peaks)
+        model = self.current_model
+        
+        # Define a color palette for individual peaks
+        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
+                 '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9']
+        
+        # Calculate individual R² values for each peak
+        individual_r2_values = self.calculate_individual_r2_values()
+        
+        for i in range(n_peaks):
+            start_idx = i * 3
+            if start_idx + 2 < len(self.fit_params):
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                
+                # Generate individual peak curve
+                if model == "Gaussian":
+                    peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
+                elif model == "Lorentzian":
+                    peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
+                elif model == "Pseudo-Voigt":
+                    peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
+                else:
+                    peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)  # Default
+                
+                # Select color from palette (cycle if more peaks than colors)
+                color = colors[i % len(colors)]
+                
+                # Get individual R² value
+                r2_value = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+                
+                # Create label with peak info and R²
+                label = f'Peak {i+1} ({cen:.1f} cm⁻¹, R²={r2_value:.3f})'
+                
+                # Plot individual peak
+                line, = self.ax_main.plot(self.wavenumbers, peak_curve, '--', 
+                                        linewidth=1.5, alpha=0.8, color=color,
+                                        label=label)
+                self.individual_peak_lines.append(line)
+                
+                # Add peak position label on the plot
+                peak_max_idx = np.argmax(peak_curve)
+                peak_max_intensity = peak_curve[peak_max_idx]
+                
+                # Offset label slightly above the peak
+                label_y = peak_max_intensity + np.max(self.processed_intensities) * 0.05
+                
+                self.ax_main.annotate(f'{cen:.1f}', 
+                                    xy=(cen, peak_max_intensity),
+                                    xytext=(cen, label_y),
+                                    ha='center', va='bottom',
+                                    fontsize=9, fontweight='bold',
+                                    color=color,
+                                    bbox=dict(boxstyle='round,pad=0.2', 
+                                            facecolor='white', 
+                                            edgecolor=color, 
+                                            alpha=0.8),
+                                    arrowprops=dict(arrowstyle='->', 
+                                                  color=color, 
+                                                  alpha=0.6, 
+                                                  lw=1))
+    
+    def calculate_individual_r2_values(self):
+        """Calculate R² values for individual peaks using a straightforward regional method."""
+        if (self.fit_params is None or 
+            not hasattr(self.fit_params, '__len__') or 
+            len(self.fit_params) == 0):
+            return []
+        
+        all_fitted_peaks = self.get_all_peaks_for_fitting()
+        if len(all_fitted_peaks) == 0:
+            return []
+        
+        validated_peaks = self.validate_peak_indices(np.array(all_fitted_peaks))
+        n_peaks = len(validated_peaks)
+        model = self.current_model
+        
+        individual_r2_values = []
+        
+        # Generate total fit for reference
+        total_fit = self.multi_peak_model(self.wavenumbers, *self.fit_params)
+        
+        # Calculate R² for each peak in its local region
+        for i in range(n_peaks):
+            start_idx = i * 3
+            if start_idx + 2 < len(self.fit_params):
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                
+                # Generate individual peak curve
+                if model == "Gaussian":
+                    peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
+                elif model == "Lorentzian":
+                    peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
+                elif model == "Pseudo-Voigt":
+                    peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
+                else:
+                    peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
+                
+                # Calculate R² for this peak in a focused region
+                individual_r2 = self._calculate_simple_regional_r2(cen, wid, peak_curve, total_fit)
+                individual_r2_values.append(individual_r2)
+            else:
+                individual_r2_values.append(0.0)
+        
+        return individual_r2_values
+    
+    def _calculate_simple_regional_r2(self, peak_center, peak_width, peak_curve, total_fit):
+        """Calculate R² for a peak using a simple, focused regional approach."""
+        try:
+            # Define region around peak center (3 times the width, minimum 20 cm⁻¹)
+            region_width = max(abs(peak_width) * 3, 20)
+            region_start = peak_center - region_width
+            region_end = peak_center + region_width
+            
+            # Find indices within this region
+            region_mask = (self.wavenumbers >= region_start) & (self.wavenumbers <= region_end)
+            
+            if not np.any(region_mask) or np.sum(region_mask) < 5:
+                return 0.0
+            
+            # Extract regional data
+            region_data = self.processed_intensities[region_mask]
+            region_total_fit = total_fit[region_mask]
+            region_individual_peak = peak_curve[region_mask]
+            
+            # Method: Compare how much the individual peak contributes to the total fit quality in this region
+            # Calculate what the fit would be WITHOUT this peak
+            fit_without_this_peak = region_total_fit - region_individual_peak
+            
+            # Calculate residuals with and without this peak
+            residuals_with_peak = region_data - region_total_fit
+            residuals_without_peak = region_data - fit_without_this_peak
+            
+            # R² represents how much this peak improves the fit
+            ss_res_with = np.sum(residuals_with_peak ** 2)
+            ss_res_without = np.sum(residuals_without_peak ** 2)
+            
+            # The improvement ratio gives us the individual peak R²
+            if ss_res_without > 0:
+                improvement_ratio = (ss_res_without - ss_res_with) / ss_res_without
+                r2 = max(0.0, min(1.0, improvement_ratio))
+            else:
+                # If no improvement possible, calculate direct correlation
+                r2 = self._calculate_correlation_r2(region_data, region_individual_peak, region_total_fit)
+            
+            return r2
+            
+        except Exception as e:
+            return 0.0
+    
+    def _calculate_correlation_r2(self, region_data, peak_curve, total_fit):
+        """Calculate R² based on how well the peak correlates with the data in its region."""
+        try:
+            # Remove baseline trend
+            baseline = np.linspace(region_data[0], region_data[-1], len(region_data))
+            data_corrected = region_data - baseline
+            
+            # Scale peak to match the data magnitude in this region
+            if np.max(peak_curve) > 0:
+                peak_scaled = peak_curve * (np.max(data_corrected) / np.max(peak_curve))
+            else:
+                return 0.0
+            
+            # Calculate correlation-based R²
+            mean_data = np.mean(data_corrected)
+            ss_tot = np.sum((data_corrected - mean_data) ** 2)
+            
+            if ss_tot > 0:
+                # Use the scaled peak as the model
+                ss_res = np.sum((data_corrected - peak_scaled) ** 2)
+                r2 = 1 - (ss_res / ss_tot)
+                return max(0.0, min(1.0, r2))
+            else:
+                return 0.0
+                
+        except Exception:
+            return 0.0
+    
+    def _calculate_regional_r2(self, peak_index, peak_curve, all_individual_peaks):
+        """Calculate R² for a peak in its local region, accounting for overlaps."""
+        try:
+            start_idx = peak_index * 3
+            if start_idx + 2 >= len(self.fit_params):
+                return 0.0
+                
+            amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+            
+            # Define a region around this peak (2.5 sigma to reduce overlap issues)
+            peak_width = abs(wid) * 2.5
+            region_mask = (self.wavenumbers >= cen - peak_width) & \
+                         (self.wavenumbers <= cen + peak_width)
+            
+            if not np.any(region_mask):
+                return 0.0
+            
+            # Extract regional data
+            region_data = self.processed_intensities[region_mask]
+            region_peak = peak_curve[region_mask]
+            
+            # Calculate baseline for this region (linear interpolation)
+            region_wavenumbers = self.wavenumbers[region_mask]
+            if len(region_wavenumbers) < 3:
+                return 0.0
+                
+            baseline = np.linspace(region_data[0], region_data[-1], len(region_data))
+            region_data_corrected = region_data - baseline
+            
+            # Calculate R² comparing peak to baseline-corrected data
+            mean_data = np.mean(region_data_corrected)
+            ss_tot = np.sum((region_data_corrected - mean_data) ** 2)
+            
+            if ss_tot > 0:
+                # For overlapping regions, subtract contributions from other significant peaks
+                other_peaks_contribution = np.zeros_like(region_peak)
+                for j, other_peak in enumerate(all_individual_peaks):
+                    if j != peak_index:
+                        other_region_peak = other_peak[region_mask]
+                        # Only subtract if the other peak contributes significantly in this region
+                        if np.max(other_region_peak) > np.max(region_peak) * 0.1:
+                            other_peaks_contribution += other_region_peak
+                
+                # Adjusted data = original - other peaks
+                adjusted_data = region_data_corrected - other_peaks_contribution
+                
+                ss_res = np.sum((adjusted_data - region_peak) ** 2)
+                r2 = 1 - (ss_res / ss_tot)
+                return max(0.0, min(1.0, r2))
+            else:
+                return 0.0
+                
+        except Exception as e:
+            return 0.0
+    
+    def calculate_total_r2(self):
+        """Calculate total R² for the global fit."""
+        if (self.fit_params is None or 
+            not hasattr(self.fit_params, '__len__') or 
+            len(self.fit_params) == 0):
+            return 0.0
+        
+        # Generate total fitted curve
+        fitted_curve = self.multi_peak_model(self.wavenumbers, *self.fit_params)
+        
+        # Calculate R² for global fit
+        ss_res = np.sum((self.processed_intensities - fitted_curve) ** 2)
+        ss_tot = np.sum((self.processed_intensities - np.mean(self.processed_intensities)) ** 2)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+        
+        # Ensure R² is reasonable (between 0 and 1)
+        return max(0.0, min(1.0, r2))
+
+    def plot_analysis_results(self):
+        """Plot PCA/NMF analysis results on the main plot."""
+        # Note: This method is kept for compatibility but analysis results
+        # will now be displayed on the main plot when PCA/NMF methods are called
+        pass
+
+    # Background subtraction methods
+    def on_bg_method_changed(self):
+        """Handle change in background method."""
+        method = self.bg_method_combo.currentText()
+        # Show ALS parameters only when ALS is selected
+        self.als_params_widget.setVisible(method.startswith("ALS"))
+        
+        # Clear any active background preview when method changes
+        if hasattr(self, 'background_preview_active') and self.background_preview_active:
+            self.clear_background_preview()
+
+    def update_lambda_label(self):
+        """Update the lambda label based on the slider value."""
+        value = self.lambda_slider.value()
+        self.lambda_label.setText(f"1e{value}")
+
+    def update_p_label(self):
+        """Update the p label based on the slider value."""
+        value = self.p_slider.value()
+        p_value = value / 1000.0  # Convert to 0.001-0.05 range
+        self.p_label.setText(f"{p_value:.3f}")
+    
+    def update_niter_label(self):
+        """Update the iterations label based on the slider value."""
+        value = self.niter_slider.value()
+        self.niter_label.setText(str(value))
+
+    def clear_background_preview(self):
+        """Clear the background preview."""
+        self.background = None
+        self.background_preview_active = False
+        self.update_plot()
 
     def preview_background(self):
         """Preview background subtraction (legacy method)."""
-        self.preview_background_live()
+        self._trigger_background_update()
     
     def apply_background(self):
         """Apply background subtraction."""
@@ -995,7 +1463,7 @@ class SpectralDeconvolutionQt6(QDialog):
             self.update_plot()
         else:
             # If no preview, generate background first
-            self.preview_background_live()
+            self._update_background_calculation()
             if self.background is not None:
                 self.apply_background()
     
@@ -1059,8 +1527,8 @@ class SpectralDeconvolutionQt6(QDialog):
         self.prominence_label.setText(f"{value}%")
     
     def detect_peaks(self):
-        """Detect peaks in the spectrum (legacy method - now calls live detection)."""
-        self.detect_peaks_live()
+        """Detect peaks in the spectrum (legacy method - now calls debounced detection)."""
+        self._trigger_peak_update()
     
     def clear_peaks(self):
         """Clear all detected peaks (both automatic and manual)."""
@@ -1188,8 +1656,9 @@ class SpectralDeconvolutionQt6(QDialog):
             
             # Update display
             self.update_peak_count_display()
-            self.update_peak_list()  # Update the peak list widget
-            self.update_plot()
+            # Use efficient updates for interactive changes
+            self._update_peak_markers()
+            self._update_manual_peak_markers()
             
         except Exception as e:
             print(f"Error in interactive peak selection: {e}")
@@ -1198,8 +1667,7 @@ class SpectralDeconvolutionQt6(QDialog):
         """Clear only manually selected peaks."""
         self.manual_peaks = np.array([])
         self.update_peak_count_display()
-        self.update_peak_list()  # Update the peak list widget
-        self.update_plot()
+        self._update_manual_peak_markers()
 
     def combine_peaks(self):
         """Combine automatic and manual peaks into the main peaks list."""
@@ -1224,8 +1692,8 @@ class SpectralDeconvolutionQt6(QDialog):
         
         # Update display
         self.update_peak_count_display()
-        self.update_peak_list()  # Update the peak list widget
-        self.update_plot()
+        self._update_peak_markers()
+        self._update_manual_peak_markers()
         
         # Show confirmation
         QMessageBox.information(self, "Peaks Combined", 
@@ -1423,12 +1891,15 @@ class SpectralDeconvolutionQt6(QDialog):
                 
                 # Update displays
                 self.update_plot()
-                self.display_fit_results(best_r_squared, all_peaks)
+                
+                # Use the more accurate total R² calculation for display
+                total_r2 = self.calculate_total_r2()
+                self.display_fit_results(total_r2, all_peaks)
                 self.update_results_table()
                 
                 QMessageBox.information(self, "Success", 
                                       f"Peak fitting completed successfully!\\n"
-                                      f"R² = {best_r_squared:.4f}\\n"
+                                      f"Total R² = {total_r2:.4f}\\n"
                                       f"Fitted {len(all_peaks)} peaks")
             else:
                 QMessageBox.warning(self, "Fitting Failed", 
@@ -1497,7 +1968,7 @@ class SpectralDeconvolutionQt6(QDialog):
             return []
 
     def display_fit_results(self, r_squared, fitted_peaks=None):
-        """Display fitting results."""
+        """Display fitting results with individual and total R² values."""
         if fitted_peaks is None:
             fitted_peaks = self.get_all_peaks_for_fitting()
         
@@ -1506,12 +1977,16 @@ class SpectralDeconvolutionQt6(QDialog):
         if isinstance(fitted_peaks, (list, np.ndarray)) and len(fitted_peaks) > 0:
             validated_fitted_peaks = self.validate_peak_indices(np.array(fitted_peaks))
         
+        # Calculate individual R² values
+        individual_r2_values = self.calculate_individual_r2_values()
+        total_r2 = self.calculate_total_r2()
+        
         results = f"Peak Fitting Results\n{'='*30}\n\n"
         results += f"Model: {self.current_model}\n"
         results += f"Number of peaks fitted: {len(validated_fitted_peaks)}\n"
-        results += f"R² = {r_squared:.4f}\n\n"
+        results += f"Total R² = {total_r2:.4f}\n\n"
         
-        # FIX: Properly handle numpy array boolean check
+        # Handle numpy array boolean check properly
         if (self.fit_params is not None and 
             hasattr(self.fit_params, '__len__') and 
             len(self.fit_params) > 0 and 
@@ -1523,19 +1998,30 @@ class SpectralDeconvolutionQt6(QDialog):
                 start_idx = i * 3
                 if start_idx + 2 < len(self.fit_params):
                     amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                    
+                    # Get individual R² value
+                    individual_r2 = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+                    
                     # Determine peak type safely
                     peak_type = "Auto"
                     if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
                         validated_auto_peaks = self.validate_peak_indices(self.peaks)
                         if len(validated_auto_peaks) > 0 and validated_fitted_peaks[i] not in validated_auto_peaks.tolist():
                             peak_type = "Manual"
-                    results += f"Peak {i+1} ({peak_type}): Center={cen:.1f}, Amplitude={amp:.1f}, Width={wid:.1f}\n"
+                    
+                    results += (f"Peak {i+1} ({peak_type}): Center={cen:.1f} cm⁻¹, "
+                              f"Amplitude={amp:.1f}, Width={wid:.1f}, R²={individual_r2:.3f}\n")
+            
+            # Add summary statistics
+            if len(individual_r2_values) > 0:
+                avg_individual_r2 = np.mean(individual_r2_values)
+                results += f"\nAverage Individual R²: {avg_individual_r2:.3f}\n"
         
         self.results_text.setPlainText(results)
 
     def update_results_table(self):
-        """Update the results table."""
-        # FIX: Properly handle numpy array boolean check
+        """Update the results table with R² values."""
+        # Properly handle numpy array boolean check
         if (self.fit_params is None or 
             not hasattr(self.fit_params, '__len__') or 
             len(self.fit_params) == 0):
@@ -1550,10 +2036,16 @@ class SpectralDeconvolutionQt6(QDialog):
         n_peaks = len(validated_fitted_peaks)
         self.results_table.setRowCount(n_peaks)
         
+        # Calculate individual R² values
+        individual_r2_values = self.calculate_individual_r2_values()
+        
         for i in range(n_peaks):
             start_idx = i * 3
             if start_idx + 2 < len(self.fit_params):
                 amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                
+                # Get individual R² value
+                individual_r2 = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
                 
                 # Determine peak type safely
                 peak_type = "Auto"
@@ -1566,126 +2058,324 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.results_table.setItem(i, 1, QTableWidgetItem(f"{cen:.1f}"))
                 self.results_table.setItem(i, 2, QTableWidgetItem(f"{amp:.1f}"))
                 self.results_table.setItem(i, 3, QTableWidgetItem(f"{wid:.1f}"))
+                self.results_table.setItem(i, 4, QTableWidgetItem(f"{individual_r2:.3f}"))
 
-    # Advanced deconvolution methods
-    def resolve_overlapping_peaks(self):
-        """Resolve overlapping peaks using advanced algorithms."""
-        if not hasattr(self, 'peaks') or self.peaks is None or len(self.peaks) < 2:
-            QMessageBox.warning(self, "Insufficient Peaks", 
-                              "Need at least 2 peaks to resolve overlaps.")
-            return
-        
+         # Fourier Transform Analysis Methods
+    def show_frequency_spectrum(self):
+        """Show the frequency spectrum of the processed intensities."""
         try:
-            # Use iterative peak fitting with constraints
-            self.fit_peaks()  # First, do basic fitting
+            # Calculate FFT
+            fft_data = np.fft.fft(self.processed_intensities)
+            fft_magnitude = np.abs(fft_data)
+            fft_phase = np.angle(fft_data)
             
-            if self.fit_result:
-                # Identify overlapping peaks (peaks within 3*width of each other)
-                overlapping_groups = self.identify_overlapping_groups()
-                
-                if overlapping_groups:
-                    # Apply deconvolution to overlapping groups
-                    self.deconvolve_overlapping_groups(overlapping_groups)
-                    
-                    QMessageBox.information(self, "Success", 
-                                          f"Resolved {len(overlapping_groups)} overlapping peak groups.")
-                else:
-                    QMessageBox.information(self, "No Overlaps", 
-                                          "No significantly overlapping peaks detected.")
+            # Create frequency array (normalized to Nyquist frequency)
+            n_points = len(self.processed_intensities)
+            frequencies = np.fft.fftfreq(n_points, d=1.0)[:n_points//2]  # Only positive frequencies
+            magnitude_spectrum = fft_magnitude[:n_points//2]
+            phase_spectrum = fft_phase[:n_points//2]
+            
+            # Store for other operations
+            self.fft_data = fft_data
+            self.fft_frequencies = frequencies
+            self.fft_magnitude = magnitude_spectrum
+            self.fft_phase = phase_spectrum
+            
+            # Create a new plot window or update residual plot
+            self.ax_residual.clear()
+            
+            # Plot magnitude spectrum
+            self.ax_residual.semilogy(frequencies, magnitude_spectrum, 'b-', linewidth=1.5, label='Magnitude')
+            self.ax_residual.set_xlabel('Normalized Frequency')
+            self.ax_residual.set_ylabel('Magnitude (log scale)')
+            self.ax_residual.set_title('Frequency Spectrum (FFT Magnitude)')
+            self.ax_residual.grid(True, alpha=0.3)
+            self.ax_residual.legend()
+            
+            # Display results
+            dominant_freq_idx = np.argmax(magnitude_spectrum[1:]) + 1  # Skip DC component
+            dominant_freq = frequencies[dominant_freq_idx]
+            max_magnitude = magnitude_spectrum[dominant_freq_idx]
+            
+            results = "Frequency Spectrum Analysis:\n"
+            results += f"Total data points: {n_points}\n"
+            results += f"Frequency resolution: {frequencies[1]:.6f}\n"
+            results += f"DC component magnitude: {magnitude_spectrum[0]:.2f}\n"
+            results += f"Dominant frequency: {dominant_freq:.4f}\n"
+            results += f"Dominant magnitude: {max_magnitude:.2f}\n"
+            results += f"Total spectral energy: {np.sum(magnitude_spectrum**2):.2e}\n"
+            
+            self.results_text.setPlainText(results)
+            self.canvas.draw()
             
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Overlap resolution failed: {str(e)}")
+            QMessageBox.critical(self, "FFT Error", f"Frequency spectrum calculation failed: {str(e)}")
     
-    def identify_overlapping_groups(self):
-        """Identify groups of overlapping peaks."""
-        # FIX: Properly handle numpy array boolean check
-        if (self.fit_params is None or 
-            not hasattr(self.fit_params, '__len__') or 
-            len(self.fit_params) == 0 or 
-            not hasattr(self, 'peaks') or 
-            self.peaks is None or 
-            len(self.peaks) == 0):
-            return []
-        
-        overlapping_groups = []
-        n_peaks = len(self.peaks)
-        processed_peaks = set()
-        
-        for i in range(n_peaks):
-            if i in processed_peaks:
-                continue
-                
-            start_idx = i * 3
-            if start_idx + 2 >= len(self.fit_params):
-                continue
-                
-            amp_i, cen_i, wid_i = self.fit_params[start_idx:start_idx+3]
-            group = [i]
+    def show_power_spectral_density(self):
+        """Show the power spectral density."""
+        try:
+            # Calculate power spectral density
+            if not hasattr(self, 'fft_data'):
+                self.show_frequency_spectrum()  # Calculate FFT first
             
-            # Find overlapping peaks
-            for j in range(i + 1, n_peaks):
-                if j in processed_peaks:
-                    continue
-                    
-                start_idx_j = j * 3
-                if start_idx_j + 2 >= len(self.fit_params):
-                    continue
-                    
-                amp_j, cen_j, wid_j = self.fit_params[start_idx_j:start_idx_j+3]
-                
-                # Check if peaks overlap (within 3*width)
-                if abs(cen_i - cen_j) < 3 * max(wid_i, wid_j):
-                    group.append(j)
-                    processed_peaks.add(j)
+            # PSD is the square of the magnitude spectrum
+            psd = self.fft_magnitude ** 2
             
-            if len(group) > 1:
-                overlapping_groups.append(group)
-                for peak_idx in group:
-                    processed_peaks.add(peak_idx)
-        
-        return overlapping_groups
+            # Normalize by frequency resolution and total power
+            psd_normalized = psd / (len(self.processed_intensities) * np.sum(psd))
+            
+            # Plot PSD
+            self.ax_residual.clear()
+            self.ax_residual.semilogy(self.fft_frequencies, psd_normalized, 'r-', linewidth=1.5, label='Power Spectral Density')
+            self.ax_residual.set_xlabel('Normalized Frequency')
+            self.ax_residual.set_ylabel('Power Density (log scale)')
+            self.ax_residual.set_title('Power Spectral Density')
+            self.ax_residual.grid(True, alpha=0.3)
+            self.ax_residual.legend()
+            
+            # Calculate spectral statistics
+            total_power = np.sum(psd)
+            mean_freq = np.sum(self.fft_frequencies * psd) / total_power
+            spectral_centroid = np.sum(self.fft_frequencies * psd) / np.sum(psd)
+            
+            # Spectral bandwidth (standard deviation)
+            spectral_bandwidth = np.sqrt(np.sum(((self.fft_frequencies - spectral_centroid) ** 2) * psd) / np.sum(psd))
+            
+            results = "Power Spectral Density Analysis:\n"
+            results += f"Total power: {total_power:.2e}\n"
+            results += f"Spectral centroid: {spectral_centroid:.4f}\n"
+            results += f"Spectral bandwidth: {spectral_bandwidth:.4f}\n"
+            results += f"Peak PSD frequency: {self.fft_frequencies[np.argmax(psd)]:.4f}\n"
+            results += f"Peak PSD value: {np.max(psd):.2e}\n"
+            
+            self.results_text.setPlainText(results)
+            self.canvas.draw()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "PSD Error", f"Power spectral density calculation failed: {str(e)}")
     
-    def deconvolve_overlapping_groups(self, overlapping_groups):
-        """Apply advanced deconvolution to overlapping peak groups."""
-        for group in overlapping_groups:
-            # Extract region around overlapping peaks
-            group_centers = []
-            group_widths = []
-            
-            for peak_idx in group:
-                start_idx = peak_idx * 3
-                if start_idx + 2 < len(self.fit_params):
-                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                    group_centers.append(cen)
-                    group_widths.append(wid)
-            
-            if not group_centers:
-                continue
-            
-            # Define region of interest
-            min_center = min(group_centers)
-            max_center = max(group_centers)
-            max_width = max(group_widths)
-            
-            # Extend region by 5*max_width on each side
-            region_start = min_center - 5 * max_width
-            region_end = max_center + 5 * max_width
-            
-            # Extract region indices
-            region_mask = (self.wavenumbers >= region_start) & (self.wavenumbers <= region_end)
-            region_wavenumbers = self.wavenumbers[region_mask]
-            region_intensities = self.processed_intensities[region_mask]
-            
-            if len(region_wavenumbers) < 10:
-                continue
-            
-            # Apply Richardson-Lucy deconvolution or similar
-            deconvolved = self.richardson_lucy_deconvolution(region_intensities)
-            
-            # Update the spectrum in this region
-            self.processed_intensities[region_mask] = deconvolved
+    # Fourier Filter Label Update Methods
+    def update_low_cutoff_label(self):
+        """Update low cutoff frequency label."""
+        value = self.low_cutoff_slider.value()
+        self.low_cutoff_label.setText(f"{value}%")
+    
+    def update_high_cutoff_label(self):
+        """Update high cutoff frequency label."""
+        value = self.high_cutoff_slider.value()
+        self.high_cutoff_label.setText(f"{value}%")
+    
+    def update_butterworth_order_label(self):
+        """Update Butterworth filter order label."""
+        value = self.butterworth_order_slider.value()
+        self.butterworth_order_label.setText(str(value))
+    
+    def on_filter_type_changed(self):
+        """Handle filter type change to show/hide Butterworth order control."""
+        filter_type = self.filter_type_combo.currentText()
+        is_butterworth = "Butterworth" in filter_type
         
-        self.update_plot()
+        # Show/hide Butterworth order control
+        self.butterworth_order_slider.setVisible(is_butterworth)
+        self.butterworth_order_label.setVisible(is_butterworth)
+    
+    def preview_fourier_filter(self):
+        """Preview the effect of Fourier filtering."""
+        try:
+            filtered_spectrum = self._apply_fourier_filter_internal(preview_only=True)
+            
+            # Update main plot with preview
+            if hasattr(self, 'filter_preview_line') and self.filter_preview_line is not None:
+                try:
+                    self.filter_preview_line.remove()
+                except:
+                    pass
+            
+            self.filter_preview_line, = self.ax_main.plot(
+                self.wavenumbers, filtered_spectrum, 'orange', 
+                linewidth=2, alpha=0.7, linestyle='--', label='Filter Preview'
+            )
+            self.ax_main.legend()
+            self.canvas.draw()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Filter Preview Error", f"Filter preview failed: {str(e)}")
+    
+    def apply_fourier_filter(self):
+        """Apply the Fourier filter to the spectrum."""
+        try:
+            filtered_spectrum = self._apply_fourier_filter_internal(preview_only=False)
+            
+            # Apply to processed intensities
+            self.processed_intensities = filtered_spectrum.copy()
+            
+            # Clear any existing filter preview
+            if hasattr(self, 'filter_preview_line') and self.filter_preview_line is not None:
+                try:
+                    self.filter_preview_line.remove()
+                    self.filter_preview_line = None
+                except:
+                    pass
+            
+            # Update plot
+            self.update_plot()
+            
+            filter_type = self.filter_type_combo.currentText()
+            QMessageBox.information(self, "Filter Applied", f"{filter_type} filter applied successfully!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Filter Error", f"Filter application failed: {str(e)}")
+    
+    def _apply_fourier_filter_internal(self, preview_only=False):
+        """Internal method to apply Fourier filtering."""
+        # Calculate FFT
+        fft_data = np.fft.fft(self.processed_intensities)
+        n_points = len(fft_data)
+        frequencies = np.fft.fftfreq(n_points)
+        
+        # Get filter parameters
+        filter_type = self.filter_type_combo.currentText()
+        low_cutoff = self.low_cutoff_slider.value() / 100.0  # Convert to fraction
+        high_cutoff = self.high_cutoff_slider.value() / 100.0
+        
+        # Check if it's a Butterworth filter
+        is_butterworth = "Butterworth" in filter_type
+        
+        if is_butterworth:
+            # Get Butterworth filter order
+            order = self.butterworth_order_slider.value()
+            
+            # Create Butterworth filter response
+            filter_response = self._create_butterworth_response(frequencies, filter_type, low_cutoff, high_cutoff, order)
+            
+            # Apply filter to FFT data (multiply by response, not mask)
+            filtered_fft = fft_data * filter_response
+        else:
+            # Original binary mask filters
+            filter_mask = np.ones_like(frequencies, dtype=bool)
+            
+            # Apply filter based on type
+            freq_magnitude = np.abs(frequencies)
+            
+            if filter_type == "Low-pass":
+                filter_mask = freq_magnitude <= high_cutoff
+            elif filter_type == "High-pass":
+                filter_mask = freq_magnitude >= low_cutoff
+            elif filter_type == "Band-pass":
+                filter_mask = (freq_magnitude >= low_cutoff) & (freq_magnitude <= high_cutoff)
+            elif filter_type == "Band-stop":
+                filter_mask = (freq_magnitude < low_cutoff) | (freq_magnitude > high_cutoff)
+            
+            # Apply filter to FFT data
+            filtered_fft = fft_data.copy()
+            filtered_fft[~filter_mask] = 0
+        
+        # Convert back to time domain
+        filtered_spectrum = np.real(np.fft.ifft(filtered_fft))
+        
+        return filtered_spectrum
+    
+    def _create_butterworth_response(self, frequencies, filter_type, low_cutoff, high_cutoff, order):
+        """Create Butterworth filter frequency response."""
+        freq_magnitude = np.abs(frequencies)
+        
+        # Initialize response array
+        response = np.ones_like(frequencies, dtype=float)
+        
+        # Avoid division by zero
+        epsilon = 1e-10
+        freq_magnitude = np.maximum(freq_magnitude, epsilon)
+        
+        if filter_type == "Butterworth Low-pass":
+            # |H(ω)|² = 1 / (1 + (ω/ωc)^(2n))
+            response = 1.0 / (1.0 + (freq_magnitude / max(high_cutoff, epsilon)) ** (2 * order))
+            
+        elif filter_type == "Butterworth High-pass":
+            # |H(ω)|² = (ω/ωc)^(2n) / (1 + (ω/ωc)^(2n))
+            ratio = freq_magnitude / max(low_cutoff, epsilon)
+            response = (ratio ** (2 * order)) / (1.0 + ratio ** (2 * order))
+            
+        elif filter_type == "Butterworth Band-pass":
+            # Combination of high-pass and low-pass
+            # High-pass component
+            ratio_low = freq_magnitude / max(low_cutoff, epsilon)
+            high_pass_response = (ratio_low ** (2 * order)) / (1.0 + ratio_low ** (2 * order))
+            
+            # Low-pass component
+            ratio_high = freq_magnitude / max(high_cutoff, epsilon)
+            low_pass_response = 1.0 / (1.0 + ratio_high ** (2 * order))
+            
+            # Combine
+            response = high_pass_response * low_pass_response
+            
+        elif filter_type == "Butterworth Band-stop":
+            # Inverse of band-pass: 1 - band_pass_response
+            # High-pass component
+            ratio_low = freq_magnitude / max(low_cutoff, epsilon)
+            high_pass_response = (ratio_low ** (2 * order)) / (1.0 + ratio_low ** (2 * order))
+            
+            # Low-pass component  
+            ratio_high = freq_magnitude / max(high_cutoff, epsilon)
+            low_pass_response = 1.0 / (1.0 + ratio_high ** (2 * order))
+            
+            # Band-pass response
+            band_pass_response = high_pass_response * low_pass_response
+            
+            # Band-stop is inverse
+            response = 1.0 - band_pass_response
+        
+        # Take square root to get magnitude response (since we calculated |H(ω)|²)
+        response = np.sqrt(np.maximum(response, 0))
+        
+        return response
+    
+    def apply_fourier_smoothing(self):
+        """Apply Fourier-based smoothing to reduce noise."""
+        try:
+            # Calculate FFT
+            fft_data = np.fft.fft(self.processed_intensities)
+            n_points = len(fft_data)
+            frequencies = np.fft.fftfreq(n_points)
+            
+            # Create Gaussian smoothing filter
+            sigma = 0.1  # Smoothing parameter
+            smoothing_filter = np.exp(-0.5 * (frequencies / sigma) ** 2)
+            
+            # Apply smoothing in frequency domain
+            smoothed_fft = fft_data * smoothing_filter
+            
+            # Convert back to time domain
+            smoothed_spectrum = np.real(np.fft.ifft(smoothed_fft))
+            
+            # Apply to processed intensities
+            self.processed_intensities = smoothed_spectrum.copy()
+            
+            # Update plot
+            self.update_plot()
+            
+            QMessageBox.information(self, "Smoothing Applied", "Fourier smoothing applied successfully!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Smoothing Error", f"Fourier smoothing failed: {str(e)}")
+    
+    def apply_richardson_lucy(self):
+        """Apply Richardson-Lucy deconvolution for resolution enhancement."""
+        try:
+            # Enhanced Richardson-Lucy implementation
+            iterations = 20
+            deconvolved = self.richardson_lucy_deconvolution(self.processed_intensities, iterations)
+            
+            # Apply to processed intensities
+            self.processed_intensities = deconvolved.copy()
+            
+            # Update plot
+            self.update_plot()
+            
+            QMessageBox.information(self, "Deconvolution Applied", 
+                                  f"Richardson-Lucy deconvolution applied with {iterations} iterations!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Deconvolution Error", f"Richardson-Lucy deconvolution failed: {str(e)}")
     
     def richardson_lucy_deconvolution(self, data, iterations=10):
         """Apply Richardson-Lucy deconvolution algorithm."""
@@ -1716,197 +2406,64 @@ class SpectralDeconvolutionQt6(QDialog):
         psf = np.exp(-0.5 * (x / sigma)**2)
         return psf / np.sum(psf)
     
-    def separate_components(self):
-        """Separate spectral components using signal processing."""
+    def apply_apodization(self):
+        """Apply apodization (windowing) to the spectrum."""
         try:
-            n_components = self.n_components_spin.value()
+            # Create apodization options dialog
+            from PySide6.QtWidgets import QInputDialog
             
-            # Method 1: Peak-based separation
-            if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0 and self.fit_result:
-                self.separate_by_peaks(n_components)
-            else:
-                # Method 2: Wavelet-based separation
-                self.separate_by_wavelets(n_components)
+            window_types = ["Hann", "Hamming", "Blackman", "Gaussian", "Tukey"]
+            window_type, ok = QInputDialog.getItem(
+                self, "Select Window Type", "Choose apodization window:", 
+                window_types, 0, False
+            )
             
-            QMessageBox.information(self, "Success", 
-                                  f"Separated spectrum into {len(self.components)} components.")
+            if not ok:
+                return
+            
+            n_points = len(self.processed_intensities)
+            
+            # Create window function
+            if window_type == "Hann":
+                window = np.hanning(n_points)
+            elif window_type == "Hamming":
+                window = np.hamming(n_points)
+            elif window_type == "Blackman":
+                window = np.blackman(n_points)
+            elif window_type == "Gaussian":
+                sigma = n_points / 8
+                x = np.arange(n_points) - n_points // 2
+                window = np.exp(-0.5 * (x / sigma) ** 2)
+            elif window_type == "Tukey":
+                # Simple Tukey window implementation
+                alpha = 0.5
+                window = np.ones(n_points)
+                n_taper = int(alpha * n_points / 2)
+                
+                # Left taper
+                for i in range(n_taper):
+                    window[i] = 0.5 * (1 + np.cos(np.pi * (2 * i / (alpha * n_points) - 1)))
+                
+                # Right taper
+                for i in range(n_points - n_taper, n_points):
+                    window[i] = 0.5 * (1 + np.cos(np.pi * (2 * (i - n_points + n_taper) / (alpha * n_points) - 1)))
+            
+            # Apply window to spectrum
+            windowed_spectrum = self.processed_intensities * window
+            
+            # Normalize to preserve total intensity
+            windowed_spectrum *= np.sum(self.processed_intensities) / np.sum(windowed_spectrum)
+            
+            # Apply to processed intensities
+            self.processed_intensities = windowed_spectrum.copy()
+            
+            # Update plot
             self.update_plot()
             
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Component separation failed: {str(e)}")
-    
-    def separate_by_peaks(self, n_components):
-        """Separate components based on fitted peaks."""
-        # FIX: Properly handle numpy array boolean check
-        if (self.fit_params is None or 
-            not hasattr(self.fit_params, '__len__') or 
-            len(self.fit_params) == 0):
-            return
-        
-        self.components = []
-        n_peaks = len(self.peaks)
-        
-        # Group peaks into components
-        peaks_per_component = max(1, n_peaks // n_components)
-        
-        for i in range(n_components):
-            component = np.zeros_like(self.wavenumbers)
-            
-            start_peak = i * peaks_per_component
-            end_peak = min((i + 1) * peaks_per_component, n_peaks)
-            
-            for peak_idx in range(start_peak, end_peak):
-                param_idx = peak_idx * 3
-                if param_idx + 2 < len(self.fit_params):
-                    amp, cen, wid = self.fit_params[param_idx:param_idx+3]
-                    component += self.gaussian(self.wavenumbers, amp, cen, wid)
-            
-            self.components.append(component)
-    
-    def separate_by_wavelets(self, n_components):
-        """Separate components using wavelet decomposition."""
-        try:
-            import pywt
-            
-            # Decompose signal using wavelets
-            coeffs = pywt.wavedec(self.processed_intensities, 'db4', level=4)
-            
-            # Reconstruct components from different detail levels
-            self.components = []
-            
-            # Low-frequency component (approximation)
-            low_freq = pywt.waverec([coeffs[0]] + [np.zeros_like(c) for c in coeffs[1:]], 'db4')
-            self.components.append(low_freq[:len(self.wavenumbers)])
-            
-            # High-frequency components (details)
-            for i in range(1, min(len(coeffs), n_components)):
-                detail_coeffs = [np.zeros_like(coeffs[0])] + [np.zeros_like(c) for c in coeffs[1:]]
-                detail_coeffs[i] = coeffs[i]
-                detail = pywt.waverec(detail_coeffs, 'db4')
-                self.components.append(detail[:len(self.wavenumbers)])
-            
-        except ImportError:
-            # Fallback: Simple frequency filtering
-            self.separate_by_frequency_filtering(n_components)
-    
-    def separate_by_frequency_filtering(self, n_components):
-        """Separate components using frequency domain filtering."""
-        # Simple frequency-based separation
-        fft = np.fft.fft(self.processed_intensities)
-        freqs = np.fft.fftfreq(len(self.processed_intensities))
-        
-        self.components = []
-        
-        # Divide frequency spectrum into bands
-        freq_bands = np.linspace(0, 0.5, n_components + 1)
-        
-        for i in range(n_components):
-            # Create filter for this frequency band
-            mask = (np.abs(freqs) >= freq_bands[i]) & (np.abs(freqs) < freq_bands[i + 1])
-            filtered_fft = fft.copy()
-            filtered_fft[~mask] = 0
-            
-            # Convert back to time domain
-            component = np.real(np.fft.ifft(filtered_fft))
-            self.components.append(component)
-    
-    def perform_pca(self):
-        """Perform Principal Component Analysis."""
-        if not ML_AVAILABLE:
-            QMessageBox.warning(self, "ML Not Available", 
-                              "Install scikit-learn for PCA functionality.")
-            return
-        
-        try:
-            # Prepare data matrix (could use multiple spectra or sliding windows)
-            # For single spectrum, use sliding window approach
-            window_size = 50
-            data_matrix = []
-            
-            for i in range(len(self.processed_intensities) - window_size + 1):
-                window = self.processed_intensities[i:i + window_size]
-                data_matrix.append(window)
-            
-            data_matrix = np.array(data_matrix)
-            
-            # Standardize data
-            scaler = StandardScaler()
-            data_scaled = scaler.fit_transform(data_matrix)
-            
-            # Perform PCA
-            n_components = min(5, data_scaled.shape[1])
-            pca = PCA(n_components=n_components)
-            transformed = pca.fit_transform(data_scaled)
-            
-            self.pca_result = pca
-            
-            # Display results
-            results = "PCA Results:\n"
-            results += f"Components: {n_components}\n"
-            results += f"Explained variance: {pca.explained_variance_ratio_[:3]}\n"
-            results += f"Total variance explained: {np.sum(pca.explained_variance_ratio_):.2%}\n"
-            
-            # Add component details
-            results += "\nComponent Details:\n"
-            for i, (ratio, component) in enumerate(zip(pca.explained_variance_ratio_[:3], pca.components_[:3])):
-                results += f"PC{i+1}: {ratio:.1%} variance, peak at index {np.argmax(np.abs(component))}\n"
-            
-            self.results_text.setPlainText(results)
-            self.update_plot()
-            
-            QMessageBox.information(self, "PCA Complete", 
-                                  f"PCA analysis complete. {n_components} components extracted.")
+            QMessageBox.information(self, "Apodization Applied", f"{window_type} window applied successfully!")
             
         except Exception as e:
-            QMessageBox.critical(self, "PCA Error", f"PCA analysis failed: {str(e)}")
-    
-    def perform_nmf(self):
-        """Perform Non-negative Matrix Factorization."""
-        if not ML_AVAILABLE:
-            QMessageBox.warning(self, "ML Not Available", 
-                              "Install scikit-learn for NMF functionality.")
-            return
-        
-        try:
-            # Prepare data matrix
-            window_size = 50
-            data_matrix = []
-            
-            for i in range(len(self.processed_intensities) - window_size + 1):
-                window = self.processed_intensities[i:i + window_size]
-                # Ensure non-negative values for NMF
-                window = np.maximum(window, 0)
-                data_matrix.append(window)
-            
-            data_matrix = np.array(data_matrix)
-            
-            # Perform NMF
-            n_components = self.n_components_spin.value()
-            nmf = NMF(n_components=n_components, random_state=42, max_iter=1000)
-            transformed = nmf.fit_transform(data_matrix)
-            
-            self.nmf_result = nmf
-            
-            # Display results
-            results = "NMF Results:\n"
-            results += f"Components: {n_components}\n"
-            results += f"Reconstruction error: {nmf.reconstruction_err_:.6f}\n"
-            results += f"Iterations: {nmf.n_iter_}\n"
-            
-            # Add component details
-            results += "\nComponent Details:\n"
-            for i, component in enumerate(nmf.components_[:3]):
-                max_idx = np.argmax(component)
-                results += f"NMF{i+1}: peak contribution at index {max_idx}, max value {component[max_idx]:.3f}\n"
-            
-            self.results_text.setPlainText(results)
-            self.update_plot()
-            
-            QMessageBox.information(self, "NMF Complete", 
-                                  f"NMF analysis complete. {n_components} components extracted.")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "NMF Error", f"NMF analysis failed: {str(e)}")
+            QMessageBox.critical(self, "Apodization Error", f"Apodization failed: {str(e)}")
     
     def export_results(self):
         """Export analysis results."""
@@ -1920,14 +2477,30 @@ class SpectralDeconvolutionQt6(QDialog):
             
             if file_path:
                 self.export_to_file(file_path)
-                QMessageBox.information(self, "Export Complete", 
-                                      f"Results exported to {file_path}")
+                
+                # Count additional files created
+                base_name = file_path.replace('.csv', '').replace('.txt', '')
+                additional_files = []
+                
+                if (self.fit_result is not None and self.fit_params is not None and 
+                    hasattr(self, 'peaks') and len(self.get_all_peaks_for_fitting()) > 0):
+                    
+                    n_peaks = len(self.get_all_peaks_for_fitting())
+                    additional_files.append(f"• Peak parameters: {base_name}_peak_parameters.csv")
+                    additional_files.append(f"• {n_peaks} individual peak region files")
+                
+                message = f"Export completed successfully!\n\nMain file: {file_path}\n"
+                if additional_files:
+                    message += "\nAdditional files created:\n" + "\n".join(additional_files)
+                    message += f"\n\nTotal files exported: {1 + len(additional_files)}"
+                
+                QMessageBox.information(self, "Export Complete", message)
                 
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Export failed: {str(e)}")
     
     def export_to_file(self, file_path):
-        """Export results to specified file."""
+        """Export results to specified file with enhanced peak data."""
         data = {
             'Wavenumber': self.wavenumbers,
             'Original_Intensity': self.original_intensities,
@@ -1942,17 +2515,329 @@ class SpectralDeconvolutionQt6(QDialog):
         if self.residuals is not None:
             data['Residuals'] = self.residuals
         
+        # Add total fitted curve if available
+        if self.fit_result is not None and self.fit_params is not None:
+            fitted_curve = self.multi_peak_model(self.wavenumbers, *self.fit_params)
+            data['Total_Fitted_Curve'] = fitted_curve
+        
+        # Add individual peak curves (full spectrum)
+        if (self.fit_result is not None and self.fit_params is not None and 
+            hasattr(self, 'peaks') and len(self.get_all_peaks_for_fitting()) > 0):
+            
+            individual_r2_values = self.calculate_individual_r2_values()
+            all_fitted_peaks = self.get_all_peaks_for_fitting()
+            validated_peaks = self.validate_peak_indices(np.array(all_fitted_peaks))
+            n_peaks = len(validated_peaks)
+            
+            for i in range(n_peaks):
+                start_idx = i * 3
+                if start_idx + 2 < len(self.fit_params):
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                    r2_value = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+                    
+                    # Generate individual peak curve
+                    if self.current_model == "Gaussian":
+                        peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
+                    elif self.current_model == "Lorentzian":
+                        peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
+                    elif self.current_model == "Pseudo-Voigt":
+                        peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
+                    else:
+                        peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
+                    
+                    data[f'Peak_{i+1}_Full_Curve'] = peak_curve
+        
         # Add components if available
         for i, component in enumerate(self.components):
             data[f'Component_{i+1}'] = component
         
-        # Create DataFrame and save
+        # Create main DataFrame
         df = pd.DataFrame(data)
         
+        # Save main spectral data
         if file_path.endswith('.csv'):
             df.to_csv(file_path, index=False)
+            base_path = file_path.replace('.csv', '')
         else:
             df.to_csv(file_path, sep='\t', index=False)
+            base_path = file_path.replace('.txt', '') if file_path.endswith('.txt') else file_path
+        
+        # Export peak parameters and regional curves
+        self._export_peak_details(base_path)
+    
+    def _export_peak_details(self, base_path):
+        """Export detailed peak parameters and regional curves."""
+        if (self.fit_result is None or self.fit_params is None or 
+            not hasattr(self, 'peaks') or len(self.get_all_peaks_for_fitting()) == 0):
+            return
+        
+        # Get peak data
+        individual_r2_values = self.calculate_individual_r2_values()
+        total_r2 = self.calculate_total_r2()
+        all_fitted_peaks = self.get_all_peaks_for_fitting()
+        validated_peaks = self.validate_peak_indices(np.array(all_fitted_peaks))
+        n_peaks = len(validated_peaks)
+        
+        # Export 1: Peak Parameters Summary
+        self._export_peak_parameters(base_path, n_peaks, individual_r2_values, total_r2)
+        
+        # Export 2: Regional Peak Curves (+/- 75 cm^-1 around each peak)
+        self._export_regional_peak_curves(base_path, n_peaks, individual_r2_values)
+    
+    def _export_peak_parameters(self, base_path, n_peaks, individual_r2_values, total_r2):
+        """Export peak parameters to a separate file."""
+        peak_params = []
+        
+        # Add header information
+        peak_params.append({
+            'Parameter': 'Analysis Summary',
+            'Value': '',
+            'Units': '',
+            'Notes': f'Model: {self.current_model}, Total R²: {total_r2:.4f}'
+        })
+        peak_params.append({
+            'Parameter': 'Number of Peaks',
+            'Value': n_peaks,
+            'Units': '',
+            'Notes': f'Average Individual R²: {np.mean(individual_r2_values):.3f}' if individual_r2_values else ''
+        })
+        peak_params.append({
+            'Parameter': '',
+            'Value': '',
+            'Units': '',
+            'Notes': ''
+        })  # Empty row
+        
+        # Add individual peak parameters
+        for i in range(n_peaks):
+            start_idx = i * 3
+            if start_idx + 2 < len(self.fit_params):
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                r2_value = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+                
+                # Determine peak type
+                peak_type = "Auto"
+                if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
+                    validated_auto_peaks = self.validate_peak_indices(self.peaks)
+                    all_fitted_peaks = self.get_all_peaks_for_fitting()
+                    if (len(validated_auto_peaks) > 0 and i < len(all_fitted_peaks) and 
+                        all_fitted_peaks[i] not in validated_auto_peaks.tolist()):
+                        peak_type = "Manual"
+                
+                # Calculate additional peak properties
+                fwhm = self._calculate_fwhm(wid)
+                area = self._calculate_peak_area(amp, wid)
+                
+                peak_params.extend([
+                    {
+                        'Parameter': f'Peak {i+1} Type',
+                        'Value': peak_type,
+                        'Units': '',
+                        'Notes': f'R² = {r2_value:.3f}'
+                    },
+                    {
+                        'Parameter': f'Peak {i+1} Center',
+                        'Value': f'{cen:.2f}',
+                        'Units': 'cm⁻¹',
+                        'Notes': 'Peak centroid position'
+                    },
+                    {
+                        'Parameter': f'Peak {i+1} Amplitude',
+                        'Value': f'{amp:.2f}',
+                        'Units': 'intensity',
+                        'Notes': 'Peak height'
+                    },
+                    {
+                        'Parameter': f'Peak {i+1} Width',
+                        'Value': f'{wid:.2f}',
+                        'Units': 'cm⁻¹',
+                        'Notes': f'Model parameter (FWHM ≈ {fwhm:.2f})'
+                    },
+                    {
+                        'Parameter': f'Peak {i+1} Area',
+                        'Value': f'{area:.2f}',
+                        'Units': 'intensity·cm⁻¹',
+                        'Notes': 'Integrated peak area'
+                    },
+                    {
+                        'Parameter': '',
+                        'Value': '',
+                        'Units': '',
+                        'Notes': ''
+                    }  # Empty row
+                ])
+        
+        # Save peak parameters
+        peak_df = pd.DataFrame(peak_params)
+        param_file = f"{base_path}_peak_parameters.csv"
+        peak_df.to_csv(param_file, index=False)
+    
+    def _export_regional_peak_curves(self, base_path, n_peaks, individual_r2_values):
+        """Export individual peak curves in +/- 75 cm^-1 regions around centroids."""
+        regional_data = {}
+        
+        for i in range(n_peaks):
+            start_idx = i * 3
+            if start_idx + 2 < len(self.fit_params):
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                r2_value = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+                
+                # Define region: +/- 75 cm^-1 around centroid
+                region_start = cen - 75
+                region_end = cen + 75
+                
+                # Find indices within this region
+                region_mask = (self.wavenumbers >= region_start) & (self.wavenumbers <= region_end)
+                
+                if np.any(region_mask):
+                    # Extract regional data
+                    region_wavenumbers = self.wavenumbers[region_mask]
+                    region_original = self.original_intensities[region_mask]
+                    region_processed = self.processed_intensities[region_mask]
+                    
+                    # Generate individual peak curve for this region
+                    if self.current_model == "Gaussian":
+                        region_peak = self.gaussian(region_wavenumbers, amp, cen, wid)
+                    elif self.current_model == "Lorentzian":
+                        region_peak = self.lorentzian(region_wavenumbers, amp, cen, wid)
+                    elif self.current_model == "Pseudo-Voigt":
+                        region_peak = self.pseudo_voigt(region_wavenumbers, amp, cen, wid)
+                    else:
+                        region_peak = self.gaussian(region_wavenumbers, amp, cen, wid)
+                    
+                    # Generate total fit for this region
+                    region_total_fit = self.multi_peak_model(region_wavenumbers, *self.fit_params)
+                    
+                    # Add background if available
+                    region_background = None
+                    if self.background is not None:
+                        region_background = self.background[region_mask]
+                    
+                    # Store data with consistent length
+                    max_length = max(len(regional_data.get('Wavenumber', [])), len(region_wavenumbers))
+                    
+                    # Extend existing columns if needed
+                    for key in regional_data:
+                        while len(regional_data[key]) < max_length:
+                            regional_data[key].append(np.nan)
+                    
+                    # Add new data (pad if shorter than existing data)
+                    if 'Wavenumber' not in regional_data:
+                        regional_data['Wavenumber'] = []
+                    
+                    regional_data['Wavenumber'].extend(region_wavenumbers.tolist())
+                    
+                    # Pad wavenumber if needed
+                    while len(regional_data['Wavenumber']) < max_length:
+                        regional_data['Wavenumber'].append(np.nan)
+                    
+                    # Add peak-specific columns
+                    col_prefix = f'Peak_{i+1}_{cen:.1f}cm'
+                    
+                    regional_data[f'{col_prefix}_Original'] = [np.nan] * max_length
+                    regional_data[f'{col_prefix}_Processed'] = [np.nan] * max_length
+                    regional_data[f'{col_prefix}_Individual'] = [np.nan] * max_length
+                    regional_data[f'{col_prefix}_Total_Fit'] = [np.nan] * max_length
+                    
+                    if region_background is not None:
+                        regional_data[f'{col_prefix}_Background'] = [np.nan] * max_length
+                    
+                    # Fill in the actual data for this peak's region
+                    start_fill = max_length - len(region_wavenumbers)
+                    for j, val in enumerate(region_original):
+                        regional_data[f'{col_prefix}_Original'][start_fill + j] = val
+                    for j, val in enumerate(region_processed):
+                        regional_data[f'{col_prefix}_Processed'][start_fill + j] = val
+                    for j, val in enumerate(region_peak):
+                        regional_data[f'{col_prefix}_Individual'][start_fill + j] = val
+                    for j, val in enumerate(region_total_fit):
+                        regional_data[f'{col_prefix}_Total_Fit'][start_fill + j] = val
+                    
+                    if region_background is not None:
+                        for j, val in enumerate(region_background):
+                            regional_data[f'{col_prefix}_Background'][start_fill + j] = val
+        
+        # Create a simpler approach: separate file for each peak region
+        for i in range(n_peaks):
+            start_idx = i * 3
+            if start_idx + 2 < len(self.fit_params):
+                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                self._export_single_peak_region(base_path, i+1, amp, cen, wid, individual_r2_values)
+    
+    def _export_single_peak_region(self, base_path, peak_num, amp, cen, wid, individual_r2_values):
+        """Export a single peak's regional data to its own file."""
+        # Define region: +/- 75 cm^-1 around centroid
+        region_start = cen - 75
+        region_end = cen + 75
+        
+        # Find indices within this region
+        region_mask = (self.wavenumbers >= region_start) & (self.wavenumbers <= region_end)
+        
+        if not np.any(region_mask):
+            return
+        
+        # Extract regional data
+        region_wavenumbers = self.wavenumbers[region_mask]
+        region_original = self.original_intensities[region_mask]
+        region_processed = self.processed_intensities[region_mask]
+        
+        # Generate curves for this region
+        if self.current_model == "Gaussian":
+            region_peak = self.gaussian(region_wavenumbers, amp, cen, wid)
+        elif self.current_model == "Lorentzian":
+            region_peak = self.lorentzian(region_wavenumbers, amp, cen, wid)
+        elif self.current_model == "Pseudo-Voigt":
+            region_peak = self.pseudo_voigt(region_wavenumbers, amp, cen, wid)
+        else:
+            region_peak = self.gaussian(region_wavenumbers, amp, cen, wid)
+        
+        # Generate total fit for this region
+        region_total_fit = self.multi_peak_model(region_wavenumbers, *self.fit_params)
+        
+        # Create data dictionary
+        peak_data = {
+            'Wavenumber': region_wavenumbers,
+            'Original_Intensity': region_original,
+            'Processed_Intensity': region_processed,
+            'Individual_Peak_Fit': region_peak,
+            'Total_Fit': region_total_fit,
+            'Residual': region_processed - region_total_fit
+        }
+        
+        # Add background if available
+        if self.background is not None:
+            region_background = self.background[region_mask]
+            peak_data['Background'] = region_background
+        
+        # Create DataFrame and save
+        peak_df = pd.DataFrame(peak_data)
+        r2_value = individual_r2_values[peak_num-1] if (peak_num-1) < len(individual_r2_values) else 0.0
+        region_file = f"{base_path}_peak_{peak_num:02d}_{cen:.1f}cm_R2_{r2_value:.3f}.csv"
+        peak_df.to_csv(region_file, index=False)
+    
+    def _calculate_fwhm(self, width_param):
+        """Calculate FWHM from model width parameter."""
+        if self.current_model == "Gaussian":
+            # For Gaussian: FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
+            return 2.355 * abs(width_param)
+        elif self.current_model == "Lorentzian":
+            # For Lorentzian: FWHM = 2 * gamma
+            return 2 * abs(width_param)
+        else:
+            # Default to Gaussian approximation
+            return 2.355 * abs(width_param)
+    
+    def _calculate_peak_area(self, amplitude, width_param):
+        """Calculate integrated peak area."""
+        if self.current_model == "Gaussian":
+            # For Gaussian: Area = amplitude * width * sqrt(2*pi)
+            return abs(amplitude * width_param * np.sqrt(2 * np.pi))
+        elif self.current_model == "Lorentzian":
+            # For Lorentzian: Area = amplitude * width * pi
+            return abs(amplitude * width_param * np.pi)
+        else:
+            # Default to Gaussian approximation
+            return abs(amplitude * width_param * np.sqrt(2 * np.pi))
 
     def update_peak_list(self):
         """Update the peak list widget with current peaks."""

@@ -187,6 +187,46 @@ def apply_theme(theme='compact'):
         mpl.rcParams['grid.alpha'] = 0.2
 
 
+def add_colorbar_no_shrink(figure, mappable, ax, **kwargs):
+    """
+    PERMANENT SOLUTION: Add colorbar without shrinking the main plot.
+    
+    This is the definitive fix for matplotlib colorbar shrinkage issues.
+    Use this function instead of figure.colorbar() to prevent plot shrinkage.
+    
+    Args:
+        figure: matplotlib figure object
+        mappable: the plot object (e.g., from imshow, contour, etc.)
+        ax: the axes object to add colorbar to
+        **kwargs: additional arguments passed to colorbar()
+    
+    Returns:
+        colorbar object or None if creation fails
+    
+    RULE: Always use this function for colorbars in RamanLab to prevent shrinkage!
+    """
+    try:
+        # Method 1: Use make_axes_locatable (most robust)
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="5%", pad=0.05)
+        return figure.colorbar(mappable, cax=cax, **kwargs)
+        
+    except ImportError:
+        # Fallback if mpl_toolkits not available
+        try:
+            return figure.colorbar(mappable, ax=ax, fraction=0.046, pad=0.04, **kwargs)
+        except Exception:
+            return None
+    except Exception:
+        # Second fallback
+        try:
+            return figure.colorbar(mappable, ax=ax, shrink=0.8, **kwargs)
+        except Exception:
+            return None
+
+
 def get_toolbar_class(size='compact'):
     """
     Get the appropriate toolbar class based on size preference.

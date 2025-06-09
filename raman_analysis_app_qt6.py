@@ -2905,10 +2905,10 @@ class RamanAnalysisAppQt6(QMainWindow):
         """Launch Raman mapping analysis tool."""
         try:
             # Import and launch the Qt6 map analysis module
-            from map_analysis_2d_qt6 import TwoDMapAnalysisQt6
+            from map_analysis_2d.ui import MapAnalysisMainWindow
             
             # Create and show the map analysis window
-            self.map_analysis_window = TwoDMapAnalysisQt6()
+            self.map_analysis_window = MapAnalysisMainWindow()
             self.map_analysis_window.show()
             
             # Show success message
@@ -2919,7 +2919,7 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self,
                 "Map Analysis Error",
                 f"Failed to import map analysis module:\n{str(e)}\n\n"
-                "Please ensure map_analysis_2d_qt6.py is in the same directory."
+                "Please ensure the map_analysis_2d module is available."
             )
         except Exception as e:
             QMessageBox.critical(
