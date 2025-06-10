@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QMessageBox, QFileDialog, QDialog, QTextEdit, QPushButton, QLabel
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QFont
 from datetime import datetime
 
 # Import core functionality
@@ -216,25 +216,10 @@ class MapAnalysisMainWindow(QMainWindow):
         
         header_layout.addStretch()
         
-        # Export button
-        self.export_results_btn = QPushButton("Export Results")
+        # Export button - use PrimaryButton style
+        from .base_widgets import PrimaryButton
+        self.export_results_btn = PrimaryButton("Export Results")
         self.export_results_btn.clicked.connect(self.export_comprehensive_results)
-        self.export_results_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:pressed {
-                background-color: #21618c;
-            }
-        """)
         header_layout.addWidget(self.export_results_btn)
         
         results_layout.addLayout(header_layout)
@@ -431,19 +416,34 @@ class MapAnalysisMainWindow(QMainWindow):
                 logger.info("Found NMF results, adding to new map control panel...")
                 self.update_map_features_with_nmf()
             
+            # Also check for template results
+            if hasattr(self, 'template_fitting_results'):
+                logger.info("Found template fitting results, adding to new map control panel...")
+                self.update_map_features_with_templates()
+            
         elif index == 1:  # Template Analysis
             control_panel = TemplateControlPanel()
             control_panel.load_template_file_requested.connect(self.load_template_file)
             control_panel.load_template_folder_requested.connect(self.load_template_folder)
+            control_panel.extract_from_map_requested.connect(self.start_template_extraction_mode)
+            control_panel.debug_templates_requested.connect(self.show_template_debug_tool)
             control_panel.remove_template_requested.connect(self.remove_template)
             control_panel.clear_templates_requested.connect(self.clear_templates)
             control_panel.plot_templates_requested.connect(self.plot_templates)
             control_panel.fit_templates_requested.connect(self.fit_templates)
             control_panel.normalize_templates_requested.connect(self.normalize_templates)
+            control_panel.show_detailed_stats.connect(self.show_detailed_template_statistics)
+            control_panel.export_statistics.connect(lambda: self.export_template_statistics(self.calculate_template_statistics()))
+            control_panel.show_chemical_analysis.connect(self.show_chemical_validity_analysis)
+            control_panel.show_hybrid_analysis.connect(self.show_hybrid_analysis_dialog)
+            control_panel.show_pp_analysis.connect(self.show_template_only_polypropylene_results)
             self.controls_panel.add_section("template_controls", control_panel)
             
             # Update template list in the control panel
             self.update_template_control_panel()
+            
+            # Update statistics display if available
+            self.update_template_statistics_display()
             
         elif index == 2:  # Combined PCA & NMF
             control_panel = DimensionalityReductionControlPanel()
@@ -466,6 +466,7 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.remove_model_requested.connect(self.remove_selected_model)
             control_panel.apply_selected_model_requested.connect(self.apply_selected_model)
             control_panel.model_selection_changed.connect(self.on_model_selection_changed)
+            control_panel.show_feature_info_requested.connect(self.show_ml_feature_info)
             
             # Check if we have a trained model and enable/disable classify button accordingly
             if hasattr(self, 'supervised_analyzer') and self.supervised_analyzer.model is not None:
@@ -591,8 +592,13 @@ class MapAnalysisMainWindow(QMainWindow):
             self.update_map()
         
     def on_spectrum_requested(self, x: float, y: float):
-        """Handle spectrum request from map click."""
+        """Handle spectrum request from map click - enhanced for template extraction."""
         if self.map_data is None:
+            return
+            
+        # Handle template extraction mode first
+        if hasattr(self, 'template_extraction_mode') and self.template_extraction_mode:
+            self._extract_template_from_position(x, y)
             return
             
         try:
@@ -719,154 +725,152 @@ class MapAnalysisMainWindow(QMainWindow):
             logger.error(f"Error adding position marker: {e}")
         
     def update_map(self):
-        """Update the map display."""
+        """Update the map display based on current settings."""
         if self.map_data is None:
             return
-            
+
         try:
-            import numpy as np
-            # Create map based on selected feature
-            if self.current_feature == "Cosmic Ray Map":
+            # Get map data based on current feature
+            map_data = None
+            discrete_labels = None
+            cmap = 'viridis'  # Default colormap
+
+            if self.current_feature == "Integrated Intensity":
+                map_data = self.create_integrated_intensity_map()
+            elif self.current_feature == "Peak Height":
+                # Could implement peak height mapping
+                pass
+            elif self.current_feature == "Cosmic Ray Map":
                 map_data = self.create_cosmic_ray_map()
+                cmap = 'Reds'
             elif self.current_feature.startswith("Template: "):
                 template_name = self.current_feature[10:]  # Remove "Template: " prefix
                 map_data = self.create_template_contribution_map(template_name)
-            elif self.current_feature == "Template Fit Quality (R²)":
+            elif self.current_feature == "Template Fit Quality":
                 map_data = self.create_template_fit_quality_map()
+            elif self.current_feature == "Template Dominance Map":
+                map_data = self.create_template_dominance_map()
+                cmap = 'Set1'
+                # Get template names for discrete labels
+                if hasattr(self, 'template_fitting_results'):
+                    template_names = self.template_fitting_results['template_names']
+                    discrete_labels = template_names + ['Mixed/Unclear']
+            elif self.current_feature.startswith("PCA Component "):
+                component_num = int(self.current_feature.split()[-1]) - 1  # Convert to 0-based index
+                map_data = self.create_pca_component_map(component_num)
             elif self.current_feature.startswith("NMF Component "):
-                # Extract component number
-                try:
-                    component_num = int(self.current_feature.split()[-1])
-                    component_index = component_num - 1  # Convert to 0-based index
-                    map_data = self.create_nmf_component_map(component_index)
-                except (ValueError, IndexError):
-                    logger.error(f"Invalid NMF component feature: {self.current_feature}")
-                    map_data = self.create_integrated_intensity_map()
+                component_num = int(self.current_feature.split()[-1]) - 1  # Convert to 0-based index
+                map_data = self.create_nmf_component_map(component_num)
             elif self.current_feature.startswith("ML Clusters"):
                 map_data = self.create_ml_clustering_map()
+                cmap = 'tab10'
+                # Get cluster labels
+                if hasattr(self, 'ml_results') and 'labels' in self.ml_results:
+                    unique_labels = np.unique(self.ml_results['labels'])
+                    discrete_labels = []
+                    for label in unique_labels:
+                        if label == -1:
+                            discrete_labels.append('Noise')
+                        else:
+                            discrete_labels.append(f'Cluster {int(label)}')
             elif self.current_feature.startswith("ML Classification"):
                 map_data = self.create_ml_classification_map()
-            elif self.current_feature.startswith("Class Probability: "):
-                class_name = self.current_feature[18:]  # Remove "Class Probability: " prefix
-                map_data = self.create_class_probability_map(class_name)
-            elif self.current_feature.startswith("Model: "):
-                map_data = self.create_model_result_map()
-            else:
-                map_data = self.create_integrated_intensity_map()
-            
-            if map_data is not None:
-                x_positions = [s.x_pos for s in self.map_data.spectra.values()]
-                y_positions = [s.y_pos for s in self.map_data.spectra.values()]
-                
-                extent = [min(x_positions), max(x_positions), 
-                         min(y_positions), max(y_positions)]
-                
-                # Choose appropriate colormap and get discrete labels if applicable
-                cmap = 'viridis'
-                discrete_labels = None
-                
-                if self.current_feature.startswith("Template: "):
-                    cmap = 'plasma'
-                elif self.current_feature == "Template Fit Quality (R²)":
-                    cmap = 'RdYlGn'
-                elif self.current_feature == "Cosmic Ray Map":
-                    cmap = 'Reds'
-                elif self.current_feature.startswith("NMF Component "):
-                    cmap = 'inferno'
-                elif self.current_feature.startswith("ML Clusters"):
-                    cmap = 'tab10'  # Discrete colormap for clusters
-                    # Get cluster method name for labeling
-                    if hasattr(self, 'ml_results') and 'method' in self.ml_results:
-                        method = self.ml_results['method']
-                        n_clusters = self.ml_results.get('n_clusters', 0)
-                        if method == 'DBSCAN':
-                            discrete_labels = ['Noise'] + [f'Cluster {i}' for i in range(n_clusters)]
-                        else:
-                            discrete_labels = [f'Cluster {i}' for i in range(n_clusters)]
-                elif self.current_feature.startswith("ML Classification"):
+                if map_data is not None:
                     cmap = 'Set1'  # Discrete colormap for classification
                     # Get class names for labeling
                     if hasattr(self, 'classification_results') and 'class_names' in self.classification_results:
                         discrete_labels = self.classification_results['class_names']
                     elif hasattr(self, 'supervised_analyzer') and hasattr(self.supervised_analyzer, 'class_names'):
                         discrete_labels = self.supervised_analyzer.class_names
-                elif self.current_feature.startswith("Class Probability: "):
-                    cmap = 'plasma'  # Continuous colormap for probabilities
-                elif self.current_feature.startswith("Model: "):
-                    # Get discrete labels for model results
-                    if hasattr(self, 'model_results') and self.current_feature in self.model_results:
-                        result_data = self.model_results[self.current_feature]
-                        if result_data['type'] == 'classification':
-                            cmap = 'Set1'
-                            # Try to get class names from model info
-                            model_name = self.current_feature[7:]  # Remove "Model: " prefix
-                            model_info = self.model_manager.get_model_info(model_name)
-                            if model_info and 'class_names' in model_info:
-                                discrete_labels = model_info['class_names']
+            elif self.current_feature.startswith("Class Probability: "):
+                # Fix: Strip whitespace from class name to handle spacing issues
+                class_name = self.current_feature[19:].strip()  # Remove "Class Probability: " prefix and strip whitespace
+                map_data = self.create_class_probability_map(class_name)
+                cmap = 'plasma'  # Continuous colormap for probabilities
+            elif self.current_feature.startswith("Model: "):
+                # Get discrete labels for model results
+                if hasattr(self, 'model_results') and self.current_feature in self.model_results:
+                    result_data = self.model_results[self.current_feature]
+                    if result_data['type'] == 'classification':
+                        cmap = 'Set1'
+                        # Try to get class names from model info
+                        model_name = self.current_feature[7:]  # Remove "Model: " prefix
+                        model_info = self.model_manager.get_model_info(model_name)
+                        if model_info and 'class_names' in model_info:
+                            discrete_labels = model_info['class_names']
+                        else:
+                            # Fallback to generic class labels
+                            unique_preds = np.unique(result_data['predictions'])
+                            discrete_labels = [f'Class {int(p)}' for p in unique_preds if p >= 0]
+                    else:  # clustering
+                        cmap = 'tab10'
+                        # Generate cluster labels
+                        unique_labels = np.unique(result_data['labels'])
+                        discrete_labels = []
+                        for label in unique_labels:
+                            if label == -1:
+                                discrete_labels.append('Noise')
                             else:
-                                # Fallback to generic class labels
-                                unique_preds = np.unique(result_data['predictions'])
-                                discrete_labels = [f'Class {int(p)}' for p in unique_preds if p >= 0]
-                        else:  # clustering
-                            cmap = 'tab10'
-                            # Generate cluster labels
-                            unique_labels = np.unique(result_data['labels'])
-                            discrete_labels = []
-                            for label in unique_labels:
-                                if label == -1:
-                                    discrete_labels.append('Noise')
-                                else:
-                                    discrete_labels.append(f'Cluster {int(label)}')
-                    else:
-                        cmap = 'viridis'
+                                discrete_labels.append(f'Cluster {int(label)}')
+                    map_data = self.create_model_result_map()
+                else:
+                    cmap = 'viridis'
+            elif "Hybrid: Confidence Map" in self.current_feature:
+                map_data = self.create_hybrid_confidence_map()
+                cmap = 'viridis'
+            elif "Enhanced: NMF Component (Log Scale)" in self.current_feature:
+                map_data = self.create_enhanced_nmf_component_map(log_scale=True)
+                cmap = 'viridis'
+            elif "Enhanced: NMF Component (High Contrast)" in self.current_feature:
+                map_data = self.create_enhanced_nmf_component_map(high_contrast=True)
+                cmap = 'plasma'
+            elif "Hybrid: NMF Candidates" in self.current_feature:
+                map_data = self.create_nmf_candidate_regions_map()
+                cmap = 'Reds'
+            elif "Hybrid: High Confidence Regions" in self.current_feature:
+                map_data = self.create_high_confidence_regions_map()
+                cmap = 'Oranges'
                 
                 # Update control panel with current data range for auto-scaling
                 if hasattr(self, 'map_control_panel') and map_data is not None:
                     data_min, data_max = np.nanmin(map_data), np.nanmax(map_data)
                     self.map_control_panel.update_intensity_range(data_min, data_max)
+
+            # Update visualization
+            if map_data is not None:
+                # Fix: Use the map plot widget instead of missing visualizer
+                x_positions = [s.x_pos for s in self.map_data.spectra.values()]
+                y_positions = [s.y_pos for s in self.map_data.spectra.values()]
+                
+                extent = [min(x_positions), max(x_positions), 
+                         min(y_positions), max(y_positions)]
                 
                 # Create title with integration info
                 title = f"{self.current_feature} Map"
                 if (self.current_feature == "Integrated Intensity" and 
-                    self.integration_center is not None and self.integration_width is not None):
+                    hasattr(self, 'integration_center') and self.integration_center is not None and 
+                    hasattr(self, 'integration_width') and self.integration_width is not None):
                     min_wn = self.integration_center - self.integration_width / 2
                     max_wn = self.integration_center + self.integration_width / 2
                     title += f" ({min_wn:.0f}-{max_wn:.0f} cm⁻¹)"
                 
+                # Use the map plot widget
                 self.map_plot_widget.plot_map(
                     map_data, extent=extent,
                     title=title,
                     cmap=cmap,
                     discrete_labels=discrete_labels,
-                    vmin=self.intensity_vmin,
-                    vmax=self.intensity_vmax
+                    vmin=getattr(self, 'intensity_vmin', None),
+                    vmax=getattr(self, 'intensity_vmax', None)
                 )
-                
+            else:
+                logger.warning(f"No data available for feature: {self.current_feature}")
+
         except Exception as e:
+            logger.error(f"Error updating map for feature '{self.current_feature}': {e}")
             import traceback
-            logger.error(f"Error updating map: {e}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            # Try to plot with basic parameters as fallback
-            try:
-                if map_data is not None:
-                    # Create fallback title
-                    title = f"{self.current_feature} Map"
-                    if (self.current_feature == "Integrated Intensity" and 
-                        self.integration_center is not None and self.integration_width is not None):
-                        min_wn = self.integration_center - self.integration_width / 2
-                        max_wn = self.integration_center + self.integration_width / 2
-                        title += f" ({min_wn:.0f}-{max_wn:.0f} cm⁻¹)"
-                    
-                    self.map_plot_widget.plot_map(
-                        map_data, extent=extent,
-                        title=title,
-                        cmap='viridis',  # Use basic colormap as fallback
-                        vmin=self.intensity_vmin,
-                        vmax=self.intensity_vmax
-                    )
-            except Exception as fallback_error:
-                logger.error(f"Fallback plotting also failed: {fallback_error}")
-            
+            traceback.print_exc()
+
     def create_integrated_intensity_map(self):
         """Create integrated intensity map with optional wavenumber range."""
         import numpy as np
@@ -984,6 +988,62 @@ class MapAnalysisMainWindow(QMainWindow):
             
         except Exception as e:
             logger.error(f"Error creating template fit quality map: {e}")
+            return None
+
+    def create_template_dominance_map(self):
+        """Create a map showing which template dominates at each position."""
+        if not hasattr(self, 'template_fitting_results'):
+            return None
+            
+        try:
+            import numpy as np
+            
+            coefficients = self.template_fitting_results['coefficients']
+            template_names = self.template_fitting_results['template_names']
+            n_templates = len(template_names)
+            
+            # Get map dimensions
+            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in positions]
+            y_coords = [pos[1] for pos in positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            map_array = np.full((y_max - y_min + 1, x_max - x_min + 1), n_templates, dtype=int)  # Default to "Mixed/Unclear"
+            
+            # Thresholds for dominance
+            confidence_threshold = 0.30  # Must contribute at least 30%
+            significance_margin = 0.10   # Must be 10% higher than second best
+            
+            # Fill map with dominant template indices
+            for spectrum in self.map_data.spectra.values():
+                pos_key = (spectrum.x_pos, spectrum.y_pos)
+                if pos_key in coefficients:
+                    coeffs = np.array(coefficients[pos_key][:n_templates])  # Only template coefficients, exclude baseline
+                    
+                    # Calculate relative contributions
+                    total_contrib = np.sum(coeffs)
+                    if total_contrib > 1e-10:  # Avoid division by zero
+                        relative_contribs = coeffs / total_contrib
+                        
+                        # Find dominant template
+                        dominant_idx = np.argmax(relative_contribs)
+                        dominant_strength = relative_contribs[dominant_idx]
+                        
+                        # Check if it meets dominance criteria
+                        if dominant_strength > confidence_threshold:
+                            # Check significance margin
+                            sorted_contribs = np.sort(relative_contribs)[::-1]
+                            if len(sorted_contribs) > 1:
+                                margin = sorted_contribs[0] - sorted_contribs[1]
+                                if margin > significance_margin:
+                                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = dominant_idx
+            
+            return map_array
+            
+        except Exception as e:
+            logger.error(f"Error creating template dominance map: {e}")
             return None
         
     def run_pca(self):
@@ -1261,10 +1321,27 @@ class MapAnalysisMainWindow(QMainWindow):
             self.template_manager.target_wavenumbers = first_spectrum.wavenumbers
             self.template_manager.validate_and_fix_template_dimensions(len(target_intensities))
             
+            # DEBUG: Print template fitting setup info
+            print(f"\n=== TEMPLATE FITTING DEBUG ===")
+            print(f"Map data: {len(self.map_data.spectra)} spectra")
+            print(f"Map wavenumbers: {len(first_spectrum.wavenumbers)} points ({first_spectrum.wavenumbers[0]:.1f} to {first_spectrum.wavenumbers[-1]:.1f})")
+            print(f"Target intensities length: {len(target_intensities)}")
+            print(f"Using {'processed' if self.use_processed else 'raw'} data")
+            print(f"Number of templates: {self.template_manager.get_template_count()}")
+            
             # Get template matrix
             template_matrix = self.template_manager.get_template_matrix()
             if template_matrix.size == 0:
                 raise ValueError("No valid template data available")
+            
+            print(f"Template matrix shape: {template_matrix.shape}")
+            print(f"Template matrix min/max: {np.min(template_matrix):.6f} to {np.max(template_matrix):.6f}")
+            
+            # Print template info
+            for i, name in enumerate(self.template_manager.get_template_names()):
+                template_col = template_matrix[:, i]
+                print(f"Template '{name}': min={np.min(template_col):.6f}, max={np.max(template_col):.6f}, std={np.std(template_col):.6f}")
+            print("==============================\n")
             
             # Add baseline if requested
             if use_baseline:
@@ -1322,7 +1399,7 @@ class MapAnalysisMainWindow(QMainWindow):
                     # Update progress
                     if processed_count % 50 == 0:
                         progress = int((processed_count / total_spectra) * 100)
-                        self.progress_status.update_progress(f"Fitting templates... {progress}%")
+                        self.progress_status.update_progress(progress, f"Fitting templates... {progress}%")
                 
                 except Exception as e:
                     logger.warning(f"Failed to fit spectrum at ({spectrum.x_pos}, {spectrum.y_pos}): {e}")
@@ -1348,6 +1425,9 @@ class MapAnalysisMainWindow(QMainWindow):
             self.update_map_features_with_templates()
             self.update_map_template_status()  # Update template status
             
+            # Calculate and display basic statistics
+            self.update_template_statistics_display()
+            
             self.statusBar().showMessage(f"Template fitting complete: {processed_count} spectra fitted")
             
         except Exception as e:
@@ -1358,36 +1438,181 @@ class MapAnalysisMainWindow(QMainWindow):
     def update_map_features_with_templates(self):
         """Update map features dropdown to include template fitting results."""
         try:
-            # Get current map control panel
-            sections = self.controls_panel.sections
-            if "map_controls" in sections:
-                control_panel = sections["map_controls"]["widget"]
-                if hasattr(control_panel, 'feature_combo') and hasattr(self, 'template_fitting_results'):
-                    # Store current selection
-                    current_feature = control_panel.feature_combo.currentText()
+            logger.info("Updating map features with template results...")
+            
+            # Check if we're currently on the map tab - if so, update directly
+            if self.tab_widget.currentIndex() == 0:  # Map View tab
+                sections = self.controls_panel.sections
+                logger.info(f"Available control panel sections: {list(sections.keys())}")
+                
+                if "map_controls" in sections:
+                    control_panel = sections["map_controls"]["widget"]
+                    logger.info(f"Found map control panel: {type(control_panel)}")
                     
-                    # Add template features
-                    control_panel.feature_combo.clear()
-                    control_panel.feature_combo.addItems([
-                        "Integrated Intensity",
-                        "Peak Height", 
-                        "Cosmic Ray Map"
-                    ])
-                    
-                    # Add template contribution maps
-                    for template_name in self.template_fitting_results['template_names']:
-                        control_panel.feature_combo.addItem(f"Template: {template_name}")
-                    
-                    # Add fit quality map
-                    control_panel.feature_combo.addItem("Template Fit Quality (R²)")
-                    
-                    # Restore selection if possible
-                    index = control_panel.feature_combo.findText(current_feature)
-                    if index >= 0:
-                        control_panel.feature_combo.setCurrentIndex(index)
+                    if hasattr(control_panel, 'feature_combo'):
+                        self._update_control_panel_features(control_panel)
+                    else:
+                        logger.warning("Map control panel does not have feature_combo attribute")
+                else:
+                    logger.warning("Map controls section not found in control panel")
+            else:
+                # Not on map tab - the features will be updated when we switch to the map tab
+                # via the on_tab_changed method, but we should also check for any existing
+                # map control panels that might need updating
+                logger.info("Not currently on map tab - features will update when switching to map view")
+                
+            # Also update any cached/stored feature lists
+            logger.info("Template features update initiated")
                         
         except Exception as e:
             logger.error(f"Error updating map features: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _update_control_panel_features(self, control_panel):
+        """Helper method to update a control panel's feature dropdown with template results."""
+        try:
+            if not hasattr(control_panel, 'feature_combo'):
+                return
+                
+            logger.info(f"Found feature combo with {control_panel.feature_combo.count()} items")
+            
+            if hasattr(self, 'template_fitting_results'):
+                logger.info(f"Template fitting results available with {len(self.template_fitting_results['template_names'])} templates")
+                
+                # Store current selection
+                current_feature = control_panel.feature_combo.currentText()
+                logger.info(f"Current feature selection: {current_feature}")
+                
+                # Get current features and remove old template features to avoid duplicates
+                current_features = [control_panel.feature_combo.itemText(i) 
+                                  for i in range(control_panel.feature_combo.count())]
+                
+                # Remove old template features to avoid duplicates
+                filtered_features = []
+                for feature in current_features:
+                    if not (feature.startswith("Template: ") or 
+                           feature == "Template Fit Quality (R²)" or
+                           feature == "Template Dominance Map"):
+                        filtered_features.append(feature)
+                
+                # Rebuild the dropdown with all features
+                control_panel.feature_combo.clear()
+                control_panel.feature_combo.addItems(filtered_features)
+                
+                # Add template contribution maps
+                for template_name in self.template_fitting_results['template_names']:
+                    feature_name = f"Template: {template_name}"
+                    control_panel.feature_combo.addItem(feature_name)
+                    logger.info(f"Added template feature: {feature_name}")
+                
+                # Add fit quality map
+                control_panel.feature_combo.addItem("Template Fit Quality (R²)")
+                logger.info("Added template fit quality feature")
+                
+                # Add template dominance map
+                control_panel.feature_combo.addItem("Template Dominance Map")
+                logger.info("Added template dominance map feature")
+                
+                # Restore selection if possible
+                index = control_panel.feature_combo.findText(current_feature)
+                if index >= 0:
+                    control_panel.feature_combo.setCurrentIndex(index)
+                    logger.info(f"Restored selection to: {current_feature}")
+                else:
+                    logger.info(f"Could not restore selection '{current_feature}', keeping default")
+                
+                logger.info(f"Template features update completed. Total features: {control_panel.feature_combo.count()}")
+            else:
+                logger.warning("No template fitting results available")
+                
+        except Exception as e:
+            logger.error(f"Error updating control panel features: {e}")
+    
+    def get_base_map_features(self):
+        """Get the base set of map features that should always be available."""
+        return [
+            "Integrated Intensity",
+            "Peak Height", 
+            "Cosmic Ray Map"
+        ]
+    
+    def get_all_available_map_features(self):
+        """Get all currently available map features from all analysis methods."""
+        features = self.get_base_map_features().copy()
+        
+        # Add template features if available
+        if hasattr(self, 'template_fitting_results'):
+            for template_name in self.template_fitting_results['template_names']:
+                features.append(f"Template: {template_name}")
+            features.append("Template Fit Quality (R²)")
+            features.append("Template Dominance Map")
+        
+        # Add PCA components if available
+        if hasattr(self, 'pca_results') and self.pca_results is not None:
+            n_components = self.pca_results.get('n_components', 0)
+            for i in range(n_components):
+                features.append(f"PCA Component {i+1}")
+        
+        # Add NMF components if available
+        if hasattr(self, 'nmf_results') and self.nmf_results is not None:
+            n_components = self.nmf_results.get('n_components', 0)
+            for i in range(n_components):
+                features.append(f"NMF Component {i+1}")
+        
+        # Add ML clustering results if available
+        if hasattr(self, 'ml_results') and self.ml_results.get('type') == 'unsupervised':
+            features.append("ML Clusters")
+        
+        # Add ML classification results if available
+        if hasattr(self, 'classification_results') and self.classification_results:
+            if self.classification_results.get('type') == 'supervised':
+                features.append("ML Classification")
+                # Add class probability maps
+                if 'class_names' in self.classification_results:
+                    for class_name in self.classification_results['class_names']:
+                        features.append(f"Class Probability: {class_name}")
+        
+        # Add model-based features if available
+        if hasattr(self, 'model_results') and self.model_results:
+            for model_name in self.model_results.keys():
+                features.append(f"Model: {model_name}")
+        
+        return features
+    
+    def refresh_all_map_features(self):
+        """Refresh the map features dropdown with all available features."""
+        try:
+            # Get current map control panel
+            control_panel = self.get_current_map_control_panel()
+            if control_panel is None or not hasattr(control_panel, 'feature_combo'):
+                logger.warning("Map control panel or feature combo not found")
+                return
+            
+            # Store current selection
+            current_feature = control_panel.feature_combo.currentText()
+            
+            # Get all available features
+            all_features = self.get_all_available_map_features()
+            
+            # Update the dropdown
+            control_panel.feature_combo.clear()
+            control_panel.feature_combo.addItems(all_features)
+            
+            # Restore selection if possible
+            index = control_panel.feature_combo.findText(current_feature)
+            if index >= 0:
+                control_panel.feature_combo.setCurrentIndex(index)
+                logger.info(f"Restored selection to: {current_feature}")
+            else:
+                logger.info(f"Could not restore selection '{current_feature}', keeping default")
+            
+            logger.info(f"Refreshed map features. Total features: {len(all_features)}")
+            
+        except Exception as e:
+            logger.error(f"Error refreshing map features: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def normalize_templates(self):
         """Normalize all template spectra."""
@@ -1706,31 +1931,64 @@ class MapAnalysisMainWindow(QMainWindow):
             return
             
         try:
-            # Get the map control panel
-            control_panel = None
-            for name, section in self.controls_panel.sections.items():
-                if name == "map_controls" and hasattr(section['widget'], 'feature_combo'):
-                    control_panel = section['widget']
-                    break
-            
-            if control_panel is None:
-                return
-            
-            # Add NMF component options to feature combo
-            current_features = [control_panel.feature_combo.itemText(i) 
-                              for i in range(control_panel.feature_combo.count())]
-            
-            # Add NMF components if not already present
-            for i in range(self.nmf_results['n_components']):
-                component_name = f"NMF Component {i+1}"
-                if component_name not in current_features:
-                    control_panel.feature_combo.addItem(component_name)
-            
+            # Use the comprehensive feature refresh system
+            self.refresh_all_map_features()
             logger.info(f"Added {self.nmf_results['n_components']} NMF components to map features")
             
         except Exception as e:
             logger.error(f"Error updating map features with NMF: {e}")
     
+    def create_pca_component_map(self, component_index: int):
+        """Create a map showing PCA component contribution."""
+        if not hasattr(self, 'pca_results') or self.pca_results is None:
+            return None
+            
+        try:
+            import numpy as np
+            
+            # Get PCA transformed data (components matrix W)
+            pca_transformed = self.pca_results.get('transformed_data', self.pca_results.get('components'))
+            if pca_transformed is None or component_index >= pca_transformed.shape[1]:
+                logger.warning(f"PCA component {component_index + 1} not available")
+                return None
+            
+            # Get component contributions for all spectra
+            component_contributions = pca_transformed[:, component_index]
+            
+            # Create position mapping
+            if hasattr(self, 'pca_valid_positions'):
+                positions = self.pca_valid_positions
+            else:
+                # Fallback: use all map positions in order
+                positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            
+            # Create position to contribution mapping
+            pos_to_contribution = {}
+            for i, (x, y) in enumerate(positions):
+                if i < len(component_contributions):
+                    pos_to_contribution[(x, y)] = component_contributions[i]
+            
+            # Create map array
+            all_positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in all_positions]
+            y_coords = [pos[1] for pos in all_positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            
+            for spectrum in self.map_data.spectra.values():
+                pos_key = (spectrum.x_pos, spectrum.y_pos)
+                if pos_key in pos_to_contribution:
+                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = pos_to_contribution[pos_key]
+            
+            return map_array
+            
+        except Exception as e:
+            logger.error(f"Error creating PCA component map: {e}")
+            return None
+
     def create_nmf_component_map(self, component_index: int):
         """Create a map showing the contribution of a specific NMF component."""
         if not hasattr(self, 'nmf_results') or not hasattr(self, 'nmf_valid_positions'):
@@ -1983,6 +2241,174 @@ class MapAnalysisMainWindow(QMainWindow):
                     feature_transformer = self.nmf_analyzer
                     feature_used = 'nmf'
             
+            # Apply feature transformation to training data if requested
+            if feature_transformer is not None:
+                logger.info(f"Applying {feature_used.upper()} transformation to training data...")
+                
+                # For NMF/PCA, we need to align training data to map data dimensions first
+                if feature_used in ['nmf', 'pca'] and self.map_data is not None:
+                    # Get map wavenumber grid
+                    map_spectrum = next(iter(self.map_data.spectra.values()))
+                    if map_spectrum.wavenumbers is not None:
+                        map_wavenumbers = map_spectrum.wavenumbers
+                        
+                        # Align training data to map wavenumber grid
+                        if len(common_wavenumbers) != len(map_wavenumbers):
+                            logger.info(f"Aligning training data to map wavenumber grid: {len(common_wavenumbers)} -> {len(map_wavenumbers)}")
+                            try:
+                                from scipy.interpolate import interp1d
+                                X_aligned = []
+                                for spectrum_data in X:
+                                    # Interpolate to map wavenumber grid
+                                    interp_func = interp1d(common_wavenumbers, spectrum_data, 
+                                                         kind='linear', bounds_error=False, fill_value=0)
+                                    aligned_spectrum = interp_func(map_wavenumbers)
+                                    X_aligned.append(aligned_spectrum)
+                                X = np.array(X_aligned)
+                                logger.info(f"Training data aligned to map grid: {X.shape}")
+                            except Exception as e:
+                                logger.warning(f"Failed to align training data to map grid: {e}")
+                
+                X_transformed, actual_type = feature_transformer.transform_data(X, fallback_to_full=True)
+                if X_transformed is not None:
+                    X = X_transformed
+                    logger.info(f"Training data transformed: {X.shape[0]} samples, {X.shape[1]} features ({actual_type})")
+                    
+                    # ENHANCED DISCRIMINATIVE FEATURE SELECTION FOR NMF
+                    if actual_type == 'nmf' and len(class_names) == 2:
+                        logger.info("Applying discriminative feature enhancement for NMF...")
+                        
+                        # Find positive and negative class indices
+                        positive_class_idx = None
+                        negative_class_idx = None
+                        
+                        # Look for common positive class indicators
+                        positive_keywords = ['positive', 'pos', 'target', 'signal', 'hit', '1', 'true']
+                        negative_keywords = ['negative', 'neg', 'background', 'noise', 'miss', '0', 'false']
+                        
+                        for i, class_name in enumerate(class_names):
+                            class_lower = class_name.lower()
+                            if any(keyword in class_lower for keyword in positive_keywords):
+                                positive_class_idx = i
+                            elif any(keyword in class_lower for keyword in negative_keywords):
+                                negative_class_idx = i
+                        
+                        # If we can't find by keywords, assume first class is negative, second is positive
+                        if positive_class_idx is None or negative_class_idx is None:
+                            positive_class_idx = 1 if len(class_names) > 1 else 0
+                            negative_class_idx = 0 if positive_class_idx == 1 else 1
+                            logger.info(f"Using default assignment: positive={class_names[positive_class_idx]}, negative={class_names[negative_class_idx]}")
+                        else:
+                            logger.info(f"Detected classes: positive={class_names[positive_class_idx]}, negative={class_names[negative_class_idx]}")
+                        
+                        positive_mask = y == positive_class_idx
+                        negative_mask = y == negative_class_idx
+                        
+                        logger.info(f"Positive samples: {np.sum(positive_mask)}, Negative samples: {np.sum(negative_mask)}")
+                        
+                        component_discriminability = []
+                        enhanced_features = []
+                        enhancement_thresholds = []
+                        threshold_directions = []
+                        
+                        for comp_idx in range(X.shape[1]):
+                            pos_values = X[positive_mask, comp_idx]
+                            neg_values = X[negative_mask, comp_idx]
+                            
+                            if len(pos_values) == 0 or len(neg_values) == 0:
+                                logger.warning(f"Component {comp_idx}: Empty class found, skipping enhancement")
+                                enhanced_features.append(X[:, comp_idx])
+                                component_discriminability.append(0.0)
+                                enhancement_thresholds.append(0.0)
+                                threshold_directions.append('none')
+                                continue
+                            
+                            pos_mean = np.mean(pos_values)
+                            neg_mean = np.mean(neg_values)
+                            pos_std = np.std(pos_values) + 1e-10  # Add small epsilon to avoid division by zero
+                            neg_std = np.std(neg_values) + 1e-10
+                            
+                            # Calculate separability (Cohen's d effect size)
+                            pooled_std = np.sqrt(((len(pos_values) - 1) * pos_std**2 + (len(neg_values) - 1) * neg_std**2) / 
+                                               (len(pos_values) + len(neg_values) - 2))
+                            cohen_d = abs(pos_mean - neg_mean) / (pooled_std + 1e-10)
+                            
+                            component_discriminability.append(cohen_d)
+                            
+                            logger.info(f"Component {comp_idx}: pos_mean={pos_mean:.3f}, neg_mean={neg_mean:.3f}, Cohen's d={cohen_d:.3f}")
+                            
+                            # Create enhanced feature based on discriminability
+                            if cohen_d > 0.3:  # Lower threshold for better sensitivity
+                                if pos_mean > neg_mean:
+                                    # Positive class has higher values - use moderate threshold
+                                    threshold = neg_mean + 1.0 * neg_std  # Less conservative threshold
+                                    enhanced_feature = np.maximum(0, X[:, comp_idx] - threshold)
+                                    direction = 'positive'
+                                else:
+                                    # Negative class has higher values - invert and threshold
+                                    threshold = pos_mean + 1.0 * pos_std
+                                    enhanced_feature = np.maximum(0, threshold - X[:, comp_idx])
+                                    direction = 'negative'
+                                
+                                enhancement_thresholds.append(threshold)
+                                threshold_directions.append(direction)
+                                logger.info(f"Component {comp_idx}: Enhanced with threshold={threshold:.3f}, direction={direction}")
+                            else:
+                                # Low discriminability - keep original but slightly downweight
+                                enhanced_feature = X[:, comp_idx] * 0.5  # Less aggressive downweighting
+                                enhancement_thresholds.append(0.0)
+                                threshold_directions.append('none')
+                                logger.info(f"Component {comp_idx}: Low discriminability, slightly downweighted")
+                            
+                            enhanced_features.append(enhanced_feature)
+                        
+                        # Replace original features with enhanced features
+                        X_enhanced = np.column_stack(enhanced_features)
+                        
+                        # Add multiple selectivity scores for robustness
+                        discriminability_array = np.array(component_discriminability)
+                        
+                        # Top components selectivity
+                        n_top = min(3, len(discriminability_array))  # Use top 3 or all if fewer
+                        top_components = np.argsort(discriminability_array)[-n_top:]
+                        
+                        selectivity_score = np.zeros(X.shape[0])
+                        if np.sum(discriminability_array[top_components]) > 0:
+                            for comp_idx in top_components:
+                                weight = discriminability_array[comp_idx] / np.sum(discriminability_array[top_components])
+                                selectivity_score += weight * enhanced_features[comp_idx]
+                        
+                        # Ratio-based feature (positive vs negative signature)
+                        pos_signature = np.mean([enhanced_features[i] for i in range(len(enhanced_features)) 
+                                               if threshold_directions[i] == 'positive'], axis=0) if any(d == 'positive' for d in threshold_directions) else np.zeros(X.shape[0])
+                        neg_signature = np.mean([enhanced_features[i] for i in range(len(enhanced_features)) 
+                                               if threshold_directions[i] == 'negative'], axis=0) if any(d == 'negative' for d in threshold_directions) else np.zeros(X.shape[0])
+                        
+                        ratio_feature = pos_signature / (neg_signature + 1e-6)  # Avoid division by zero
+                        
+                        # Combine enhanced features with selectivity scores
+                        X = np.column_stack([X_enhanced, selectivity_score, ratio_feature])
+                        
+                        logger.info(f"Enhanced NMF features: {X_enhanced.shape[1]} components + 2 selectivity scores = {X.shape[1]} total features")
+                        logger.info(f"Most discriminative components: {top_components} (Cohen's d: {discriminability_array[top_components]})")
+                        
+                        # Store enhancement parameters for consistent application during classification
+                        self.supervised_analyzer.component_discriminability = component_discriminability
+                        self.supervised_analyzer.enhancement_thresholds = enhancement_thresholds
+                        self.supervised_analyzer.threshold_directions = threshold_directions
+                        self.supervised_analyzer.top_components = top_components
+                        self.supervised_analyzer.positive_class_idx = positive_class_idx
+                        self.supervised_analyzer.negative_class_idx = negative_class_idx
+                    
+                else:
+                    logger.warning(f"Failed to apply {feature_used} transformation to training data, using full spectrum")
+                    feature_used = 'full'
+                    feature_transformer = None
+            
+            # Store the feature transformer in the analyzer for consistent application
+            self.supervised_analyzer.feature_transformer = feature_transformer
+            self.supervised_analyzer.feature_type = feature_used
+            
             # Train the actual model using the training data manager
             from sklearn.model_selection import train_test_split
             from sklearn.ensemble import RandomForestClassifier
@@ -2018,9 +2444,20 @@ class MapAnalysisMainWindow(QMainWindow):
             self.supervised_analyzer.y_pred = y_pred
             self.supervised_analyzer.class_names = class_names
             
-            # Store the common wavenumber grid used for training (this is the interpolated grid)
-            self.supervised_analyzer.training_wavenumbers = common_wavenumbers
-            logger.info(f"Stored training wavenumbers: {len(common_wavenumbers)} points")
+            # Store the effective wavenumber grid used for training
+            if feature_used in ['nmf', 'pca'] and self.map_data is not None:
+                # For transformed features, store the map wavenumbers (what was actually used)
+                map_spectrum = next(iter(self.map_data.spectra.values()))
+                if map_spectrum.wavenumbers is not None:
+                    self.supervised_analyzer.training_wavenumbers = map_spectrum.wavenumbers
+                    logger.info(f"Stored map wavenumbers for {feature_used} training: {len(map_spectrum.wavenumbers)} points")
+                else:
+                    self.supervised_analyzer.training_wavenumbers = common_wavenumbers
+                    logger.info(f"Stored interpolated wavenumbers for {feature_used} training: {len(common_wavenumbers)} points")
+            else:
+                # For full spectrum, store the interpolated common grid
+                self.supervised_analyzer.training_wavenumbers = common_wavenumbers
+                logger.info(f"Stored training wavenumbers: {len(common_wavenumbers)} points")
             
             # Store results for visualization
             self.ml_results = {
@@ -2059,12 +2496,14 @@ class MapAnalysisMainWindow(QMainWindow):
             
             # Also create classification results immediately for feature dropdown
             # This allows the classification features to appear in the map dropdown right after training
+            # Clean class names to prevent spacing issues
+            clean_class_names = [name.strip() for name in class_names] if class_names else []
             self.classification_results = {
                 'predictions': [],  # Empty until map is classified
                 'probabilities': None,
                 'positions': [],
                 'type': 'supervised',
-                'class_names': class_names
+                'class_names': clean_class_names
             }
             
             # Automatically apply the model to the current map to populate classification results
@@ -2298,15 +2737,8 @@ class MapAnalysisMainWindow(QMainWindow):
                             return
                 
                 # Step 2: Apply the same feature transformation as used during training
-                feature_transformer = None
-                feature_used = 'full'
-                
-                if feature_options['use_pca'] and hasattr(self, 'pca_analyzer') and self.pca_analyzer.pca is not None:
-                    feature_transformer = self.pca_analyzer
-                    feature_used = 'pca'
-                elif feature_options['use_nmf'] and hasattr(self, 'nmf_analyzer') and self.nmf_analyzer.nmf is not None:
-                    feature_transformer = self.nmf_analyzer
-                    feature_used = 'nmf'
+                feature_transformer = getattr(self.supervised_analyzer, 'feature_transformer', None)
+                feature_used = getattr(self.supervised_analyzer, 'feature_type', 'full')
                 
                 if feature_transformer is not None:
                     try:
@@ -2315,10 +2747,82 @@ class MapAnalysisMainWindow(QMainWindow):
                         if X_transformed is not None:
                             X = X_transformed
                             logger.info(f"Applied {actual_type} transformation to map data: {X.shape}")
+                            
+                            # Apply the same enhanced discriminative features if available
+                            if (actual_type == 'nmf' and 
+                                hasattr(self.supervised_analyzer, 'component_discriminability') and 
+                                hasattr(self.supervised_analyzer, 'enhancement_thresholds')):
+                                
+                                logger.info("Applying enhanced discriminative features to map data...")
+                                
+                                component_discriminability = self.supervised_analyzer.component_discriminability
+                                enhancement_thresholds = self.supervised_analyzer.enhancement_thresholds
+                                threshold_directions = self.supervised_analyzer.threshold_directions
+                                
+                                enhanced_features = []
+                                
+                                for comp_idx in range(X.shape[1]):
+                                    if comp_idx < len(component_discriminability):
+                                        cohen_d = component_discriminability[comp_idx]
+                                        
+                                        if cohen_d > 0.3:  # Match training threshold (0.3, not 0.5)
+                                            threshold = enhancement_thresholds[comp_idx]
+                                            direction = threshold_directions[comp_idx]
+                                            
+                                            if direction == 'positive':
+                                                enhanced_feature = np.maximum(0, X[:, comp_idx] - threshold)
+                                            elif direction == 'negative':
+                                                enhanced_feature = np.maximum(0, threshold - X[:, comp_idx])
+                                            else:
+                                                # 'none' direction - slightly downweight like in training
+                                                enhanced_feature = X[:, comp_idx] * 0.5
+                                            
+                                            logger.info(f"Map Component {comp_idx}: Enhanced with threshold={threshold:.3f}, direction={direction}")
+                                        else:
+                                            # Low discriminability - match training downweighting (0.5, not 0.1)
+                                            enhanced_feature = X[:, comp_idx] * 0.5
+                                            logger.info(f"Map Component {comp_idx}: Low discriminability, slightly downweighted")
+                                    else:
+                                        # Fallback for components beyond training range
+                                        enhanced_feature = X[:, comp_idx]
+                                        logger.warning(f"Map Component {comp_idx}: No training data, using original")
+                                    
+                                    enhanced_features.append(enhanced_feature)
+                                
+                                # Replace original features with enhanced features
+                                X_enhanced = np.column_stack(enhanced_features)
+                                
+                                # Recreate the selectivity score (match training logic)
+                                discriminability_array = np.array(component_discriminability)
+                                n_top = min(3, len(discriminability_array))  # Use top 3 or all if fewer
+                                top_components = np.argsort(discriminability_array)[-n_top:]
+                                
+                                selectivity_score = np.zeros(X.shape[0])
+                                if np.sum(discriminability_array[top_components]) > 0:
+                                    for comp_idx in top_components:
+                                        weight = discriminability_array[comp_idx] / np.sum(discriminability_array[top_components])
+                                        selectivity_score += weight * enhanced_features[comp_idx]
+                                
+                                # Recreate the ratio-based feature (match training logic)
+                                pos_signature = np.mean([enhanced_features[i] for i in range(len(enhanced_features)) 
+                                                       if i < len(threshold_directions) and threshold_directions[i] == 'positive'], axis=0) if any(d == 'positive' for d in threshold_directions) else np.zeros(X.shape[0])
+                                neg_signature = np.mean([enhanced_features[i] for i in range(len(enhanced_features)) 
+                                                       if i < len(threshold_directions) and threshold_directions[i] == 'negative'], axis=0) if any(d == 'negative' for d in threshold_directions) else np.zeros(X.shape[0])
+                                
+                                ratio_feature = pos_signature / (neg_signature + 1e-6)  # Avoid division by zero
+                                
+                                # Combine enhanced features with both selectivity scores (match training)
+                                X = np.column_stack([X_enhanced, selectivity_score, ratio_feature])
+                                
+                                logger.info(f"Applied enhanced NMF features to map: {len(enhanced_features)} components + 2 selectivity scores = {X.shape[1]} total features")
                         else:
                             logger.warning(f"Failed to apply {feature_used} transformation, using full spectrum")
+                            feature_used = 'full'
                     except Exception as e:
                         logger.warning(f"Feature transformation failed: {str(e)}, using full spectrum")
+                        feature_used = 'full'
+                else:
+                    logger.info(f"No feature transformation stored in analyzer, using {feature_used} features")
                 
                 # Step 3: Use the trained model for prediction
                 try:
@@ -2329,6 +2833,33 @@ class MapAnalysisMainWindow(QMainWindow):
                             probabilities = self.supervised_analyzer.model.predict_proba(X)
                         except:
                             probabilities = None
+                    
+                    # Add detailed logging about predictions
+                    unique_predictions, prediction_counts = np.unique(predictions, return_counts=True)
+                    logger.info(f"Classification results:")
+                    logger.info(f"  Total spectra classified: {len(predictions)}")
+                    logger.info(f"  Unique predictions: {unique_predictions}")
+                    logger.info(f"  Prediction counts: {prediction_counts}")
+                    
+                    if hasattr(self.supervised_analyzer, 'class_names') and self.supervised_analyzer.class_names:
+                        for pred_val, count in zip(unique_predictions, prediction_counts):
+                            if pred_val < len(self.supervised_analyzer.class_names):
+                                class_name = self.supervised_analyzer.class_names[pred_val]
+                                percentage = (count / len(predictions)) * 100
+                                logger.info(f"  Class '{class_name}' (label {pred_val}): {count} spectra ({percentage:.1f}%)")
+                    
+                    if probabilities is not None:
+                        logger.info(f"  Probability matrix shape: {probabilities.shape}")
+                        logger.info(f"  Average probabilities per class: {np.mean(probabilities, axis=0)}")
+                        
+                        # Find high-confidence positive predictions
+                        if hasattr(self.supervised_analyzer, 'positive_class_idx'):
+                            pos_idx = self.supervised_analyzer.positive_class_idx
+                            high_conf_positive = np.sum(probabilities[:, pos_idx] > 0.7)
+                            medium_conf_positive = np.sum(probabilities[:, pos_idx] > 0.5)
+                            logger.info(f"  High confidence positive (>70%): {high_conf_positive} spectra")
+                            logger.info(f"  Medium confidence positive (>50%): {medium_conf_positive} spectra")
+                    
                 except ValueError as e:
                     if "features" in str(e):
                         QMessageBox.critical(
@@ -2578,25 +3109,9 @@ class MapAnalysisMainWindow(QMainWindow):
             return
             
         try:
-            # Get the map control panel
-            control_panel = None
-            for name, section in self.controls_panel.sections.items():
-                if name == "map_controls" and hasattr(section['widget'], 'feature_combo'):
-                    control_panel = section['widget']
-                    break
-            
-            if control_panel is None:
-                return
-            
-            # Add clustering options to feature combo
-            current_features = [control_panel.feature_combo.itemText(i) 
-                              for i in range(control_panel.feature_combo.count())]
-            
-            cluster_feature_name = f"ML Clusters ({self.ml_results['method']})"
-            if cluster_feature_name not in current_features:
-                control_panel.feature_combo.addItem(cluster_feature_name)
-            
-            logger.info(f"Added clustering results to map features: {cluster_feature_name}")
+            # Use the comprehensive feature refresh system
+            self.refresh_all_map_features()
+            logger.info("Added clustering results to map features")
             
         except Exception as e:
             logger.error(f"Error updating map features with clustering: {e}")
@@ -2607,43 +3122,14 @@ class MapAnalysisMainWindow(QMainWindow):
             return
             
         try:
-            # Get the map control panel (should be available since we're called from map tab creation)
-            control_panel = None
-            for name, section in self.controls_panel.sections.items():
-                if name == "map_controls" and hasattr(section.get('widget'), 'feature_combo'):
-                    control_panel = section['widget']
-                    break
-            
-            if control_panel is None:
-                logger.warning("Could not find map control panel for classification features")
-                return
-            
-            # Add classification options to feature combo
-            current_features = [control_panel.feature_combo.itemText(i) 
-                              for i in range(control_panel.feature_combo.count())]
-            
-            class_type = self.classification_results['type']
-            feature_name = f"ML Classification ({class_type.title()})"
-            
-            if feature_name not in current_features:
-                control_panel.feature_combo.addItem(feature_name)
-                logger.info(f"Added classification feature: {feature_name}")
-            
-            # Also add individual class probability features if available
-            if ('class_names' in self.classification_results and 
-                self.classification_results['class_names'] is not None):
-                
-                class_names = self.classification_results['class_names']
-                for class_name in class_names:
-                    prob_feature_name = f"Class Probability: {class_name}"
-                    if prob_feature_name not in current_features:
-                        control_panel.feature_combo.addItem(prob_feature_name)
-                        logger.info(f"Added class probability feature: {prob_feature_name}")
-            
-            logger.info(f"Classification features added to map dropdown. Total features: {control_panel.feature_combo.count()}")
+            # Use the comprehensive feature refresh system
+            self.refresh_all_map_features()
+            logger.info("Added classification results to map features")
             
         except Exception as e:
             logger.error(f"Error updating map features with classification: {e}")
+            import traceback
+            traceback.print_exc()
     
     def create_ml_classification_map(self):
         """Create a map showing ML classification results."""
@@ -2698,12 +3184,24 @@ class MapAnalysisMainWindow(QMainWindow):
                 logger.warning("No probabilities or class names available for probability map")
                 return None
             
-            # Find the class index
+            # Fix: Clean up class names and make matching more robust
+            clean_class_name = class_name.strip().lower()
+            clean_class_names = [name.strip().lower() for name in class_names]
+            
+            # Find the class index with robust matching
             try:
-                class_index = list(class_names).index(class_name)
+                class_index = clean_class_names.index(clean_class_name)
             except ValueError:
-                logger.error(f"Class '{class_name}' not found in class names: {class_names}")
-                return None
+                # Try partial matching if exact match fails
+                for i, name in enumerate(clean_class_names):
+                    if clean_class_name in name or name in clean_class_name:
+                        class_index = i
+                        logger.info(f"Found partial match for '{class_name}' with '{class_names[i]}'")
+                        break
+                else:
+                    logger.error(f"Class '{class_name}' not found in class names: {class_names}")
+                    logger.error(f"Available class names: {[name.strip() for name in class_names]}")
+                    return None
             
             # Create position to probability mapping
             pos_to_probability = {}
@@ -3261,7 +3759,7 @@ class MapAnalysisMainWindow(QMainWindow):
         self.statusBar().showMessage("Comprehensive analysis report generated")
         
     def plot_comprehensive_results(self):
-        """Plot comprehensive analysis results with 2x2 layout."""
+        """Plot comprehensive analysis results with optimized 2x2 layout focusing on key analyses."""
         try:
             # Import necessary modules including matplotlib config
             import sys
@@ -3277,24 +3775,30 @@ class MapAnalysisMainWindow(QMainWindow):
             # Clear the figure
             self.results_plot_widget.figure.clear()
             
-            # Create 2x2 grid
-            gs = GridSpec(2, 2, figure=self.results_plot_widget.figure, hspace=0.3, wspace=0.3)
+            # Create 2x2 grid with improved spacing for clarity
+            gs = GridSpec(2, 2, figure=self.results_plot_widget.figure, 
+                         hspace=0.4, wspace=0.4,
+                         left=0.12, right=0.88, top=0.88, bottom=0.12)
             
-            # Plot 1: PCA scatter with positive groups
+            # Plot 1: PCA scatter with positive groups (keep as is - user likes it)
             ax1 = self.results_plot_widget.figure.add_subplot(gs[0, 0])
             self._plot_pca_scatter_with_positive_groups(ax1)
             
-            # Plot 2: NMF scatter with positive groups  
+            # Plot 2: NMF scatter with positive groups (keep as is - user likes it)
             ax2 = self.results_plot_widget.figure.add_subplot(gs[0, 1])
             self._plot_nmf_scatter_with_positive_groups(ax2)
             
-            # Plot 3: Top 5 spectral matches
+            # Plot 3: Top 5 spectral matches (improved and fixed)
             ax3 = self.results_plot_widget.figure.add_subplot(gs[1, 0])
             self._plot_top_spectral_matches(ax3)
             
-            # Plot 4: Component analysis and statistics
+            # Plot 4: Analysis statistics (focused on key metrics)
             ax4 = self.results_plot_widget.figure.add_subplot(gs[1, 1])
             self._plot_component_statistics(ax4)
+            
+            # Add overall title
+            self.results_plot_widget.figure.suptitle('Comprehensive Raman Map Analysis Results', 
+                                                    fontsize=14, fontweight='bold', y=0.98)
             
             # Update statistics text
             self._update_statistics_text()
@@ -3307,29 +3811,37 @@ class MapAnalysisMainWindow(QMainWindow):
             # Show error message
             self.results_plot_widget.figure.clear()
             ax = self.results_plot_widget.figure.add_subplot(111)
-            ax.text(0.5, 0.5, f'Error generating comprehensive results:\n{str(e)}\n\nPlease ensure all analysis steps are complete.', 
-                   ha='center', va='center', transform=ax.transAxes, fontsize=12, 
-                   bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", edgecolor="orange"))
+            ax.text(0.5, 0.5, f'Error generating comprehensive results:\n{str(e)}\n\nPlease ensure all analysis steps are complete.\n\nSteps to complete:\n• Load map data\n• Run PCA analysis\n• Run NMF analysis\n• Train and apply ML model (optional)', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=11, 
+                   bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", edgecolor="orange"))
             ax.set_title('Comprehensive Results - Error')
             ax.axis('off')
             self.results_plot_widget.canvas.draw()
             
     def _plot_pca_scatter_with_positive_groups(self, ax):
         """Plot PCA scatter plot with positive groups color-coded."""
-        if not hasattr(self, 'pca_results') or self.pca_results is None:
-            ax.text(0.5, 0.5, 'No PCA results available.\nRun PCA analysis first.', 
-                   ha='center', va='center', transform=ax.transAxes, fontsize=10)
-            ax.set_title('PCA Analysis - Not Available')
-            ax.axis('off')
-            return
-            
         try:
-            # PCA results use 'components' key, not 'transformed_data'
-            pca_transformed = self.pca_results.get('components', self.pca_results.get('transformed_data'))
+            if not hasattr(self, 'pca_results') or self.pca_results is None:
+                ax.text(0.5, 0.5, 'PCA results not available.\nRun PCA analysis first.', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.set_title('PCA Analysis - Not Available')
+                ax.axis('off')
+                return
+            
+            # PCA results use 'transformed_data' key
+            pca_transformed = self.pca_results.get('transformed_data', self.pca_results.get('components'))
             if pca_transformed is None:
                 ax.text(0.5, 0.5, 'PCA transformed data not available.\nCheck PCA results structure.', 
                        ha='center', va='center', transform=ax.transAxes, fontsize=10)
                 ax.set_title('PCA Analysis - Data Not Available')
+                ax.axis('off')
+                return
+            
+            # Use first two components for scatter plot
+            if pca_transformed.shape[1] < 2:
+                ax.text(0.5, 0.5, 'PCA results have less than 2 components.\nCannot create scatter plot.', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.set_title('PCA Analysis - Insufficient Components')
                 ax.axis('off')
                 return
             
@@ -3346,13 +3858,13 @@ class MapAnalysisMainWindow(QMainWindow):
                 # Plot positive groups prominently
                 if np.any(positive_mask):
                     ax.scatter(pca_transformed[positive_mask, 0], pca_transformed[positive_mask, 1], 
-                             c='red', alpha=0.8, s=40, label='Positive Groups', edgecolors='darkred', linewidths=0.5)
+                             c='orange', alpha=0.8, s=40, label='Positive Groups', edgecolors='darkorange', linewidths=0.5)
             else:
                 # No classification available, use clustering if available
                 if hasattr(self, 'pca_results') and 'cluster_labels' in self.pca_results:
                     cluster_labels = self.pca_results['cluster_labels']
                     unique_labels = np.unique(cluster_labels)
-                    colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+                    colors = plt.cm.Set2(np.linspace(0, 1, len(unique_labels)))
                     
                     for i, label in enumerate(unique_labels):
                         mask = cluster_labels == label
@@ -3363,29 +3875,31 @@ class MapAnalysisMainWindow(QMainWindow):
                     ax.scatter(pca_transformed[:, 0], pca_transformed[:, 1], 
                              c='blue', alpha=0.6, s=20)
             
-            ax.set_xlabel(f'PC1 ({self.pca_results["explained_variance_ratio"][0]:.1%} variance)')
-            ax.set_ylabel(f'PC2 ({self.pca_results["explained_variance_ratio"][1]:.1%} variance)')
+            ax.set_xlabel('PC1')
+            ax.set_ylabel('PC2')
             ax.set_title('PCA Analysis with Positive Groups')
             ax.grid(True, alpha=0.3)
             if positive_mask is not None or (hasattr(self, 'pca_results') and 'cluster_labels' in self.pca_results):
-                ax.legend(fontsize=8)
+                # Use bbox_to_anchor to prevent tight_layout issues
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
                 
         except Exception as e:
-            ax.text(0.5, 0.5, f'Error plotting PCA results:\n{str(e)}', 
+            logger.error(f"Error plotting PCA scatter: {e}")
+            ax.text(0.5, 0.5, f'Error plotting PCA scatter:\n{str(e)}', 
                    ha='center', va='center', transform=ax.transAxes, fontsize=10)
             ax.set_title('PCA Analysis - Error')
             ax.axis('off')
-            
+
     def _plot_nmf_scatter_with_positive_groups(self, ax):
         """Plot NMF scatter plot with positive groups color-coded."""
-        if not hasattr(self, 'nmf_results') or self.nmf_results is None:
-            ax.text(0.5, 0.5, 'No NMF results available.\nRun NMF analysis first.', 
-                   ha='center', va='center', transform=ax.transAxes, fontsize=10)
-            ax.set_title('NMF Analysis - Not Available')
-            ax.axis('off')
-            return
-            
         try:
+            if not hasattr(self, 'nmf_results') or self.nmf_results is None:
+                ax.text(0.5, 0.5, 'NMF results not available.\nRun NMF analysis first.', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.set_title('NMF Analysis - Not Available')
+                ax.axis('off')
+                return
+            
             # NMF results use 'components' key, not 'transformed_data'
             nmf_transformed = self.nmf_results.get('components', self.nmf_results.get('transformed_data'))
             if nmf_transformed is None:
@@ -3438,7 +3952,15 @@ class MapAnalysisMainWindow(QMainWindow):
             ax.set_title('NMF Analysis with Positive Groups')
             ax.grid(True, alpha=0.3)
             if positive_mask is not None or (hasattr(self, 'nmf_results') and 'cluster_labels' in self.nmf_results):
-                ax.legend(fontsize=8)
+                # Use bbox_to_anchor to prevent tight_layout issues
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+                
+        except Exception as e:
+            logger.error(f"Error plotting NMF scatter: {e}")
+            ax.text(0.5, 0.5, f'Error plotting NMF scatter:\n{str(e)}', 
+                   ha='center', va='center', transform=ax.transAxes, fontsize=10)
+            ax.set_title('NMF Analysis - Error')
+            ax.axis('off')
                 
         except Exception as e:
             ax.text(0.5, 0.5, f'Error plotting NMF results:\n{str(e)}', 
@@ -3449,6 +3971,9 @@ class MapAnalysisMainWindow(QMainWindow):
     def _plot_top_spectral_matches(self, ax):
         """Plot top 5 spectral matches from classification."""
         try:
+            import numpy as np
+            import matplotlib.pyplot as plt
+            
             # Check if we have spectral data to analyze
             if not hasattr(self, 'map_data') or self.map_data is None:
                 ax.text(0.5, 0.5, 'No map data available.\nLoad map data first.', 
@@ -3457,42 +3982,33 @@ class MapAnalysisMainWindow(QMainWindow):
                 ax.axis('off')
                 return
             
-            # Get positive groups if available
+            # First try to get positive groups from ML classification
             positive_mask = self._get_positive_groups_mask()
             
+            # If no positive groups from ML, try to find interesting spectra from other analyses
             if positive_mask is None or not np.any(positive_mask):
-                ax.text(0.5, 0.5, 'No positive groups identified.\nRun ML classification first.', 
+                # Try to identify interesting spectra from PCA/NMF results
+                positive_mask = self._find_interesting_spectra_fallback()
+            
+            if positive_mask is None or not np.any(positive_mask):
+                ax.text(0.5, 0.5, 'No interesting spectra identified.\n\nTry one of these steps:\n• Run ML classification\n• Run PCA/NMF analysis\n• Check that analysis completed successfully', 
                        ha='center', va='center', transform=ax.transAxes, fontsize=10)
-                ax.set_title('Top Spectral Matches - No Positive Groups')
+                ax.set_title('Top Spectral Matches - No Interesting Groups')
                 ax.axis('off')
                 return
             
-            # Get spectra from positive groups
+            # Get spectra from positive/interesting groups
             positive_indices = np.where(positive_mask)[0]
             
-            # Limit to top 5 positive spectra (by intensity or classification confidence if available)
+            # Limit to top 5 interesting spectra
             if len(positive_indices) > 5:
-                # Try to get classification probabilities for ranking
-                if hasattr(self, 'classification_results') and 'probabilities' in self.classification_results:
-                    probs = self.classification_results['probabilities']
-                    if probs is not None and len(probs) == len(positive_mask):
-                        # Get probabilities for positive class
-                        positive_probs = probs[positive_mask]
-                        if len(positive_probs.shape) > 1:
-                            positive_probs = positive_probs[:, 1]  # Assume positive class is index 1
-                        
-                        # Sort by probability and take top 5
-                        sorted_indices = np.argsort(positive_probs)[-5:]
-                        top_positive_indices = positive_indices[sorted_indices]
-                    else:
-                        top_positive_indices = positive_indices[:5]
-                else:
-                    top_positive_indices = positive_indices[:5]
+                # Try to rank by classification confidence or other metrics
+                top_positive_indices = self._rank_interesting_spectra(positive_indices, positive_mask)[:5]
             else:
                 top_positive_indices = positive_indices
             
             # Plot the spectra
-            colors = plt.cm.Reds(np.linspace(0.4, 1.0, len(top_positive_indices)))
+            colors = plt.cm.tab10(np.linspace(0, 1, len(top_positive_indices)))
             
             # Get all spectra as a list for indexing
             all_spectra = list(self.map_data.spectra.values())
@@ -3512,14 +4028,14 @@ class MapAnalysisMainWindow(QMainWindow):
                     continue  # Skip spectra without data
                 
                 # Normalize for display
-                intensities_norm = (intensities - intensities.min()) / (intensities.max() - intensities.min()) + plotted_count * 0.2
+                intensities_norm = (intensities - intensities.min()) / (intensities.max() - intensities.min()) + plotted_count * 0.3
                 
                 ax.plot(wavenumbers, intensities_norm, color=colors[plotted_count], 
-                       linewidth=1.5, alpha=0.8, label=f'Positive #{plotted_count+1}')
+                       linewidth=1.5, alpha=0.8, label=f'Match #{plotted_count+1} (pos: {spectrum.x_pos}, {spectrum.y_pos})')
                 plotted_count += 1
             
             if plotted_count == 0:
-                ax.text(0.5, 0.5, 'No valid positive spectra found for plotting.', 
+                ax.text(0.5, 0.5, 'No valid spectra found for plotting.\nCheck that map data contains valid spectral information.', 
                        ha='center', va='center', transform=ax.transAxes, fontsize=10)
                 ax.set_title('Top Spectral Matches - No Valid Data')
                 ax.axis('off')
@@ -3527,8 +4043,8 @@ class MapAnalysisMainWindow(QMainWindow):
             
             ax.set_xlabel('Wavenumber (cm⁻¹)')
             ax.set_ylabel('Normalized Intensity (offset)')
-            ax.set_title('Top Positive Group Spectra')
-            ax.legend(fontsize=8)
+            ax.set_title(f'Top {plotted_count} Interesting Spectra')
+            ax.legend(fontsize=8, loc='upper right')
             ax.grid(True, alpha=0.3)
             
         except Exception as e:
@@ -3536,71 +4052,176 @@ class MapAnalysisMainWindow(QMainWindow):
                    ha='center', va='center', transform=ax.transAxes, fontsize=10)
             ax.set_title('Top Spectral Matches - Error')
             ax.axis('off')
-            
-    def _plot_component_statistics(self, ax):
-        """Plot component analysis and statistics."""
+    
+    def _find_interesting_spectra_fallback(self):
+        """Find interesting spectra when ML classification is not available."""
         try:
-            # Collect statistics from all analyses
+            import numpy as np
+            
+            # Try to use PCA outliers
+            if hasattr(self, 'pca_results') and self.pca_results is not None:
+                pca_transformed = self.pca_results.get('components', self.pca_results.get('transformed_data'))
+                if pca_transformed is not None and pca_transformed.shape[0] > 0:
+                    # Find outliers in PCA space (furthest from center)
+                    center = np.mean(pca_transformed[:, :2], axis=0)
+                    distances = np.linalg.norm(pca_transformed[:, :2] - center, axis=1)
+                    # Consider top 10% as outliers/interesting
+                    threshold = np.percentile(distances, 90)
+                    return distances >= threshold
+            
+            # Try to use NMF high-contribution spectra
+            if hasattr(self, 'nmf_results') and self.nmf_results is not None:
+                nmf_transformed = self.nmf_results.get('components', self.nmf_results.get('transformed_data'))
+                if nmf_transformed is not None and nmf_transformed.shape[0] > 0:
+                    # Find spectra with high contributions to any component
+                    max_contributions = np.max(nmf_transformed, axis=1)
+                    threshold = np.percentile(max_contributions, 85)
+                    return max_contributions >= threshold
+            
+            # Fallback: use intensity-based selection
+            if hasattr(self, 'map_data') and self.map_data is not None:
+                spectra_intensities = []
+                for spectrum in self.map_data.spectra.values():
+                    intensities = (spectrum.processed_intensities 
+                                 if self.use_processed and spectrum.processed_intensities is not None
+                                 else spectrum.intensities)
+                    if intensities is not None:
+                        # Use total intensity or maximum peak as criterion
+                        spectra_intensities.append(np.max(intensities))
+                    else:
+                        spectra_intensities.append(0)
+                
+                if spectra_intensities:
+                    intensities_array = np.array(spectra_intensities)
+                    # Select top 10% by intensity
+                    threshold = np.percentile(intensities_array, 90)
+                    return intensities_array >= threshold
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error finding interesting spectra fallback: {e}")
+            return None
+    
+    def _rank_interesting_spectra(self, positive_indices, positive_mask):
+        """Rank interesting spectra by various criteria."""
+        try:
+            import numpy as np
+            
+            # Try to get classification probabilities for ranking
+            if hasattr(self, 'classification_results') and 'probabilities' in self.classification_results:
+                probs = self.classification_results['probabilities']
+                if probs is not None and len(probs) == len(positive_mask):
+                    # Get probabilities for positive class
+                    positive_probs = probs[positive_mask]
+                    if len(positive_probs.shape) > 1:
+                        positive_probs = positive_probs[:, 1]  # Assume positive class is index 1
+                    
+                    # Sort by probability and take highest confidence
+                    sorted_indices = np.argsort(positive_probs)[-len(positive_indices):][::-1]
+                    return positive_indices[sorted_indices]
+            
+            # Try ranking by PCA distance from center
+            if hasattr(self, 'pca_results') and self.pca_results is not None:
+                pca_transformed = self.pca_results.get('components', self.pca_results.get('transformed_data'))
+                if pca_transformed is not None:
+                    center = np.mean(pca_transformed[:, :2], axis=0)
+                    distances = np.linalg.norm(pca_transformed[positive_indices, :2] - center, axis=1)
+                    sorted_indices = np.argsort(distances)[::-1]  # Highest distances first
+                    return positive_indices[sorted_indices]
+            
+            # Try ranking by NMF contribution
+            if hasattr(self, 'nmf_results') and self.nmf_results is not None:
+                nmf_transformed = self.nmf_results.get('components', self.nmf_results.get('transformed_data'))
+                if nmf_transformed is not None:
+                    max_contributions = np.max(nmf_transformed[positive_indices], axis=1)
+                    sorted_indices = np.argsort(max_contributions)[::-1]  # Highest contributions first
+                    return positive_indices[sorted_indices]
+            
+            # Default: return as-is
+            return positive_indices
+            
+        except Exception as e:
+            logger.warning(f"Error ranking interesting spectra: {e}")
+            return positive_indices
+    
+    def _plot_component_statistics(self, ax):
+        """Plot focused analysis statistics with key metrics."""
+        try:
+            # Collect key statistics from all analyses
             stats_text = []
             
-            # PCA Statistics
+            # Data Overview
+            if hasattr(self, 'map_data') and self.map_data is not None:
+                n_spectra = len(self.map_data.spectra)
+                stats_text.append("=== DATA OVERVIEW ===")
+                stats_text.append(f"   Total spectra: {n_spectra}")
+                stats_text.append("")
+            
+            # PCA Statistics (focused on key info)
             if hasattr(self, 'pca_results') and self.pca_results is not None:
                 pca_variance = self.pca_results['explained_variance_ratio'][:3]  # Top 3 components
                 stats_text.append("=== PCA ANALYSIS ===")
-                for i, var in enumerate(pca_variance):
-                    stats_text.append(f"PC{i+1}: {var:.1%} variance")
+                stats_text.append(f"   PC1: {pca_variance[0]:.1%}")
+                stats_text.append(f"   PC2: {pca_variance[1]:.1%}")
+                if len(pca_variance) > 2:
+                    stats_text.append(f"   PC3: {pca_variance[2]:.1%}")
                 total_var = np.sum(pca_variance)
-                stats_text.append(f"Total (3 comp): {total_var:.1%}")
+                stats_text.append(f"   Total (3 PC): {total_var:.1%}")
                 stats_text.append("")
             
             # NMF Statistics
             if hasattr(self, 'nmf_results') and self.nmf_results is not None:
                 n_components = self.nmf_results.get('n_components', 0)
                 reconstruction_error = self.nmf_results.get('reconstruction_error', 0)
-                stats_text.append("=== NMF ANALYSIS ===")
-                stats_text.append(f"Components: {n_components}")
-                stats_text.append(f"Reconstruction error: {reconstruction_error:.3f}")
+                stats_text.append("=== NMF DECOMPOSITION ===")
+                stats_text.append(f"   Components: {n_components}")
+                stats_text.append(f"   Reconstruction: {reconstruction_error:.3f}")
                 stats_text.append("")
             
-            # ML Classification Statistics
+            # ML Classification Results (key finding)
             positive_mask = self._get_positive_groups_mask()
             if positive_mask is not None:
                 n_positive = np.sum(positive_mask)
                 n_total = len(positive_mask)
-                positive_rate = n_positive / n_total if n_total > 0 else 0
+                positive_rate = n_positive / n_total * 100 if n_total > 0 else 0
                 
-                stats_text.append("=== ML CLASSIFICATION ===")
-                stats_text.append(f"Total spectra: {n_total}")
-                stats_text.append(f"Positive groups: {n_positive}")
-                stats_text.append(f"Positive rate: {positive_rate:.1%}")
+                stats_text.append("=== INTERESTING SPECTRA ===")
+                stats_text.append(f"   Found: {n_positive}/{n_total}")
+                stats_text.append(f"   Rate: {positive_rate:.1f}%")
                 
-                if hasattr(self, 'classification_results'):
-                    if 'type' in self.classification_results:
-                        stats_text.append(f"Type: {self.classification_results['type']}")
-                    if 'class_names' in self.classification_results and self.classification_results['class_names']:
-                        stats_text.append(f"Classes: {', '.join(self.classification_results['class_names'])}")
+                # Add interpretation
+                if positive_rate < 5:
+                    stats_text.append(f"   -> Few outliers detected")
+                elif positive_rate < 20:
+                    stats_text.append(f"   -> Good separation achieved")
+                else:
+                    stats_text.append(f"   -> Many groups detected")
                 
                 stats_text.append("")
             
-            # Template Fitting Statistics
-            if hasattr(self, 'template_manager') and self.template_manager.templates:
-                stats_text.append("=== TEMPLATE ANALYSIS ===")
-                stats_text.append(f"Templates loaded: {len(self.template_manager.templates)}")
-                if hasattr(self, 'template_fit_results'):
-                    avg_r2 = np.mean([r['r_squared'] for r in self.template_fit_results.values()])
-                    stats_text.append(f"Avg. R²: {avg_r2:.3f}")
+            # Template Fitting (if available)
+            if hasattr(self, 'template_manager') and self.template_manager and self.template_manager.templates:
+                stats_text.append("=== TEMPLATE FITTING ===")
+                stats_text.append(f"   Templates: {len(self.template_manager.templates)}")
+                if hasattr(self, 'template_fit_results') and self.template_fit_results:
+                    avg_r2 = np.mean([r.get('r_squared', 0) for r in self.template_fit_results.values()])
+                    stats_text.append(f"   Avg. fit R²: {avg_r2:.3f}")
                 stats_text.append("")
             
-            # Display statistics
+            # Display statistics with improved formatting
             if stats_text:
-                ax.text(0.05, 0.95, '\n'.join(stats_text), transform=ax.transAxes, 
+                text_content = '\n'.join(stats_text)
+                ax.text(0.05, 0.95, text_content, transform=ax.transAxes, 
                        fontsize=9, verticalalignment='top', fontfamily='monospace',
-                       bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+                       bbox=dict(boxstyle="round,pad=0.4", facecolor="#f8f9fa", 
+                               edgecolor="#dee2e6", alpha=0.9))
             else:
-                ax.text(0.5, 0.5, 'No analysis results available.\nComplete analysis steps first.', 
-                       ha='center', va='center', transform=ax.transAxes, fontsize=10)
+                ax.text(0.5, 0.5, 'No analysis results available\n\nComplete these steps:\n• Run PCA analysis\n• Run NMF analysis\n• Apply ML classification (optional)', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=10,
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor="lightyellow", alpha=0.8))
             
-            ax.set_title('Analysis Statistics')
+            ax.set_title('Key Analysis Summary', fontsize=11, fontweight='bold')
             ax.axis('off')
             
         except Exception as e:
@@ -3619,9 +4240,30 @@ class MapAnalysisMainWindow(QMainWindow):
             if predictions is None:
                 return None
             
-            # For supervised classification, positive class is typically 1
+            # For supervised classification, identify the minority class as "positive"
             if self.classification_results.get('type') == 'supervised':
-                return predictions == 1
+                import numpy as np
+                
+                # Get class names if available to determine which is the minority class
+                class_names = self.classification_results.get('class_names', [])
+                
+                # Count occurrences of each class
+                unique_classes, counts = np.unique(predictions, return_counts=True)
+                
+                # If we have class names, try to identify "plastic" as the positive class
+                if class_names:
+                    try:
+                        plastic_idx = class_names.index('plastic')
+                        # Return mask for plastic class
+                        return predictions == plastic_idx
+                    except (ValueError, IndexError):
+                        # If 'plastic' not found, fall back to minority class detection
+                        pass
+                
+                # Fall back to minority class detection (smallest count)
+                minority_class_idx = unique_classes[np.argmin(counts)]
+                logger.info(f"Identifying minority class {minority_class_idx} as positive class. Counts: {dict(zip(unique_classes, counts))}")
+                return predictions == minority_class_idx
             
             # For unsupervised clustering, we need to identify which cluster(s) are "interesting"
             # This is heuristic - typically the smallest clusters are more likely to be positive
@@ -4243,7 +4885,7 @@ All spectra have been processed and cleaned data is now available for analysis."
         if hasattr(self, 'current_selected_spectrum') and self.current_selected_spectrum is not None:
             test_spectrum = self.current_selected_spectrum
         # Fallback to using marker position
-        elif hasattr(self, 'current_marker_position'):
+        elif hasattr(self, 'current_marker_position') and self.current_marker_position is not None:
             x_marker, y_marker = self.current_marker_position
             test_spectrum = self.find_closest_spectrum(x_marker, y_marker)
         
@@ -4782,34 +5424,18 @@ The map is now ready for analysis!"""
         """Update the template status in the map control panel."""
         try:
             # Get current map control panel
-            sections = self.controls_panel.sections
-            if "map_controls" in sections:
-                control_panel = sections["map_controls"]["widget"]
-                if hasattr(control_panel, 'template_fitting_group'):
-                    # Check if templates are loaded
-                    template_count = self.template_manager.get_template_count()
-                    
-                    if template_count > 0:
-                        # Show template fitting section
-                        control_panel.template_fitting_group.setVisible(True)
-                        control_panel.template_status_label.setText(f"{template_count} templates loaded")
-                        control_panel.fit_templates_btn.setEnabled(True)
-                        
-                        # Update fitting results status
-                        if hasattr(self, 'template_fitting_results'):
-                            fitted_count = len(self.template_fitting_results['coefficients'])
-                            avg_r_squared = sum(self.template_fitting_results['r_squared'].values()) / len(self.template_fitting_results['r_squared']) if self.template_fitting_results['r_squared'] else 0
-                            control_panel.fitting_results_label.setText(
-                                f"Fitted {fitted_count} spectra (avg R²: {avg_r_squared:.3f})"
-                            )
-                        else:
-                            control_panel.fitting_results_label.setText("No fitting results available")
-                    else:
-                        # Hide template fitting section
-                        control_panel.template_fitting_group.setVisible(False)
-                        
+            control_panel = self.get_current_map_control_panel()
+            if control_panel and hasattr(self, 'template_fitting_results'):
+                # Template fitting has been performed
+                total_templates = len(self.template_fitting_results['template_names'])
+                total_spectra = len(self.template_fitting_results['coefficients'])
+                
+                status_text = f"Templates fitted: {total_templates} templates, {total_spectra} spectra"
+                logger.info(f"Template status: {status_text}")
+            else:
+                logger.info("No template fitting results available")
         except Exception as e:
-            logger.error(f"Error updating map template status: {e}")
+            logger.error(f"Error updating template status: {e}")
 
     def show_model_result_map(self, model_name: str):
         """Manually show a model result map by setting the current feature."""
@@ -4992,3 +5618,2922 @@ The map is now ready for analysis!"""
             
         except Exception as e:
             logger.error(f"Error in debug_and_fix_map_features: {e}")
+
+    def debug_ml_training_features(self):
+        """Debug ML training to understand what features the model is learning from."""
+        if not hasattr(self, 'ml_data_manager') or not self.ml_data_manager.class_data:
+            print("No training data loaded")
+            return
+        
+        if not hasattr(self, 'nmf_analyzer') or self.nmf_analyzer.nmf is None:
+            print("No NMF model available")
+            return
+        
+        print("\n=== ML Training Feature Analysis ===")
+        
+        try:
+            # Get training data
+            X, y, class_names, common_wavenumbers = self.ml_data_manager.get_training_data(self.preprocessor)
+            print(f"Training data loaded: {X.shape[0]} spectra, {X.shape[1]} features")
+            print(f"Classes: {class_names}")
+            print(f"Class distribution: {np.unique(y, return_counts=True)}")
+            
+            # Transform with NMF
+            X_nmf, feature_type = self.nmf_analyzer.transform_data(X, fallback_to_full=True)
+            print(f"\nNMF transformation: {X.shape} -> {X_nmf.shape}")
+            print(f"Feature type used: {feature_type}")
+            
+            if feature_type == 'nmf':
+                # Analyze NMF components for each class
+                print(f"\n=== NMF Component Analysis by Class ===")
+                
+                for class_idx, class_name in enumerate(class_names):
+                    class_mask = y == class_idx
+                    class_spectra_nmf = X_nmf[class_mask]
+                    
+                    print(f"\nClass '{class_name}' ({np.sum(class_mask)} spectra):")
+                    mean_components = np.mean(class_spectra_nmf, axis=0)
+                    std_components = np.std(class_spectra_nmf, axis=0)
+                    
+                    for comp_idx in range(len(mean_components)):
+                        print(f"  Component {comp_idx}: mean={mean_components[comp_idx]:.3f}, std={std_components[comp_idx]:.3f}")
+                    
+                    # Find most discriminative components
+                    print(f"  Dominant components: {np.argsort(mean_components)[::-1][:3]}")
+                
+                # Compare with map NMF
+                print(f"\n=== Map NMF Component Analysis ===")
+                if hasattr(self, 'nmf_analyzer') and self.nmf_analyzer.components is not None:
+                    map_components = self.nmf_analyzer.components
+                    print(f"Map has {map_components.shape[0]} spectra, {map_components.shape[1]} NMF components")
+                    
+                    for comp_idx in range(map_components.shape[1]):
+                        comp_values = map_components[:, comp_idx]
+                        print(f"  Map Component {comp_idx}: mean={np.mean(comp_values):.3f}, std={np.std(comp_values):.3f}, max={np.max(comp_values):.3f}")
+                        
+                        # Find pixels with high values for this component
+                        high_threshold = np.percentile(comp_values, 95)
+                        high_pixels = np.sum(comp_values > high_threshold)
+                        print(f"    High-value pixels (>95th percentile): {high_pixels}/{len(comp_values)} ({100*high_pixels/len(comp_values):.1f}%)")
+                
+                # Check if training and map NMF ranges are compatible
+                print(f"\n=== Training vs Map NMF Range Comparison ===")
+                training_ranges = [(np.min(X_nmf[:, i]), np.max(X_nmf[:, i])) for i in range(X_nmf.shape[1])]
+                map_ranges = [(np.min(map_components[:, i]), np.max(map_components[:, i])) for i in range(map_components.shape[1])]
+                
+                for comp_idx in range(len(training_ranges)):
+                    train_min, train_max = training_ranges[comp_idx]
+                    map_min, map_max = map_ranges[comp_idx]
+                    overlap = max(0, min(train_max, map_max) - max(train_min, map_min))
+                    train_range = train_max - train_min
+                    map_range = map_max - map_min
+                    
+                    print(f"  Component {comp_idx}:")
+                    print(f"    Training range: [{train_min:.3f}, {train_max:.3f}] (width: {train_range:.3f})")
+                    print(f"    Map range: [{map_min:.3f}, {map_max:.3f}] (width: {map_range:.3f})")
+                    print(f"    Overlap: {overlap:.3f} ({100*overlap/max(train_range,map_range):.1f}% of larger range)")
+                    
+                    if overlap < 0.1 * max(train_range, map_range):
+                        print(f"    ⚠️  WARNING: Poor overlap for component {comp_idx}!")
+                
+            # Train a simple model and examine feature importance
+            if feature_type == 'nmf' and X_nmf.shape[1] > 1:
+                print(f"\n=== Feature Importance Analysis ===")
+                from sklearn.ensemble import RandomForestClassifier
+                from sklearn.model_selection import train_test_split
+                
+                X_train, X_test, y_train, y_test = train_test_split(X_nmf, y, test_size=0.3, random_state=42, stratify=y)
+                rf = RandomForestClassifier(n_estimators=100, random_state=42)
+                rf.fit(X_train, y_train)
+                
+                importance = rf.feature_importances_
+                print(f"Feature importance (NMF components):")
+                for comp_idx, imp in enumerate(importance):
+                    print(f"  Component {comp_idx}: {imp:.3f}")
+                
+                # Test predictions
+                y_pred = rf.predict(X_test)
+                accuracy = np.mean(y_pred == y_test)
+                print(f"Training accuracy on test set: {accuracy:.3f}")
+                
+                # Show some prediction examples
+                print(f"\nPrediction examples (first 10 test samples):")
+                for i in range(min(10, len(y_test))):
+                    actual_class = class_names[y_test[i]]
+                    pred_class = class_names[y_pred[i]]
+                    correct = "✓" if y_test[i] == y_pred[i] else "✗"
+                    print(f"  {correct} Actual: {actual_class}, Predicted: {pred_class}")
+                    print(f"    NMF features: {X_test[i]}")
+            
+            print(f"\n=== Recommendations ===")
+            if feature_type != 'nmf':
+                print("• NMF transformation failed - check if NMF was run successfully")
+            else:
+                # Check for potential issues
+                issues = []
+                
+                # Check for very small NMF values
+                if np.max(X_nmf) < 0.1:
+                    issues.append("NMF component values are very small - may need different scaling")
+                
+                # Check for component dominance
+                component_variances = np.var(X_nmf, axis=0)
+                if np.max(component_variances) > 10 * np.min(component_variances):
+                    dominant_comp = np.argmax(component_variances)
+                    issues.append(f"Component {dominant_comp} dominates variance - may need different n_components")
+                
+                # Check class separability in NMF space
+                if len(class_names) == 2:
+                    class0_mean = np.mean(X_nmf[y == 0], axis=0)
+                    class1_mean = np.mean(X_nmf[y == 1], axis=0)
+                    separation = np.linalg.norm(class0_mean - class1_mean)
+                    combined_std = np.mean([np.std(X_nmf[y == 0], axis=0), np.std(X_nmf[y == 1], axis=0)])
+                    separability = separation / np.mean(combined_std)
+                    
+                    if separability < 1.0:
+                        issues.append(f"Poor class separation in NMF space (separability: {separability:.2f})")
+                
+                if issues:
+                    print("• Issues detected:")
+                    for issue in issues:
+                        print(f"  - {issue}")
+                    print("• Suggestions:")
+                    print("  - Try different number of NMF components")
+                    print("  - Check if your training spectra have the expected spectral features")
+                    print("  - Verify that NMF is capturing meaningful chemical information")
+                    print("  - Consider using full spectrum features instead of NMF")
+                else:
+                    print("• No obvious issues detected with NMF features")
+                    print("• The ML model should be learning meaningful patterns")
+                    print("• Check if the background spectra have unexpected similarity to training features")
+                
+        except Exception as e:
+            print(f"Error during feature analysis: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def show_ml_feature_info(self):
+        """Show detailed information about ML features and training data."""
+        try:
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("ML Feature Information")
+            dialog.setMinimumSize(800, 600)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Create text area for information
+            info_text = QTextEdit()
+            info_text.setReadOnly(True)
+            info_text.setFont(QFont("Courier", 10))  # Monospace font for better formatting
+            
+            # Gather comprehensive ML information
+            info_content = "=== ML TRAINING DIAGNOSTIC INFORMATION ===\n\n"
+            
+            # 1. Training Data Information
+            info_content += "1. TRAINING DATA STATUS:\n"
+            if hasattr(self, 'ml_data_manager') and self.ml_data_manager.class_data:
+                class_info = self.ml_data_manager.get_class_info()
+                info_content += f"   ✓ Training data loaded\n"
+                info_content += f"   Classes: {class_info['n_classes']}\n"
+                for class_name, count in class_info['class_counts'].items():
+                    info_content += f"     - {class_name}: {count} spectra\n"
+            else:
+                info_content += "   ❌ No training data loaded\n"
+            
+            # 2. Model Information
+            info_content += "\n2. MODEL STATUS:\n"
+            if hasattr(self, 'supervised_analyzer') and self.supervised_analyzer.model is not None:
+                info_content += f"   ✓ Supervised model trained\n"
+                info_content += f"   Model type: {getattr(self.supervised_analyzer, 'model_type', 'Unknown')}\n"
+                
+                # Training performance
+                if hasattr(self, 'ml_results') and self.ml_results.get('type') == 'supervised':
+                    info_content += f"   Training accuracy: {self.ml_results.get('accuracy', 'Unknown'):.3f}\n"
+            else:
+                info_content += "   ❌ No supervised model trained\n"
+            
+            # 3. Classification Results
+            info_content += "\n3. CLASSIFICATION RESULTS:\n"
+            if hasattr(self, 'classification_results') and self.classification_results:
+                predictions = self.classification_results.get('predictions', [])
+                if len(predictions) > 0:
+                    unique_preds, counts = np.unique(predictions, return_counts=True)
+                    info_content += f"   ✓ Map classified - {len(predictions)} spectra\n"
+                    
+                    class_names = self.classification_results.get('class_names', [])
+                    for pred_val, count in zip(unique_preds, counts):
+                        if pred_val < len(class_names):
+                            class_name = class_names[pred_val]
+                            percentage = (count / len(predictions)) * 100
+                            info_content += f"     - {class_name}: {count} spectra ({percentage:.1f}%)\n"
+                else:
+                    info_content += "   ❌ No classification results\n"
+            else:
+                info_content += "   ❌ No classification results\n"
+            
+            # 4. Recommendations
+            info_content += "\n4. RECOMMENDATIONS:\n"
+            if not hasattr(self, 'ml_data_manager') or not self.ml_data_manager.class_data:
+                info_content += "   🔧 Load training data first using 'Load Training Data Folders'\n"
+            elif not hasattr(self, 'supervised_analyzer') or self.supervised_analyzer.model is None:
+                info_content += "   🔧 Train a supervised model using the ML tab\n"
+            elif not hasattr(self, 'classification_results') or not self.classification_results:
+                info_content += "   🔧 Apply the trained model to the map using 'Apply Model to Map'\n"
+            else:
+                info_content += "   ✓ ML pipeline appears to be working\n"
+            
+            info_text.setPlainText(info_content)
+            layout.addWidget(info_text)
+            
+            # Add close button
+            close_btn = StandardButton("Close")
+            close_btn.clicked.connect(dialog.accept)
+            layout.addWidget(close_btn)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error showing ML feature info:\n{str(e)}")
+            logger.error(f"Error in show_ml_feature_info: {e}")
+
+    def calculate_template_statistics(self):
+        """Calculate comprehensive template fitting statistics."""
+        if not hasattr(self, 'template_fitting_results') or not self.template_fitting_results:
+            return None
+            
+        import numpy as np
+        from collections import defaultdict
+        
+        try:
+            coefficients = self.template_fitting_results['coefficients']
+            r_squared_values = self.template_fitting_results['r_squared']
+            template_names = self.template_fitting_results['template_names']
+            use_baseline = self.template_fitting_results.get('use_baseline', False)
+            
+            # Adjust for baseline if present
+            n_templates = len(template_names)
+            
+            # Initialize statistics containers
+            stats = {
+                'template_names': template_names,
+                'total_spectra': len(coefficients),
+                'mean_r_squared': np.mean(list(r_squared_values.values())),
+                'relative_contributions': {},  # Mean relative contribution per template
+                'dominance_count': defaultdict(int),  # How often each template dominates
+                'coverage_stats': {},  # Coverage analysis
+                'template_correlations': {},  # Template interaction analysis
+                'quality_by_template': {},  # R² when template dominates
+                'spatial_distribution': {}  # Spatial characteristics
+            }
+            
+            # Extract coefficient arrays
+            coeff_arrays = []
+            positions = []
+            r_squared_list = []
+            
+            for pos, coeffs in coefficients.items():
+                # Only consider template coefficients (exclude baseline if present)
+                template_coeffs = coeffs[:n_templates]
+                coeff_arrays.append(template_coeffs)
+                positions.append(pos)
+                r_squared_list.append(r_squared_values[pos])
+            
+            coeff_matrix = np.array(coeff_arrays)  # Shape: (n_spectra, n_templates)
+            r_squared_array = np.array(r_squared_list)
+            
+            # 1. Relative Contributions (normalize each spectrum to sum to 100%)
+            spectrum_totals = np.sum(coeff_matrix, axis=1)
+            
+            # Handle zero totals (avoid division by zero)
+            nonzero_mask = spectrum_totals > 1e-10
+            relative_contributions = np.zeros_like(coeff_matrix)
+            relative_contributions[nonzero_mask] = (
+                coeff_matrix[nonzero_mask] / spectrum_totals[nonzero_mask, np.newaxis]
+            )
+            
+            # Mean relative contribution per template
+            for i, name in enumerate(template_names):
+                stats['relative_contributions'][name] = {
+                    'mean_percent': np.mean(relative_contributions[:, i]) * 100,
+                    'std_percent': np.std(relative_contributions[:, i]) * 100,
+                    'max_percent': np.max(relative_contributions[:, i]) * 100
+                }
+            
+            # 2. Dominance Analysis
+            # Find dominant template for each spectrum (with confidence threshold)
+            dominant_indices = np.argmax(relative_contributions, axis=1)
+            dominant_strengths = np.max(relative_contributions, axis=1)
+            
+            # Only count as "dominant" if contribution > 30% and significantly higher than others
+            confidence_threshold = 0.30
+            significance_margin = 0.10  # Must be 10% higher than second best
+            
+            for i, (dom_idx, dom_strength) in enumerate(zip(dominant_indices, dominant_strengths)):
+                if dom_strength > confidence_threshold:
+                    # Check if significantly higher than second best
+                    sorted_contribs = np.sort(relative_contributions[i])[::-1]
+                    if len(sorted_contribs) > 1:
+                        margin = sorted_contribs[0] - sorted_contribs[1]
+                        if margin > significance_margin:
+                            stats['dominance_count'][template_names[dom_idx]] += 1
+            
+            # 3. Coverage Statistics (where each template significantly contributes)
+            significance_threshold = 0.15  # 15% contribution threshold
+            
+            for i, name in enumerate(template_names):
+                significant_mask = relative_contributions[:, i] > significance_threshold
+                stats['coverage_stats'][name] = {
+                    'coverage_percent': np.sum(significant_mask) / len(coefficients) * 100,
+                    'mean_contribution_when_present': np.mean(relative_contributions[significant_mask, i]) * 100 if np.any(significant_mask) else 0,
+                    'max_contribution': np.max(relative_contributions[:, i]) * 100
+                }
+            
+            # 4. Quality Metrics by Template
+            for i, name in enumerate(template_names):
+                # R² values when this template is dominant
+                dominant_mask = (dominant_indices == i) & (dominant_strengths > confidence_threshold)
+                if np.any(dominant_mask):
+                    stats['quality_by_template'][name] = {
+                        'mean_r_squared_when_dominant': np.mean(r_squared_array[dominant_mask]),
+                        'count_dominant': np.sum(dominant_mask)
+                    }
+                else:
+                    stats['quality_by_template'][name] = {
+                        'mean_r_squared_when_dominant': 0,
+                        'count_dominant': 0
+                    }
+            
+            # 5. Template Correlation Analysis
+            template_corr_matrix = np.corrcoef(coeff_matrix.T)
+            for i, name1 in enumerate(template_names):
+                correlations = {}
+                for j, name2 in enumerate(template_names):
+                    if i != j:
+                        correlations[name2] = template_corr_matrix[i, j]
+                stats['template_correlations'][name1] = correlations
+            
+            # 6. Spatial Distribution Analysis (if we have position info)
+            if positions:
+                x_coords = [pos[0] for pos in positions]
+                y_coords = [pos[1] for pos in positions]
+                
+                for i, name in enumerate(template_names):
+                    # Calculate spatial clustering of high-contribution areas
+                    high_contrib_mask = relative_contributions[:, i] > 0.20  # 20% threshold
+                    if np.any(high_contrib_mask):
+                        high_contrib_x = np.array([x_coords[j] for j in range(len(positions)) if high_contrib_mask[j]])
+                        high_contrib_y = np.array([y_coords[j] for j in range(len(positions)) if high_contrib_mask[j]])
+                        
+                        stats['spatial_distribution'][name] = {
+                            'spatial_extent_x': np.max(high_contrib_x) - np.min(high_contrib_x) if len(high_contrib_x) > 1 else 0,
+                            'spatial_extent_y': np.max(high_contrib_y) - np.min(high_contrib_y) if len(high_contrib_y) > 1 else 0,
+                            'centroid_x': np.mean(high_contrib_x),
+                            'centroid_y': np.mean(high_contrib_y),
+                            'high_contrib_count': len(high_contrib_x)
+                        }
+                    else:
+                        stats['spatial_distribution'][name] = {
+                            'spatial_extent_x': 0, 'spatial_extent_y': 0,
+                            'centroid_x': 0, 'centroid_y': 0,
+                            'high_contrib_count': 0
+                        }
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error calculating template statistics: {e}")
+            return None
+
+    def format_template_statistics(self, stats):
+        """Format template statistics for display."""
+        if not stats:
+            return "No template fitting statistics available."
+        
+        output = []
+        output.append("=" * 60)
+        output.append("TEMPLATE FITTING STATISTICS")
+        output.append("=" * 60)
+        output.append(f"Total Spectra Analyzed: {stats['total_spectra']}")
+        output.append(f"Overall Fit Quality (R²): {stats['mean_r_squared']:.3f}")
+        output.append("")
+        
+        # 1. Relative Contributions Summary
+        output.append("1. RELATIVE CONTRIBUTION ANALYSIS")
+        output.append("-" * 40)
+        for name, contrib in stats['relative_contributions'].items():
+            output.append(f"{name}:")
+            output.append(f"  Mean: {contrib['mean_percent']:.1f}% ± {contrib['std_percent']:.1f}%")
+            output.append(f"  Max:  {contrib['max_percent']:.1f}%")
+        output.append("")
+        
+        # 2. Dominance Analysis
+        output.append("2. DOMINANCE ANALYSIS")
+        output.append("-" * 40)
+        total_dominant = sum(stats['dominance_count'].values())
+        for name in stats['template_names']:
+            count = stats['dominance_count'][name]
+            percentage = (count / stats['total_spectra']) * 100 if stats['total_spectra'] > 0 else 0
+            output.append(f"{name}: {count} spectra ({percentage:.1f}% of map)")
+        
+        if total_dominant < stats['total_spectra']:
+            mixed_count = stats['total_spectra'] - total_dominant
+            mixed_percent = (mixed_count / stats['total_spectra']) * 100
+            output.append(f"Mixed/Unclear: {mixed_count} spectra ({mixed_percent:.1f}% of map)")
+        output.append("")
+        
+        # 3. Coverage Statistics
+        output.append("3. COVERAGE ANALYSIS (>15% contribution)")
+        output.append("-" * 40)
+        for name, coverage in stats['coverage_stats'].items():
+            output.append(f"{name}:")
+            output.append(f"  Coverage: {coverage['coverage_percent']:.1f}% of map")
+            output.append(f"  Avg when present: {coverage['mean_contribution_when_present']:.1f}%")
+        output.append("")
+        
+        # 4. Quality by Template
+        output.append("4. FIT QUALITY BY TEMPLATE")
+        output.append("-" * 40)
+        for name, quality in stats['quality_by_template'].items():
+            if quality['count_dominant'] > 0:
+                output.append(f"{name}: R² = {quality['mean_r_squared_when_dominant']:.3f} "
+                             f"(from {quality['count_dominant']} dominant regions)")
+            else:
+                output.append(f"{name}: No dominant regions")
+        output.append("")
+        
+        return "\n".join(output)
+
+    def show_detailed_template_statistics(self):
+        """Show detailed template statistics in a dialog."""
+        stats = self.calculate_template_statistics()
+        if not stats:
+            QMessageBox.warning(self, "No Statistics", "No template fitting results available.")
+            return
+        
+        # Create detailed statistics dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Detailed Template Statistics")
+        dialog.setModal(True)
+        dialog.resize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Text area for statistics
+        text_area = QTextEdit()
+        text_area.setReadOnly(True)
+        text_area.setFont(QFont("Courier New", 10))
+        
+        # Generate comprehensive report
+        detailed_text = self.format_detailed_template_statistics(stats)
+        text_area.setPlainText(detailed_text)
+        
+        layout.addWidget(text_area)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        export_btn = QPushButton("Export to File")
+        export_btn.clicked.connect(lambda: self.export_template_statistics(stats))
+        button_layout.addWidget(export_btn)
+        
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+
+    def format_detailed_template_statistics(self, stats):
+        """Format detailed template statistics for the dialog."""
+        if not stats:
+            return "No template fitting statistics available."
+        
+        output = []
+        output.append("=" * 80)
+        output.append("COMPREHENSIVE TEMPLATE FITTING ANALYSIS")
+        output.append("=" * 80)
+        output.append(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        output.append(f"Total Spectra: {stats['total_spectra']}")
+        output.append(f"Number of Templates: {len(stats['template_names'])}")
+        output.append(f"Overall Fit Quality (R²): {stats['mean_r_squared']:.3f}")
+        output.append("")
+        
+        # Detailed breakdown for each template
+        for i, name in enumerate(stats['template_names']):
+            output.append("=" * 80)
+            output.append(f"TEMPLATE: {name}")
+            output.append("=" * 80)
+            
+            # Contribution statistics
+            contrib = stats['relative_contributions'][name]
+            output.append("Contribution Statistics:")
+            output.append(f"  Mean contribution: {contrib['mean_percent']:.2f}%")
+            output.append(f"  Standard deviation: {contrib['std_percent']:.2f}%")
+            output.append(f"  Maximum contribution: {contrib['max_percent']:.2f}%")
+            output.append("")
+            
+            # Dominance and coverage
+            dom_count = stats['dominance_count'][name]
+            dom_percent = (dom_count / stats['total_spectra']) * 100 if stats['total_spectra'] > 0 else 0
+            output.append("Dominance Analysis:")
+            output.append(f"  Dominant regions: {dom_count} ({dom_percent:.1f}% of map)")
+            output.append("")
+            
+            coverage = stats['coverage_stats'][name]
+            output.append("Coverage Analysis:")
+            output.append(f"  Significant presence: {coverage['coverage_percent']:.1f}% of map")
+            output.append(f"  Average when present: {coverage['mean_contribution_when_present']:.1f}%")
+            output.append("")
+            
+            # Quality metrics
+            quality = stats['quality_by_template'][name]
+            if quality['count_dominant'] > 0:
+                output.append("Quality Metrics:")
+                output.append(f"  R² when dominant: {quality['mean_r_squared_when_dominant']:.3f}")
+                output.append(f"  Based on {quality['count_dominant']} dominant regions")
+            else:
+                output.append("Quality Metrics: No dominant regions for analysis")
+            output.append("")
+            
+            # Spatial distribution
+            if name in stats['spatial_distribution']:
+                spatial = stats['spatial_distribution'][name]
+                output.append("Spatial Distribution:")
+                output.append(f"  High-contribution regions: {spatial['high_contrib_count']}")
+                if spatial['high_contrib_count'] > 0:
+                    output.append(f"  Spatial extent (X): {spatial['spatial_extent_x']:.2f}")
+                    output.append(f"  Spatial extent (Y): {spatial['spatial_extent_y']:.2f}")
+                    output.append(f"  Centroid: ({spatial['centroid_x']:.2f}, {spatial['centroid_y']:.2f})")
+                output.append("")
+            
+            # Template correlations
+            if name in stats['template_correlations']:
+                correlations = stats['template_correlations'][name]
+                output.append("Template Interactions:")
+                for other_name, corr in correlations.items():
+                    if abs(corr) > 0.3:  # Only show significant correlations
+                        corr_type = "positive" if corr > 0 else "negative"
+                        output.append(f"  {corr_type} correlation with {other_name}: {corr:.3f}")
+                output.append("")
+            
+            output.append("")
+        
+        # Summary recommendations
+        output.append("=" * 80)
+        output.append("ANALYSIS SUMMARY & RECOMMENDATIONS")
+        output.append("=" * 80)
+        
+        # Identify most important templates
+        sorted_by_dominance = sorted(stats['dominance_count'].items(), key=lambda x: x[1], reverse=True)
+        output.append("Template Importance Ranking (by dominance):")
+        for i, (name, count) in enumerate(sorted_by_dominance[:5], 1):
+            percent = (count / stats['total_spectra']) * 100 if stats['total_spectra'] > 0 else 0
+            output.append(f"  {i}. {name}: {count} regions ({percent:.1f}%)")
+        output.append("")
+        
+        # Coverage analysis
+        sorted_by_coverage = sorted(
+            [(name, data['coverage_percent']) for name, data in stats['coverage_stats'].items()],
+            key=lambda x: x[1], reverse=True
+        )
+        output.append("Template Coverage Ranking:")
+        for i, (name, coverage) in enumerate(sorted_by_coverage[:5], 1):
+            output.append(f"  {i}. {name}: {coverage:.1f}% coverage")
+        output.append("")
+        
+        return "\n".join(output)
+
+    def export_template_statistics(self, stats):
+        """Export template statistics to a file."""
+        if not stats:
+            QMessageBox.warning(self, "No Statistics", "No template fitting results available.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Template Statistics", 
+            f"template_statistics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            "Text Files (*.txt);;All Files (*)"
+        )
+        
+        if filename:
+            try:
+                detailed_text = self.format_detailed_template_statistics(stats)
+                with open(filename, 'w') as f:
+                    f.write(detailed_text)
+                QMessageBox.information(self, "Export Complete", f"Statistics exported to:\n{filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export statistics:\n{str(e)}")
+
+    def update_template_statistics_display(self):
+        """Update the template statistics display in the control panel."""
+        try:
+            control_panel = self.get_current_template_control_panel()
+            if control_panel:
+                stats = self.calculate_template_statistics()
+                if stats:
+                    # Format basic statistics for display
+                    basic_stats = self.format_template_statistics(stats)
+                    control_panel.update_statistics_display(basic_stats)
+                else:
+                    control_panel.hide_statistics()
+        except Exception as e:
+            logger.error(f"Error updating template statistics display: {e}")
+
+    def analyze_template_chemical_validity(self):
+        """
+        Analyze template assignments using spectroscopic features to distinguish
+        between mathematical fitting and true chemical presence.
+        """
+        if not hasattr(self, 'template_fitting_results') or not self.template_fitting_results:
+            return None
+            
+        import numpy as np
+        from collections import defaultdict
+        
+        try:
+            coefficients = self.template_fitting_results['coefficients']
+            template_names = self.template_fitting_results['template_names']
+            n_templates = len(template_names)
+            
+            # Initialize analysis containers
+            analysis = {
+                'template_names': template_names,
+                'peak_based_analysis': {},
+                'residual_analysis': {},
+                'spectral_quality': {},
+                'chemical_likelihood': {},
+                'recommended_thresholds': {}
+            }
+            
+            # Get template spectra for reference
+            template_spectra = {}
+            if hasattr(self, 'template_manager'):
+                for i, name in enumerate(template_names):
+                    if i < len(self.template_manager.templates):
+                        template = self.template_manager.templates[i]
+                        template_spectra[name] = {
+                            'wavenumbers': template.wavenumbers,
+                            'intensities': (template.processed_intensities 
+                                          if template.processed_intensities is not None 
+                                          else template.intensities)
+                        }
+            
+            # Analyze each template
+            for template_name in template_names:
+                analysis['peak_based_analysis'][template_name] = self._analyze_template_peaks(
+                    template_name, template_spectra.get(template_name), coefficients
+                )
+                analysis['residual_analysis'][template_name] = self._analyze_template_residuals(
+                    template_name, coefficients
+                )
+                analysis['spectral_quality'][template_name] = self._analyze_spectral_quality(
+                    template_name, coefficients
+                )
+            
+            # Calculate chemical likelihood scores
+            for template_name in template_names:
+                peak_score = analysis['peak_based_analysis'][template_name].get('peak_presence_score', 0)
+                residual_score = analysis['residual_analysis'][template_name].get('improvement_score', 0)
+                quality_score = analysis['spectral_quality'][template_name].get('snr_score', 0)
+                
+                # Weighted combination (adjust weights based on your priorities)
+                chemical_likelihood = (0.5 * peak_score + 0.3 * residual_score + 0.2 * quality_score)
+                analysis['chemical_likelihood'][template_name] = chemical_likelihood
+                
+                # Recommend thresholds based on analysis
+                if peak_score > 0.7 and quality_score > 0.6:
+                    threshold = 0.10  # Lower threshold for high-confidence peaks
+                elif peak_score > 0.4:
+                    threshold = 0.20  # Medium threshold for moderate peaks
+                else:
+                    threshold = 0.40  # Higher threshold for background-like templates
+                    
+                analysis['recommended_thresholds'][template_name] = threshold
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error in chemical validity analysis: {e}")
+            return None
+
+    def _analyze_template_peaks(self, template_name, template_spectrum, coefficients):
+        """Analyze peak-based features for a template."""
+        import numpy as np
+        from scipy.signal import find_peaks
+        
+        try:
+            peak_analysis = {
+                'has_peaks': False,
+                'peak_count': 0,
+                'peak_prominence': 0,
+                'peak_presence_score': 0,
+                'characteristic_peaks': []
+            }
+            
+            if template_spectrum is None:
+                return peak_analysis
+                
+            wavenumbers = template_spectrum['wavenumbers']
+            intensities = template_spectrum['intensities']
+            
+            # Find peaks in template spectrum
+            peaks, properties = find_peaks(
+                intensities, 
+                prominence=np.std(intensities) * 0.5,  # Adaptive prominence threshold
+                width=2
+            )
+            
+            if len(peaks) > 0:
+                peak_analysis['has_peaks'] = True
+                peak_analysis['peak_count'] = len(peaks)
+                peak_analysis['peak_prominence'] = np.mean(properties['prominences'])
+                
+                # Store characteristic peak positions
+                for peak_idx in peaks:
+                    peak_analysis['characteristic_peaks'].append({
+                        'wavenumber': wavenumbers[peak_idx],
+                        'intensity': intensities[peak_idx],
+                        'prominence': properties['prominences'][np.where(peaks == peak_idx)[0][0]]
+                    })
+                
+                # Calculate peak presence score (0-1)
+                # Higher score for more/sharper peaks
+                prominence_score = min(1.0, peak_analysis['peak_prominence'] / (np.max(intensities) * 0.1))
+                count_score = min(1.0, len(peaks) / 10.0)  # Max score at 10 peaks
+                peak_analysis['peak_presence_score'] = 0.7 * prominence_score + 0.3 * count_score
+            
+            return peak_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in peak analysis for {template_name}: {e}")
+            return {'has_peaks': False, 'peak_count': 0, 'peak_prominence': 0, 'peak_presence_score': 0}
+
+    def _analyze_template_residuals(self, template_name, coefficients):
+        """Analyze fitting residuals to assess template necessity."""
+        import numpy as np
+        
+        try:
+            residual_analysis = {
+                'avg_improvement': 0,
+                'improvement_score': 0,
+                'regions_with_improvement': 0
+            }
+            
+            # This would require refitting without the template to compare residuals
+            # For now, we'll use a proxy based on template contribution patterns
+            template_idx = self.template_fitting_results['template_names'].index(template_name)
+            
+            contributions = []
+            for pos, coeffs in coefficients.items():
+                if template_idx < len(coeffs):
+                    contributions.append(coeffs[template_idx])
+            
+            if contributions:
+                contributions = np.array(contributions)
+                # Score based on distribution - good templates should have some high contributions
+                # and clear low contributions, not uniform medium contributions
+                contrib_std = np.std(contributions)
+                contrib_max = np.max(contributions)
+                
+                if contrib_max > 0:
+                    # Higher score for templates with clear high-contribution regions
+                    improvement_score = min(1.0, (contrib_std / contrib_max) * 2.0)
+                    residual_analysis['improvement_score'] = improvement_score
+                    residual_analysis['regions_with_improvement'] = np.sum(contributions > np.mean(contributions))
+            
+            return residual_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in residual analysis for {template_name}: {e}")
+            return {'avg_improvement': 0, 'improvement_score': 0, 'regions_with_improvement': 0}
+
+    def _analyze_spectral_quality(self, template_name, coefficients):
+        """Analyze spectral quality metrics for template assignments."""
+        import numpy as np
+        
+        try:
+            quality_analysis = {
+                'avg_snr': 0,
+                'snr_score': 0,
+                'baseline_stability': 0
+            }
+            
+            # Get regions where this template contributes significantly
+            template_idx = self.template_fitting_results['template_names'].index(template_name)
+            
+            snr_values = []
+            for spectrum in self.map_data.spectra.values():
+                pos_key = (spectrum.x_pos, spectrum.y_pos)
+                if pos_key in coefficients:
+                    coeffs = coefficients[pos_key]
+                    if template_idx < len(coeffs) and coeffs[template_idx] > 0.1:  # Significant contribution
+                        # Calculate SNR for this spectrum
+                        intensities = (spectrum.processed_intensities 
+                                     if self.use_processed and spectrum.processed_intensities is not None
+                                     else spectrum.intensities)
+                        
+                        if intensities is not None and len(intensities) > 10:
+                            signal = np.max(intensities)
+                            noise = np.std(intensities[:10])  # Estimate noise from first 10 points
+                            if noise > 0:
+                                snr = signal / noise
+                                snr_values.append(snr)
+            
+            if snr_values:
+                quality_analysis['avg_snr'] = np.mean(snr_values)
+                # Normalize SNR score (assuming good SNR > 10)
+                quality_analysis['snr_score'] = min(1.0, np.mean(snr_values) / 20.0)
+            
+            return quality_analysis
+            
+        except Exception as e:
+            logger.error(f"Error in quality analysis for {template_name}: {e}")
+            return {'avg_snr': 0, 'snr_score': 0, 'baseline_stability': 0}
+
+    def show_chemical_validity_analysis(self):
+        """Show detailed chemical validity analysis in a dialog."""
+        analysis = self.analyze_template_chemical_validity()
+        if not analysis:
+            QMessageBox.warning(self, "No Analysis", "No template fitting results available for chemical analysis.")
+            return
+        
+        # Create detailed analysis dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Chemical Validity Analysis")
+        dialog.setModal(True)
+        dialog.resize(900, 700)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Text area for analysis
+        text_area = QTextEdit()
+        text_area.setReadOnly(True)
+        text_area.setFont(QFont("Courier New", 10))
+        
+        # Generate comprehensive report
+        detailed_text = self.format_chemical_validity_analysis(analysis)
+        text_area.setPlainText(detailed_text)
+        
+        layout.addWidget(text_area)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        export_btn = QPushButton("Export Analysis")
+        export_btn.clicked.connect(lambda: self.export_chemical_analysis(analysis))
+        button_layout.addWidget(export_btn)
+        
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+
+    def format_chemical_validity_analysis(self, analysis):
+        """Format chemical validity analysis for display."""
+        if not analysis:
+            return "No chemical validity analysis available."
+        
+        output = []
+        output.append("=" * 80)
+        output.append("CHEMICAL VALIDITY ANALYSIS")
+        output.append("=" * 80)
+        output.append(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        output.append("")
+        
+        output.append("SUMMARY - Chemical Likelihood Scores (0.0 = background-like, 1.0 = peak-rich)")
+        output.append("-" * 70)
+        
+        # Sort templates by chemical likelihood
+        likelihood_sorted = sorted(
+            [(name, analysis['chemical_likelihood'][name]) for name in analysis['template_names']],
+            key=lambda x: x[1], reverse=True
+        )
+        
+        for name, likelihood in likelihood_sorted:
+            recommended_threshold = analysis['recommended_thresholds'][name]
+            output.append(f"{name[:50]:<50} {likelihood:.3f} (threshold: {recommended_threshold:.2f})")
+        output.append("")
+        
+        # Detailed analysis for each template
+        for name in analysis['template_names']:
+            output.append("=" * 80)
+            output.append(f"TEMPLATE: {name}")
+            output.append("=" * 80)
+            
+            # Peak analysis
+            peak_data = analysis['peak_based_analysis'][name]
+            output.append("Peak Analysis:")
+            output.append(f"  Has distinct peaks: {'Yes' if peak_data['has_peaks'] else 'No'}")
+            output.append(f"  Peak count: {peak_data['peak_count']}")
+            output.append(f"  Average prominence: {peak_data['peak_prominence']:.3f}")
+            output.append(f"  Peak presence score: {peak_data['peak_presence_score']:.3f}")
+            
+            if peak_data['characteristic_peaks']:
+                output.append("  Characteristic peaks:")
+                for peak in peak_data['characteristic_peaks'][:5]:  # Show top 5
+                    output.append(f"    {peak['wavenumber']:.1f} cm⁻¹ (prominence: {peak['prominence']:.3f})")
+            output.append("")
+            
+            # Residual analysis
+            residual_data = analysis['residual_analysis'][name]
+            output.append("Fitting Quality:")
+            output.append(f"  Improvement score: {residual_data['improvement_score']:.3f}")
+            output.append(f"  Regions with improvement: {residual_data['regions_with_improvement']}")
+            output.append("")
+            
+            # Spectral quality
+            quality_data = analysis['spectral_quality'][name]
+            output.append("Spectral Quality:")
+            output.append(f"  Average SNR: {quality_data['avg_snr']:.1f}")
+            output.append(f"  SNR score: {quality_data['snr_score']:.3f}")
+            output.append("")
+            
+            # Overall assessment
+            likelihood = analysis['chemical_likelihood'][name]
+            threshold = analysis['recommended_thresholds'][name]
+            
+            output.append("Assessment:")
+            if likelihood > 0.7:
+                assessment = "HIGH confidence - likely represents real chemical component"
+            elif likelihood > 0.4:
+                assessment = "MEDIUM confidence - may represent chemical component"
+            else:
+                assessment = "LOW confidence - likely background or noise fitting"
+            
+            output.append(f"  Chemical likelihood: {likelihood:.3f}")
+            output.append(f"  Recommended threshold: {threshold:.2f}")
+            output.append(f"  Assessment: {assessment}")
+            output.append("")
+        
+        # Recommendations
+        output.append("=" * 80)
+        output.append("RECOMMENDATIONS")
+        output.append("=" * 80)
+        
+        # Find potential over-assignment issues
+        for name in analysis['template_names']:
+            likelihood = analysis['chemical_likelihood'][name]
+            peak_data = analysis['peak_based_analysis'][name]
+            
+            if likelihood < 0.3 and not any(bg_word in name.lower() for bg_word in ['background', 'baseline', 'steno']):
+                output.append(f"⚠️  {name}:")
+                output.append(f"   Low chemical likelihood ({likelihood:.3f}) suggests potential over-assignment")
+                if not peak_data['has_peaks']:
+                    output.append(f"   Consider treating as background template")
+                output.append("")
+            
+            elif likelihood > 0.7 and peak_data['peak_count'] > 3:
+                output.append(f"✅ {name}:")
+                output.append(f"   High confidence template with {peak_data['peak_count']} characteristic peaks")
+                output.append(f"   Current assignment may be accurate")
+                output.append("")
+        
+        output.append("Suggested next steps:")
+        output.append("1. For low-likelihood templates with high dominance: add more background templates")
+        output.append("2. For peak-rich templates: verify characteristic peaks are present in assigned regions")
+        output.append("3. Consider using chemical-informed thresholds for more accurate assignments")
+        
+        return "\n".join(output)
+
+    def export_chemical_analysis(self, analysis):
+        """Export chemical validity analysis to a file."""
+        if not analysis:
+            QMessageBox.warning(self, "No Analysis", "No chemical validity analysis available.")
+            return
+        
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Export Chemical Analysis", 
+            f"chemical_validity_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            "Text Files (*.txt);;All Files (*)"
+        )
+        
+        if filename:
+            try:
+                detailed_text = self.format_chemical_validity_analysis(analysis)
+                with open(filename, 'w') as f:
+                    f.write(detailed_text)
+                QMessageBox.information(self, "Export Complete", f"Chemical analysis exported to:\n{filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export analysis:\n{str(e)}")
+
+    def perform_nmf_guided_template_analysis(self, nmf_component_index=None, nmf_threshold=2.0):
+        """
+        Perform hybrid analysis using NMF to guide template fitting.
+        Only applies template analysis to regions where NMF identifies strong signals.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Starting perform_nmf_guided_template_analysis with component_index={nmf_component_index}, threshold={nmf_threshold}")
+        
+        try:
+            # Check template results
+            logger.info("Checking template fitting results...")
+            if not hasattr(self, 'template_fitting_results'):
+                logger.error("No template_fitting_results attribute")
+                QMessageBox.warning(self, "No Template Results", "Fit templates first before running hybrid analysis.")
+                return None
+            
+            if not self.template_fitting_results:
+                logger.error("template_fitting_results is empty/None")
+                QMessageBox.warning(self, "No Template Results", "Fit templates first before running hybrid analysis.")
+                return None
+            
+            logger.info("Template results OK")
+            
+            # Check NMF results  
+            logger.info("Checking NMF results...")
+            if not hasattr(self, 'nmf_results'):
+                logger.error("No nmf_results attribute")
+                QMessageBox.warning(self, "No NMF Results", "Run NMF analysis first before running hybrid analysis.")
+                return None
+                
+            if not self.nmf_results:
+                logger.error("nmf_results is empty/None")
+                QMessageBox.warning(self, "No NMF Results", "Run NMF analysis first before running hybrid analysis.")
+                return None
+            
+            logger.info("NMF results OK")
+            
+        except Exception as e:
+            logger.error(f"Error in initial validation: {e}")
+            QMessageBox.critical(self, "Validation Error", f"Error checking prerequisites:\n{str(e)}")
+            return None
+        
+        try:
+            import numpy as np
+            from collections import defaultdict
+            
+            logger.info("Starting hybrid analysis...")
+            
+            # Get NMF components
+            nmf_components = self.nmf_results.get('components', [])
+            
+            # Validate NMF components structure
+            if nmf_components is None:
+                QMessageBox.warning(self, "No NMF Components", "No NMF components available for analysis.")
+                return None
+                
+            # Handle different component structures
+            if hasattr(nmf_components, 'shape'):
+                if len(nmf_components.shape) == 0 or (len(nmf_components.shape) == 1 and nmf_components.shape[0] == 0):
+                    QMessageBox.warning(self, "No NMF Components", "No NMF components available for analysis.")
+                    return None
+                if len(nmf_components.shape) == 2:
+                    n_components = nmf_components.shape[0]
+                    logger.info(f"Found 2D NMF components array with shape {nmf_components.shape}")
+                elif len(nmf_components.shape) == 1:
+                    n_components = 1  # Single flattened component
+                    logger.info(f"Found 1D NMF components array with {len(nmf_components)} elements")
+                else:
+                    logger.error(f"Unexpected NMF components shape: {nmf_components.shape}")
+                    QMessageBox.warning(self, "Invalid Data Structure", "NMF components have unexpected structure.")
+                    return None
+            elif hasattr(nmf_components, '__len__'):
+                if len(nmf_components) == 0:
+                    QMessageBox.warning(self, "No NMF Components", "No NMF components available for analysis.")
+                    return None
+                n_components = len(nmf_components)
+                logger.info(f"Found list/array with {n_components} NMF components")
+            else:
+                QMessageBox.warning(self, "Invalid Data Structure", "NMF components data structure is not recognized.")
+                return None
+            
+            logger.info(f"Using {n_components} NMF components for analysis")
+            
+            # If no specific component specified, try to auto-detect polypropylene
+            logger.info(f"Component index validation: input={nmf_component_index}")
+            if nmf_component_index is None:
+                logger.info("Auto-detecting polypropylene component...")
+                nmf_component_index = self._auto_detect_polypropylene_component()
+                logger.info(f"Auto-detection result: {nmf_component_index}")
+                if nmf_component_index is None:
+                    logger.warning("No component auto-detected")
+                    QMessageBox.warning(self, "Component Selection", "Please specify which NMF component contains polypropylene.")
+                    return None
+            
+            # Validate component index
+            logger.info(f"Validating component index {nmf_component_index} against {n_components} available components")
+            if not isinstance(nmf_component_index, (int, np.integer)):
+                logger.error(f"Component index is not an integer: {type(nmf_component_index)}")
+                QMessageBox.warning(self, "Invalid Component", "Component index must be an integer.")
+                return None
+                
+            if nmf_component_index < 0 or nmf_component_index >= n_components:
+                logger.error(f"Component index {nmf_component_index} out of range [0, {n_components-1}]")
+                QMessageBox.warning(self, "Invalid Component", f"Component {nmf_component_index} not available. Only {n_components} components found.")
+                return None
+            
+            logger.info(f"Component index {nmf_component_index} is valid")
+            
+            # Get NMF component data based on structure
+            if hasattr(nmf_components, 'shape') and len(nmf_components.shape) == 2:
+                # 2D array: extract the specific component (row)
+                nmf_component_data = nmf_components[nmf_component_index]
+            else:
+                # List or other structure
+                nmf_component_data = nmf_components[nmf_component_index]
+            
+            # Debug information
+            logger.info(f"NMF component data type: {type(nmf_component_data)}")
+            logger.info(f"NMF component data shape: {np.array(nmf_component_data).shape if hasattr(nmf_component_data, '__len__') else 'scalar'}")
+            if hasattr(nmf_component_data, '__len__') and len(nmf_component_data) > 0:
+                logger.info(f"First few values: {nmf_component_data[:5] if len(nmf_component_data) > 5 else nmf_component_data}")
+                if hasattr(nmf_component_data, '__getitem__'):
+                    try:
+                        sample_value = nmf_component_data[0]
+                        logger.info(f"Sample value type: {type(sample_value)}, shape: {np.array(sample_value).shape if hasattr(sample_value, '__len__') else 'scalar'}")
+                    except Exception as e:
+                        logger.error(f"Error accessing first value: {e}")
+            
+            # Validate component data structure
+            if not hasattr(nmf_component_data, '__len__'):
+                logger.error(f"NMF component data is not iterable: {type(nmf_component_data)}")
+                QMessageBox.critical(self, "Data Error", "NMF component data structure is incompatible.")
+                return None
+                
+            if len(nmf_component_data) == 0:
+                logger.error("NMF component data is empty")
+                QMessageBox.critical(self, "Data Error", "NMF component data is empty.")
+                return None
+            
+            # Initialize hybrid analysis results
+            hybrid_results = {
+                'nmf_component_index': nmf_component_index,
+                'nmf_threshold': nmf_threshold,
+                'nmf_guided_assignments': {},
+                'cross_validation': {},
+                'refined_statistics': {},
+                'confidence_regions': {}
+            }
+            
+            # Get map dimensions and positions
+            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in positions]
+            y_coords = [pos[1] for pos in positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            # Create NMF intensity map for threshold detection
+            nmf_map = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            
+            # Fill NMF map with component intensities
+            logger.info("Filling NMF map with component intensities...")
+            for i, spectrum in enumerate(self.map_data.spectra.values()):
+                try:
+                    if i < len(nmf_component_data):
+                        nmf_intensity = nmf_component_data[i]
+                        
+                        # Ensure we store scalar values in the map
+                        if np.isscalar(nmf_intensity):
+                            intensity_value = float(nmf_intensity)
+                        elif hasattr(nmf_intensity, '__len__'):
+                            # If it's an array, take the mean value
+                            intensity_value = float(np.mean(nmf_intensity))
+                        else:
+                            # Fallback - try to convert to float
+                            intensity_value = float(nmf_intensity)
+                        
+                        # Check bounds before assignment
+                        map_y = spectrum.y_pos - y_min
+                        map_x = spectrum.x_pos - x_min
+                        if 0 <= map_y < nmf_map.shape[0] and 0 <= map_x < nmf_map.shape[1]:
+                            nmf_map[map_y, map_x] = intensity_value
+                        else:
+                            logger.warning(f"Spectrum {i} at position ({spectrum.x_pos}, {spectrum.y_pos}) maps to out-of-bounds indices ({map_x}, {map_y})")
+                    else:
+                        logger.warning(f"Spectrum {i} has no corresponding NMF component data (only {len(nmf_component_data)} components available)")
+                except Exception as e:
+                    logger.error(f"Error processing spectrum {i} at position ({spectrum.x_pos}, {spectrum.y_pos}): {e}")
+                    continue
+            
+            # Find regions where NMF component exceeds threshold
+            nmf_candidates = nmf_map > nmf_threshold
+            candidate_positions = []
+            
+            logger.info("Finding candidate positions...")
+            for spectrum in self.map_data.spectra.values():
+                try:
+                    map_y = spectrum.y_pos - y_min
+                    map_x = spectrum.x_pos - x_min
+                    
+                    # Safely check bounds first
+                    if 0 <= map_y < nmf_candidates.shape[0] and 0 <= map_x < nmf_candidates.shape[1]:
+                        # Safely check the boolean value
+                        candidate_flag = nmf_candidates[map_y, map_x]
+                        
+                        # Handle different types of candidate_flag
+                        is_candidate = False
+                        if np.isscalar(candidate_flag):
+                            is_candidate = bool(candidate_flag)
+                        elif hasattr(candidate_flag, '__len__'):
+                            # Handle array case - use any() for arrays
+                            is_candidate = bool(np.any(candidate_flag))
+                        else:
+                            # Fallback - try to convert to bool
+                            is_candidate = bool(candidate_flag)
+                        
+                        if is_candidate:
+                            candidate_positions.append((spectrum.x_pos, spectrum.y_pos))
+                    else:
+                        logger.warning(f"Spectrum position ({spectrum.x_pos}, {spectrum.y_pos}) -> map indices ({map_x}, {map_y}) out of bounds for map shape {nmf_candidates.shape}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing spectrum at ({spectrum.x_pos}, {spectrum.y_pos}): {e}")
+                    continue
+            
+            logger.info(f"NMF-guided analysis: Found {len(candidate_positions)} candidate positions above threshold {nmf_threshold}")
+            
+            # Cross-validate with template results
+            logger.info("Getting template results data...")
+            try:
+                template_coefficients = self.template_fitting_results['coefficients']
+                template_names = self.template_fitting_results['template_names']
+                logger.info(f"Template coefficients type: {type(template_coefficients)}")
+                logger.info(f"Template names: {template_names}")
+                logger.info(f"Number of coefficient entries: {len(template_coefficients) if hasattr(template_coefficients, '__len__') else 'N/A'}")
+            except Exception as e:
+                logger.error(f"Error accessing template results: {e}")
+                QMessageBox.critical(self, "Data Error", f"Error accessing template results:\n{str(e)}")
+                return None
+            
+            # Find polypropylene template index using comprehensive detection
+            logger.info(f"Looking for polypropylene template in: {template_names}")
+            
+            # First try simple name matching
+            polyprop_template_idx = None
+            for i, name in enumerate(template_names):
+                logger.info(f"Checking template {i}: '{name}'")
+                try:
+                    name_lower = str(name).lower()
+                    if any(hint in name_lower for hint in ['polyprop', 'pp', 'plastic']):
+                        polyprop_template_idx = i
+                        logger.info(f"Found polypropylene template by name at index {i}: '{name}'")
+                        break
+                except Exception as e:
+                    logger.error(f"Error processing template name '{name}': {e}")
+                    continue
+            
+            # If name matching fails, use spectral analysis
+            if polyprop_template_idx is None:
+                logger.info("Name-based detection failed, trying spectral analysis...")
+                polyprop_template_idx = self._auto_detect_polypropylene_component()
+                
+                if polyprop_template_idx is not None:
+                    template_name = template_names[polyprop_template_idx]
+                    logger.info(f"✅ Auto-detected polypropylene template: '{template_name}' at index {polyprop_template_idx}")
+                else:
+                    logger.warning("Spectral auto-detection also failed, asking user to select manually...")
+                    
+                    # Show dialog to let user manually select polypropylene template
+                    from PySide6.QtWidgets import QInputDialog
+                    template_choices = [f"{i}: {name}" for i, name in enumerate(template_names)]
+                    choice, ok = QInputDialog.getItem(
+                        self, 
+                        "Select Polypropylene Template",
+                        "Could not automatically identify polypropylene template.\nPlease select which template represents polypropylene:",
+                        template_choices,
+                        0,
+                        False
+                    )
+                    
+                    if ok and choice:
+                        polyprop_template_idx = int(choice.split(':')[0])
+                        logger.info(f"User selected polypropylene template: {template_names[polyprop_template_idx]} at index {polyprop_template_idx}")
+                    else:
+                        logger.error("User cancelled template selection")
+                        QMessageBox.warning(self, "Template Selection Cancelled", "Hybrid analysis cancelled - no polypropylene template selected.")
+                        return None
+            
+            # Analyze candidate regions
+            logger.info("Analyzing candidate regions...")
+            nmf_template_agreement = 0
+            nmf_only_detections = 0
+            template_only_detections = 0
+            hybrid_confident_detections = []
+            
+            for i, pos in enumerate(candidate_positions):
+                try:
+                    if i % 100 == 0:  # Log progress every 100 positions
+                        logger.info(f"Processing position {i+1}/{len(candidate_positions)}")
+                    
+                    pos_key = (pos[0], pos[1])
+                    
+                    # Debug the pos_key type and template_coefficients structure
+                    if i == 0:  # Only log for first position to avoid spam
+                        logger.info(f"pos_key type: {type(pos_key)}, value: {pos_key}")
+                        logger.info(f"template_coefficients keys type: {type(list(template_coefficients.keys())[0]) if template_coefficients else 'empty'}")
+                        if template_coefficients:
+                            first_key = list(template_coefficients.keys())[0]
+                            logger.info(f"First template key: {first_key}, type: {type(first_key)}")
+                    
+                    # Safe check for key presence
+                    try:
+                        key_exists = pos_key in template_coefficients
+                    except Exception as key_error:
+                        logger.error(f"Error checking if {pos_key} in template_coefficients: {key_error}")
+                        continue
+                    
+                    if key_exists:
+                        coeffs = template_coefficients[pos_key]
+                        
+                        # Safe array access
+                        if polyprop_template_idx < len(coeffs):
+                            # Calculate relative polypropylene contribution
+                            coeffs_array = np.array(coeffs[:len(template_names)])
+                            total_contrib = np.sum(coeffs_array)
+                            
+                            # Safe division check
+                            if np.isscalar(total_contrib) and total_contrib > 1e-10:
+                                pp_relative = coeffs[polyprop_template_idx] / total_contrib
+                                
+                                # Get NMF intensity at this position
+                                spectrum_idx = list(self.map_data.spectra.keys()).index(pos_key) if pos_key in self.map_data.spectra else -1
+                                if 0 <= spectrum_idx < len(nmf_component_data):
+                                    nmf_intensity = nmf_component_data[spectrum_idx]
+                                    # Ensure scalar value
+                                    if not np.isscalar(nmf_intensity):
+                                        nmf_intensity = float(np.mean(nmf_intensity))
+                                else:
+                                    nmf_intensity = 0.0
+                                
+                                # Store hybrid analysis data
+                                hybrid_results['nmf_guided_assignments'][pos_key] = {
+                                    'nmf_intensity': float(nmf_intensity),
+                                    'template_contribution': float(coeffs[polyprop_template_idx]),
+                                    'template_relative': float(pp_relative),
+                                    'agreement_score': self._calculate_agreement_score(nmf_intensity, pp_relative)
+                                }
+                                
+                                # Check for agreement (both methods detect significant signal)
+                                if np.isscalar(pp_relative) and pp_relative > 0.3:  # Template says polypropylene dominant
+                                    nmf_template_agreement += 1
+                                    hybrid_confident_detections.append(pos_key)
+                except Exception as e:
+                    logger.error(f"Error analyzing position {pos}: {e}")
+                    continue
+            
+            # Calculate refined statistics
+            logger.info("Calculating refined statistics...")
+            total_spectra = len(self.map_data.spectra)
+            hybrid_results['refined_statistics'] = {
+                'total_spectra': total_spectra,
+                'nmf_candidates': len(candidate_positions),
+                'nmf_candidate_percentage': (len(candidate_positions) / total_spectra) * 100 if total_spectra > 0 else 0,
+                'agreement_count': nmf_template_agreement,
+                'agreement_percentage': (nmf_template_agreement / total_spectra) * 100 if total_spectra > 0 else 0,
+                'confident_detections': len(hybrid_confident_detections),
+                'confident_percentage': (len(hybrid_confident_detections) / total_spectra) * 100 if total_spectra > 0 else 0
+            }
+            
+            # Generate confidence regions based on agreement strength
+            high_confidence = []
+            medium_confidence = []
+            low_confidence = []
+            
+            for pos_key, data in hybrid_results['nmf_guided_assignments'].items():
+                try:
+                    agreement = data['agreement_score']
+                    # Ensure scalar comparison
+                    if np.isscalar(agreement):
+                        if agreement > 0.8:
+                            high_confidence.append(pos_key)
+                        elif agreement > 0.5:
+                            medium_confidence.append(pos_key)
+                        else:
+                            low_confidence.append(pos_key)
+                    else:
+                        # Handle array case
+                        agreement_val = float(np.mean(agreement))
+                        if agreement_val > 0.8:
+                            high_confidence.append(pos_key)
+                        elif agreement_val > 0.5:
+                            medium_confidence.append(pos_key)
+                        else:
+                            low_confidence.append(pos_key)
+                except Exception as e:
+                    logger.error(f"Error processing confidence for position {pos_key}: {e}")
+                    low_confidence.append(pos_key)  # Default to low confidence
+            
+            hybrid_results['confidence_regions'] = {
+                'high_confidence': high_confidence,
+                'medium_confidence': medium_confidence,
+                'low_confidence': low_confidence
+            }
+            
+            # Store results
+            self.hybrid_analysis_results = hybrid_results
+            
+            logger.info(f"Hybrid analysis complete: {nmf_template_agreement} confident detections ({(nmf_template_agreement/total_spectra)*100:.3f}%)")
+            
+            return hybrid_results
+            
+        except Exception as e:
+            logger.error(f"Error in NMF-guided template analysis: {e}")
+            QMessageBox.critical(self, "Analysis Error", f"Error in hybrid analysis:\n{str(e)}")
+            return None
+
+    def _auto_detect_polypropylene_component(self):
+        """Try to automatically detect which template contains polypropylene."""
+        try:
+            if not hasattr(self, 'template_manager') or not self.template_manager.templates:
+                logger.info("No templates available for polypropylene detection")
+                return None
+                
+            logger.info("Starting automatic polypropylene template detection...")
+            
+            # Look for polypropylene characteristic peaks around 1080, 1460, and 2900 cm⁻¹
+            pp_peaks = [1080, 1460, 2900]  # Key polypropylene peaks
+            best_template_idx = None
+            best_score = 0
+            
+            for i, template in enumerate(self.template_manager.templates):
+                logger.info(f"Analyzing template {i}: '{template.name}'")
+                
+                # Get template data
+                if hasattr(template, 'processed_intensities') and template.processed_intensities is not None:
+                    intensities = template.processed_intensities
+                    wavenumbers = self.template_manager.target_wavenumbers
+                    data_type = "processed"
+                else:
+                    intensities = template.intensities
+                    wavenumbers = template.wavenumbers
+                    data_type = "raw"
+                    
+                logger.info(f"Using {data_type} data for template '{template.name}'")
+                logger.info(f"Wavenumber range: {np.min(wavenumbers):.1f} to {np.max(wavenumbers):.1f}")
+                logger.info(f"Intensity stats: min={np.min(intensities):.6f}, max={np.max(intensities):.6f}, std={np.std(intensities):.6f}")
+                
+                # Calculate polypropylene score
+                score = self._calculate_polypropylene_score(wavenumbers, intensities, template.name)
+                logger.info(f"Template '{template.name}' polypropylene score: {score:.3f}")
+                
+                if score > best_score:
+                    best_score = score
+                    best_template_idx = i
+                    
+            # Threshold for detection (lowered to be more permissive)
+            min_score = 0.3
+            if best_score > min_score:
+                best_template = self.template_manager.templates[best_template_idx]
+                logger.info(f"✅ Detected polypropylene template: '{best_template.name}' (score: {best_score:.3f})")
+                return best_template_idx
+            else:
+                logger.info(f"❌ No template meets polypropylene threshold (best score: {best_score:.3f} < {min_score})")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in polypropylene auto-detection: {e}")
+            return None
+
+    def _calculate_polypropylene_score(self, wavenumbers, intensities, template_name):
+        """Calculate how likely a template is to be polypropylene."""
+        import numpy as np
+        score = 0.0
+        
+        try:
+            # Key polypropylene peaks and their relative importance
+            pp_peaks = {
+                1080: 1.0,   # Most characteristic peak
+                1460: 0.7,   # Secondary peak  
+                2900: 0.5,   # Tertiary peak (C-H stretch)
+                841: 0.6,    # Another PP peak
+                1376: 0.4    # Additional peak
+            }
+            
+            # Look for name hints first
+            name_lower = template_name.lower()
+            if any(hint in name_lower for hint in ['plastic', 'poly', 'pp', 'propylene']):
+                score += 0.2
+                logger.info(f"Template name '{template_name}' suggests plastic material (+0.2)")
+            
+            # Check for characteristic peaks
+            total_weight = 0
+            found_peaks = 0
+            
+            for peak_wn, weight in pp_peaks.items():
+                # Find closest wavenumber
+                closest_idx = np.argmin(np.abs(wavenumbers - peak_wn))
+                closest_wn = wavenumbers[closest_idx]
+                
+                # Must be within reasonable range
+                if abs(closest_wn - peak_wn) < 20:  # 20 cm⁻¹ tolerance
+                    # Get intensity at this position and nearby region
+                    window = 3  # Look at ±3 points around peak
+                    start_idx = max(0, closest_idx - window)
+                    end_idx = min(len(intensities), closest_idx + window + 1)
+                    
+                    peak_region = intensities[start_idx:end_idx]
+                    peak_intensity = np.max(peak_region)  # Take max in region
+                    
+                    # Normalize by overall spectrum intensity
+                    spectrum_max = np.max(intensities)
+                    if spectrum_max > 0:
+                        relative_intensity = peak_intensity / spectrum_max
+                        
+                        # Score based on relative intensity and weight
+                        peak_score = relative_intensity * weight
+                        score += peak_score
+                        found_peaks += 1
+                        
+                        logger.info(f"  Peak at {peak_wn} cm⁻¹: found at {closest_wn:.1f}, "
+                                  f"rel_intensity={relative_intensity:.3f}, score_contrib={peak_score:.3f}")
+                    
+                total_weight += weight
+            
+            # Normalize score by total possible weight
+            if total_weight > 0:
+                score = score / total_weight
+                
+            # Bonus for finding multiple peaks
+            if found_peaks >= 2:
+                bonus = min(0.2, found_peaks * 0.05)
+                score += bonus
+                logger.info(f"Multi-peak bonus for {found_peaks} peaks: +{bonus:.3f}")
+                
+            # Penalty for very noisy spectra (might indicate poor extraction)
+            noise_level = np.std(intensities) / np.mean(intensities) if np.mean(intensities) > 0 else 0
+            if noise_level > 0.5:  # High noise
+                penalty = min(0.2, noise_level * 0.1)
+                score -= penalty
+                logger.info(f"High noise penalty (noise={noise_level:.3f}): -{penalty:.3f}")
+                
+            logger.info(f"Final polypropylene score for '{template_name}': {score:.3f}")
+            return max(0.0, min(1.0, score))  # Clamp to [0,1]
+            
+        except Exception as e:
+            logger.error(f"Error calculating polypropylene score for '{template_name}': {e}")
+            return 0.0
+
+    def _calculate_agreement_score(self, nmf_intensity, template_relative):
+        """Calculate agreement score between NMF and template methods."""
+        import numpy as np
+        
+        try:
+            # Ensure scalar values
+            if not np.isscalar(nmf_intensity):
+                nmf_intensity = float(np.mean(nmf_intensity))
+            if not np.isscalar(template_relative):
+                template_relative = float(np.mean(template_relative))
+            
+            # Normalize both values to 0-1 scale
+            nmf_norm = min(1.0, float(nmf_intensity) / 10.0)  # Assuming NMF values 0-10
+            template_norm = float(template_relative)  # Already 0-1
+            
+            # Calculate agreement as inverse of difference
+            diff = abs(nmf_norm - template_norm)
+            agreement = 1.0 - diff
+            
+            return max(0.0, agreement)
+        except Exception as e:
+            logger.error(f"Error calculating agreement score: {e}")
+            return 0.0
+
+    def show_hybrid_analysis_dialog(self):
+        """Show dialog for configuring and running hybrid NMF-Template analysis."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Add debug logging at the start
+        logger.info("Starting show_hybrid_analysis_dialog()")
+        
+        # Check prerequisites
+        if not hasattr(self, 'template_fitting_results') or not self.template_fitting_results:
+            QMessageBox.warning(self, "No Template Results", "Fit templates first before running hybrid analysis.")
+            return
+            
+        if not hasattr(self, 'nmf_results') or not self.nmf_results:
+            QMessageBox.warning(self, "No NMF Results", "Run NMF analysis first before running hybrid analysis.")
+            return
+        
+        # Debug NMF data structure
+        logger.info(f"NMF results keys: {list(self.nmf_results.keys())}")
+        nmf_components = self.nmf_results.get('components', [])
+        logger.info(f"NMF components type: {type(nmf_components)}")
+        logger.info(f"Number of NMF components: {len(nmf_components) if hasattr(nmf_components, '__len__') else 'Not iterable'}")
+        
+        # Handle case where components is a numpy array vs list of arrays
+        if hasattr(nmf_components, '__len__') and len(nmf_components) > 0:
+            logger.info(f"NMF components shape: {getattr(nmf_components, 'shape', 'No shape')}")
+            
+            # Check if it's a 2D array that needs to be transposed or split
+            if hasattr(nmf_components, 'shape'):
+                if len(nmf_components.shape) == 2:
+                    logger.info(f"2D array detected with shape {nmf_components.shape}")
+                    # This might be components x features, we want features x components for individual component access
+                    if nmf_components.shape[0] > nmf_components.shape[1]:
+                        logger.info("Transposing components array")
+                        nmf_components = nmf_components.T
+                elif len(nmf_components.shape) == 1:
+                    logger.info(f"1D array detected with {len(nmf_components)} elements")
+                    # This might be a flattened array - we need to know the structure better
+                    logger.warning("1D array structure needs clarification")
+            
+            # Try to access first element safely
+            try:
+                if hasattr(nmf_components, 'shape') and len(nmf_components.shape) >= 2:
+                    first_component = nmf_components[0]
+                    logger.info(f"First component type: {type(first_component)}")
+                    logger.info(f"First component shape: {getattr(first_component, 'shape', 'No shape')}")
+                elif hasattr(nmf_components, '__getitem__'):
+                    first_item = nmf_components[0]
+                    logger.info(f"First item type: {type(first_item)}")
+                    logger.info(f"First item value: {first_item}")
+            except Exception as e:
+                logger.error(f"Error accessing first component: {e}")
+        
+        # Create hybrid analysis dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Hybrid NMF-Template Analysis")
+        dialog.setModal(True)
+        dialog.resize(600, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Header
+        header_label = QLabel("🔬 Hybrid Analysis: NMF-Guided Template Refinement")
+        header_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50; padding: 10px;")
+        layout.addWidget(header_label)
+        
+        # Description
+        desc_label = QLabel(
+            "This analysis uses NMF component maps to identify candidate regions,\n"
+            "then applies template fitting only to those regions for refined quantification.\n"
+            "Perfect for detecting trace amounts of materials with weak signals."
+        )
+        desc_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
+        layout.addWidget(desc_label)
+        
+        # NMF Component Selection
+        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox, QGroupBox, QFormLayout
+        
+        config_group = QGroupBox("Analysis Configuration")
+        config_layout = QFormLayout(config_group)
+        
+        # Component selection
+        self.component_spin = QSpinBox()
+        self.component_spin.setMinimum(1)
+        
+        # Handle different NMF component structures
+        if hasattr(nmf_components, 'shape') and len(nmf_components.shape) == 2:
+            # 2D array: number of components is the first dimension
+            n_components = nmf_components.shape[0]
+        elif hasattr(nmf_components, '__len__'):
+            # List or 1D array: each element is a component
+            n_components = len(nmf_components)
+        else:
+            n_components = 1
+            
+        logger.info(f"Setting component spin to {n_components} components")
+        self.component_spin.setMaximum(n_components)
+        self.component_spin.setValue(min(3, n_components))  # Default to component 3 or max available
+        config_layout.addRow("NMF Component (Polypropylene):", self.component_spin)
+        
+        # Threshold selection
+        self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setMinimum(0.1)
+        self.threshold_spin.setMaximum(20.0)
+        self.threshold_spin.setValue(2.0)
+        self.threshold_spin.setSingleStep(0.5)
+        self.threshold_spin.setSuffix(" (NMF intensity)")
+        config_layout.addRow("Detection Threshold:", self.threshold_spin)
+        
+        layout.addWidget(config_group)
+        
+        # Preview section
+        preview_group = QGroupBox("Current Analysis Summary")
+        preview_layout = QVBoxLayout(preview_group)
+        
+        # Get current stats for preview with robust error handling
+        try:
+            # Check if we have enough components for preview
+            has_enough_components = False
+            if hasattr(nmf_components, 'shape') and len(nmf_components.shape) == 2:
+                has_enough_components = nmf_components.shape[0] >= 3
+            elif hasattr(nmf_components, '__len__'):
+                has_enough_components = len(nmf_components) >= 3
+            
+            if has_enough_components:
+                import numpy as np
+                
+                # Extract component 3 data based on structure
+                if hasattr(nmf_components, 'shape') and len(nmf_components.shape) == 2:
+                    component_3_data = nmf_components[2]  # Get row 2 (component 3)
+                else:
+                    component_3_data = nmf_components[2]  # Get element 2
+                
+                # Debug the component data structure
+                logger.info(f"Component 3 data type: {type(component_3_data)}")
+                logger.info(f"Component 3 data shape: {getattr(component_3_data, 'shape', 'No shape attribute')}")
+                
+                # Convert to numpy array and handle different structures
+                component_array = np.asarray(component_3_data).flatten()
+                logger.info(f"Flattened component array shape: {component_array.shape}")
+                
+                # Safely calculate statistics
+                mask = component_array > 2.0
+                above_2 = np.sum(mask)
+                total_spectra = len(component_array)
+                percentage = (above_2 / total_spectra) * 100 if total_spectra > 0 else 0
+                
+                preview_text = f"Current NMF Component 3 analysis:\n"
+                preview_text += f"• Total spectra: {total_spectra:,}\n"
+                preview_text += f"• Above threshold (2.0): {above_2} spectra\n" 
+                preview_text += f"• Percentage: {percentage:.3f}%\n\n"
+                preview_text += f"Template analysis shows: {self.template_fitting_results['template_names']}\n"
+                preview_text += f"Hybrid analysis will cross-validate these methods."
+            else:
+                # Determine the actual number of components
+                if hasattr(nmf_components, 'shape') and len(nmf_components.shape) == 2:
+                    n_comps = nmf_components.shape[0]
+                elif hasattr(nmf_components, '__len__'):
+                    n_comps = len(nmf_components)
+                else:
+                    n_comps = 0
+                preview_text = f"NMF analysis has {n_comps} components. Need at least 3 for preview."
+        except Exception as e:
+            logger.error(f"Error generating preview: {e}")
+            preview_text = f"Preview generation failed: {str(e)}\nNMF data structure may be incompatible."
+        
+        preview_label = QLabel(preview_text)
+        preview_label.setStyleSheet("font-family: 'Courier New'; font-size: 10px; background-color: #f8f9fa; padding: 10px; border: 1px solid #dee2e6;")
+        preview_layout.addWidget(preview_label)
+        
+        layout.addWidget(preview_group)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        run_btn = QPushButton("🚀 Run Hybrid Analysis")
+        run_btn.clicked.connect(lambda: self.run_hybrid_analysis_from_dialog(dialog))
+        button_layout.addWidget(run_btn)
+        
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+
+    def run_hybrid_analysis_from_dialog(self, dialog):
+        """Run hybrid analysis with parameters from dialog."""
+        try:
+            # Get parameters from dialog
+            component_index = self.component_spin.value() - 1  # Convert to 0-based
+            threshold = self.threshold_spin.value()
+            
+            dialog.accept()  # Close dialog
+            
+            # Show progress
+            self.progress_status.show_progress("Running hybrid NMF-Template analysis...")
+            
+            # Run the analysis
+            results = self.perform_nmf_guided_template_analysis(component_index, threshold)
+            
+            self.progress_status.hide_progress()
+            
+            if results:
+                # Show results dialog
+                self.show_hybrid_analysis_results(results)
+                
+                # Add hybrid maps to features dropdown
+                self.update_map_features_with_hybrid_results()
+            else:
+                QMessageBox.warning(self, "Analysis Failed", "Hybrid analysis could not be completed.")
+                
+        except Exception as e:
+            self.progress_status.hide_progress()
+            QMessageBox.critical(self, "Error", f"Error running hybrid analysis:\n{str(e)}")
+            logger.error(f"Error in hybrid analysis dialog: {e}")
+
+    def show_hybrid_analysis_results(self, results):
+        """Show detailed results of hybrid analysis."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Hybrid Analysis Results")
+        dialog.setModal(True)
+        dialog.resize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Results text area
+        text_area = QTextEdit()
+        text_area.setReadOnly(True)
+        text_area.setFont(QFont("Courier New", 10))
+        
+        # Format results
+        results_text = self.format_hybrid_analysis_results(results)
+        text_area.setPlainText(results_text)
+        
+        layout.addWidget(text_area)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        export_btn = QPushButton("Export Results")
+        export_btn.clicked.connect(lambda: self.export_hybrid_analysis_results(results))
+        button_layout.addWidget(export_btn)
+        
+        show_maps_btn = QPushButton("Show Hybrid Maps")
+        show_maps_btn.clicked.connect(lambda: (dialog.accept(), self.switch_to_hybrid_maps()))
+        button_layout.addWidget(show_maps_btn)
+        
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+
+    def format_hybrid_analysis_results(self, results):
+        """Format hybrid analysis results for display."""
+        output = []
+        output.append("=" * 80)
+        output.append("HYBRID NMF-TEMPLATE ANALYSIS RESULTS")
+        output.append("=" * 80)
+        output.append(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        output.append(f"NMF Component: {results['nmf_component_index'] + 1}")
+        output.append(f"Detection Threshold: {results['nmf_threshold']}")
+        output.append("")
+        
+        stats = results['refined_statistics']
+        output.append("REFINED POLYPROPYLENE STATISTICS")
+        output.append("-" * 50)
+        output.append(f"Total Spectra Analyzed: {stats['total_spectra']:,}")
+        output.append(f"NMF Candidate Regions: {stats['nmf_candidates']} ({stats['nmf_candidate_percentage']:.3f}%)")
+        output.append(f"NMF-Template Agreement: {stats['agreement_count']} ({stats['agreement_percentage']:.3f}%)")
+        output.append(f"High-Confidence Detections: {stats['confident_detections']} ({stats['confident_percentage']:.3f}%)")
+        output.append("")
+        
+        # Confidence breakdown
+        confidence = results['confidence_regions']
+        output.append("CONFIDENCE LEVEL BREAKDOWN")
+        output.append("-" * 50)
+        total_hybrid = len(results['nmf_guided_assignments'])
+        if total_hybrid > 0:
+            high_pct = (len(confidence['high_confidence']) / total_hybrid) * 100
+            med_pct = (len(confidence['medium_confidence']) / total_hybrid) * 100
+            low_pct = (len(confidence['low_confidence']) / total_hybrid) * 100
+            
+            output.append(f"High Confidence (>80% agreement): {len(confidence['high_confidence'])} ({high_pct:.1f}%)")
+            output.append(f"Medium Confidence (50-80%): {len(confidence['medium_confidence'])} ({med_pct:.1f}%)")
+            output.append(f"Low Confidence (<50%): {len(confidence['low_confidence'])} ({low_pct:.1f}%)")
+        output.append("")
+        
+        # Comparison with original template analysis
+        output.append("COMPARISON WITH ORIGINAL TEMPLATE ANALYSIS")
+        output.append("-" * 50)
+        if hasattr(self, 'template_fitting_results'):
+            # Calculate original template dominance for polypropylene
+            original_dominance = 0
+            template_names = self.template_fitting_results['template_names']
+            polyprop_idx = None
+            for i, name in enumerate(template_names):
+                if 'polyprop' in name.lower():
+                    polyprop_idx = i
+                    break
+            
+            if polyprop_idx is not None:
+                template_coeffs = self.template_fitting_results['coefficients']
+                for pos_key, coeffs in template_coeffs.items():
+                    if polyprop_idx < len(coeffs):
+                        total_contrib = np.sum(coeffs[:len(template_names)])
+                        if total_contrib > 1e-10:
+                            pp_relative = coeffs[polyprop_idx] / total_contrib
+                            if pp_relative > 0.30:  # Using same threshold as hybrid
+                                original_dominance += 1
+                
+                original_pct = (original_dominance / stats['total_spectra']) * 100
+                output.append(f"Original Template Dominance: {original_dominance} ({original_pct:.3f}%)")
+                output.append(f"Hybrid Refined Estimate: {stats['agreement_count']} ({stats['agreement_percentage']:.3f}%)")
+                
+                improvement = original_pct - stats['agreement_percentage']
+                output.append(f"Refinement: {improvement:+.3f}% (negative = more conservative)")
+        
+        output.append("")
+        output.append("INTERPRETATION")
+        output.append("-" * 50)
+        refined_pct = stats['agreement_percentage']
+        if refined_pct < 0.5:
+            output.append("✅ EXCELLENT: Very low contamination level detected")
+            output.append("   Both NMF and template methods agree on minimal presence")
+        elif refined_pct < 1.0:
+            output.append("✅ GOOD: Low contamination level detected")
+            output.append("   Consistent with trace material detection")
+        else:
+            output.append("⚠️  MODERATE: Higher contamination detected")
+            output.append("   Consider verifying against independent methods")
+        
+        output.append("")
+        output.append("RECOMMENDED ACTIONS")
+        output.append("-" * 50)
+        output.append("1. Examine high-confidence regions visually")
+        output.append("2. Compare spatial patterns with expected contamination sources")
+        output.append("3. Use hybrid confidence maps for publication-quality figures")
+        
+        return "\n".join(output)
+
+    def export_hybrid_analysis_results(self, results):
+        """Export hybrid analysis results to file."""
+        try:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Export Hybrid Analysis Results", 
+                f"hybrid_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                "Text files (*.txt);;All files (*.*)"
+            )
+            
+            if file_path:
+                with open(file_path, 'w') as f:
+                    f.write(self.format_hybrid_analysis_results(results))
+                
+                QMessageBox.information(self, "Export Complete", f"Results exported to:\n{file_path}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export results:\n{str(e)}")
+
+    def switch_to_hybrid_maps(self):
+        """Switch to Map tab and show hybrid analysis features."""
+        # Switch to Map tab
+        for i in range(self.tab_widget.count()):
+            if self.tab_widget.tabText(i) == "Map View":
+                self.tab_widget.setCurrentIndex(i)
+                break
+        
+        # Update map features to include hybrid results
+        self.update_map_features_with_hybrid_results()
+        
+        # Set map feature to hybrid confidence map
+        control_panel = self.get_current_map_control_panel()
+        if control_panel and hasattr(control_panel, 'feature_combo'):
+            for i in range(control_panel.feature_combo.count()):
+                if "Hybrid Confidence" in control_panel.feature_combo.itemText(i):
+                    control_panel.feature_combo.setCurrentIndex(i)
+                    break
+
+    def update_map_features_with_hybrid_results(self):
+        """Add hybrid analysis results to map features dropdown."""
+        if not hasattr(self, 'hybrid_analysis_results'):
+            return
+        
+        # Get current map control panel
+        control_panel = self.get_current_map_control_panel()
+        if not control_panel or not hasattr(control_panel, 'feature_combo'):
+            return
+        
+        # Add hybrid features to dropdown
+        hybrid_features = [
+            "Hybrid: Confidence Map",
+            "Hybrid: NMF-Template Agreement", 
+            "Hybrid: High Confidence Regions",
+            "Hybrid: NMF Candidates",
+            "Enhanced: NMF Component (Log Scale)",
+            "Enhanced: NMF Component (High Contrast)"
+        ]
+        
+        current_items = [control_panel.feature_combo.itemText(i) for i in range(control_panel.feature_combo.count())]
+        
+        for feature in hybrid_features:
+            if feature not in current_items:
+                control_panel.feature_combo.addItem(feature)
+
+    def create_hybrid_confidence_map(self):
+        """Create a map showing hybrid analysis confidence levels."""
+        if not hasattr(self, 'hybrid_analysis_results'):
+            QMessageBox.warning(self, "No Hybrid Results", "Run hybrid analysis first.")
+            return None
+            
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            results = self.hybrid_analysis_results
+            confidence_regions = results['confidence_regions']
+            
+            # Create base map
+            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in positions]
+            y_coords = [pos[1] for pos in positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            confidence_map = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            
+            # Fill confidence map
+            # 0 = no data, 1 = low confidence, 2 = medium confidence, 3 = high confidence
+            for pos_key in confidence_regions['low_confidence']:
+                x, y = pos_key
+                confidence_map[y - y_min, x - x_min] = 1
+                
+            for pos_key in confidence_regions['medium_confidence']:
+                x, y = pos_key
+                confidence_map[y - y_min, x - x_min] = 2
+                
+            for pos_key in confidence_regions['high_confidence']:
+                x, y = pos_key
+                confidence_map[y - y_min, x - x_min] = 3
+            
+            # Plot with custom colormap
+            plt.figure(figsize=(10, 8))
+            
+            # Create custom colormap: gray -> yellow -> orange -> red
+            from matplotlib.colors import ListedColormap
+            colors = ['#f0f0f0', '#fff3cd', '#fd7e14', '#dc3545']  # light gray, light yellow, orange, red
+            cmap = ListedColormap(colors)
+            
+            im = plt.imshow(confidence_map, cmap=cmap, vmin=0, vmax=3, 
+                           extent=[x_min, x_max, y_min, y_max], origin='lower')
+            
+            # Add colorbar with labels
+            cbar = plt.colorbar(im, shrink=0.8)
+            cbar.set_ticks([0.375, 1.125, 1.875, 2.625])  # Center of each color band
+            cbar.set_ticklabels(['No Detection', 'Low Confidence', 'Medium Confidence', 'High Confidence'])
+            
+            plt.title(f'Hybrid Analysis Confidence Map\n'
+                     f'NMF Component {results["nmf_component_index"] + 1}, Threshold: {results["nmf_threshold"]}', 
+                     fontweight='bold')
+            plt.xlabel('X Position (μm)')
+            plt.ylabel('Y Position (μm)')
+            
+            # Add statistics text
+            stats = results['refined_statistics']
+            stats_text = f'High Conf: {len(confidence_regions["high_confidence"])} ' \
+                        f'({len(confidence_regions["high_confidence"])/stats["total_spectra"]*100:.2f}%)\n' \
+                        f'Total NMF Candidates: {stats["nmf_candidates"]} ' \
+                        f'({stats["nmf_candidate_percentage"]:.2f}%)'
+            plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes, 
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            plt.tight_layout()
+            plt.show()
+            
+            return confidence_map
+            
+        except Exception as e:
+            logger.error(f"Error creating hybrid confidence map: {e}")
+            QMessageBox.critical(self, "Map Error", f"Error creating confidence map:\n{str(e)}")
+            return None
+
+    def create_enhanced_nmf_component_map(self, log_scale=False, high_contrast=False):
+        """Create enhanced NMF component map with improved visualization."""
+        if not hasattr(self, 'nmf_results') or not self.nmf_results:
+            QMessageBox.warning(self, "No NMF Results", "Run NMF analysis first.")
+            return None
+            
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Get NMF component data (assume component 3 for polypropylene)
+            nmf_components = self.nmf_results.get('components', [])
+            if len(nmf_components) < 3:
+                QMessageBox.warning(self, "Component Missing", "NMF Component 3 not available.")
+                return None
+            
+            component_data = nmf_components[2]  # Component 3 (0-based index)
+            
+            # Create map
+            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in positions]
+            y_coords = [pos[1] for pos in positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            nmf_map = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            
+            # Fill map with component intensities
+            for i, spectrum in enumerate(self.map_data.spectra.values()):
+                if i < len(component_data):
+                    intensity = component_data[i]
+                    
+                    # Apply transformations
+                    if log_scale:
+                        # Handle potential arrays and ensure positive values
+                        if np.isscalar(intensity):
+                            if intensity > 0:
+                                intensity = np.log10(intensity + 1e-6)
+                            else:
+                                intensity = np.log10(1e-6)  # Small value for zero/negative
+                        else:
+                            # Handle array case
+                            intensity = np.where(intensity > 0, np.log10(intensity + 1e-6), np.log10(1e-6))
+                    
+                    nmf_map[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = intensity
+            
+            # Plot with enhanced visualization
+            plt.figure(figsize=(12, 8))
+            
+            if high_contrast:
+                # Use percentile-based scaling for high contrast
+                positive_values = nmf_map[nmf_map > 0]
+                if len(positive_values) > 0:
+                    p1, p99 = np.percentile(positive_values, [1, 99])
+                    vmin, vmax = p1, p99
+                else:
+                    vmin, vmax = np.min(nmf_map), np.max(nmf_map)
+                cmap = 'plasma'  # High contrast colormap
+            else:
+                # Standard scaling
+                vmin, vmax = np.min(nmf_map), np.max(nmf_map)
+                cmap = 'viridis'
+            
+            im = plt.imshow(nmf_map, cmap=cmap, vmin=vmin, vmax=vmax,
+                           extent=[x_min, x_max, y_min, y_max], origin='lower')
+            
+            plt.colorbar(im, shrink=0.8, label='NMF Component Intensity')
+            
+            # Add threshold line if hybrid analysis available
+            if hasattr(self, 'hybrid_analysis_results'):
+                threshold = self.hybrid_analysis_results['nmf_threshold']
+                threshold_color = nmf_map.copy()
+                threshold_color[threshold_color < threshold] = np.nan
+                
+                plt.contour(threshold_color, levels=[threshold], colors='red', linewidths=2,
+                           extent=[x_min, x_max, y_min, y_max], origin='lower')
+                plt.text(0.02, 0.02, f'Red line: Detection threshold ({threshold})', 
+                        transform=plt.gca().transAxes, color='red', fontweight='bold',
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            # Title based on enhancement type
+            title_suffix = ""
+            if log_scale:
+                title_suffix += " (Log Scale)"
+            if high_contrast:
+                title_suffix += " (High Contrast)"
+            
+            plt.title(f'Enhanced NMF Component 3 Map{title_suffix}', fontweight='bold')
+            plt.xlabel('X Position (μm)')
+            plt.ylabel('Y Position (μm)')
+            
+            # Add detection statistics
+            if hasattr(self, 'hybrid_analysis_results'):
+                stats = self.hybrid_analysis_results['refined_statistics']
+                stats_text = f'Candidates: {stats["nmf_candidates"]} ({stats["nmf_candidate_percentage"]:.3f}%)\n' \
+                            f'High Confidence: {stats["confident_detections"]} ({stats["confident_percentage"]:.3f}%)'
+                plt.text(0.98, 0.98, stats_text, transform=plt.gca().transAxes, 
+                        horizontalalignment='right', verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            plt.tight_layout()
+            plt.show()
+            
+            return nmf_map
+            
+        except Exception as e:
+            logger.error(f"Error creating enhanced NMF map: {e}")
+            QMessageBox.critical(self, "Map Error", f"Error creating enhanced NMF map:\n{str(e)}")
+            return None
+
+    def create_nmf_candidate_regions_map(self):
+        """Create a map highlighting NMF candidate regions above threshold."""
+        if not hasattr(self, 'hybrid_analysis_results'):
+            QMessageBox.warning(self, "No Hybrid Results", "Run hybrid analysis first.")
+            return None
+            
+        try:
+            import numpy as np
+            
+            results = self.hybrid_analysis_results
+            nmf_component_index = results['nmf_component_index']
+            nmf_threshold = results['nmf_threshold']
+            
+            # Get NMF component data
+            nmf_components = self.nmf_results.get('components', [])
+            component_data = nmf_components[nmf_component_index]
+            
+            # Create base map
+            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in positions]
+            y_coords = [pos[1] for pos in positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            candidate_map = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            
+            # Fill with candidate regions
+            for i, spectrum in enumerate(self.map_data.spectra.values()):
+                if i < len(component_data):
+                    nmf_intensity = component_data[i]
+                    # Handle both scalar and array values
+                    if np.isscalar(nmf_intensity):
+                        candidate_value = 1.0 if nmf_intensity > nmf_threshold else 0.0
+                    else:
+                        # For arrays, use mean value
+                        candidate_value = 1.0 if np.mean(nmf_intensity) > nmf_threshold else 0.0
+                    candidate_map[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = candidate_value
+            
+            return candidate_map
+            
+        except Exception as e:
+            logger.error(f"Error creating NMF candidate map: {e}")
+            return None
+
+    def create_high_confidence_regions_map(self):
+        """Create a map highlighting only high confidence hybrid detections."""
+        if not hasattr(self, 'hybrid_analysis_results'):
+            QMessageBox.warning(self, "No Hybrid Results", "Run hybrid analysis first.")
+            return None
+            
+        try:
+            import numpy as np
+            
+            results = self.hybrid_analysis_results
+            high_confidence_positions = results['confidence_regions']['high_confidence']
+            
+            # Create base map
+            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+            x_coords = [pos[0] for pos in positions]
+            y_coords = [pos[1] for pos in positions]
+            
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            
+            confidence_map = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            
+            # Fill with high confidence regions
+            for pos_key in high_confidence_positions:
+                x, y = pos_key
+                confidence_map[y - y_min, x - x_min] = 1.0
+            
+            return confidence_map
+            
+        except Exception as e:
+            logger.error(f"Error creating high confidence map: {e}")
+            return None
+
+    # Template Extraction from Map Functionality
+    def start_template_extraction_mode(self):
+        """Start interactive template extraction mode."""
+        if not hasattr(self, 'map_data') or self.map_data is None:
+            QMessageBox.warning(self, "No Map Data", "Load map data first before extracting templates.")
+            return
+        
+        # Show instruction dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Extract Templates from Map")
+        dialog.setModal(True)
+        dialog.resize(500, 350)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Instructions
+        instruction_text = QLabel(
+            "🔬 Template Extraction Mode\n\n"
+            "Instructions:\n"
+            "1. Click on map positions to select good example spectra\n"
+            "2. Each click will show the spectrum for confirmation\n"
+            "3. Give each template a descriptive name\n"
+            "4. Templates will be added to your template list\n\n"
+            "Tips:\n"
+            "• Choose representative spectra from your map\n"
+            "• Include both target material and background examples\n"
+            "• Select positions with good signal-to-noise ratio"
+        )
+        instruction_text.setStyleSheet("padding: 10px; background-color: #f0f8ff; border: 1px solid #cce7ff; border-radius: 5px;")
+        instruction_text.setWordWrap(True)
+        layout.addWidget(instruction_text)
+        
+        # Control buttons
+        button_layout = QHBoxLayout()
+        
+        start_btn = QPushButton("🎯 Start Extraction")
+        start_btn.clicked.connect(lambda: self._activate_extraction_mode(dialog))
+        button_layout.addWidget(start_btn)
+        
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
+    def _activate_extraction_mode(self, dialog):
+        """Activate the extraction mode and close dialog."""
+        dialog.accept()
+        
+        # Set extraction mode flag
+        self.template_extraction_mode = True
+        self.extraction_count = 0
+        
+        # Show status message
+        self.statusBar().showMessage("🎯 Template Extraction Mode: Click on map positions to extract spectra as templates", 0)
+        
+        # Change cursor to indicate extraction mode
+        from PySide6.QtCore import Qt
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        
+        # Show instruction in a temporary message box
+        QMessageBox.information(
+            self, 
+            "Extraction Mode Active", 
+            "Template extraction mode is now active!\n\n"
+            "Click on any position in the map to extract that spectrum as a template.\n"
+            "Press ESC or click 'Exit Extraction Mode' to stop."
+        )
+    
+    def _extract_template_from_position(self, x: float, y: float):
+        """Extract a template from the clicked map position."""
+        try:
+            # Find closest spectrum
+            spectrum = self.find_closest_spectrum(x, y)
+            if spectrum is None:
+                QMessageBox.warning(self, "No Spectrum", "No spectrum found at this position.")
+                return
+            
+            actual_x, actual_y = spectrum.x_pos, spectrum.y_pos
+            wavenumbers = spectrum.wavenumbers
+            
+            # Choose intensities based on processing preference
+            if self.use_processed and hasattr(spectrum, 'processed_intensities') and spectrum.processed_intensities is not None:
+                intensities = spectrum.processed_intensities
+                data_type = "Processed"
+            else:
+                intensities = spectrum.intensities
+                data_type = "Raw"
+            
+            # Show confirmation dialog with spectrum preview
+            self._show_template_extraction_dialog(wavenumbers, intensities, actual_x, actual_y, data_type)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Extraction Error", f"Error extracting template:\n{str(e)}")
+    
+    def _show_template_extraction_dialog(self, wavenumbers, intensities, x, y, data_type):
+        """Show dialog to confirm template extraction with spectrum preview."""
+        from PySide6.QtWidgets import QGroupBox, QLineEdit, QFormLayout
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Extract Template from Position ({x}, {y})")
+        dialog.setModal(True)
+        dialog.resize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Info header
+        info_label = QLabel(f"📍 Extracting {data_type} spectrum from position ({x}, {y})")
+        info_label.setStyleSheet("font-weight: bold; padding: 5px; background-color: #e8f4fd; border-radius: 3px;")
+        layout.addWidget(info_label)
+        
+        # Spectrum preview
+        preview_group = QGroupBox("Spectrum Preview")
+        preview_layout = QVBoxLayout(preview_group)
+        
+        # Create matplotlib widget for preview
+        from matplotlib.backends.qt_compat import QtWidgets
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        
+        fig = Figure(figsize=(10, 4))
+        canvas = FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        
+        # Plot the spectrum
+        ax.plot(wavenumbers, intensities, 'b-', linewidth=1)
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title(f'{data_type} Spectrum at ({x}, {y})')
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        
+        preview_layout.addWidget(canvas)
+        layout.addWidget(preview_group)
+        
+        # Template naming
+        name_group = QGroupBox("Template Information")
+        name_layout = QFormLayout(name_group)
+        
+        template_name_input = QLineEdit()
+        # Auto-suggest name based on position and extraction count
+        suggested_name = f"Map_Extract_{self.extraction_count + 1}_({x}_{y})"
+        template_name_input.setText(suggested_name)
+        template_name_input.selectAll()  # Select all for easy replacement
+        name_layout.addRow("Template Name:", template_name_input)
+        
+        description_input = QLineEdit()
+        description_input.setPlaceholderText("Optional: Brief description of this spectrum")
+        name_layout.addRow("Description:", description_input)
+        
+        layout.addWidget(name_group)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        add_btn = QPushButton("✅ Add as Template")
+        add_btn.clicked.connect(lambda: self._confirm_template_extraction(
+            dialog, template_name_input.text(), description_input.text(), 
+            wavenumbers, intensities, x, y, data_type))
+        button_layout.addWidget(add_btn)
+        
+        skip_btn = QPushButton("⏭️ Skip This Position")
+        skip_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(skip_btn)
+        
+        button_layout.addStretch()
+        
+        exit_btn = QPushButton("🚪 Exit Extraction Mode")
+        exit_btn.clicked.connect(lambda: self._exit_extraction_mode(dialog))
+        button_layout.addWidget(exit_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
+    def _confirm_template_extraction(self, dialog, name, description, wavenumbers, intensities, x, y, data_type):
+        """Confirm and add the extracted template."""
+        if not name.strip():
+            QMessageBox.warning(dialog, "Invalid Name", "Please provide a name for the template.")
+            return
+        
+        try:
+            # Add template to template manager
+            from ..core.template_management import TemplateSpectrum
+            import numpy as np
+            
+            # Create arrays from input data
+            wn_array = np.array(wavenumbers)
+            int_array = np.array(intensities)
+            
+            # DEBUG: Print original template info
+            print(f"\n=== TEMPLATE EXTRACTION DEBUG ===")
+            print(f"Template name: {name}")
+            print(f"Original template - Min: {np.min(int_array):.6f}, Max: {np.max(int_array):.6f}, Mean: {np.mean(int_array):.6f}, Std: {np.std(int_array):.6f}")
+            print(f"Original wavenumbers - Min: {np.min(wn_array):.1f}, Max: {np.max(wn_array):.1f}, Length: {len(wn_array)}")
+            
+            # Check if wavenumbers match map data
+            if hasattr(self, 'map_data') and self.map_data:
+                first_spectrum = next(iter(self.map_data.spectra.values()))
+                map_wn = first_spectrum.wavenumbers
+                print(f"Map wavenumbers - Min: {np.min(map_wn):.1f}, Max: {np.max(map_wn):.1f}, Length: {len(map_wn)}")
+                print(f"Wavenumber arrays equal: {np.array_equal(wn_array, map_wn)}")
+                
+                # Check target wavenumbers
+                if hasattr(self.template_manager, 'target_wavenumbers') and self.template_manager.target_wavenumbers is not None:
+                    print(f"Target wavenumbers - Min: {np.min(self.template_manager.target_wavenumbers):.1f}, Max: {np.max(self.template_manager.target_wavenumbers):.1f}, Length: {len(self.template_manager.target_wavenumbers)}")
+                    print(f"Target equals map: {np.array_equal(self.template_manager.target_wavenumbers, map_wn)}")
+                else:
+                    print("WARNING: Template manager has no target wavenumbers!")
+            
+            # Preprocess the spectrum using the template manager's method
+            processed_intensities = self.template_manager._preprocess_spectrum(wn_array, int_array)
+            
+            # DEBUG: Print processed template info
+            print(f"Processed template - Min: {np.min(processed_intensities):.6f}, Max: {np.max(processed_intensities):.6f}, Mean: {np.mean(processed_intensities):.6f}, Std: {np.std(processed_intensities):.6f}")
+            
+            # Check if processing destroyed the template
+            orig_std = np.std(int_array)
+            proc_std = np.std(processed_intensities)
+            ratio = proc_std/orig_std if orig_std > 0 else 0
+            print(f"Std deviation ratio (processed/original): {ratio:.3f}")
+            if ratio < 0.5:
+                print("⚠️  WARNING: Processing significantly reduced spectral variation!")
+            print(f"================================\n")
+            
+            template = TemplateSpectrum(
+                name=name.strip(),
+                wavenumbers=wn_array,
+                intensities=int_array,
+                processed_intensities=processed_intensities
+            )
+            
+            # Add metadata (if the TemplateSpectrum supports it)
+            if hasattr(template, 'metadata'):
+                template.metadata = {
+                    'description': description.strip(),
+                    'source': f'Map position ({x}, {y})',
+                    'data_type': data_type,
+                    'extraction_date': datetime.now().isoformat()
+                }
+            
+            # Add directly to templates list
+            self.template_manager.templates.append(template)
+            self.extraction_count += 1
+            
+            # Update template control panel
+            self.update_template_control_panel()
+            
+            # Show success message
+            self.statusBar().showMessage(f"✅ Template '{name}' extracted successfully! ({self.extraction_count} total)", 3000)
+            
+            dialog.accept()
+            
+            # Ask if user wants to continue extracting
+            reply = QMessageBox.question(
+                self, 
+                "Continue Extraction?", 
+                f"Template '{name}' added successfully!\n\nDo you want to continue extracting more templates?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.No:
+                self._exit_extraction_mode()
+                
+        except Exception as e:
+            QMessageBox.critical(dialog, "Error", f"Error adding template:\n{str(e)}")
+    
+    def _exit_extraction_mode(self, dialog=None):
+        """Exit template extraction mode."""
+        self.template_extraction_mode = False
+        
+        # Reset cursor
+        from PySide6.QtCore import Qt
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        
+        # Update status
+        self.statusBar().showMessage(f"🎯 Template extraction completed. {getattr(self, 'extraction_count', 0)} templates extracted.", 5000)
+        
+        if dialog:
+            dialog.reject()
+        
+        # Show summary if templates were extracted
+        if hasattr(self, 'extraction_count') and self.extraction_count > 0:
+            QMessageBox.information(
+                self,
+                "Extraction Complete", 
+                f"Successfully extracted {self.extraction_count} templates from map positions!\n\n"
+                "You can now:\n"
+                "• View templates in the Template Analysis tab\n"
+                "• Fit these templates to your map\n"
+                "• Run hybrid NMF-Template analysis"
+            )
+
+    def show_template_debug_tool(self):
+        """Show the template comparison debug tool."""
+        try:
+            from template_comparison_tool import show_template_comparison_tool
+            self.debug_tool = show_template_comparison_tool(self)
+        except Exception as e:
+            QMessageBox.warning(self, "Debug Tool Error", f"Could not open debug tool:\n{str(e)}")
+
+    def calculate_template_only_material_stats(self):
+        """Calculate material statistics from template fitting results only (no NMF interference)."""
+        try:
+            if not hasattr(self, 'template_fitting_results') or not self.template_fitting_results:
+                QMessageBox.warning(self, "No Template Results", "Run template fitting first.")
+                return None
+                
+            logger.info("Calculating template-only material statistics...")
+            
+            # Get template data
+            template_names = self.template_fitting_results['template_names']
+            template_coefficients = self.template_fitting_results['coefficients']
+            r_squared_values = self.template_fitting_results['r_squared']
+            
+            # Find target material template (flexible detection + manual selection)
+            target_template_idx = None
+            
+            # Try automatic detection for common materials first
+            for i, name in enumerate(template_names):
+                name_lower = str(name).lower()
+                if any(hint in name_lower for hint in ['pp1', 'pp', 'polyprop', 'plastic', 'propyl', 'pe', 'polyethylene', 'ps', 'polystyrene']):
+                    target_template_idx = i
+                    logger.info(f"Auto-detected material template: '{name}' at index {i}")
+                    break
+                    
+            # If auto-detection fails, let user select manually
+            if target_template_idx is None:
+                logger.info("Auto-detection failed, asking user to select target material template...")
+                
+                from PySide6.QtWidgets import QInputDialog
+                template_choices = [f"{i}: {name}" for i, name in enumerate(template_names)]
+                
+                choice, ok = QInputDialog.getItem(
+                    self, 
+                    "Select Target Material Template",
+                    "Which template represents the material you want to analyze?\n\nSelect the template for quantitative analysis:",
+                    template_choices,
+                    0,
+                    False
+                )
+                
+                if ok and choice:
+                    target_template_idx = int(choice.split(':')[0])
+                    logger.info(f"User selected target material template: '{template_names[target_template_idx]}' at index {target_template_idx}")
+                else:
+                    logger.info("User cancelled template selection")
+                    QMessageBox.information(self, "Analysis Cancelled", "Material analysis cancelled - no template selected.")
+                    return None
+                
+            target_template_name = template_names[target_template_idx]
+            
+            # Calculate statistics
+            total_spectra = len(template_coefficients)
+            material_contributions = []
+            material_relative_contributions = []
+            high_confidence_positions = []
+            medium_confidence_positions = []
+            low_confidence_positions = []
+            
+            # Quality thresholds
+            min_r_squared = 0.5  # Minimum fit quality
+            high_material_threshold = 0.5  # >50% target material contribution
+            medium_material_threshold = 0.2  # 20-50% target material contribution
+            
+            for pos_key, coeffs in template_coefficients.items():
+                try:
+                    r_squared = r_squared_values.get(pos_key, 0)
+                    
+                    # Skip poor fits
+                    if r_squared < min_r_squared:
+                        continue
+                        
+                    # Get target material contribution
+                    material_contrib = coeffs[target_template_idx] if target_template_idx < len(coeffs) else 0
+                    
+                    # Calculate relative contribution (target material vs all templates)
+                    total_contrib = sum(coeffs[:len(template_names)])
+                    material_relative = (material_contrib / total_contrib) if total_contrib > 1e-10 else 0
+                    
+                    material_contributions.append(material_contrib)
+                    material_relative_contributions.append(material_relative)
+                    
+                    # Categorize confidence levels
+                    if material_relative >= high_material_threshold:
+                        high_confidence_positions.append(pos_key)
+                    elif material_relative >= medium_material_threshold:
+                        medium_confidence_positions.append(pos_key)
+                    else:
+                        low_confidence_positions.append(pos_key)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing position {pos_key}: {e}")
+                    continue
+            
+            # Calculate overall statistics
+            import numpy as np
+            material_contributions = np.array(material_contributions)
+            material_relative_contributions = np.array(material_relative_contributions)
+            
+            stats = {
+                'template_name': target_template_name,
+                'total_spectra_analyzed': total_spectra,
+                'good_fit_spectra': len(material_contributions),
+                'good_fit_percentage': (len(material_contributions) / total_spectra) * 100,
+                
+                # Material detection statistics
+                'high_confidence_count': len(high_confidence_positions),
+                'medium_confidence_count': len(medium_confidence_positions), 
+                'low_confidence_count': len(low_confidence_positions),
+                'detection_count': len(high_confidence_positions) + len(medium_confidence_positions),
+                
+                # Percentages of total map
+                'high_confidence_percentage': (len(high_confidence_positions) / total_spectra) * 100,
+                'medium_confidence_percentage': (len(medium_confidence_positions) / total_spectra) * 100,
+                'total_detection_percentage': ((len(high_confidence_positions) + len(medium_confidence_positions)) / total_spectra) * 100,
+                
+                # Material contribution statistics
+                'mean_material_contribution': np.mean(material_contributions),
+                'std_material_contribution': np.std(material_contributions),
+                'max_material_contribution': np.max(material_contributions),
+                'mean_material_relative': np.mean(material_relative_contributions),
+                'std_material_relative': np.std(material_relative_contributions),
+                'max_material_relative': np.max(material_relative_contributions),
+                
+                # Position lists for mapping
+                'high_confidence_positions': high_confidence_positions,
+                'medium_confidence_positions': medium_confidence_positions,
+                'low_confidence_positions': low_confidence_positions
+            }
+            
+            logger.info(f"Template-only analysis complete:")
+            logger.info(f"  Total detection: {stats['total_detection_percentage']:.2f}% of map")
+            logger.info(f"  High confidence: {stats['high_confidence_percentage']:.2f}% of map")
+            logger.info(f"  Medium confidence: {stats['medium_confidence_percentage']:.2f}% of map")
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error in template-only polypropylene analysis: {e}")
+            QMessageBox.critical(self, "Analysis Error", f"Error calculating polypropylene statistics:\n{str(e)}")
+            return None
+
+    def show_template_only_polypropylene_results(self):
+        """Show material statistics from template fitting only."""
+        stats = self.calculate_template_only_material_stats()
+        if stats is None:
+            return
+            
+        # Create results dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Material Detection - Template Analysis Only")
+        dialog.setModal(True)
+        dialog.resize(800, 600)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Header
+        header = QLabel(f"🧬 Material Analysis Results - Template: {stats['template_name']}")
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50; padding: 10px;")
+        layout.addWidget(header)
+        
+        # Results text area
+        results_text = QTextEdit()
+        results_text.setReadOnly(True)
+        results_text.setFont(QFont("Courier", 10))
+        
+        # Format results
+        results_content = self.format_template_only_material_results(stats)
+        results_text.setPlainText(results_content)
+        
+        layout.addWidget(results_text)
+        
+        # Action buttons
+        button_layout = QHBoxLayout()
+        
+        # Export button
+        export_btn = QPushButton("📊 Export Results")
+        export_btn.clicked.connect(lambda: self.export_template_only_results(stats))
+        button_layout.addWidget(export_btn)
+        
+        # Create map button
+        map_btn = QPushButton("🗺️ Show Detection Map")
+        map_btn.clicked.connect(lambda: self.create_template_only_detection_map(stats))
+        button_layout.addWidget(map_btn)
+        
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+
+    def format_template_only_material_results(self, stats):
+        """Format template-only material results for display."""
+        material_name = stats['template_name']
+        content = []
+        content.append("=" * 80)
+        content.append(f"{material_name.upper()} DETECTION - TEMPLATE ANALYSIS ONLY")
+        content.append("=" * 80)
+        content.append("")
+        
+        content.append(f"Template Used: {stats['template_name']}")
+        content.append(f"Total Spectra: {stats['total_spectra_analyzed']:,}")
+        content.append(f"Good Fit Spectra: {stats['good_fit_spectra']:,} ({stats['good_fit_percentage']:.1f}%)")
+        content.append("")
+        
+        content.append(f"{material_name.upper()} DETECTION SUMMARY:")
+        content.append("-" * 40)
+        content.append(f"🔴 High Confidence (>50%):     {stats['high_confidence_count']:,} spectra ({stats['high_confidence_percentage']:.3f}%)")
+        content.append(f"🟡 Medium Confidence (20-50%): {stats['medium_confidence_count']:,} spectra ({stats['medium_confidence_percentage']:.3f}%)")
+        content.append(f"🔵 Low Confidence (<20%):      {stats['low_confidence_count']:,} spectra")
+        content.append("")
+        content.append(f"📊 TOTAL {material_name.upper()} DETECTION: {stats['detection_count']:,} spectra ({stats['total_detection_percentage']:.3f}% of map)")
+        content.append("")
+        
+        content.append(f"{material_name.upper()} CONTRIBUTION STATISTICS:")
+        content.append("-" * 40)
+        content.append(f"Mean Absolute Contribution: {stats['mean_material_contribution']:.6f} ± {stats['std_material_contribution']:.6f}")
+        content.append(f"Maximum Absolute Contribution: {stats['max_material_contribution']:.6f}")
+        content.append(f"Mean Relative Contribution: {stats['mean_material_relative']:.3f} ± {stats['std_material_relative']:.3f}")
+        content.append(f"Maximum Relative Contribution: {stats['max_material_relative']:.3f}")
+        content.append("")
+        
+        content.append("INTERPRETATION:")
+        content.append("-" * 40)
+        if stats['total_detection_percentage'] > 1.0:
+            content.append(f"⚠️  Significant {material_name} contamination detected ({stats['total_detection_percentage']:.3f}%)")
+        elif stats['total_detection_percentage'] > 0.1:
+            content.append(f"✅ Moderate {material_name} presence detected ({stats['total_detection_percentage']:.3f}%)")
+        else:
+            content.append(f"✅ Low level {material_name} traces detected ({stats['total_detection_percentage']:.3f}%)")
+            
+        if stats['high_confidence_percentage'] > 0.01:
+            content.append(f"🎯 High confidence detections: {stats['high_confidence_percentage']:.3f}% - these are very reliable")
+            
+        content.append("")
+        content.append("Note: This analysis uses template fitting only, without NMF interference.")
+        content.append(f"Results are based on spectral matching to the {material_name} template reference.")
+        
+        return "\n".join(content)
+
+    def create_template_only_detection_map(self, stats):
+        """Create a map showing template-only polypropylene detections."""
+        try:
+            if not self.map_data:
+                return
+                
+            # Create detection intensity map
+            detection_map = np.zeros((self.map_data.height, self.map_data.width))
+            
+            # Fill in detection levels
+            for pos in stats['high_confidence_positions']:
+                if pos in self.map_data.spectra:
+                    spectrum = self.map_data.spectra[pos]
+                    x_idx = int(spectrum.x_pos)
+                    y_idx = int(spectrum.y_pos)
+                    if 0 <= y_idx < self.map_data.height and 0 <= x_idx < self.map_data.width:
+                        detection_map[y_idx, x_idx] = 3  # High confidence
+                        
+            for pos in stats['medium_confidence_positions']:
+                if pos in self.map_data.spectra:
+                    spectrum = self.map_data.spectra[pos]
+                    x_idx = int(spectrum.x_pos)
+                    y_idx = int(spectrum.y_pos)
+                    if 0 <= y_idx < self.map_data.height and 0 <= x_idx < self.map_data.width:
+                        if detection_map[y_idx, x_idx] == 0:  # Don't overwrite high confidence
+                            detection_map[y_idx, x_idx] = 2  # Medium confidence
+                            
+            for pos in stats['low_confidence_positions']:
+                if pos in self.map_data.spectra:
+                    spectrum = self.map_data.spectra[pos]
+                    x_idx = int(spectrum.x_pos)
+                    y_idx = int(spectrum.y_pos)
+                    if 0 <= y_idx < self.map_data.height and 0 <= x_idx < self.map_data.width:
+                        if detection_map[y_idx, x_idx] == 0:  # Don't overwrite higher confidence
+                            detection_map[y_idx, x_idx] = 1  # Low confidence
+            
+            # Create and display the map
+            self.current_map_data = detection_map
+            material_name = stats['template_name']
+            self.current_map_title = f"{material_name} Detection - Template Only ({stats['total_detection_percentage']:.3f}%)"
+            
+            # Update the map display
+            self.update_map()
+            
+            # Switch to map view
+            self.tab_widget.setCurrentIndex(0)
+            
+            # Add custom feature to dropdown
+            control_panel = self.get_current_map_control_panel()
+            if control_panel and hasattr(control_panel, 'feature_combo'):
+                current_features = [control_panel.feature_combo.itemText(i) 
+                                  for i in range(control_panel.feature_combo.count())]
+                
+                feature_name = f"{material_name} Detection (Template Only)"
+                if feature_name not in current_features:
+                    control_panel.feature_combo.addItem(feature_name)
+                    control_panel.feature_combo.setCurrentText(feature_name)
+            
+            self.statusBar().showMessage(f"Showing {material_name} detection map: {stats['total_detection_percentage']:.3f}% detection rate", 5000)
+            
+        except Exception as e:
+            logger.error(f"Error creating template-only detection map: {e}")
+            QMessageBox.critical(self, "Map Error", f"Error creating detection map:\n{str(e)}")
+
+    def export_template_only_results(self, stats):
+        """Export template-only polypropylene results."""
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            import os
+            from datetime import datetime
+            
+            # Get save location
+            material_name = stats['template_name'].replace(' ', '_').lower()
+            default_name = f"{material_name}_template_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Export Template Analysis Results", default_name,
+                "Text Files (*.txt);;All Files (*)"
+            )
+            
+            if file_path:
+                content = self.format_template_only_material_results(stats)
+                
+                with open(file_path, 'w') as f:
+                    f.write(content)
+                    f.write("\n\n")
+                    f.write("DETAILED POSITION DATA:\n")
+                    f.write("=" * 40 + "\n")
+                    f.write("High Confidence Positions:\n")
+                    for pos in stats['high_confidence_positions']:
+                        f.write(f"  {pos}\n")
+                    f.write("\nMedium Confidence Positions:\n")
+                    for pos in stats['medium_confidence_positions']:
+                        f.write(f"  {pos}\n")
+                
+                QMessageBox.information(self, "Export Complete", f"Results exported to:\n{file_path}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting results:\n{str(e)}")
+
+    def keyPressEvent(self, event):
+        """Handle key press events - including ESC to exit extraction mode."""
+        from PySide6.QtCore import Qt
+        
+        if event.key() == Qt.Key.Key_Escape:
+            if hasattr(self, 'template_extraction_mode') and self.template_extraction_mode:
+                self._exit_extraction_mode()
+                return
+        
+        super().keyPressEvent(event)

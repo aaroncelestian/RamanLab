@@ -3,3 +3,57 @@ description:
 globs:
 alwaysApply: false
 ---
+# Canvas Redraw Debugging Guide
+
+## Map Tab Plot Shrinking Issue (SOLVED)
+Problem: Map plots gradually shrink when switching between different map features due to colorbar layout memory.
+
+### Root Cause
+- Matplotlib `autolayout=True` conflicts with manual `tight_layout()` calls
+- Colorbar space allocation gets accumulated across updates
+- Canvas not fully reset between plot updates
+
+### Solution Pattern (Applied to update_map())
+```python
+# 1. Save and disable autolayout
+original_autolayout = fig.get_autolayout()
+fig.set_autolayout(False)
+
+# 2. Complete figure reset
+fig.clear()
+import gc; gc.collect()  # Force cleanup
+
+# 3. Manual layout control
+if colorbar_exists:
+    fig.subplots_adjust(left=0.1, bottom=0.1, right=0.85, top=0.95)
+else:
+    fig.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.95)
+
+# 4. Multi-step canvas refresh
+canvas.flush_events()
+canvas.draw_idle()
+canvas.draw()
+
+# 5. Always restore autolayout (even in except blocks)
+fig.set_autolayout(original_autolayout)
+```
+
+## Debugging Canvas Issues
+### Symptoms to Look For
+- **Gradual shrinking**: Layout memory accumulation
+- **Inconsistent sizing**: Autolayout conflicts
+- **Incomplete updates**: Missing canvas refresh steps
+- **Widget positioning drift**: Qt/matplotlib layout conflicts
+
+### Diagnostic Steps
+1. Check if `figure.autolayout` is enabled
+2. Verify complete figure clearing before updates
+3. Ensure proper colorbar removal/recreation
+4. Test with fixed `subplots_adjust()` parameters
+5. Add multiple canvas refresh calls
+
+### Prevention
+- Use consistent layout management approach
+- Always pair layout changes with proper restoration
+- Implement robust error handling for matplotlib state
+- Test with rapid feature switching to catch accumulation bugs

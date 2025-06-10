@@ -7,13 +7,14 @@ from typing import Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, 
     QLabel, QCheckBox, QComboBox, QLineEdit, QListWidget, QTabWidget,
-    QTextEdit, QSlider, QDoubleSpinBox
+    QTextEdit, QSlider, QDoubleSpinBox, QSizePolicy
 )
 from PySide6.QtCore import Signal, Qt
 
 from .base_widgets import (
     ParameterGroupBox, ButtonGroup, TitleLabel, StandardButton,
-    SafeWidgetMixin
+    PrimaryButton, SuccessButton, WarningButton, InfoButton, SafeWidgetMixin,
+    apply_icon_button_style
 )
 
 logger = logging.getLogger(__name__)
@@ -71,11 +72,8 @@ class MapViewControlPanel(BaseControlPanel):
         feature_layout = QVBoxLayout(feature_group)
         
         self.feature_combo = QComboBox()
-        self.feature_combo.addItems([
-            "Integrated Intensity",
-            "Peak Height", 
-            "Cosmic Ray Map"
-        ])
+        # Initialize with base features - can be updated later via refresh methods
+        self.feature_combo.addItems(self._get_initial_features())
         self.feature_combo.currentTextChanged.connect(self.feature_changed.emit)
         feature_layout.addWidget(self.feature_combo)
         
@@ -131,14 +129,7 @@ class MapViewControlPanel(BaseControlPanel):
         width_widget.setLayout(width_layout)
         self.range_controls.layout.addWidget(width_widget)
         
-        # Center wavenumber slider label
-        center_label = QLabel("Center (cm⁻¹):")
-        center_label.setStyleSheet("QLabel { font-weight: bold; }")
-        self.range_controls.layout.addWidget(center_label)
-        
-        # Center wavenumber slider (horizontal slider widget as requested) - much longer
-        slider_layout = QHBoxLayout()
-        
+        # Center wavenumber slider - compact layout
         self.center_wavenumber_slider = QSlider(Qt.Horizontal)
         self.center_wavenumber_slider.setRange(200, 4000)  # 200-4000 cm⁻¹ range
         self.center_wavenumber_slider.setValue(1000)  # Default center
@@ -146,27 +137,13 @@ class MapViewControlPanel(BaseControlPanel):
         self.center_wavenumber_slider.setPageStep(100)  # Larger jumps
         self.center_wavenumber_slider.setTickPosition(QSlider.TicksBelow)
         self.center_wavenumber_slider.setTickInterval(500)  # Tick marks every 500 cm⁻¹
-        self.center_wavenumber_slider.setToolTip("Center wavenumber for integration (50 cm⁻¹ increments)")
-        self.center_wavenumber_slider.setMinimumWidth(250)  # Make slider much longer
+        self.center_wavenumber_slider.setToolTip("Drag to set center wavenumber for integration (50 cm⁻¹ increments)")
         
-        # Value display for the slider - compact
-        self.center_value_label = QLabel("1000")
-        self.center_value_label.setMinimumWidth(40)
-        self.center_value_label.setMaximumWidth(40)
-        self.center_value_label.setAlignment(Qt.AlignCenter)
-        self.center_value_label.setStyleSheet("QLabel { font-weight: bold; font-size: 11px; }")
+        self.range_controls.layout.addWidget(self.center_wavenumber_slider)
         
-        slider_layout.addWidget(self.center_wavenumber_slider)
-        slider_layout.addWidget(self.center_value_label)
-        
-        # Add slider layout to range controls
-        slider_widget = QWidget()
-        slider_widget.setLayout(slider_layout)
-        self.range_controls.layout.addWidget(slider_widget)
-        
-        # Show calculated integration range - under the slider
+        # Show calculated integration range - below the slider
         self.range_display = QLabel("Range: 950 - 1050 cm⁻¹")
-        self.range_display.setStyleSheet("QLabel { color: #666; font-size: 10px; }")
+        self.range_display.setStyleSheet("QLabel { color: #666; font-size: 10px; text-align: center; }")
         self.range_display.setAlignment(Qt.AlignCenter)
         self.range_controls.layout.addWidget(self.range_display)
         
@@ -316,6 +293,14 @@ class MapViewControlPanel(BaseControlPanel):
         # Initially hide template fitting section
         self.template_fitting_group.setVisible(False)
     
+    def _get_initial_features(self):
+        """Get the initial set of features for the dropdown."""
+        return [
+            "Integrated Intensity",
+            "Peak Height", 
+            "Cosmic Ray Map"
+        ]
+    
     def get_available_features(self) -> list:
         """Get list of available features in the combo box."""
         return [self.feature_combo.itemText(i) for i in range(self.feature_combo.count())]
@@ -376,10 +361,7 @@ class MapViewControlPanel(BaseControlPanel):
         min_wavenumber = center - width / 2
         max_wavenumber = center + width / 2
         
-        # Update slider value display
-        self.center_value_label.setText(f"{center}")
-        
-        # Update range display label
+        # Update range display label (center value is now shown in tooltip)
         self.range_display.setText(f"Range: {min_wavenumber:.0f} - {max_wavenumber:.0f} cm⁻¹")
         
         # Emit signal if in custom range mode
@@ -456,7 +438,6 @@ class DimensionalityReductionControlPanel(BaseControlPanel):
         
         # Create tab widget for PCA and NMF
         self.tab_widget = QTabWidget()
-        self.tab_widget.setMaximumHeight(800)  # Constrain height
         
         # === PCA TAB ===
         self.pca_tab = QWidget()
@@ -488,9 +469,9 @@ class DimensionalityReductionControlPanel(BaseControlPanel):
         pca_run_btn.clicked.connect(self.run_pca_requested.emit)
         pca_layout.addWidget(pca_run_btn)
         
-        pca_rerun_btn = StandardButton("Re-run PCA (Update Clustering)")
+
+        pca_rerun_btn = SuccessButton("Re-run PCA (Update Clustering)")
         pca_rerun_btn.clicked.connect(self.rerun_pca_requested.emit)
-        pca_rerun_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
         pca_layout.addWidget(pca_rerun_btn)
         
         pca_layout.addStretch()  # Push content to top
@@ -547,9 +528,8 @@ class DimensionalityReductionControlPanel(BaseControlPanel):
         nmf_run_btn.clicked.connect(self.run_nmf_requested.emit)
         nmf_layout.addWidget(nmf_run_btn)
         
-        nmf_rerun_btn = StandardButton("Re-run NMF (Update Clustering)")
+        nmf_rerun_btn = SuccessButton("Re-run NMF (Update Clustering)")
         nmf_rerun_btn.clicked.connect(self.rerun_nmf_requested.emit)
-        nmf_rerun_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
         nmf_layout.addWidget(nmf_rerun_btn)
         
         # NMF Save/Load section
@@ -650,11 +630,18 @@ class TemplateControlPanel(BaseControlPanel):
     # Signals
     load_template_file_requested = Signal()
     load_template_folder_requested = Signal()
+    extract_from_map_requested = Signal()  # New signal for map extraction
+    debug_templates_requested = Signal()  # New signal for debug tool
     remove_template_requested = Signal(int)  # template index
     clear_templates_requested = Signal()
     plot_templates_requested = Signal()
     fit_templates_requested = Signal()
     normalize_templates_requested = Signal()
+    show_detailed_stats = Signal()
+    export_statistics = Signal()
+    show_chemical_analysis = Signal()
+    show_hybrid_analysis = Signal()
+    show_pp_analysis = Signal()  # Template-only polypropylene analysis
     
     def __init__(self, parent=None):
         super().__init__("Template Analysis", parent)
@@ -669,9 +656,17 @@ class TemplateControlPanel(BaseControlPanel):
         load_buttons = ButtonGroup()
         load_buttons.add_button_row([
             ("Load Single File", self.load_template_file_requested.emit),
-            ("Load Folder", self.load_template_folder_requested.emit)
+            ("Load Folder", self.load_template_folder_requested.emit),
+            ("📍 Extract from Map", self.extract_from_map_requested.emit)
         ])
         template_layout.addWidget(load_buttons)
+        
+        # Debug button
+        debug_buttons = ButtonGroup()
+        debug_buttons.add_button_row([
+            ("🔬 Debug Templates", self.debug_templates_requested.emit)
+        ])
+        template_layout.addWidget(debug_buttons)
         
         # Template list box
         list_label = QLabel("Loaded Templates:")
@@ -691,6 +686,53 @@ class TemplateControlPanel(BaseControlPanel):
         template_layout.addWidget(manage_buttons)
         
         self.layout.addWidget(template_group)
+        
+        # Template Statistics (only shown after fitting)
+        self.stats_group = QGroupBox("Template Fitting Statistics")
+        self.stats_group.setVisible(False)  # Hidden until fitting is complete
+        stats_layout = QVBoxLayout(self.stats_group)
+        
+        # Statistics display area
+        self.stats_text = QTextEdit()
+        self.stats_text.setMaximumHeight(200)
+        self.stats_text.setReadOnly(True)
+        self.stats_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+            }
+        """)
+        stats_layout.addWidget(self.stats_text)
+        
+        # Statistics control buttons
+        stats_buttons = ButtonGroup()
+        stats_buttons.add_button_row([
+            ("Show Detailed Stats", self.show_detailed_stats),
+            ("Export Statistics", self.export_statistics)
+        ])
+        stats_layout.addWidget(stats_buttons)
+        
+        # Chemical analysis button
+        chemical_analysis_btn = StandardButton("Chemical Validity Analysis")
+        chemical_analysis_btn.clicked.connect(self.show_chemical_analysis)
+        stats_layout.addWidget(chemical_analysis_btn)
+        
+        # Hybrid analysis button
+        hybrid_analysis_btn = StandardButton("🔬 Hybrid NMF-Template Analysis")
+        hybrid_analysis_btn.clicked.connect(self.show_hybrid_analysis)
+        hybrid_analysis_btn.setToolTip("Run hybrid analysis combining NMF and template fitting for trace detection")
+        stats_layout.addWidget(hybrid_analysis_btn)
+        
+        # Template-only material analysis button
+        material_analysis_btn = StandardButton("📊 Material Analysis (Template Only)")
+        material_analysis_btn.clicked.connect(self.show_pp_analysis)
+        material_analysis_btn.setToolTip("Calculate material statistics from template fitting only (bypasses NMF)")
+        stats_layout.addWidget(material_analysis_btn)
+        
+        self.layout.addWidget(self.stats_group)
         
         # Normalization options
         norm_group = QGroupBox("Normalization")
@@ -784,6 +826,23 @@ class TemplateControlPanel(BaseControlPanel):
     def show_processed_data(self) -> bool:
         """Check if processed data should be shown."""
         return self.show_processed_cb.isChecked()
+    
+    def _show_detailed_stats(self):
+        """Handle show detailed stats button click."""
+        self.show_detailed_stats.emit()
+    
+    def _export_statistics(self):
+        """Handle export statistics button click."""
+        self.export_statistics.emit()
+    
+    def update_statistics_display(self, stats_text: str):
+        """Update the statistics display area."""
+        self.stats_text.setPlainText(stats_text)
+        self.stats_group.setVisible(True)
+    
+    def hide_statistics(self):
+        """Hide the statistics group."""
+        self.stats_group.setVisible(False)
 
 
 class NMFControlPanel(BaseControlPanel):
@@ -901,344 +960,268 @@ class MLControlPanel(BaseControlPanel):
     remove_model_requested = Signal()
     apply_selected_model_requested = Signal()
     model_selection_changed = Signal(str)
+    show_feature_info_requested = Signal()
     
     def __init__(self, parent=None):
         super().__init__("ML Analysis", parent)
         
     def setup_controls(self):
-        """Setup ML analysis controls with improved workflow."""
+        """Setup ML analysis controls with tabbed interface."""
         # === WORKFLOW GUIDE ===
-        guide_group = QGroupBox("📋 Quick Start Guide")
+        guide_group = QGroupBox("📋 Quick Start")
         guide_layout = QVBoxLayout(guide_group)
         
         guide_text = QLabel(
-            "1️⃣ Choose your analysis type below\n"
-            "2️⃣ Set up your data and parameters\n"  
-            "3️⃣ Train your model\n"
-            "4️⃣ Apply to map data (Map View tab)\n"
-            "5️⃣ Save your trained model for reuse"
+            "1️⃣ Choose tab (Classification/Clustering)\n"
+            "2️⃣ Set data & params → 3️⃣ Train → 4️⃣ Apply\n"
+            "5️⃣ Save model for reuse"
         )
         guide_text.setStyleSheet("color: #666; font-size: 10px; padding: 4px;")
         guide_layout.addWidget(guide_text)
         
         self.layout.addWidget(guide_group)
         
-        # === ANALYSIS TYPE SELECTION ===
-        analysis_type_group = QGroupBox("🎯 Step 1: Choose Analysis Type")
-        analysis_type_layout = QVBoxLayout(analysis_type_group)
+        # === TABBED INTERFACE ===
+        from PySide6.QtWidgets import QTabWidget
+        self.tab_widget = QTabWidget()
         
-        # Radio buttons for analysis type
-        from PySide6.QtWidgets import QRadioButton
-        self.supervised_radio = QRadioButton("🔍 Supervised Learning (Classification)")
-        self.supervised_radio.setChecked(True)  # Default
-        self.supervised_radio.toggled.connect(self._on_analysis_type_changed)
-        analysis_type_layout.addWidget(self.supervised_radio)
+        # Create tabs
+        self.supervised_tab = QWidget()
+        self.unsupervised_tab = QWidget()
         
-        supervised_hint = QLabel("   → Train a classifier using known examples (good/bad spectra)")
-        supervised_hint.setStyleSheet("color: #888; font-size: 9px; margin-left: 20px;")
-        analysis_type_layout.addWidget(supervised_hint)
+        self.tab_widget.addTab(self.supervised_tab, "🔍 Classification")
+        self.tab_widget.addTab(self.unsupervised_tab, "🧩 Clustering")
         
-        self.unsupervised_radio = QRadioButton("🧩 Unsupervised Learning (Clustering)")
-        self.unsupervised_radio.toggled.connect(self._on_analysis_type_changed)
-        analysis_type_layout.addWidget(self.unsupervised_radio)
+        self.layout.addWidget(self.tab_widget)
         
-        unsupervised_hint = QLabel("   → Find patterns and groups in data without known examples")
-        unsupervised_hint.setStyleSheet("color: #888; font-size: 9px; margin-left: 20px;")
-        analysis_type_layout.addWidget(unsupervised_hint)
-        
-        self.layout.addWidget(analysis_type_group)
-        
-        # === SUPERVISED LEARNING SECTION ===
-        self.supervised_group = QGroupBox("🔍 Step 2: Supervised Learning Setup")
-        supervised_layout = QVBoxLayout(self.supervised_group)
-        
-        # Training data setup
-        training_data_group = QGroupBox("📁 Training Data")
-        training_data_layout = QVBoxLayout(training_data_group)
-        
-        training_hint = QLabel("💡 Load folders containing positive and negative example spectra")
-        training_hint.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
-        training_data_layout.addWidget(training_hint)
-        
-        load_data_btn = StandardButton("📂 Load Training Data Folders")
-        load_data_btn.clicked.connect(self.load_training_data_requested.emit)
-        load_data_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 6px; }")
-        training_data_layout.addWidget(load_data_btn)
-        
-        self.training_data_label = QLabel("No training data loaded")
-        self.training_data_label.setStyleSheet("QLabel { color: #666; font-size: 10px; }")
-        training_data_layout.addWidget(self.training_data_label)
-        
-        supervised_layout.addWidget(training_data_group)
-        
-        # Model parameters
-        params_group = QGroupBox("⚙️ Model Parameters")
-        params_layout = QVBoxLayout(params_group)
-        
-        # Algorithm selection with description
-        params_layout.addWidget(QLabel("🤖 Algorithm: Random Forest"))
-        algo_hint = QLabel("   Robust ensemble method, good for spectral data")
-        algo_hint.setStyleSheet("color: #888; font-size: 9px;")
-        params_layout.addWidget(algo_hint)
-        
-        # Parameters in a more compact layout
-        supervised_params = ParameterGroupBox("Training Parameters")
-        self.n_estimators_spin = supervised_params.add_spinbox(
-            "Trees", 10, 1000, 100)
-        self.n_estimators_spin.setToolTip("Number of decision trees (more = better accuracy, slower training)")
-        
-        self.max_depth_spin = supervised_params.add_spinbox(
-            "Max Depth", 3, 100, 10)
-        self.max_depth_spin.setToolTip("Maximum tree depth (higher = more complex model)")
-        
-        self.test_size_spin = supervised_params.add_double_spinbox(
-            "Test Size", 0.1, 0.5, 0.2, 0.1)
-        self.test_size_spin.setToolTip("Fraction of data for testing")
-        
-        params_layout.addWidget(supervised_params)
-        
-        # Feature options
-        feature_group = QGroupBox("📊 Feature Options")
-        feature_layout = QVBoxLayout(feature_group)
-        
-        feature_hint = QLabel("💡 Select which features to use for training:")
-        feature_hint.setStyleSheet("color: #666; font-size: 9px;")
-        feature_layout.addWidget(feature_hint)
-        
-        self.use_raw_features_cb = QCheckBox("✅ Use Full Spectrum (Recommended)")
-        self.use_raw_features_cb.setChecked(True)
-        self.use_raw_features_cb.setToolTip("Use all wavenumber points as features")
-        feature_layout.addWidget(self.use_raw_features_cb)
-        
-        self.use_pca_features_cb = QCheckBox("📈 Use PCA Features (requires PCA analysis)")
-        self.use_pca_features_cb.setChecked(False)
-        self.use_pca_features_cb.setToolTip("Use principal components as features\n(Run PCA analysis first in PCA & NMF tab)")
-        feature_layout.addWidget(self.use_pca_features_cb)
-        
-        self.use_nmf_features_cb = QCheckBox("🧩 Use NMF Features (requires NMF analysis)")
-        self.use_nmf_features_cb.setChecked(False)
-        self.use_nmf_features_cb.setToolTip("Use non-negative matrix factors as features\n(Run NMF analysis first in PCA & NMF tab)")
-        feature_layout.addWidget(self.use_nmf_features_cb)
-        
-        supervised_layout.addWidget(feature_group)
-        
-        # Training actions
-        train_group = QGroupBox("🚀 Training & Application")
-        train_layout = QVBoxLayout(train_group)
-        
-        # Step indicators
-        step3_label = QLabel("3️⃣ Configure parameters above, then train the model:")
-        step3_label.setStyleSheet("font-weight: bold;")
-        train_layout.addWidget(step3_label)
-        
-        param_hint = QLabel("   💡 Adjust RF parameters, PCA/NMF features above before training")
-        param_hint.setStyleSheet("color: #2196F3; font-size: 9px; font-style: italic;")
-        train_layout.addWidget(param_hint)
-        
-        self.train_supervised_btn = StandardButton("🎯 Train Classification Model")
-        self.train_supervised_btn.clicked.connect(self.train_supervised_requested.emit)
-        self.train_supervised_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; }")
-        train_layout.addWidget(self.train_supervised_btn)
-        
-        step4_label = QLabel("4️⃣ Apply to map (after training):")
-        step4_label.setStyleSheet("font-weight: bold;")
-        train_layout.addWidget(step4_label)
-        
-        # Make the classify button more prominent
-        self.classify_btn = StandardButton("🗺️ Apply Model to Map")
-        self.classify_btn.clicked.connect(self.classify_map_requested.emit)
-        self.classify_btn.setToolTip("Apply the trained model to the currently loaded map")
-        self.classify_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                font-weight: bold;
-                padding: 10px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #F57C00;
-            }
-            QPushButton:disabled {
-                background-color: #ccc;
-                color: #666;
-            }
-        """)
-        self.classify_btn.setEnabled(False)  # Initially disabled until model is trained
-        train_layout.addWidget(self.classify_btn)
-        
-        map_hint = QLabel("   💡 This will add 'ML Classification' to the Map View features dropdown")
-        map_hint.setStyleSheet("color: #2196F3; font-size: 9px; font-style: italic;")
-        train_layout.addWidget(map_hint)
-        
-        supervised_layout.addWidget(train_group)
-        supervised_layout.addWidget(feature_group)
-        supervised_layout.addWidget(params_group)
-        
-        self.layout.addWidget(self.supervised_group)
-        
-        # === UNSUPERVISED LEARNING SECTION ===
-        self.unsupervised_group = QGroupBox("🧩 Step 2: Unsupervised Learning Setup")
-        unsupervised_layout = QVBoxLayout(self.unsupervised_group)
-        
-        unsup_hint = QLabel("🔍 Find natural groups/patterns in your map data without examples")
-        unsup_hint.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
-        unsupervised_layout.addWidget(unsup_hint)
-        
-        # Clustering parameters
-        cluster_params_group = QGroupBox("⚙️ Clustering Parameters")
-        cluster_params_layout = QVBoxLayout(cluster_params_group)
-        
-        # Algorithm selection
-        cluster_method_group = QGroupBox("🤖 Algorithm Selection")
-        cluster_method_layout = QVBoxLayout(cluster_method_group)
-        
-        self.clustering_method_combo = QComboBox()
-        self.clustering_method_combo.addItems([
-            "K-Means",
-            "Gaussian Mixture Model", 
-            "DBSCAN",
-            "Hierarchical Clustering"
-        ])
-        self.clustering_method_combo.setToolTip("K-Means: Fast, finds spherical clusters\nGMM: Soft clustering\nDBSCAN: Variable density clusters\nHierarchical: Creates cluster tree")
-        cluster_method_layout.addWidget(self.clustering_method_combo)
-        cluster_params_layout.addWidget(cluster_method_group)
-        
-        # Clustering parameters
-        cluster_params = ParameterGroupBox("Parameters")
-        self.n_clusters_spin = cluster_params.add_spinbox(
-            "# Clusters", 2, 20, 3)
-        self.n_clusters_spin.setToolTip("Number of groups to find (not used for DBSCAN)")
-        
-        self.eps_spin = cluster_params.add_double_spinbox(
-            "DBSCAN Eps", 0.1, 10.0, 0.5, 0.1)
-        self.eps_spin.setToolTip("DBSCAN neighborhood distance")
-        
-        self.min_samples_spin = cluster_params.add_spinbox(
-            "Min Samples", 2, 20, 5)
-        self.min_samples_spin.setToolTip("DBSCAN minimum samples per cluster")
-        
-        cluster_params_layout.addWidget(cluster_params)
-        unsupervised_layout.addWidget(cluster_params_group)
-        
-        # Clustering action
-        cluster_action_group = QGroupBox("🚀 Run Clustering")
-        cluster_action_layout = QVBoxLayout(cluster_action_group)
-        
-        step3_unsup_label = QLabel("3️⃣ Find clusters in your data:")
-        step3_unsup_label.setStyleSheet("font-weight: bold;")
-        cluster_action_layout.addWidget(step3_unsup_label)
-        
-        self.train_unsupervised_btn = StandardButton("🧩 Find Clusters")
-        self.train_unsupervised_btn.clicked.connect(self.train_unsupervised_requested.emit)
-        self.train_unsupervised_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px; }")
-        cluster_action_layout.addWidget(self.train_unsupervised_btn)
-        
-        cluster_hint = QLabel("   → Results will appear in the plot area and can be viewed in Map View")
-        cluster_hint.setStyleSheet("color: #888; font-size: 9px;")
-        cluster_action_layout.addWidget(cluster_hint)
-        
-        unsupervised_layout.addWidget(cluster_action_group)
-        
-        self.layout.addWidget(self.unsupervised_group)
+        # Setup each tab
+        self._setup_supervised_tab()
+        self._setup_unsupervised_tab()
         
         # === MODEL MANAGEMENT ===
-        model_mgmt_group = QGroupBox("💾 Step 5: Save & Load Models")
-        model_mgmt_layout = QVBoxLayout(model_mgmt_group)
-        
-        model_hint = QLabel("💡 Save trained models to reuse later or share with others")
-        model_hint.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
-        model_mgmt_layout.addWidget(model_hint)
-        
-        # Model naming for save
-        model_name_layout = QHBoxLayout()
-        model_name_layout.addWidget(QLabel("Model Name:"))
-        self.model_name_edit = QLineEdit()
-        self.model_name_edit.setPlaceholderText("e.g., Polymer_Classifier_v1")
-        model_name_layout.addWidget(self.model_name_edit)
-        model_mgmt_layout.addLayout(model_name_layout)
-        
-        save_model_btn = StandardButton("💾 Save Named Model")
-        save_model_btn.clicked.connect(self.save_named_model_requested.emit)
-        save_model_btn.setToolTip("Save the trained model to a file")
-        model_mgmt_layout.addWidget(save_model_btn)
-        
-        # Trained models selection
-        models_selection_layout = QHBoxLayout()
-        models_selection_layout.addWidget(QLabel("Select Model:"))
-        self.trained_models_combo = QComboBox()
-        self.trained_models_combo.setMinimumWidth(150)
-        self.trained_models_combo.addItem("No models loaded")
-        self.trained_models_combo.currentTextChanged.connect(self.model_selection_changed.emit)
-        models_selection_layout.addWidget(self.trained_models_combo)
-        model_mgmt_layout.addLayout(models_selection_layout)
-        
-        # Model action buttons
-        model_action_layout = QHBoxLayout()
-        
-        load_model_btn = StandardButton("📂 Load Model")
-        load_model_btn.clicked.connect(self.load_model_requested.emit)
-        load_model_btn.setToolTip("Load a previously saved model")
-        model_action_layout.addWidget(load_model_btn)
-        
-        remove_model_btn = StandardButton("🗑️ Remove Model")
-        remove_model_btn.clicked.connect(self.remove_model_requested.emit)
-        model_action_layout.addWidget(remove_model_btn)
-        
-        model_mgmt_layout.addLayout(model_action_layout)
-        
-        # Apply selected model to map
-        apply_model_btn = StandardButton("📈 Apply Selected Model to Map")
-        apply_model_btn.clicked.connect(self.apply_selected_model_requested.emit)
-        apply_model_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        model_mgmt_layout.addWidget(apply_model_btn)
-        
-        self.layout.addWidget(model_mgmt_group)
+        self._setup_model_management()
         
         # Results Info
-        info_group = QGroupBox("ℹ️ Analysis Status")
+        info_group = QGroupBox("ℹ️ Status")
         info_layout = QVBoxLayout(info_group)
         
         from PySide6.QtWidgets import QTextEdit
         self.info_text = QTextEdit()
-        self.info_text.setMaximumHeight(100)
+        self.info_text.setMaximumHeight(80)  # Compact height
         self.info_text.setReadOnly(True)
-        self.info_text.setPlainText("Ready to start machine learning analysis!\n\n"
-                                   "Choose your analysis type above and follow the steps.")
+        self.info_text.setPlainText("Ready! Choose Classification or Clustering tab above.")
         info_layout.addWidget(self.info_text)
         
         self.layout.addWidget(info_group)
+    
+    def _setup_supervised_tab(self):
+        """Setup the supervised learning tab with condensed layout."""
+        supervised_layout = QVBoxLayout(self.supervised_tab)
+        supervised_layout.setSpacing(10)  # Normal spacing
+        supervised_layout.setContentsMargins(6, 6, 6, 6)  # Normal margins
         
-        # Initialize visibility
-        self._on_analysis_type_changed()
+        # Training data setup - condensed
+        training_data_group = QGroupBox("📁 Data")
+        training_data_layout = QVBoxLayout(training_data_group)
+        
+        load_data_btn = PrimaryButton("📂 Load Training Folders")
+        load_data_btn.clicked.connect(self.load_training_data_requested.emit)
+        load_data_btn.setMaximumWidth(200)  # Compact width
+        training_data_layout.addWidget(load_data_btn)
+        
+        self.training_data_label = QLabel("No data loaded")
+        self.training_data_label.setStyleSheet("QLabel { color: #666; font-size: 9px; }")
+        training_data_layout.addWidget(self.training_data_label)
+        
+        # Feature options - condensed
+        feature_group = QGroupBox("📊 Features")
+        feature_layout = QVBoxLayout(feature_group)
+        
+        self.use_raw_features_cb = QCheckBox("✅ Full Spectrum")
+        self.use_raw_features_cb.setChecked(True)
+        self.use_raw_features_cb.setToolTip("Use all wavenumber points")
+        feature_layout.addWidget(self.use_raw_features_cb)
+        
+        self.use_pca_features_cb = QCheckBox("📈 PCA Features")
+        self.use_pca_features_cb.setToolTip("Use PCA components (run PCA first)")
+        feature_layout.addWidget(self.use_pca_features_cb)
+        
+        self.use_nmf_features_cb = QCheckBox("🧩 NMF Features")
+        self.use_nmf_features_cb.setToolTip("Use NMF components (run NMF first)")
+        feature_layout.addWidget(self.use_nmf_features_cb)
+        
+        # Model parameters - better spaced
+        params_group = QGroupBox("⚙️ Parameters")
+        params_layout = QVBoxLayout(params_group)
+        params_layout.setSpacing(8)  # Reasonable spacing between elements
+        
+        params_label = QLabel("🤖 Random Forest")
+        params_label.setStyleSheet("font-weight: bold; color: #333; font-size: 12px;")
+        params_layout.addWidget(params_label)
+        
+        # Add some space after the label
+        params_layout.addSpacing(8)
+        
+        # Parameters with natural sizing
+        supervised_params = ParameterGroupBox("Settings")
+        # Remove aggressive spacing and let the grid layout work naturally
+        supervised_params.layout.setSpacing(8)  # Normal spacing between parameters
+        supervised_params.layout.setContentsMargins(12, 12, 12, 12)  # Normal padding
+        
+        self.n_estimators_spin = supervised_params.add_spinbox("Trees", 10, 1000, 100)
+        self.max_depth_spin = supervised_params.add_spinbox("Depth", 3, 100, 10)
+        self.test_size_spin = supervised_params.add_double_spinbox("Test Size", 0.1, 0.5, 0.2, 0.1)
+        
+        params_layout.addWidget(supervised_params)
+        
+        # Training actions - normal sizing
+        train_group = QGroupBox("🚀 Train & Apply")
+        train_layout = QVBoxLayout(train_group)
+        train_layout.setSpacing(8)  # Normal spacing between buttons
+        train_layout.setContentsMargins(8, 8, 8, 8)  # Normal padding
+        
+        self.train_supervised_btn = SuccessButton("🎯 Train Model")
+        self.train_supervised_btn.clicked.connect(self.train_supervised_requested.emit)
+        train_layout.addWidget(self.train_supervised_btn)
+        
+        self.classify_btn = WarningButton("🗺️ Apply to Map")
+        self.classify_btn.clicked.connect(self.classify_map_requested.emit)
+        self.classify_btn.setEnabled(False)
+        train_layout.addWidget(self.classify_btn)
+        
+        self.feature_info_btn = InfoButton("📊 Feature Info")
+        self.feature_info_btn.clicked.connect(self.show_feature_info_requested.emit)
+        self.feature_info_btn.setToolTip("Show information about ML features being used")
+        train_layout.addWidget(self.feature_info_btn)
+        
+        # Add all groups to layout with normal spacing
+        supervised_layout.addWidget(training_data_group)
+        supervised_layout.addWidget(feature_group)
+        supervised_layout.addWidget(params_group)
+        supervised_layout.addWidget(train_group)
+        supervised_layout.addStretch()  # Push everything to top
+    
+    def _setup_unsupervised_tab(self):
+        """Setup the unsupervised learning tab with condensed layout."""
+        unsupervised_layout = QVBoxLayout(self.unsupervised_tab)
+        
+        # Algorithm selection - condensed
+        algo_group = QGroupBox("🤖 Algorithm")
+        algo_layout = QVBoxLayout(algo_group)
+        
+        self.clustering_method_combo = QComboBox()
+        self.clustering_method_combo.addItems([
+            "K-Means", "Gaussian Mixture", "DBSCAN", "Hierarchical"
+        ])
+        self.clustering_method_combo.setMaximumWidth(150)
+        self.clustering_method_combo.setToolTip("Choose clustering algorithm")
+        algo_layout.addWidget(self.clustering_method_combo)
+        
+        # Parameters - condensed
+        cluster_params = ParameterGroupBox("Settings")
+        self.n_clusters_spin = cluster_params.add_spinbox("Clusters", 2, 20, 3)
+        self.n_clusters_spin.setMaximumWidth(70)
+        
+        self.eps_spin = cluster_params.add_double_spinbox("Eps", 0.1, 10.0, 0.5, 0.1)
+        self.eps_spin.setMaximumWidth(70)
+        
+        self.min_samples_spin = cluster_params.add_spinbox("Min Samples", 2, 20, 5)
+        self.min_samples_spin.setMaximumWidth(70)
+        
+        # Training action - condensed
+        action_group = QGroupBox("🚀 Run")
+        action_layout = QVBoxLayout(action_group)
+        
+        self.train_unsupervised_btn = PrimaryButton("🧩 Find Clusters")
+        self.train_unsupervised_btn.clicked.connect(self.train_unsupervised_requested.emit)
+        self.train_unsupervised_btn.setMaximumWidth(150)
+        action_layout.addWidget(self.train_unsupervised_btn)
+        
+        # Add all groups to layout
+        unsupervised_layout.addWidget(algo_group)
+        unsupervised_layout.addWidget(cluster_params)
+        unsupervised_layout.addWidget(action_group)
+        unsupervised_layout.addStretch()  # Push everything to top
+    
+    def _setup_model_management(self):
+        """Setup model management section with icon buttons."""
+        model_mgmt_group = QGroupBox("💾 Models")
+        model_mgmt_layout = QVBoxLayout(model_mgmt_group)
+        
+        # Model naming - condensed
+        model_mgmt_layout.addWidget(QLabel("Name:"))
+        self.model_name_edit = QLineEdit()
+        self.model_name_edit.setPlaceholderText("Model_v1")
+        self.model_name_edit.setMaximumHeight(25)
+        model_mgmt_layout.addWidget(self.model_name_edit)
+        
+        # Icon-only buttons for save/load/remove
+        from PySide6.QtWidgets import QPushButton
+
+        
+        # Save button - icon only
+        save_model_btn = QPushButton("💾")
+        apply_icon_button_style(save_model_btn)
+        save_model_btn.clicked.connect(self.save_named_model_requested.emit)
+        save_model_btn.setToolTip("Save model")
+        save_model_btn.setMaximumWidth(40)
+        save_model_btn.setMaximumHeight(30)
+        
+        # Model selection
+        model_mgmt_layout.addWidget(QLabel("Select:"))
+        self.trained_models_combo = QComboBox()
+        self.trained_models_combo.setMaximumHeight(25)
+        self.trained_models_combo.addItem("No models")
+        self.trained_models_combo.currentTextChanged.connect(self.model_selection_changed.emit)
+        model_mgmt_layout.addWidget(self.trained_models_combo)
+        
+        # Icon buttons layout
+        button_layout = QHBoxLayout()
+        
+        # Load button - icon only
+        load_model_btn = QPushButton("📂")
+        apply_icon_button_style(load_model_btn)
+        load_model_btn.clicked.connect(self.load_model_requested.emit)
+        load_model_btn.setToolTip("Load model")
+        load_model_btn.setMaximumWidth(40)
+        load_model_btn.setMaximumHeight(30)
+        
+        # Remove button - icon only
+        remove_model_btn = QPushButton("🗑️")
+        apply_icon_button_style(remove_model_btn)
+        remove_model_btn.clicked.connect(self.remove_model_requested.emit)
+        remove_model_btn.setToolTip("Remove model")
+        remove_model_btn.setMaximumWidth(40)
+        remove_model_btn.setMaximumHeight(30)
+        
+        button_layout.addWidget(save_model_btn)
+        button_layout.addWidget(load_model_btn)
+        button_layout.addWidget(remove_model_btn)
+        button_layout.addStretch()
+        
+        model_mgmt_layout.addLayout(button_layout)
+        
+        # Apply model button
+        apply_model_btn = SuccessButton("📈 Apply Selected")
+        apply_model_btn.clicked.connect(self.apply_selected_model_requested.emit)
+        apply_model_btn.setMaximumWidth(150)
+        model_mgmt_layout.addWidget(apply_model_btn)
+        
+        self.layout.addWidget(model_mgmt_group)
         
     def _on_analysis_type_changed(self):
-        """Handle analysis type radio button changes."""
-        if hasattr(self, 'supervised_radio') and hasattr(self, 'unsupervised_radio'):
-            # Show/hide appropriate sections
-            if self.supervised_radio.isChecked():
-                self.supervised_group.setVisible(True)
-                self.unsupervised_group.setVisible(False)
-            else:
-                self.supervised_group.setVisible(False)
-                self.unsupervised_group.setVisible(True)
+        """Handle analysis type changes - no longer needed with tabs."""
+        pass
     
     def get_analysis_type(self) -> str:
-        """Get the selected analysis type."""
-        if hasattr(self, 'supervised_radio') and self.supervised_radio.isChecked():
-            return "Supervised Classification"
-        else:
-            return "Unsupervised Clustering"
+        """Get the selected analysis type based on current tab."""
+        if hasattr(self, 'tab_widget'):
+            current_index = self.tab_widget.currentIndex()
+            if current_index == 0:
+                return "Supervised Classification"
+            else:
+                return "Unsupervised Clustering"
+        return "Supervised Classification"  # Default fallback
     
     def get_supervised_model(self) -> str:
         """Get the selected supervised model."""

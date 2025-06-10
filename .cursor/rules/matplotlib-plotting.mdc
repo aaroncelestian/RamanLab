@@ -3,3 +3,39 @@ description:
 globs:
 alwaysApply: false
 ---
+# Matplotlib Plotting Guidelines for RamanLab
+
+## Configuration Requirements
+- Always use [matplotlib_config.py](mdc:ui/matplotlib_config.py) for matplotlib configuration
+- The config sets `figure.autolayout = True` by default, which can interfere with manual layout management
+
+## Canvas and Colorbar Management
+When updating plots with colorbars (especially in map visualizations):
+
+### Proper Update Sequence
+1. **Disable autolayout temporarily** before clearing figure
+2. **Clear figure completely** with `fig.clear()`
+3. **Force garbage collection** to clean up matplotlib artists
+4. **Use manual layout control** with `subplots_adjust()` instead of `tight_layout()`
+5. **Restore autolayout setting** after plotting
+
+### Canvas Redrawing Best Practices
+```python
+# Force complete canvas refresh
+canvas.flush_events()
+canvas.draw_idle()
+canvas.draw()
+```
+
+### Colorbar Space Management
+- With colorbar: use `right=0.85` in `subplots_adjust()`
+- Without colorbar: use `right=0.95` in `subplots_adjust()`
+- This prevents plot shrinking when switching between features
+
+## Common Issues
+- **Plot Shrinking**: Caused by matplotlib retaining layout memory from previous colorbars
+- **Layout Conflicts**: `autolayout=True` + `tight_layout()` can cause unpredictable behavior
+- **Incomplete Redraw**: Single `draw()` call may not fully refresh complex plots
+
+## Error Handling
+Always restore matplotlib settings in exception handlers to prevent state corruption.

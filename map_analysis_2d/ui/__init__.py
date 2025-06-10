@@ -8,7 +8,9 @@ control panels, and dialogs.
 from .main_window import MapAnalysisMainWindow
 from .base_widgets import (
     SafeWidgetMixin, ParameterGroupBox, ButtonGroup, 
-    ScrollableControlPanel, TitleLabel, StandardButton, ProgressStatusWidget
+    ScrollableControlPanel, TitleLabel, StandardButton, PrimaryButton,
+    SecondaryButton, DangerButton, SuccessButton, WarningButton, 
+    apply_icon_button_style, ProgressStatusWidget
 )
 from .plotting_widgets import (
     BasePlotWidget, MapPlotWidget, SpectrumPlotWidget, 
@@ -28,6 +30,12 @@ __all__ = [
     'ScrollableControlPanel',
     'TitleLabel',
     'StandardButton',
+    'PrimaryButton',
+    'SecondaryButton', 
+    'DangerButton',
+    'SuccessButton',
+    'WarningButton',
+    'apply_icon_button_style',
     'ProgressStatusWidget',
     'BasePlotWidget',
     'MapPlotWidget', 

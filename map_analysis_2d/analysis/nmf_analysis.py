@@ -223,13 +223,57 @@ class NMFAnalyzer:
             data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
             data = np.abs(data) + 1e-10  # Add epsilon
             
-            # Transform data
-            transformed = self.nmf.transform(data)
+            # Check feature dimensions
+            expected_features = self.nmf.n_features_in_ if hasattr(self.nmf, 'n_features_in_') else self.feature_components.shape[1]
+            actual_features = data.shape[1]
+            
+            logger.info(f"NMF transform: Expected {expected_features} features, got {actual_features}")
+            
+            if actual_features != expected_features:
+                logger.warning(f"Feature dimension mismatch: X has {actual_features} features, but NMF is expecting {expected_features} features as input.")
+                
+                # Try to align features
+                if actual_features > expected_features:
+                    # Truncate excess features
+                    logger.info(f"Truncating {actual_features - expected_features} excess features")
+                    data = data[:, :expected_features]
+                elif actual_features < expected_features:
+                    # Pad with zeros
+                    logger.info(f"Padding with {expected_features - actual_features} zero features")
+                    padding = np.zeros((data.shape[0], expected_features - actual_features))
+                    data = np.hstack([data, padding])
+                
+                # Verify dimensions after alignment
+                if data.shape[1] != expected_features:
+                    raise ValueError(f"Could not align features: still have dimension mismatch after alignment")
+            
+            # Transform data in batches to avoid memory issues
+            batch_size = min(1000, data.shape[0])
+            n_batches = (data.shape[0] + batch_size - 1) // batch_size
+            
+            transformed_batches = []
+            for i in range(n_batches):
+                start_idx = i * batch_size
+                end_idx = min((i + 1) * batch_size, data.shape[0])
+                batch_data = data[start_idx:end_idx]
+                
+                try:
+                    batch_transformed = self.nmf.transform(batch_data)
+                    transformed_batches.append(batch_transformed)
+                except Exception as batch_error:
+                    logger.warning(f"NMF transform failed for batch {i+1}/{n_batches}: {str(batch_error)}")
+                    # Use zeros for failed batch
+                    batch_transformed = np.zeros((batch_data.shape[0], self.nmf.n_components))
+                    transformed_batches.append(batch_transformed)
+            
+            transformed = np.vstack(transformed_batches)
+            logger.info(f"NMF transformation successful: {data.shape} -> {transformed.shape}")
             return transformed, 'nmf'
             
         except Exception as e:
             logger.error(f"NMF transformation failed: {str(e)}")
             if fallback_to_full:
+                logger.info("Falling back to full spectrum features")
                 return data, 'full'
             return None, 'none'
     

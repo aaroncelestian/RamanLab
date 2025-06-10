@@ -3,3 +3,43 @@ description:
 globs:
 alwaysApply: false
 ---
+# RamanLab Project Structure Guide
+
+## Main Application Files
+- [map_analysis_2d_qt6.py](mdc:map_analysis_2d_qt6.py) - Main 2D Map Analysis application (9600+ lines)
+- [map_analysis_2d/main.py](mdc:map_analysis_2d/main.py) - Modular entry point for 2D analysis
+- [raman_analysis_app_qt6.py](mdc:raman_analysis_app_qt6.py) - General Raman analysis application
+
+## UI and Configuration
+- [ui/matplotlib_config.py](mdc:ui/matplotlib_config.py) - Centralized matplotlib configuration
+- [ui/](mdc:ui/) - UI components and widgets directory
+
+## Key Classes and Components
+### TwoDMapAnalysisQt6 Class (in map_analysis_2d_qt6.py)
+- **Line ~4745**: `update_map()` function - handles map visualization updates
+- **Line ~1273**: Main class definition
+- **Map Tab**: Primary visualization interface for 2D maps
+
+### Important Methods
+- `update_map()` - Core map plotting function (prone to colorbar shrinking issues)
+- `create_*_map()` functions - Generate different map types (intensity, template, cosmic ray, etc.)
+- `apply_map_interpolation()` - Handle map data processing
+
+## Analysis Modules
+- **Cosmic Ray Elimination (CRE)**: Advanced cosmic ray detection and removal
+- **Template Analysis**: Template fitting and coefficient mapping  
+- **Machine Learning**: Classification and clustering features
+- **PCA/NMF**: Dimensionality reduction analysis
+
+## Common Data Flow
+1. Load map data from directory structure
+2. Process spectra (with optional CRE)
+3. Generate maps based on selected features
+4. Visualize with matplotlib canvas
+5. Export results and analysis
+
+## Architecture Notes
+- Large monolithic structure in main file (~9600 lines)
+- Modular components being developed in `map_analysis_2d/` directory
+- Heavy use of Qt6 for GUI components
+- Matplotlib for all plotting operations

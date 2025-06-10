@@ -63,14 +63,14 @@ class ParameterGroupBox(QGroupBox, SafeWidgetMixin):
     def __init__(self, title: str, parent=None):
         super().__init__(title, parent)
         self.layout = QGridLayout(self)
-        self.layout.setSpacing(3)  # Reduced spacing
-        self.layout.setContentsMargins(6, 6, 6, 6)  # Reduced margins
+        self.layout.setSpacing(12)  # More generous spacing for better usability
+        self.layout.setContentsMargins(15, 15, 15, 15)  # More generous margins
         self.layout.setColumnStretch(0, 0)  # Don't stretch label column
         self.layout.setColumnStretch(1, 1)  # Stretch control column
         self.row_count = 0
         
     def add_double_spinbox(self, label: str, min_val: float, max_val: float, 
-                          value: float, step: float = 1.0, width: int = 70) -> QDoubleSpinBox:
+                          value: float, step: float = 1.0, width: int = 120) -> QDoubleSpinBox:
         """Add a double spinbox parameter."""
         label_widget = QLabel(f"{label}:")
         label_widget.setMaximumWidth(90)  # Constrain label width
@@ -79,8 +79,9 @@ class ParameterGroupBox(QGroupBox, SafeWidgetMixin):
         spinbox.setRange(min_val, max_val)
         spinbox.setValue(value)
         spinbox.setSingleStep(step)
-        spinbox.setMaximumWidth(width)  # Reduced default width
-        spinbox.setMinimumWidth(60)  # Minimum width for readability
+        spinbox.setMaximumWidth(width)  # Increased default width
+        spinbox.setMinimumWidth(80)  # Increased minimum width for better usability
+        spinbox.setMinimumHeight(30)  # Add minimum height for better touch targets
         
         self.layout.addWidget(label_widget, self.row_count, 0, Qt.AlignmentFlag.AlignTop)
         self.layout.addWidget(spinbox, self.row_count, 1, Qt.AlignmentFlag.AlignLeft)
@@ -89,7 +90,7 @@ class ParameterGroupBox(QGroupBox, SafeWidgetMixin):
         return spinbox
     
     def add_spinbox(self, label: str, min_val: int, max_val: int, 
-                   value: int, width: int = 70) -> QSpinBox:
+                   value: int, width: int = 120) -> QSpinBox:
         """Add an integer spinbox parameter."""
         label_widget = QLabel(f"{label}:")
         label_widget.setMaximumWidth(90)  # Constrain label width
@@ -97,8 +98,9 @@ class ParameterGroupBox(QGroupBox, SafeWidgetMixin):
         spinbox = QSpinBox()
         spinbox.setRange(min_val, max_val)
         spinbox.setValue(value)
-        spinbox.setMaximumWidth(width)  # Reduced default width
-        spinbox.setMinimumWidth(60)  # Minimum width for readability
+        spinbox.setMaximumWidth(width)  # Increased default width
+        spinbox.setMinimumWidth(80)  # Increased minimum width for better usability
+        spinbox.setMinimumHeight(30)  # Add minimum height for better touch targets
         
         self.layout.addWidget(label_widget, self.row_count, 0, Qt.AlignmentFlag.AlignTop)
         self.layout.addWidget(spinbox, self.row_count, 1, Qt.AlignmentFlag.AlignLeft)
@@ -136,7 +138,30 @@ class ParameterGroupBox(QGroupBox, SafeWidgetMixin):
 
 
 class ButtonGroup(QWidget):
-    """Widget for organizing related buttons in rows."""
+    """Widget for organizing related buttons in rows with consistent flat rounded styling."""
+    
+    BUTTON_STYLE = """
+        QPushButton {
+            background-color: #64748b;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 10px;
+            min-height: 18px;
+        }
+        QPushButton:hover {
+            background-color: #475569;
+        }
+        QPushButton:pressed {
+            background-color: #334155;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,7 +171,7 @@ class ButtonGroup(QWidget):
         
     def add_button_row(self, button_configs: list) -> list:
         """
-        Add a row of buttons.
+        Add a row of buttons with consistent flat rounded styling.
         
         Args:
             button_configs: List of (text, callback) tuples
@@ -159,6 +184,7 @@ class ButtonGroup(QWidget):
         
         for text, callback in button_configs:
             button = QPushButton(text)
+            button.setStyleSheet(self.BUTTON_STYLE)
             if callback:
                 button.clicked.connect(callback)
             buttons.append(button)
@@ -236,17 +262,18 @@ class TitleLabel(QLabel):
 
 
 class StandardButton(QPushButton):
-    """Button with standard styling for the application."""
+    """Button with standard flat rounded styling for the application."""
     
     STANDARD_STYLE = """
         QPushButton {
             background-color: #0D9488;
             color: white;
             border: none;
-            padding: 10px;
-            border-radius: 4px;
+            padding: 10px 16px;
+            border-radius: 6px;
             font-weight: bold;
             font-size: 11px;
+            min-height: 20px;
         }
         QPushButton:hover {
             background-color: #0F766E;
@@ -254,11 +281,228 @@ class StandardButton(QPushButton):
         QPushButton:pressed {
             background-color: #115E59;
         }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
     """
     
     def __init__(self, text: str, parent=None):
         super().__init__(text, parent)
         self.setStyleSheet(self.STANDARD_STYLE)
+
+
+class PrimaryButton(QPushButton):
+    """Primary action button with flat rounded styling."""
+    
+    PRIMARY_STYLE = """
+        QPushButton {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 12px;
+            min-height: 24px;
+        }
+        QPushButton:hover {
+            background-color: #2563eb;
+        }
+        QPushButton:pressed {
+            background-color: #1d4ed8;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(self.PRIMARY_STYLE)
+
+
+class SecondaryButton(QPushButton):
+    """Secondary action button with flat rounded styling."""
+    
+    SECONDARY_STYLE = """
+        QPushButton {
+            background-color: #6b7280;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 11px;
+            min-height: 20px;
+        }
+        QPushButton:hover {
+            background-color: #4b5563;
+        }
+        QPushButton:pressed {
+            background-color: #374151;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(self.SECONDARY_STYLE)
+
+
+class DangerButton(QPushButton):
+    """Danger/destructive action button with flat rounded styling."""
+    
+    DANGER_STYLE = """
+        QPushButton {
+            background-color: #ef4444;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 11px;
+            min-height: 20px;
+        }
+        QPushButton:hover {
+            background-color: #dc2626;
+        }
+        QPushButton:pressed {
+            background-color: #b91c1c;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(self.DANGER_STYLE)
+
+
+class SuccessButton(QPushButton):
+    """Success/positive action button with flat rounded styling."""
+    
+    SUCCESS_STYLE = """
+        QPushButton {
+            background-color: #10b981;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 11px;
+            min-height: 20px;
+        }
+        QPushButton:hover {
+            background-color: #059669;
+        }
+        QPushButton:pressed {
+            background-color: #047857;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(self.SUCCESS_STYLE)
+
+
+class WarningButton(QPushButton):
+    """Warning/action button with flat rounded styling."""
+    
+    WARNING_STYLE = """
+        QPushButton {
+            background-color: #f59e0b;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 11px;
+            min-height: 20px;
+        }
+        QPushButton:hover {
+            background-color: #d97706;
+        }
+        QPushButton:pressed {
+            background-color: #b45309;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(self.WARNING_STYLE)
+
+
+class InfoButton(QPushButton):
+    """Info/information button with flat rounded styling."""
+    
+    INFO_STYLE = """
+        QPushButton {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 11px;
+            min-height: 20px;
+        }
+        QPushButton:hover {
+            background-color: #2563eb;
+        }
+        QPushButton:pressed {
+            background-color: #1d4ed8;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """
+    
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setStyleSheet(self.INFO_STYLE)
+
+
+def apply_icon_button_style(button):
+    """Apply consistent flat rounded styling to icon buttons."""
+    button.setStyleSheet("""
+        QPushButton {
+            background-color: #64748b;
+            color: white;
+            border: none;
+            padding: 6px;
+            border-radius: 6px;
+            font-weight: 500;
+            font-size: 12px;
+            min-height: 18px;
+            min-width: 30px;
+        }
+        QPushButton:hover {
+            background-color: #475569;
+        }
+        QPushButton:pressed {
+            background-color: #334155;
+        }
+        QPushButton:disabled {
+            background-color: #94a3b8;
+            color: #e2e8f0;
+        }
+    """)
 
 
 class ProgressStatusWidget(QWidget):
