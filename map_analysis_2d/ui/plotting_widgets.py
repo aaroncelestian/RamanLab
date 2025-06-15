@@ -13,7 +13,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from ui.matplotlib_config import CompactNavigationToolbar, configure_compact_ui, apply_theme
+from polarization_ui.matplotlib_config import CompactNavigationToolbar, configure_compact_ui, apply_theme
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import logging
@@ -135,7 +135,7 @@ class MapPlotWidget(BasePlotWidget):
         # Add new colorbar using the permanent no-shrink solution
         try:
             # Import the permanent colorbar solution
-            from ui.matplotlib_config import add_colorbar_no_shrink
+            from polarization_ui.matplotlib_config import add_colorbar_no_shrink
             self.colorbar = add_colorbar_no_shrink(self.figure, im, self.ax)
             
             if self.colorbar is None:
@@ -355,6 +355,8 @@ class PCANMFPlotWidget(BasePlotWidget):
         
         # Plot 2: PCA Clustering Scatter Plot
         components = pca_results.get('components')
+        positions = pca_results.get('positions', None)
+        scatter = None
         if components is not None and components.shape[1] >= 2:
             # Use first two principal components for scatter plot
             pc1 = components[:, 0]
@@ -379,14 +381,14 @@ class PCANMFPlotWidget(BasePlotWidget):
                         label_name = f'Cluster {label}'
                         
                     mask = labels == label
-                    self.ax_pca_scatter.scatter(pc1[mask], pc2[mask], 
+                    scatter = self.ax_pca_scatter.scatter(pc1[mask], pc2[mask], 
                                               c=[color], marker=marker, alpha=alpha,
                                               label=label_name, s=50)
                 
                 self.ax_pca_scatter.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             else:
                 # Plot without clustering information
-                self.ax_pca_scatter.scatter(pc1, pc2, alpha=0.6, s=50)
+                scatter = self.ax_pca_scatter.scatter(pc1, pc2, alpha=0.6, s=50)
             
             pc1_var = explained_variance[0] if len(explained_variance) > 0 else 0
             pc2_var = explained_variance[1] if len(explained_variance) > 1 else 0
@@ -394,6 +396,9 @@ class PCANMFPlotWidget(BasePlotWidget):
             self.ax_pca_scatter.set_xlabel(f'PC1 ({pc1_var:.1%} variance)')
             self.ax_pca_scatter.set_ylabel(f'PC2 ({pc2_var:.1%} variance)')
             self.ax_pca_scatter.set_title('PCA Clustering Results')
+            # Add hover tooltips for XY positions
+            if positions is not None and scatter is not None:
+                self._add_hover_tooltips(self.ax_pca_scatter, scatter, positions)
         else:
             self._plot_error_message(self.ax_pca_scatter, "Insufficient PCA components\nfor scatter plot")
         
@@ -436,7 +441,7 @@ class PCANMFPlotWidget(BasePlotWidget):
             colors = plt.cm.Set1(np.linspace(0, 1, n_components))
             for i in range(n_components):
                 self.ax_nmf_components.plot(x_data, feature_components[i, :], 
-                                          color=colors[i], linewidth=2,
+                                          color=colors[i], linewidth=1,
                                           label=f'Component {i+1}')
             
             self.ax_nmf_components.set_xlabel(x_label)
@@ -448,6 +453,8 @@ class PCANMFPlotWidget(BasePlotWidget):
         
         # Plot 4: NMF Clustering Scatter Plot
         components = nmf_results.get('components')  # W matrix
+        positions = nmf_results.get('positions', None)
+        scatter = None
         if components is not None and components.shape[1] >= 2:
             # Use first two NMF components for scatter plot
             comp1 = components[:, 0]
@@ -472,18 +479,21 @@ class PCANMFPlotWidget(BasePlotWidget):
                         label_name = f'Cluster {label}'
                         
                     mask = labels == label
-                    self.ax_nmf_scatter.scatter(comp1[mask], comp2[mask], 
+                    scatter = self.ax_nmf_scatter.scatter(comp1[mask], comp2[mask], 
                                               c=[color], marker=marker, alpha=alpha,
                                               label=label_name, s=50)
                 
                 self.ax_nmf_scatter.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             else:
                 # Plot without clustering information
-                self.ax_nmf_scatter.scatter(comp1, comp2, alpha=0.6, s=50)
+                scatter = self.ax_nmf_scatter.scatter(comp1, comp2, alpha=0.6, s=50)
             
             self.ax_nmf_scatter.set_xlabel('NMF Component 1')
             self.ax_nmf_scatter.set_ylabel('NMF Component 2')
             self.ax_nmf_scatter.set_title('NMF Clustering Results')
+            # Add hover tooltips for XY positions
+            if positions is not None and scatter is not None:
+                self._add_hover_tooltips(self.ax_nmf_scatter, scatter, positions)
         else:
             self._plot_error_message(self.ax_nmf_scatter, "Insufficient NMF components\nfor scatter plot")
         
@@ -511,3 +521,30 @@ class PCANMFPlotWidget(BasePlotWidget):
         self.pca_clusters = None
         self.nmf_clusters = None
         self.setup_subplots()
+
+    def _add_hover_tooltips(self, ax, scatter, positions):
+        """Add mouse hover tooltips to a scatter plot showing XY map positions."""
+        from matplotlib.backend_bases import MouseEvent
+        import matplotlib.pyplot as plt
+        annot = ax.annotate("", xy=(0,0), xytext=(15,15), textcoords="offset points",
+                            bbox=dict(boxstyle="round", fc="w"), arrowprops=dict(arrowstyle="->"))
+        annot.set_visible(False)
+        fig = ax.figure
+        coords = scatter.get_offsets()
+        def update_annot(ind):
+            idx = ind["ind"][0]
+            pos = positions[idx]
+            annot.xy = coords[idx]
+            annot.set_text(f"XY: {pos}")
+        def hover(event):
+            vis = annot.get_visible()
+            if event.inaxes == ax:
+                cont, ind = scatter.contains(event)
+                if cont:
+                    update_annot(ind)
+                    annot.set_visible(True)
+                    fig.canvas.draw_idle()
+                elif vis:
+                    annot.set_visible(False)
+                    fig.canvas.draw_idle()
+        fig.canvas.mpl_connect("motion_notify_event", hover)

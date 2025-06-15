@@ -230,16 +230,19 @@ class NMFAnalyzer:
             logger.info(f"NMF transform: Expected {expected_features} features, got {actual_features}")
             
             if actual_features != expected_features:
-                logger.warning(f"Feature dimension mismatch: X has {actual_features} features, but NMF is expecting {expected_features} features as input.")
+                logger.error(f"CRITICAL: Feature dimension mismatch: X has {actual_features} features, but NMF is expecting {expected_features} features as input.")
+                logger.error(f"This usually indicates training data and map data have different wavenumber grids!")
+                logger.error(f"SOLUTION: Ensure training data is aligned to map wavenumber grid BEFORE running NMF")
                 
-                # Try to align features
+                # Try to align features but warn about data loss
                 if actual_features > expected_features:
                     # Truncate excess features
-                    logger.info(f"Truncating {actual_features - expected_features} excess features")
+                    logger.error(f"TRUNCATING {actual_features - expected_features} excess features - this will degrade model performance!")
+                    logger.error(f"Consider retraining with properly aligned data")
                     data = data[:, :expected_features]
                 elif actual_features < expected_features:
                     # Pad with zeros
-                    logger.info(f"Padding with {expected_features - actual_features} zero features")
+                    logger.warning(f"Padding with {expected_features - actual_features} zero features")
                     padding = np.zeros((data.shape[0], expected_features - actual_features))
                     data = np.hstack([data, padding])
                 

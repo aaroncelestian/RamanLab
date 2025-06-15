@@ -32,12 +32,12 @@ from matplotlib.figure import Figure
 
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
-from ui.matplotlib_config import configure_compact_ui, apply_theme
+from polarization_ui.matplotlib_config import configure_compact_ui, apply_theme
 
 
 class MineralModesDatabaseQt6(QMainWindow):

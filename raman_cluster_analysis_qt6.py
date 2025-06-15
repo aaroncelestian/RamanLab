@@ -36,11 +36,11 @@ from matplotlib.figure import Figure
 # Import Qt6-compatible matplotlib backends
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
     # Fallback for older matplotlib versions
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
 # Qt6 imports
 from PySide6.QtWidgets import (

@@ -5,7 +5,7 @@ import pandas as pd
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from scipy.interpolate import interp1d
 from scipy.signal import savgol_filter
 
@@ -208,6 +208,24 @@ class TemplateSpectraManager:
     def get_template_names(self) -> List[str]:
         """Get list of template names."""
         return [template.name for template in self.templates]
+    
+    def get_all_templates(self) -> Dict[str, Dict[str, np.ndarray]]:
+        """
+        Get all templates as a dictionary for plotting.
+        
+        Returns:
+        --------
+        Dict[str, Dict[str, np.ndarray]]
+            Dictionary where keys are template names and values are dictionaries
+            containing 'wavenumbers' and 'intensities' arrays
+        """
+        templates_dict = {}
+        for template in self.templates:
+            templates_dict[template.name] = {
+                'wavenumbers': template.wavenumbers,
+                'intensities': template.intensities
+            }
+        return templates_dict
     
     def validate_and_fix_template_dimensions(self, expected_length: int):
         """Validate and fix template dimensions to match expected length."""

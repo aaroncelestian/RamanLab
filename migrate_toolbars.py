@@ -25,11 +25,11 @@ def migrate_toolbar_imports(file_path):
     
     # Pattern 1: Replace NavigationToolbar2QT imports
     pattern1 = r'from matplotlib\.backends\.backend_qtagg import NavigationToolbar2QT as NavigationToolbar'
-    replacement1 = 'from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar'
+    replacement1 = 'from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar'
     content = re.sub(pattern1, replacement1, content)
     
     pattern2 = r'from matplotlib\.backends\.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar'
-    replacement2 = 'from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar'
+    replacement2 = 'from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar'
     content = re.sub(pattern2, replacement2, content)
     
     # Pattern 3: Update try/except import blocks
@@ -37,17 +37,17 @@ def migrate_toolbar_imports(file_path):
     
     try_except_replacement = '''try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar'''
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar'''
     
     content = re.sub(try_except_pattern, try_except_replacement, content, flags=re.MULTILINE | re.DOTALL)
     
     # Add UI configuration import if not present
-    if 'from ui.matplotlib_config import' in content and 'configure_compact_ui' not in content:
-        # Find the ui.matplotlib_config import line and add configure_compact_ui
-        ui_import_pattern = r'(from ui\.matplotlib_config import [^\\n]*)'
+    if 'from polarization_ui.matplotlib_config import' in content and 'configure_compact_ui' not in content:
+        # Find the polarization_ui.matplotlib_config import line and add configure_compact_ui
+        ui_import_pattern = r'(from polarization_ui\.matplotlib_config import [^\\n]*)'
         def add_config_import(match):
             imports = match.group(1)
             if 'configure_compact_ui' not in imports and 'apply_theme' not in imports:

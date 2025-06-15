@@ -22,7 +22,7 @@ from PySide6.QtGui import QFont
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 from matplotlib.figure import Figure
 
 # Import core modules
@@ -36,7 +36,7 @@ from core.polarization import (
 )
 
 # Import UI modules
-from ui.polarization_dialogs import PolarizedSpectraDialog
+from polarization_ui.polarization_dialogs import PolarizedSpectraDialog
 
 
 class RamanPolarizationAnalyzerModular(QMainWindow):

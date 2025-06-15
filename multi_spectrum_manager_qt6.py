@@ -13,7 +13,7 @@ import matplotlib
 matplotlib.use("QtAgg")
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 import matplotlib.pyplot as plt
 
 # Qt6 imports

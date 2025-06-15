@@ -29,7 +29,7 @@ matplotlib.use("QtAgg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
+from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
 
 # Scientific computing
 from scipy.optimize import curve_fit

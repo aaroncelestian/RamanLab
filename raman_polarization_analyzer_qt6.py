@@ -48,8 +48,8 @@ matplotlib.use('QtAgg')  # Use QtAgg backend which works with PySide6
 # Import compact UI configuration and toolbar
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
-    from ui.matplotlib_config import apply_theme, configure_compact_ui
+    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from polarization_ui.matplotlib_config import apply_theme, configure_compact_ui
     COMPACT_UI_AVAILABLE = True
 except ImportError:
     # Fallback for environments without ui.matplotlib_config
@@ -311,7 +311,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Refresh database button
         refresh_btn = QPushButton("Refresh Database")
         refresh_btn.clicked.connect(self.refresh_database)
-        refresh_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+        self.apply_flat_rounded_style(refresh_btn)
         import_layout.addWidget(refresh_btn)
         
         side_layout.addWidget(import_group)
@@ -440,6 +440,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         clear_peaks_btn = QPushButton("Clear Selected Peaks")
         clear_peaks_btn.clicked.connect(self.clear_selected_peaks)
+        self.apply_flat_rounded_style(clear_peaks_btn)
         peak_layout.addWidget(clear_peaks_btn)
         
         # Add peak count status
@@ -450,7 +451,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Auto peak detection button
         auto_detect_btn = QPushButton("Auto-Detect Peaks")
         auto_detect_btn.clicked.connect(self.auto_detect_peaks)
-        auto_detect_btn.setStyleSheet("QPushButton { background-color: #e6f3ff; }")
+        self.apply_flat_rounded_style(auto_detect_btn)
         peak_layout.addWidget(auto_detect_btn)
         
         layout.addWidget(peak_group)
@@ -472,11 +473,13 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Baseline correction
         baseline_btn = QPushButton("Correct Baseline")
         baseline_btn.clicked.connect(self.correct_baseline)
+        self.apply_flat_rounded_style(baseline_btn)
         preprocess_layout.addWidget(baseline_btn)
         
         # Noise filtering
         noise_filter_btn = QPushButton("Apply Noise Filter")
         noise_filter_btn.clicked.connect(self.apply_noise_filter)
+        self.apply_flat_rounded_style(noise_filter_btn)
         preprocess_layout.addWidget(noise_filter_btn)
         
         layout.addWidget(preprocess_group)
@@ -522,13 +525,13 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Fit button
         fit_btn = QPushButton("Fit Selected Peaks")
         fit_btn.clicked.connect(self.fit_peaks)
-        fit_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
+        self.apply_flat_rounded_style(fit_btn)
         fitting_layout.addWidget(fit_btn)
         
         # Advanced multipeak fit button
         multipeak_btn = QPushButton("Multipeak + Weak Peak")
         multipeak_btn.clicked.connect(self.fit_overlapping_peaks)
-        multipeak_btn.setStyleSheet("QPushButton { background-color: #FF9800; color: white; }")
+        self.apply_flat_rounded_style(multipeak_btn)
         multipeak_btn.setToolTip("Fit selected peaks and automatically detect/fit additional weak peaks in the region")
         fitting_layout.addWidget(multipeak_btn)
         
@@ -542,18 +545,21 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         quality_btn = QPushButton("Assess Peak Quality")
         quality_btn.clicked.connect(self.assess_peak_quality)
         quality_btn.setToolTip("Evaluate S/N ratio, width, and fit quality for all peaks")
+        self.apply_flat_rounded_style(quality_btn)
         analysis_layout.addWidget(quality_btn)
         
         # Peak deconvolution for overlaps
         deconv_btn = QPushButton("Deconvolve Overlapping Peaks")
         deconv_btn.clicked.connect(self.deconvolve_peaks)
         deconv_btn.setToolTip("Identify and analyze overlapping peak pairs")
+        self.apply_flat_rounded_style(deconv_btn)
         analysis_layout.addWidget(deconv_btn)
         
         # Export fitted parameters
         export_params_btn = QPushButton("Export Fit Parameters")
         export_params_btn.clicked.connect(self.export_fit_parameters)
         export_params_btn.setToolTip("Export all fitted parameters to CSV/TXT file")
+        self.apply_flat_rounded_style(export_params_btn)
         analysis_layout.addWidget(export_params_btn)
         
         layout.addWidget(analysis_group)
@@ -577,7 +583,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Switch to Parameters tab button
         params_btn = QPushButton("→ Go to Parameters Tab")
         params_btn.clicked.connect(lambda: self.switch_to_parameters_tab())
-        params_btn.setStyleSheet("QPushButton { background-color: #f0f8ff; }")
+        self.apply_flat_rounded_style(params_btn)
         status_layout.addWidget(params_btn)
         
         layout.addWidget(status_group)
@@ -613,19 +619,21 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         match_peaks_btn = QPushButton("Match with Reference Peaks")
         match_peaks_btn.clicked.connect(self.match_peaks_with_reference)
         match_peaks_btn.setToolTip("Match fitted peaks with calculated reference peaks")
-        match_peaks_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        self.apply_flat_rounded_style(match_peaks_btn)
         matching_layout.addWidget(match_peaks_btn)
         
         # Auto-assign labels button
         assign_labels_btn = QPushButton("Auto-Assign Peak Labels")
         assign_labels_btn.clicked.connect(self.auto_assign_peak_labels)
         assign_labels_btn.setToolTip("Automatically assign vibrational mode labels")
+        self.apply_flat_rounded_style(assign_labels_btn)
         matching_layout.addWidget(assign_labels_btn)
         
         # Show assignments button
         show_assignments_btn = QPushButton("Show Peak Assignments")
         show_assignments_btn.clicked.connect(self.show_peak_assignments)
         show_assignments_btn.setToolTip("Display detailed peak assignment results")
+        self.apply_flat_rounded_style(show_assignments_btn)
         matching_layout.addWidget(show_assignments_btn)
         
         layout.addWidget(matching_group)
@@ -637,21 +645,21 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Show Raman activity info button
         activity_info_btn = QPushButton("Raman Activity Filter")
         activity_info_btn.clicked.connect(self.show_raman_activity_info)
-        activity_info_btn.setStyleSheet("QPushButton { background-color: #e7f3ff; }")
+        self.apply_flat_rounded_style(activity_info_btn)
         activity_info_btn.setToolTip("Information about Raman active modes")
         advanced_layout.addWidget(activity_info_btn)
         
         # Debug calculated modes button
         debug_modes_btn = QPushButton("Debug Calculated Modes")
         debug_modes_btn.clicked.connect(self.debug_calculated_modes)
-        debug_modes_btn.setStyleSheet("QPushButton { background-color: #fff3cd; }")
+        self.apply_flat_rounded_style(debug_modes_btn)
         debug_modes_btn.setToolTip("Debug information for calculated vibrational modes")
         advanced_layout.addWidget(debug_modes_btn)
         
         # Debug database content button
         debug_db_btn = QPushButton("Debug Database Content")
         debug_db_btn.clicked.connect(self.debug_database_content)
-        debug_db_btn.setStyleSheet("QPushButton { background-color: #d4edda; }")
+        self.apply_flat_rounded_style(debug_db_btn)
         debug_db_btn.setToolTip("Debug information for mineral database content")
         advanced_layout.addWidget(debug_db_btn)
         
@@ -679,7 +687,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
     def setup_crystal_structure_tab(self, side_panel, content_area):
         """Setup the Crystal Structure tab using the new comprehensive module."""
         try:
-            from ui.crystal_structure_widget import CrystalStructureWidget
+            from polarization_ui.crystal_structure_widget import CrystalStructureWidget
             
             # Create the main crystal structure widget
             self.crystal_structure_widget = CrystalStructureWidget()
@@ -717,6 +725,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         load_cif_btn = QPushButton("Load CIF File")
         load_cif_btn.clicked.connect(self.load_cif_file)
+        self.apply_flat_rounded_style(load_cif_btn)
         struct_layout.addWidget(load_cif_btn)
         
         manual_input_btn = QPushButton("Manual Input")
@@ -762,6 +771,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Auto-detect button
         auto_detect_btn = QPushButton("Auto-Detect from Structure")
         auto_detect_btn.clicked.connect(self.auto_detect_crystal_system)
+        self.apply_flat_rounded_style(auto_detect_btn)
         crystal_layout.addWidget(auto_detect_btn)
         
         side_layout.addWidget(crystal_group)
@@ -785,7 +795,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         calc_tensor_btn = QPushButton("Calculate Raman Tensors")
         calc_tensor_btn.clicked.connect(self.calculate_raman_tensors)
-        calc_tensor_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; }")
+        self.apply_flat_rounded_style(calc_tensor_btn)
         tensor_layout.addWidget(calc_tensor_btn)
         
         # Tensor visualization options (radio buttons)
@@ -814,12 +824,13 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         # Update visualization button
         update_viz_btn = QPushButton("Update Visualization")
         update_viz_btn.clicked.connect(self.update_tensor_visualization)
+        self.apply_flat_rounded_style(update_viz_btn)
         tensor_layout.addWidget(update_viz_btn)
         
         # Individual tensor windows button
         individual_btn = QPushButton("Open Individual Tensor Windows")
         individual_btn.clicked.connect(self.open_individual_tensor_windows)
-        individual_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        self.apply_flat_rounded_style(individual_btn)
         tensor_layout.addWidget(individual_btn)
         
         side_layout.addWidget(tensor_group)
@@ -830,14 +841,17 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         show_results_btn = QPushButton("Show Detailed Results")
         show_results_btn.clicked.connect(self.show_tensor_results)
+        self.apply_flat_rounded_style(show_results_btn)
         results_layout.addWidget(show_results_btn)
         
         export_tensor_btn = QPushButton("Export Tensor Data")
         export_tensor_btn.clicked.connect(self.export_tensor_data)
+        self.apply_flat_rounded_style(export_tensor_btn)
         results_layout.addWidget(export_tensor_btn)
         
         export_viz_btn = QPushButton("Export Visualization")
         export_viz_btn.clicked.connect(self.export_tensor_visualization)
+        self.apply_flat_rounded_style(export_viz_btn)
         results_layout.addWidget(export_viz_btn)
         
         side_layout.addWidget(results_group)
@@ -848,10 +862,12 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         assign_modes_btn = QPushButton("Assign Vibrational Modes")
         assign_modes_btn.clicked.connect(self.assign_vibrational_modes)
+        self.apply_flat_rounded_style(assign_modes_btn)
         assignment_layout.addWidget(assign_modes_btn)
         
         show_assignments_btn = QPushButton("Show Mode Assignments")
         show_assignments_btn.clicked.connect(self.show_mode_assignments)
+        self.apply_flat_rounded_style(show_assignments_btn)
         assignment_layout.addWidget(show_assignments_btn)
         
         side_layout.addWidget(assignment_group)
@@ -898,6 +914,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         run_opt_btn = QPushButton("Run Optimization")
         run_opt_btn.clicked.connect(self.run_orientation_optimization)
+        self.apply_flat_rounded_style(run_opt_btn)
         opt_layout.addWidget(run_opt_btn)
         
         side_layout.addWidget(opt_group)
@@ -929,6 +946,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         stress_layout = QVBoxLayout(stress_group)
         
         calc_stress_btn = QPushButton("Calculate Stress")
+        self.apply_flat_rounded_style(calc_stress_btn)
         stress_layout.addWidget(calc_stress_btn)
         
         side_layout.addWidget(stress_group)
@@ -960,6 +978,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         vis_layout = QVBoxLayout(vis_group)
         
         render_3d_btn = QPushButton("Render 3D Structure")
+        self.apply_flat_rounded_style(render_3d_btn)
         vis_layout.addWidget(render_3d_btn)
         
         side_layout.addWidget(vis_group)
@@ -1019,6 +1038,35 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
                     border: 1px solid #adb5bd;
                 }
             """)
+    
+    def apply_flat_rounded_style(self, button):
+        """Apply flat rounded styling to a button."""
+        button.setStyleSheet("""
+            QPushButton {
+                background-color: #f0f0f0;
+                border: 1px solid #d0d0d0;
+                border-radius: 8px;
+                padding: 4px 16px;
+                font-weight: 500;
+                color: #333333;
+                font-size: 12px;
+                min-height: 12px;
+            }
+            QPushButton:hover {
+                background-color: #e8e8e8;
+                border-color: #bbb;
+            }
+            QPushButton:pressed {
+                background-color: #d8d8d8;
+                border-color: #999;
+            }
+            QPushButton:disabled {
+                background-color: #f8f8f8;
+                color: #999999;
+                border-color: #e0e0e0;
+            }
+        """)
+        button.setFlat(False)
     
     def load_mineral_database(self):
         """Load the mineral database from available sources."""

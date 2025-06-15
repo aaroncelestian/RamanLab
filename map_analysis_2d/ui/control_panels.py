@@ -113,7 +113,24 @@ class MapViewControlPanel(BaseControlPanel):
         # Range controls (initially hidden)
         self.range_controls = ParameterGroupBox("Integration Range")
         
-        # Integration range width (fixed at 100 cm⁻¹ as requested) - on one line
+        # Center wavenumber slider - compact layout (move to top)
+        self.center_wavenumber_slider = QSlider(Qt.Horizontal)
+        self.center_wavenumber_slider.setRange(200, 4000)  # 200-4000 cm⁻¹ range
+        self.center_wavenumber_slider.setValue(1000)  # Default center
+        self.center_wavenumber_slider.setSingleStep(50)  # 50 cm⁻¹ increments
+        self.center_wavenumber_slider.setPageStep(100)  # Larger jumps
+        self.center_wavenumber_slider.setTickPosition(QSlider.TicksBelow)
+        self.center_wavenumber_slider.setTickInterval(500)  # Tick marks every 500 cm⁻¹
+        self.center_wavenumber_slider.setToolTip("Drag to set center wavenumber for integration (50 cm⁻¹ increments)")
+
+        # Add the slider first
+        slider_widget = QWidget()
+        slider_layout = QVBoxLayout(slider_widget)
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        slider_layout.addWidget(self.center_wavenumber_slider)
+        self.range_controls.layout.addWidget(slider_widget)
+
+        # Integration range width (fixed at 100 cm⁻¹) - below slider
         width_layout = QHBoxLayout()
         width_layout.addWidget(QLabel("Range Width (cm⁻¹):"))
         self.range_width_spin = QDoubleSpinBox()
@@ -124,23 +141,11 @@ class MapViewControlPanel(BaseControlPanel):
         self.range_width_spin.setMaximumWidth(80)
         width_layout.addWidget(self.range_width_spin)
         width_layout.addStretch()  # Push everything to the left
-        
+
         width_widget = QWidget()
         width_widget.setLayout(width_layout)
         self.range_controls.layout.addWidget(width_widget)
-        
-        # Center wavenumber slider - compact layout
-        self.center_wavenumber_slider = QSlider(Qt.Horizontal)
-        self.center_wavenumber_slider.setRange(200, 4000)  # 200-4000 cm⁻¹ range
-        self.center_wavenumber_slider.setValue(1000)  # Default center
-        self.center_wavenumber_slider.setSingleStep(50)  # 50 cm⁻¹ increments
-        self.center_wavenumber_slider.setPageStep(100)  # Larger jumps
-        self.center_wavenumber_slider.setTickPosition(QSlider.TicksBelow)
-        self.center_wavenumber_slider.setTickInterval(500)  # Tick marks every 500 cm⁻¹
-        self.center_wavenumber_slider.setToolTip("Drag to set center wavenumber for integration (50 cm⁻¹ increments)")
-        
-        self.range_controls.layout.addWidget(self.center_wavenumber_slider)
-        
+
         # Show calculated integration range - below the slider
         self.range_display = QLabel("Range: 950 - 1050 cm⁻¹")
         self.range_display.setStyleSheet("QLabel { color: #666; font-size: 10px; text-align: center; }")
@@ -631,7 +636,6 @@ class TemplateControlPanel(BaseControlPanel):
     load_template_file_requested = Signal()
     load_template_folder_requested = Signal()
     extract_from_map_requested = Signal()  # New signal for map extraction
-    debug_templates_requested = Signal()  # New signal for debug tool
     remove_template_requested = Signal(int)  # template index
     clear_templates_requested = Signal()
     plot_templates_requested = Signal()
@@ -640,7 +644,7 @@ class TemplateControlPanel(BaseControlPanel):
     show_detailed_stats = Signal()
     export_statistics = Signal()
     show_chemical_analysis = Signal()
-    show_hybrid_analysis = Signal()
+            # Removed: show_hybrid_analysis and show_quantitative_calibration signals
     show_pp_analysis = Signal()  # Template-only polypropylene analysis
     
     def __init__(self, parent=None):
@@ -656,17 +660,16 @@ class TemplateControlPanel(BaseControlPanel):
         load_buttons = ButtonGroup()
         load_buttons.add_button_row([
             ("Load Single File", self.load_template_file_requested.emit),
-            ("Load Folder", self.load_template_folder_requested.emit),
-            ("📍 Extract from Map", self.extract_from_map_requested.emit)
+            ("Load Folder", self.load_template_folder_requested.emit)
         ])
         template_layout.addWidget(load_buttons)
         
-        # Debug button
-        debug_buttons = ButtonGroup()
-        debug_buttons.add_button_row([
-            ("🔬 Debug Templates", self.debug_templates_requested.emit)
+        # Extract from Map button on separate line
+        extract_buttons = ButtonGroup()
+        extract_buttons.add_button_row([
+            ("📍 Extract from Map", self.extract_from_map_requested.emit)
         ])
-        template_layout.addWidget(debug_buttons)
+        template_layout.addWidget(extract_buttons)
         
         # Template list box
         list_label = QLabel("Loaded Templates:")
@@ -720,11 +723,7 @@ class TemplateControlPanel(BaseControlPanel):
         chemical_analysis_btn.clicked.connect(self.show_chemical_analysis)
         stats_layout.addWidget(chemical_analysis_btn)
         
-        # Hybrid analysis button
-        hybrid_analysis_btn = StandardButton("🔬 Hybrid NMF-Template Analysis")
-        hybrid_analysis_btn.clicked.connect(self.show_hybrid_analysis)
-        hybrid_analysis_btn.setToolTip("Run hybrid analysis combining NMF and template fitting for trace detection")
-        stats_layout.addWidget(hybrid_analysis_btn)
+        # Removed: Hybrid analysis and Quantitative calibration buttons
         
         # Template-only material analysis button
         material_analysis_btn = StandardButton("📊 Material Analysis (Template Only)")
@@ -1331,6 +1330,7 @@ class ResultsControlPanel(BaseControlPanel):
     # Signals
     generate_report_requested = Signal()
     export_results_requested = Signal()
+    run_quantitative_analysis_requested = Signal()
     
     def __init__(self, parent=None):
         super().__init__("Results Summary", parent)
@@ -1341,12 +1341,14 @@ class ResultsControlPanel(BaseControlPanel):
         summary_group = QGroupBox("Analysis Summary")
         summary_layout = QVBoxLayout(summary_group)
         
-        summary_label = QLabel("This section provides tools to export and\n"
-                             "summarize analysis results from all tabs:\n\n"
-                             "• Map analysis data\n"
-                             "• Template fitting results\n" 
-                             "• PCA decomposition\n"
-                             "• NMF components\n"
+        summary_label = QLabel("This section provides tools to analyze and export\n"
+                             "results from all analysis methods:\n\n"
+                             "🎯 Quantitative Analysis: Combines template,\n"
+                             "   NMF, and ML results with automatic class\n"
+                             "   flip detection. Shows top 5 best spectra.\n\n"
+                             "📊 Export tools for comprehensive reporting:\n"
+                             "• Map analysis data • Template fitting results\n" 
+                             "• PCA decomposition • NMF components\n"
                              "• ML classification results")
         summary_label.setStyleSheet("QLabel { color: #666; font-size: 11px; padding: 10px; }")
         summary_label.setWordWrap(True)
@@ -1392,6 +1394,23 @@ class ResultsControlPanel(BaseControlPanel):
         # Actions
         action_group = QGroupBox("Actions")
         action_layout = QVBoxLayout(action_group)
+        
+        # NEW: Quantitative analysis button
+        quantitative_btn = StandardButton("🎯 Run Quantitative Analysis")
+        quantitative_btn.clicked.connect(self.run_quantitative_analysis_requested.emit)
+        quantitative_btn.setToolTip("Run robust quantitative analysis and show top 5 best-fitting spectra")
+        quantitative_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        action_layout.addWidget(quantitative_btn)
         
         report_btn = StandardButton("Generate Comprehensive Report")
         report_btn.clicked.connect(self.generate_report_requested.emit)

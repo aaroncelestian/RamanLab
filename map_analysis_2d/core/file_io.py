@@ -296,6 +296,16 @@ class RamanMapData:
         """Get map dimensions (width, height)."""
         return len(self.x_positions), len(self.y_positions)
     
+    @property
+    def width(self) -> int:
+        """Get map width."""
+        return len(self.x_positions)
+    
+    @property 
+    def height(self) -> int:
+        """Get map height."""
+        return len(self.y_positions)
+    
     def get_processed_data_matrix(self) -> np.ndarray:
         """Get matrix of all processed spectra."""
         n_spectra = len(self.spectra)
