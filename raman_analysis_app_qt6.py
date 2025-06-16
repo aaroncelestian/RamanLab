@@ -296,6 +296,107 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         bg_layout.addWidget(self.als_params_widget)
         
+        # Linear parameters
+        self.linear_params_widget = QWidget()
+        linear_params_layout = QVBoxLayout(self.linear_params_widget)
+        linear_params_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Start and end point weighting
+        start_weight_layout = QHBoxLayout()
+        start_weight_layout.addWidget(QLabel("Start Point Weight:"))
+        self.start_weight_slider = QSlider(Qt.Horizontal)
+        self.start_weight_slider.setRange(1, 20)  # 0.1 to 2.0
+        self.start_weight_slider.setValue(10)  # 1.0 (default)
+        start_weight_layout.addWidget(self.start_weight_slider)
+        self.start_weight_label = QLabel("1.0")
+        start_weight_layout.addWidget(self.start_weight_label)
+        linear_params_layout.addLayout(start_weight_layout)
+        
+        end_weight_layout = QHBoxLayout()
+        end_weight_layout.addWidget(QLabel("End Point Weight:"))
+        self.end_weight_slider = QSlider(Qt.Horizontal)
+        self.end_weight_slider.setRange(1, 20)  # 0.1 to 2.0
+        self.end_weight_slider.setValue(10)  # 1.0 (default)
+        end_weight_layout.addWidget(self.end_weight_slider)
+        self.end_weight_label = QLabel("1.0")
+        end_weight_layout.addWidget(self.end_weight_label)
+        linear_params_layout.addLayout(end_weight_layout)
+        
+        # Connect sliders to update labels and live preview
+        self.start_weight_slider.valueChanged.connect(self.update_start_weight_label)
+        self.end_weight_slider.valueChanged.connect(self.update_end_weight_label)
+        self.start_weight_slider.valueChanged.connect(self.preview_background_subtraction)
+        self.end_weight_slider.valueChanged.connect(self.preview_background_subtraction)
+        
+        bg_layout.addWidget(self.linear_params_widget)
+        
+        # Polynomial parameters
+        self.poly_params_widget = QWidget()
+        poly_params_layout = QVBoxLayout(self.poly_params_widget)
+        poly_params_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Polynomial order
+        poly_order_layout = QHBoxLayout()
+        poly_order_layout.addWidget(QLabel("Polynomial Order:"))
+        self.poly_order_slider = QSlider(Qt.Horizontal)
+        self.poly_order_slider.setRange(1, 6)
+        self.poly_order_slider.setValue(2)  # Default order 2
+        poly_order_layout.addWidget(self.poly_order_slider)
+        self.poly_order_label = QLabel("2")
+        poly_order_layout.addWidget(self.poly_order_label)
+        poly_params_layout.addLayout(poly_order_layout)
+        
+        # Fitting method
+        poly_method_layout = QHBoxLayout()
+        poly_method_layout.addWidget(QLabel("Fitting Method:"))
+        self.poly_method_combo = QComboBox()
+        self.poly_method_combo.addItems(["Least Squares", "Robust"])
+        poly_method_layout.addWidget(self.poly_method_combo)
+        poly_params_layout.addLayout(poly_method_layout)
+        
+        # Connect controls to live preview
+        self.poly_order_slider.valueChanged.connect(self.update_poly_order_label)
+        self.poly_order_slider.valueChanged.connect(self.preview_background_subtraction)
+        self.poly_method_combo.currentTextChanged.connect(self.preview_background_subtraction)
+        
+        bg_layout.addWidget(self.poly_params_widget)
+        
+        # Moving Average parameters
+        self.moving_avg_params_widget = QWidget()
+        moving_avg_params_layout = QVBoxLayout(self.moving_avg_params_widget)
+        moving_avg_params_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Window size
+        window_size_layout = QHBoxLayout()
+        window_size_layout.addWidget(QLabel("Window Size (%):"))
+        self.window_size_slider = QSlider(Qt.Horizontal)
+        self.window_size_slider.setRange(1, 50)  # 1% to 50% of spectrum length
+        self.window_size_slider.setValue(10)  # 10% default
+        window_size_layout.addWidget(self.window_size_slider)
+        self.window_size_label = QLabel("10%")
+        window_size_layout.addWidget(self.window_size_label)
+        moving_avg_params_layout.addLayout(window_size_layout)
+        
+        # Window type
+        window_type_layout = QHBoxLayout()
+        window_type_layout.addWidget(QLabel("Window Type:"))
+        self.window_type_combo = QComboBox()
+        self.window_type_combo.addItems(["Uniform", "Gaussian", "Hann", "Hamming"])
+        window_type_layout.addWidget(self.window_type_combo)
+        moving_avg_params_layout.addLayout(window_type_layout)
+        
+        # Connect controls to live preview
+        self.window_size_slider.valueChanged.connect(self.update_window_size_label)
+        self.window_size_slider.valueChanged.connect(self.preview_background_subtraction)
+        self.window_type_combo.currentTextChanged.connect(self.preview_background_subtraction)
+        
+        bg_layout.addWidget(self.moving_avg_params_widget)
+        
+        # Initially hide all parameter widgets except ALS (default)
+        self.linear_params_widget.setVisible(False)
+        self.poly_params_widget.setVisible(False)
+        self.moving_avg_params_widget.setVisible(False)
+        
         # Background subtraction buttons
         button_layout = QHBoxLayout()
         
@@ -1219,30 +1320,83 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self.processed_intensities = corrected_intensities
                 
             elif method == "Linear":
-                # Linear background subtraction
-                x = np.arange(len(self.processed_intensities))
-                background = np.linspace(
-                    self.processed_intensities[0],
-                    self.processed_intensities[-1],
-                    len(self.processed_intensities)
-                )
+                # Linear background subtraction with weighted endpoints
+                start_weight = self.start_weight_slider.value() / 10.0
+                end_weight = self.end_weight_slider.value() / 10.0
+                
+                # Create weighted linear background
+                start_val = self.processed_intensities[0] * start_weight
+                end_val = self.processed_intensities[-1] * end_weight
+                background = np.linspace(start_val, end_val, len(self.processed_intensities))
                 self.processed_intensities -= background
                 
             elif method == "Polynomial":
-                # Polynomial background fitting (order 2)
+                # Polynomial background fitting with adjustable order and method
                 x = np.arange(len(self.processed_intensities))
-                coeffs = np.polyfit(x, self.processed_intensities, 2)
-                background = np.polyval(coeffs, x)
+                poly_order = self.poly_order_slider.value()
+                poly_method = self.poly_method_combo.currentText()
+                
+                if poly_method == "Robust":
+                    # Use robust polynomial fitting (less sensitive to outliers)
+                    try:
+                        # Robust fitting using iterative reweighting
+                        coeffs = np.polyfit(x, self.processed_intensities, poly_order)
+                        background = np.polyval(coeffs, x)
+                        
+                        # Apply robust reweighting
+                        for _ in range(3):  # 3 iterations of robust fitting
+                            residuals = np.abs(self.processed_intensities - background)
+                            weights = 1.0 / (1.0 + residuals / np.median(residuals))
+                            coeffs = np.polyfit(x, self.processed_intensities, poly_order, w=weights)
+                            background = np.polyval(coeffs, x)
+                    except:
+                        # Fallback to regular fitting
+                        coeffs = np.polyfit(x, self.processed_intensities, poly_order)
+                        background = np.polyval(coeffs, x)
+                else:
+                    # Regular least squares fitting
+                    coeffs = np.polyfit(x, self.processed_intensities, poly_order)
+                    background = np.polyval(coeffs, x)
+                
                 self.processed_intensities -= background
                 
             elif method == "Moving Average":
-                # Moving average background
-                window_size = max(len(self.processed_intensities) // 20, 5)  # Adaptive window size
-                background = np.convolve(
-                    self.processed_intensities, 
-                    np.ones(window_size)/window_size, 
-                    mode='same'
-                )
+                # Moving average background with adjustable window and type
+                window_percent = self.window_size_slider.value()
+                window_type = self.window_type_combo.currentText()
+                
+                # Calculate window size as percentage of spectrum length
+                window_size = max(int(len(self.processed_intensities) * window_percent / 100.0), 3)
+                
+                if window_type == "Uniform":
+                    # Simple uniform moving average
+                    background = np.convolve(
+                        self.processed_intensities, 
+                        np.ones(window_size)/window_size, 
+                        mode='same'
+                    )
+                elif window_type == "Gaussian":
+                    # Gaussian-weighted moving average
+                    from scipy import ndimage
+                    sigma = window_size / 4.0  # Standard deviation
+                    background = ndimage.gaussian_filter1d(self.processed_intensities, sigma=sigma)
+                elif window_type in ["Hann", "Hamming"]:
+                    # Windowed moving average
+                    if window_type == "Hann":
+                        window = np.hanning(window_size)
+                    else:  # Hamming
+                        window = np.hamming(window_size)
+                    
+                    window = window / np.sum(window)  # Normalize
+                    background = np.convolve(self.processed_intensities, window, mode='same')
+                else:
+                    # Fallback to uniform
+                    background = np.convolve(
+                        self.processed_intensities, 
+                        np.ones(window_size)/window_size, 
+                        mode='same'
+                    )
+                
                 self.processed_intensities -= background
             
             # Update plot
@@ -1278,31 +1432,85 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self.preview_corrected = corrected_intensities
                 
             elif method == "Linear":
-                # Linear background subtraction preview
-                background = np.linspace(
-                    self.processed_intensities[0],
-                    self.processed_intensities[-1],
-                    len(self.processed_intensities)
-                )
+                # Linear background subtraction preview with weighted endpoints
+                start_weight = self.start_weight_slider.value() / 10.0
+                end_weight = self.end_weight_slider.value() / 10.0
+                
+                # Create weighted linear background
+                start_val = self.processed_intensities[0] * start_weight
+                end_val = self.processed_intensities[-1] * end_weight
+                background = np.linspace(start_val, end_val, len(self.processed_intensities))
                 self.preview_background = background
                 self.preview_corrected = self.processed_intensities - background
                 
             elif method == "Polynomial":
-                # Polynomial background fitting preview (order 2)
+                # Polynomial background fitting preview with adjustable parameters
                 x = np.arange(len(self.processed_intensities))
-                coeffs = np.polyfit(x, self.processed_intensities, 2)
-                background = np.polyval(coeffs, x)
+                poly_order = self.poly_order_slider.value()
+                poly_method = self.poly_method_combo.currentText()
+                
+                if poly_method == "Robust":
+                    # Use robust polynomial fitting
+                    try:
+                        # Robust fitting using iterative reweighting
+                        coeffs = np.polyfit(x, self.processed_intensities, poly_order)
+                        background = np.polyval(coeffs, x)
+                        
+                        # Apply robust reweighting
+                        for _ in range(3):  # 3 iterations of robust fitting
+                            residuals = np.abs(self.processed_intensities - background)
+                            weights = 1.0 / (1.0 + residuals / np.median(residuals))
+                            coeffs = np.polyfit(x, self.processed_intensities, poly_order, w=weights)
+                            background = np.polyval(coeffs, x)
+                    except:
+                        # Fallback to regular fitting
+                        coeffs = np.polyfit(x, self.processed_intensities, poly_order)
+                        background = np.polyval(coeffs, x)
+                else:
+                    # Regular least squares fitting
+                    coeffs = np.polyfit(x, self.processed_intensities, poly_order)
+                    background = np.polyval(coeffs, x)
+                
                 self.preview_background = background
                 self.preview_corrected = self.processed_intensities - background
                 
             elif method == "Moving Average":
-                # Moving average background preview
-                window_size = max(len(self.processed_intensities) // 20, 5)
-                background = np.convolve(
-                    self.processed_intensities, 
-                    np.ones(window_size)/window_size, 
-                    mode='same'
-                )
+                # Moving average background preview with adjustable parameters
+                window_percent = self.window_size_slider.value()
+                window_type = self.window_type_combo.currentText()
+                
+                # Calculate window size as percentage of spectrum length
+                window_size = max(int(len(self.processed_intensities) * window_percent / 100.0), 3)
+                
+                if window_type == "Uniform":
+                    # Simple uniform moving average
+                    background = np.convolve(
+                        self.processed_intensities, 
+                        np.ones(window_size)/window_size, 
+                        mode='same'
+                    )
+                elif window_type == "Gaussian":
+                    # Gaussian-weighted moving average
+                    from scipy import ndimage
+                    sigma = window_size / 4.0  # Standard deviation
+                    background = ndimage.gaussian_filter1d(self.processed_intensities, sigma=sigma)
+                elif window_type in ["Hann", "Hamming"]:
+                    # Windowed moving average
+                    if window_type == "Hann":
+                        window = np.hanning(window_size)
+                    else:  # Hamming
+                        window = np.hamming(window_size)
+                    
+                    window = window / np.sum(window)  # Normalize
+                    background = np.convolve(self.processed_intensities, window, mode='same')
+                else:
+                    # Fallback to uniform
+                    background = np.convolve(
+                        self.processed_intensities, 
+                        np.ones(window_size)/window_size, 
+                        mode='same'
+                    )
+                
                 self.preview_background = background
                 self.preview_corrected = self.processed_intensities - background
             
@@ -1733,8 +1941,12 @@ class RamanAnalysisAppQt6(QMainWindow):
     def on_bg_method_changed(self):
         """Handle change in background method."""
         method = self.bg_method_combo.currentText()
-        # Show ALS parameters only when ALS is selected
+        
+        # Show/hide parameter widgets based on selected method
         self.als_params_widget.setVisible(method.startswith("ALS"))
+        self.linear_params_widget.setVisible(method == "Linear")
+        self.poly_params_widget.setVisible(method == "Polynomial")
+        self.moving_avg_params_widget.setVisible(method == "Moving Average")
         
         # Clear any active background preview when method changes
         if self.background_preview_active:
@@ -1751,6 +1963,28 @@ class RamanAnalysisAppQt6(QMainWindow):
         value = self.p_slider.value()
         p_value = value / 1000.0  # Convert to 0.001-0.05 range
         self.p_label.setText(f"{p_value:.3f}")
+    
+    def update_start_weight_label(self):
+        """Update the start weight label based on the slider value."""
+        value = self.start_weight_slider.value()
+        weight_value = value / 10.0  # Convert to 0.1-2.0 range
+        self.start_weight_label.setText(f"{weight_value:.1f}")
+    
+    def update_end_weight_label(self):
+        """Update the end weight label based on the slider value."""
+        value = self.end_weight_slider.value()
+        weight_value = value / 10.0  # Convert to 0.1-2.0 range
+        self.end_weight_label.setText(f"{weight_value:.1f}")
+    
+    def update_poly_order_label(self):
+        """Update the polynomial order label based on the slider value."""
+        value = self.poly_order_slider.value()
+        self.poly_order_label.setText(str(value))
+    
+    def update_window_size_label(self):
+        """Update the window size label based on the slider value."""
+        value = self.window_size_slider.value()
+        self.window_size_label.setText(f"{value}%")
 
     def perform_basic_search(self):
         """Perform basic database search using current spectrum."""

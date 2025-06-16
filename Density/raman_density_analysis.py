@@ -5,42 +5,194 @@ from scipy.optimize import curve_fit
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 
+class MaterialConfigs:
+    """Material configuration library for different types of Raman density analysis."""
+    
+    @staticmethod
+    def get_kidney_stones_config():
+        return {
+            'name': 'Kidney Stones (COM)',
+            'characteristic_peaks': {
+                'main': 1462,      # Primary COM peak
+                'secondary': 895,   # Secondary COM peak
+                'tertiary': 1630   # Tertiary COM peak
+            },
+            'reference_regions': {
+                'ch_stretch': (2800, 3000),    # C-H stretching
+                'amide_i': (1640, 1680),       # Protein Amide I
+                'baseline': (400, 600)         # Low-frequency baseline
+            },
+            'densities': {
+                'crystalline': 2.23,    # COM crystal
+                'matrix': 1.0,          # Organic matrix
+                'low_density': 1.0      # Bacteria/organic
+            },
+            'density_ranges': {
+                'low_range': (0.95, 1.05),      # Pure bacteria
+                'medium_range': (1.0, 1.2),     # Bacteria + some mineral
+                'mixed_range': (1.0, 1.4),      # Mixed organic matrix
+                'crystalline_range': (2.0, 2.4) # COM crystal range
+            },
+            'reference_intensity': 1000,  # Whewellite reference
+            'classification_thresholds': {
+                'low': 0.2,       # Bacterial/organic
+                'medium': 0.5,    # Mixed organic
+                'high': 0.8       # Crystalline
+            }
+        }
+    
+    @staticmethod
+    def get_quartz_config():
+        return {
+            'name': 'Quartz',
+            'characteristic_peaks': {
+                'main': 464,       # Primary quartz peak
+                'secondary': 206,  # Secondary quartz peak
+                'tertiary': 354    # Tertiary quartz peak
+            },
+            'reference_regions': {
+                'low_freq': (100, 300),      # Low frequency region
+                'fingerprint': (300, 600),   # Fingerprint region
+                'baseline': (700, 900)       # Baseline region
+            },
+            'densities': {
+                'crystalline': 2.65,   # Pure quartz
+                'matrix': 2.0,         # Mixed silicate matrix
+                'low_density': 1.5     # Amorphous/organic
+            },
+            'density_ranges': {
+                'low_range': (1.4, 1.6),        # Amorphous silica
+                'medium_range': (1.8, 2.2),     # Mixed crystalline
+                'mixed_range': (2.0, 2.4),      # Polycrystalline
+                'crystalline_range': (2.5, 2.7) # Pure quartz
+            },
+            'reference_intensity': 800,   # Pure quartz reference
+            'classification_thresholds': {
+                'low': 0.3,       # Amorphous
+                'medium': 0.6,    # Mixed crystalline
+                'high': 0.85      # Pure crystalline
+            }
+        }
+    
+    @staticmethod
+    def get_feldspar_config():
+        return {
+            'name': 'Feldspar',
+            'characteristic_peaks': {
+                'main': 476,       # Primary feldspar peak
+                'secondary': 507,  # Secondary peak
+                'tertiary': 284    # Tertiary peak
+            },
+            'reference_regions': {
+                'aluminosilicate': (400, 600),  # Al-Si framework
+                'alkali': (200, 400),           # Alkali region
+                'baseline': (800, 1000)        # Baseline region
+            },
+            'densities': {
+                'crystalline': 2.56,   # Average feldspar density
+                'matrix': 2.2,         # Mixed aluminosilicate
+                'low_density': 1.8     # Glassy/amorphous
+            },
+            'density_ranges': {
+                'low_range': (1.7, 1.9),        # Glassy feldspar
+                'medium_range': (2.0, 2.3),     # Mixed crystalline
+                'mixed_range': (2.2, 2.4),      # Polycrystalline
+                'crystalline_range': (2.5, 2.6) # Pure feldspar
+            },
+            'reference_intensity': 600,   # Pure feldspar reference
+            'classification_thresholds': {
+                'low': 0.25,      # Glassy
+                'medium': 0.55,   # Mixed
+                'high': 0.8       # Crystalline
+            }
+        }
+    
+    @staticmethod
+    def get_calcite_config():
+        return {
+            'name': 'Calcite',
+            'characteristic_peaks': {
+                'main': 1086,      # Primary calcite peak (ν1 CO3)
+                'secondary': 282,  # Secondary peak
+                'tertiary': 712    # ν4 CO3 peak
+            },
+            'reference_regions': {
+                'carbonate': (1000, 1200),   # Carbonate stretching
+                'lattice': (200, 400),       # Lattice modes
+                'baseline': (600, 800)       # Baseline region
+            },
+            'densities': {
+                'crystalline': 2.71,   # Pure calcite
+                'matrix': 2.3,         # Mixed carbonate
+                'low_density': 1.9     # Organic/amorphous
+            },
+            'density_ranges': {
+                'low_range': (1.8, 2.0),        # Organic-rich
+                'medium_range': (2.1, 2.4),     # Mixed carbonate
+                'mixed_range': (2.3, 2.5),      # Polycrystalline
+                'crystalline_range': (2.6, 2.8) # Pure calcite
+            },
+            'reference_intensity': 1200,  # Pure calcite reference
+            'classification_thresholds': {
+                'low': 0.3,       # Organic-rich
+                'medium': 0.6,    # Mixed
+                'high': 0.85      # Pure crystalline
+            }
+        }
+    
+    @staticmethod
+    def get_available_materials():
+        """Get list of available material configurations."""
+        return [
+            'Kidney Stones (COM)',
+            'Quartz',
+            'Feldspar', 
+            'Calcite'
+        ]
+    
+    @staticmethod
+    def get_config(material_name):
+        """Get configuration for specified material."""
+        configs = {
+            'Kidney Stones (COM)': MaterialConfigs.get_kidney_stones_config(),
+            'Quartz': MaterialConfigs.get_quartz_config(),
+            'Feldspar': MaterialConfigs.get_feldspar_config(),
+            'Calcite': MaterialConfigs.get_calcite_config()
+        }
+        return configs.get(material_name, MaterialConfigs.get_kidney_stones_config())
+
+
 class RamanDensityAnalyzer:
     """
-    Quantitative density analysis of kidney stone Raman spectroscopy data
-    for correlation with micro-CT measurements.
+    Flexible quantitative density analysis for Raman spectroscopy data.
+    Supports multiple material types with configurable parameters.
     """
     
-    def __init__(self):
-        # COM characteristic peaks (cm-1)
-        self.com_peaks = {
-            'main': 1462,      # Primary COM peak
-            'secondary': 895,   # Secondary COM peak
-            'tertiary': 1630   # Tertiary COM peak
-        }
+    def __init__(self, material_type='Kidney Stones (COM)'):
+        """
+        Initialize density analyzer with specified material configuration.
         
-        # Organic reference regions (cm-1)
-        self.organic_regions = {
-            'ch_stretch': (2800, 3000),    # C-H stretching
-            'amide_i': (1640, 1680),       # Protein Amide I
-            'baseline': (400, 600)         # Low-frequency baseline
-        }
+        Parameters:
+        -----------
+        material_type : str
+            Type of material to analyze ('Kidney Stones (COM)', 'Quartz', 'Feldspar', 'Calcite')
+        """
+        self.material_type = material_type
+        self.config = MaterialConfigs.get_config(material_type)
         
-        # Known densities (g/cm³) - Updated for bacterial biofilm analysis
-        self.densities = {
-            'com_crystal': 2.23,
-            'organic_matrix': 1.0,      # Adjusted for bacteria-rich regions (1.0-1.2 g/cm³)
-            'pure_bacteria': 1.0,       # Pure bacteria (0.95-1.05 g/cm³ depending on water content)
-            'void_space': 0.0
-        }
+        # Set up material-specific parameters
+        self.characteristic_peaks = self.config['characteristic_peaks']
+        self.reference_regions = self.config['reference_regions']
+        self.densities = self.config['densities']
+        self.density_ranges = self.config['density_ranges']
+        self.reference_intensity = self.config['reference_intensity']
+        self.classification_thresholds = self.config['classification_thresholds']
         
-        # Bacterial biofilm density ranges for calibration
-        self.biofilm_densities = {
-            'pure_bacteria_range': (0.95, 1.05),           # Pure bacteria depending on water content
-            'bacteria_rich_range': (1.0, 1.2),             # Bacteria + some mineral precipitation
-            'mixed_organic_range': (1.0, 1.4),             # Mixed organic/bacterial matrix
-            'crystalline_range': (2.0, 2.4)                # COM crystal range
-        }
+        # Legacy attribute names for backward compatibility (kidney stones)
+        if material_type == 'Kidney Stones (COM)':
+            self.com_peaks = self.characteristic_peaks
+            self.organic_regions = self.reference_regions
+            self.biofilm_densities = self.density_ranges
     
     def preprocess_spectrum(self, wavenumber, intensity):
         """
@@ -86,6 +238,7 @@ class RamanDensityAnalyzer:
     def calculate_crystalline_density_index(self, wavenumber, intensity):
         """
         Calculate Crystalline Density Index (CDI) using peak height ratios.
+        Flexible for different material types.
         
         Parameters:
         -----------
@@ -101,32 +254,31 @@ class RamanDensityAnalyzer:
         metrics : dict
             Detailed analysis metrics
         """
-        # Find COM main peak intensity
-        com_idx = np.argmin(np.abs(wavenumber - self.com_peaks['main']))
-        com_intensity = intensity[com_idx]
+        # Find main characteristic peak intensity
+        main_peak = self.characteristic_peaks['main']
+        peak_idx = np.argmin(np.abs(wavenumber - main_peak))
+        peak_intensity = intensity[peak_idx]
         
-        # Calculate baseline intensity in organic-dominated region
-        baseline_mask = (wavenumber >= self.organic_regions['baseline'][0]) & \
-                       (wavenumber <= self.organic_regions['baseline'][1])
+        # Calculate baseline intensity in reference region
+        baseline_region = list(self.reference_regions.values())[0]  # Use first reference region as baseline
+        baseline_mask = (wavenumber >= baseline_region[0]) & (wavenumber <= baseline_region[1])
         baseline_intensity = np.mean(intensity[baseline_mask])
         
         # Calculate peak-to-baseline ratio
-        peak_height = com_intensity - baseline_intensity
+        peak_height = peak_intensity - baseline_intensity
         peak_height = max(peak_height, 0)  # Ensure non-negative
         
-        # Normalize using empirical calibration from your whewellite standard
-        # This value should be calibrated against your panel L data
-        whewellite_reference = 1000  # Adjust based on your whewellite spectrum
-        
-        # Calculate CDI
-        cdi = min(peak_height / whewellite_reference, 1.0)
+        # Normalize using material-specific reference intensity
+        cdi = min(peak_height / self.reference_intensity, 1.0)
         
         # Additional metrics for validation
         metrics = {
-            'com_peak_height': peak_height,
+            'main_peak_height': peak_height,
             'baseline_intensity': baseline_intensity,
-            'peak_width': self._calculate_peak_width(wavenumber, intensity, com_idx),
-            'spectral_contrast': (com_intensity - baseline_intensity) / (com_intensity + baseline_intensity)
+            'peak_width': self._calculate_peak_width(wavenumber, intensity, peak_idx),
+            'spectral_contrast': (peak_intensity - baseline_intensity) / (peak_intensity + baseline_intensity + 1e-10),
+            'material_type': self.material_type,
+            'main_peak_position': main_peak
         }
         
         return cdi, metrics
@@ -147,40 +299,49 @@ class RamanDensityAnalyzer:
         
         return wavenumber[right_idx] - wavenumber[left_idx]
     
-    def calculate_biofilm_density(self, cdi, biofilm_type='mixed'):
+    def calculate_density_by_type(self, cdi, density_type='mixed'):
         """
-        Convert CDI to apparent density specifically calibrated for bacterial biofilms.
+        Convert CDI to apparent density using material-specific density ranges.
         
         Parameters:
         -----------
         cdi : float or array
             Crystalline Density Index values
-        biofilm_type : str
-            Type of biofilm analysis ('pure', 'bacteria_rich', 'mixed')
+        density_type : str
+            Type of density analysis ('low', 'medium', 'mixed', 'crystalline')
             
         Returns:
         --------
         apparent_density : float or array
-            Calculated apparent density (g/cm³) optimized for bacterial biofilms
+            Calculated apparent density (g/cm³)
         """
-        if biofilm_type == 'pure':
-            # Pure bacteria: 0.95-1.05 g/cm³
-            min_density, max_density = self.biofilm_densities['pure_bacteria_range']
-        elif biofilm_type == 'bacteria_rich':
-            # Bacteria-rich regions: 1.0-1.2 g/cm³
-            min_density, max_density = self.biofilm_densities['bacteria_rich_range']
-        else:  # mixed
-            # Mixed organic/bacterial matrix: 1.0-1.4 g/cm³
-            min_density, max_density = self.biofilm_densities['mixed_organic_range']
+        # Get density range based on type
+        if density_type == 'low':
+            min_density, max_density = self.density_ranges['low_range']
+        elif density_type == 'medium':
+            min_density, max_density = self.density_ranges['medium_range']
+        elif density_type == 'crystalline':
+            min_density, max_density = self.density_ranges['crystalline_range']
+        else:  # mixed (default)
+            min_density, max_density = self.density_ranges['mixed_range']
         
-        # Linear interpolation between biofilm baseline and COM crystal
-        apparent_density = min_density + (self.densities['com_crystal'] - min_density) * cdi
+        # Linear interpolation between baseline and crystalline
+        apparent_density = min_density + (self.densities['crystalline'] - min_density) * cdi
         
         return apparent_density
     
+    def calculate_biofilm_density(self, cdi, biofilm_type='mixed'):
+        """
+        Legacy method for backward compatibility (kidney stones).
+        """
+        if self.material_type == 'Kidney Stones (COM)':
+            return self.calculate_density_by_type(cdi, biofilm_type)
+        else:
+            return self.calculate_density_by_type(cdi, 'mixed')
+    
     def calculate_apparent_density(self, cdi):
         """
-        Convert CDI to apparent density for micro-CT correlation.
+        Convert CDI to apparent density using linear mixing model.
         
         Parameters:
         -----------
@@ -192,9 +353,9 @@ class RamanDensityAnalyzer:
         apparent_density : float or array
             Calculated apparent density (g/cm³)
         """
-        # Linear mixing model - updated for bacterial biofilm baseline
-        apparent_density = (self.densities['organic_matrix'] + 
-                          (self.densities['com_crystal'] - self.densities['organic_matrix']) * cdi)
+        # Linear mixing model between low-density matrix and crystalline phase
+        apparent_density = (self.densities['matrix'] + 
+                          (self.densities['crystalline'] - self.densities['matrix']) * cdi)
         
         return apparent_density
     
@@ -314,40 +475,43 @@ class RamanDensityAnalyzer:
     
     def _classify_layers(self, cdi_profile, thresholds=None):
         """
-        Classify layers as bacterial, organic, or crystalline based on CDI thresholds.
-        Updated for bacterial biofilm analysis.
+        Classify layers based on CDI thresholds using material-specific configuration.
         """
         if thresholds is None:
-            thresholds = {
-                'bacterial': 0.2,     # Pure bacterial regions (low crystallinity)
-                'organic': 0.5,       # Mixed organic/bacterial regions  
-                'crystalline': 0.8    # High crystallinity threshold
-            }
+            thresholds = self.classification_thresholds
         
         classifications = []
         for cdi in cdi_profile:
-            if cdi < thresholds['bacterial']:
-                classifications.append('bacterial')
-            elif cdi < thresholds['organic']:
+            if cdi < thresholds['low']:
+                if self.material_type == 'Kidney Stones (COM)':
+                    classifications.append('bacterial')
+                else:
+                    classifications.append('low')
+            elif cdi < thresholds['medium']:
                 classifications.append('organic') 
-            elif cdi < thresholds['crystalline']:
+            elif cdi < thresholds['high']:
                 classifications.append('mixed_crystalline')
             else:
                 classifications.append('crystalline')
                 
         return classifications
     
-    def plot_density_analysis(self, density_profile, title="Kidney Stone Density Profile"):
+    def plot_density_analysis(self, density_profile, title=None):
         """
         Create comprehensive density analysis visualization.
         """
+        # Set default title based on material type
+        if title is None:
+            title = f"{self.material_type} Density Profile Analysis"
+            
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(12, 10))
         
         positions = density_profile['positions']
         
         # 1. CDI profile
         ax1.plot(positions, density_profile['cdi_profile'], 'b-', linewidth=2)
-        ax1.axhline(y=0.5, color='r', linestyle='--', alpha=0.7, label='Classification threshold')
+        mid_threshold = (self.classification_thresholds['low'] + self.classification_thresholds['high']) / 2
+        ax1.axhline(y=mid_threshold, color='r', linestyle='--', alpha=0.7, label='Classification threshold')
         ax1.set_xlabel('Position (μm)')
         ax1.set_ylabel('Crystalline Density Index')
         ax1.set_title('CDI Spatial Profile')
@@ -356,45 +520,66 @@ class RamanDensityAnalyzer:
         
         # 2. Apparent density profile
         ax2.plot(positions, density_profile['density_profile'], 'g-', linewidth=2)
-        ax2.axhline(y=self.densities['com_crystal'], color='b', linestyle=':', 
-                   alpha=0.7, label='Pure COM density')
-        ax2.axhline(y=self.densities['organic_matrix'], color='r', linestyle=':', 
-                   alpha=0.7, label='Organic matrix density')
+        ax2.axhline(y=self.densities['crystalline'], color='b', linestyle=':', 
+                   alpha=0.7, label=f'Pure {self.material_type.split()[0]} density')
+        ax2.axhline(y=self.densities['matrix'], color='r', linestyle=':', 
+                   alpha=0.7, label='Matrix density')
         
-        # Add bacterial biofilm density reference ranges
-        ax2.axhspan(self.biofilm_densities['pure_bacteria_range'][0], 
-                   self.biofilm_densities['pure_bacteria_range'][1], 
-                   alpha=0.2, color='cyan', label='Pure bacteria range')
-        ax2.axhspan(self.biofilm_densities['bacteria_rich_range'][0], 
-                   self.biofilm_densities['bacteria_rich_range'][1], 
-                   alpha=0.2, color='orange', label='Bacteria-rich range')
+        # Add material-specific density reference ranges
+        if self.material_type == 'Kidney Stones (COM)':
+            # Special handling for kidney stones (biofilm ranges)
+            ax2.axhspan(self.density_ranges['low_range'][0], 
+                       self.density_ranges['low_range'][1], 
+                       alpha=0.2, color='cyan', label='Bacterial range')
+            ax2.axhspan(self.density_ranges['medium_range'][0], 
+                       self.density_ranges['medium_range'][1], 
+                       alpha=0.2, color='orange', label='Bacteria-rich range')
+        else:
+            # Generic material ranges
+            ax2.axhspan(self.density_ranges['low_range'][0], 
+                       self.density_ranges['low_range'][1], 
+                       alpha=0.2, color='lightblue', label='Low density range')
+            ax2.axhspan(self.density_ranges['crystalline_range'][0], 
+                       self.density_ranges['crystalline_range'][1], 
+                       alpha=0.2, color='lightgreen', label='Crystalline range')
                    
         ax2.set_xlabel('Position (μm)')
         ax2.set_ylabel('Apparent Density (g/cm³)')
-        ax2.set_title('Calculated Density Profile (Bacterial Biofilm Calibrated)')
+        ax2.set_title(f'Calculated Density Profile ({self.material_type})')
         ax2.grid(True, alpha=0.3)
         ax2.legend()
         
-        # 3. Layer classification - updated for bacterial types
-        color_map = {
-            'bacterial': 'cyan',
-            'organic': 'orange', 
-            'mixed_crystalline': 'purple',
-            'crystalline': 'blue'
-        }
+        # 3. Layer classification
+        if self.material_type == 'Kidney Stones (COM)':
+            # Biofilm-specific colors
+            color_map = {
+                'bacterial': 'cyan',
+                'organic': 'orange', 
+                'mixed_crystalline': 'purple',
+                'crystalline': 'blue'
+            }
+            legend_labels = ['Bacterial', 'Organic', 'Mixed Crystalline', 'Crystalline']
+        else:
+            # Generic material colors
+            color_map = {
+                'low': 'lightblue',
+                'organic': 'orange', 
+                'mixed_crystalline': 'purple',
+                'crystalline': 'darkgreen'
+            }
+            legend_labels = ['Low Density', 'Matrix', 'Mixed Crystalline', 'Crystalline']
+            
         colors = [color_map.get(layer, 'gray') for layer in density_profile['layer_classification']]
         ax3.scatter(positions, density_profile['cdi_profile'], c=colors, alpha=0.7)
         ax3.set_xlabel('Position (μm)')
         ax3.set_ylabel('CDI')
-        ax3.set_title('Layer Classification (Bacterial Biofilm Analysis)')
+        ax3.set_title(f'Layer Classification ({self.material_type})')
         ax3.grid(True, alpha=0.3)
         
         # Add legend for layer classification
         from matplotlib.patches import Patch
-        legend_elements = [Patch(facecolor='cyan', label='Bacterial'),
-                          Patch(facecolor='orange', label='Organic'),
-                          Patch(facecolor='purple', label='Mixed Crystalline'),
-                          Patch(facecolor='blue', label='Crystalline')]
+        legend_elements = [Patch(facecolor=list(color_map.values())[i], label=legend_labels[i])
+                          for i in range(len(legend_labels))]
         ax3.legend(handles=legend_elements)
         
         # 4. Density histogram

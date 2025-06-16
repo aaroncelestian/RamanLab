@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QSplitter, QMessageBox, QProgressBar, QSpinBox, 
     QDoubleSpinBox, QFormLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QScrollArea, QFrame, QGridLayout, QListWidget, QListWidgetItem,
-    QFileDialog, QApplication, QMenuBar, QMenu, QProgressDialog
+    QFileDialog, QApplication, QMenuBar, QMenu, QProgressDialog, QInputDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
 from PySide6.QtGui import QFont, QAction, QKeySequence
@@ -37,6 +37,16 @@ from scipy.sparse.linalg import spsolve
 import pandas as pd
 import os
 import chardet
+import subprocess
+import sys
+from pathlib import Path
+
+# Import the density analysis module
+try:
+    from Density.raman_density_analysis import RamanDensityAnalyzer
+    DENSITY_AVAILABLE = True
+except ImportError:
+    DENSITY_AVAILABLE = False
 
 class BatchPeakFittingQt6(QDialog):
     """Enhanced batch peak fitting dialog for processing multiple Raman spectra."""
@@ -53,6 +63,7 @@ class BatchPeakFittingQt6(QDialog):
         self.spectra_files = []  # List of file paths
         self.current_spectrum_index = 0
         self.batch_results = []
+        self.density_results = []  # Initialize density results storage
         self.reference_peaks = None
         self.reference_background = None
         
@@ -80,6 +91,7 @@ class BatchPeakFittingQt6(QDialog):
         # Preview states for UI consistency
         self.background_preview_active = False
         self.smoothing_preview_active = False
+        self.background_preview = None  # Store preview background
         
         self.setup_ui()
         self.initial_plot()
@@ -285,9 +297,11 @@ class BatchPeakFittingQt6(QDialog):
         p_layout.addWidget(self.p_label)
         als_params_layout.addLayout(p_layout)
         
-        # Connect sliders to update labels
+        # Connect sliders to update labels and preview
         self.lambda_slider.valueChanged.connect(self.update_lambda_label)
+        self.lambda_slider.valueChanged.connect(self.preview_background_subtraction)
         self.p_slider.valueChanged.connect(self.update_p_label)
+        self.p_slider.valueChanged.connect(self.preview_background_subtraction)
         
         bg_layout.addWidget(self.als_params_widget)
         
@@ -298,7 +312,7 @@ class BatchPeakFittingQt6(QDialog):
         subtract_btn.clicked.connect(self.apply_background_subtraction)
         button_layout.addWidget(subtract_btn)
         
-        preview_btn = QPushButton("Clear Preview")
+        preview_btn = QPushButton("Clear Background Preview")
         preview_btn.clicked.connect(self.clear_background_preview)
         button_layout.addWidget(preview_btn)
         
@@ -589,6 +603,60 @@ class BatchPeakFittingQt6(QDialog):
         
         layout.addWidget(batch_group)
         
+        # Density analysis integration
+        if DENSITY_AVAILABLE:
+            density_group = QGroupBox("Density Analysis Integration")
+            density_layout = QVBoxLayout(density_group)
+            
+            # Enable density analysis checkbox
+            self.enable_density_analysis = QCheckBox("Include Density Analysis in Batch Processing")
+            self.enable_density_analysis.setChecked(False)
+            self.enable_density_analysis.toggled.connect(self.on_density_analysis_toggle)
+            density_layout.addWidget(self.enable_density_analysis)
+            
+            # Material selection
+            material_layout = QHBoxLayout()
+            material_layout.addWidget(QLabel("Material Type:"))
+            self.batch_material_combo = QComboBox()
+            from Density.raman_density_analysis import MaterialConfigs
+            self.batch_material_combo.addItems(MaterialConfigs.get_available_materials())
+            self.batch_material_combo.setEnabled(False)
+            material_layout.addWidget(self.batch_material_combo)
+            density_layout.addLayout(material_layout)
+            
+            # Density type selection
+            density_type_layout = QHBoxLayout()
+            density_type_layout.addWidget(QLabel("Density Type:"))
+            self.batch_density_type_combo = QComboBox()
+            self.batch_density_type_combo.addItems(["mixed", "low", "medium", "crystalline"])
+            self.batch_density_type_combo.setEnabled(False)
+            density_type_layout.addWidget(self.batch_density_type_combo)
+            density_layout.addLayout(density_type_layout)
+            
+            # Batch density analysis button
+            self.batch_density_btn = QPushButton("Run Density Analysis on All Loaded Spectra")
+            self.batch_density_btn.clicked.connect(self.run_batch_density_analysis)
+            self.batch_density_btn.setEnabled(False)
+            self.batch_density_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #9C27B0;
+                    color: white;
+                    border: none;
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #7B1FA2;
+                }
+                QPushButton:disabled {
+                    background-color: #BDBDBD;
+                }
+            """)
+            density_layout.addWidget(self.batch_density_btn)
+            
+            layout.addWidget(density_group)
+        
         # Progress log
         log_group = QGroupBox("Progress Log")
         log_layout = QVBoxLayout(log_group)
@@ -600,6 +668,28 @@ class BatchPeakFittingQt6(QDialog):
         log_layout.addWidget(self.batch_status_text)
         
         layout.addWidget(log_group)
+        
+        # Peak information display
+        peak_info_group = QGroupBox("Current Peak Information")
+        peak_info_layout = QVBoxLayout(peak_info_group)
+        
+        self.peak_info_text = QTextEdit()
+        self.peak_info_text.setMaximumHeight(200)
+        self.peak_info_text.setReadOnly(True)
+        self.peak_info_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: monospace;
+                font-size: 11px;
+            }
+        """)
+        self.peak_info_text.append("No peaks fitted yet")
+        peak_info_layout.addWidget(self.peak_info_text)
+        
+        layout.addWidget(peak_info_group)
         layout.addStretch()
         return tab
         
@@ -835,6 +925,208 @@ class BatchPeakFittingQt6(QDialog):
         layout.addStretch()
         return tab
         
+    def create_specialized_tab(self):
+        """Create specialized tools tab for launching external analysis programs."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Header
+        header_label = QLabel("Specialized Analysis Tools")
+        header_label.setFont(QFont("Arial", 12, QFont.Bold))
+        layout.addWidget(header_label)
+        
+        # Density Analysis Group
+        density_group = QGroupBox("Density Analysis")
+        density_layout = QVBoxLayout(density_group)
+        
+        # Description
+        density_desc = QLabel(
+            "Launch the Raman Density Analysis tool for quantitative density\n"
+            "analysis of kidney stone Raman spectroscopy data with micro-CT correlation.\n"
+            "Supports bacterial biofilm analysis and crystalline density indexing."
+        )
+        density_desc.setWordWrap(True)
+        density_layout.addWidget(density_desc)
+        
+        # Launch button
+        if DENSITY_AVAILABLE:
+            density_btn = QPushButton("Launch Density Analysis")
+            density_btn.clicked.connect(self.launch_density_analysis)
+            density_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2196F3;
+                    color: white;
+                    border: none;
+                    padding: 10px;
+                    border-radius: 5px;
+                    font-weight: bold;
+                    font-size: 12px;
+                }
+                QPushButton:hover {
+                    background-color: #1976D2;
+                }
+            """)
+            density_layout.addWidget(density_btn)
+            
+            # Quick analysis button for current spectrum
+            if len(self.wavenumbers) > 0 and len(self.intensities) > 0:
+                quick_analysis_btn = QPushButton("Analyze Current Spectrum")
+                quick_analysis_btn.clicked.connect(self.quick_density_analysis)
+                quick_analysis_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border: none;
+                        padding: 8px;
+                        border-radius: 5px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #45A049;
+                    }
+                """)
+                density_layout.addWidget(quick_analysis_btn)
+        else:
+            error_label = QLabel("Density analysis module not available.\nCheck Density/ folder for raman_density_analysis.py")
+            error_label.setStyleSheet("color: red; font-style: italic;")
+            density_layout.addWidget(error_label)
+        
+        layout.addWidget(density_group)
+        
+        # Future tools placeholder
+        future_group = QGroupBox("Future Analysis Tools")
+        future_layout = QVBoxLayout(future_group)
+        
+        future_desc = QLabel(
+            "Additional specialized analysis tools will be added here:\n"
+            "• Feldspar Ca/Na/K ratio chemical analysis\n"
+            "• Zircon zoning analysis\n"
+            "• Garnet zoning analysis\n"
+            "• Trapped organic D/G ratio geothermometry analysis"
+        )
+        future_desc.setWordWrap(True)
+        future_desc.setStyleSheet("color: gray; font-style: italic;")
+        future_layout.addWidget(future_desc)
+        
+        layout.addWidget(future_group)
+        
+        layout.addStretch()
+        return tab
+        
+    def launch_density_analysis(self):
+        """Launch the density analysis tool as a separate process."""
+        try:
+            # Get the path to the density analysis GUI launcher
+            script_path = Path(__file__).parent / "Density" / "density_gui_launcher.py"
+            
+            if not script_path.exists():
+                # Fallback to the main analysis script
+                script_path = Path(__file__).parent / "Density" / "raman_density_analysis.py"
+                if not script_path.exists():
+                    QMessageBox.warning(self, "File Not Found", 
+                                      f"Density analysis scripts not found in Density/ folder")
+                    return
+            
+            # Launch as separate Python process
+            subprocess.Popen([sys.executable, str(script_path)], 
+                           cwd=Path(__file__).parent)
+            
+            QMessageBox.information(self, "Launched", 
+                                  "Density Analysis tool has been launched in a separate window.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", 
+                               f"Failed to launch density analysis tool:\n{str(e)}")
+    
+    def quick_density_analysis(self):
+        """Perform quick density analysis on the current spectrum."""
+        if not DENSITY_AVAILABLE:
+            QMessageBox.warning(self, "Not Available", 
+                              "Density analysis module is not available.")
+            return
+            
+        if len(self.wavenumbers) == 0 or len(self.intensities) == 0:
+            QMessageBox.warning(self, "No Data", 
+                              "No spectrum data loaded for analysis.")
+            return
+        
+        try:
+            from Density.raman_density_analysis import MaterialConfigs
+            
+            # Ask user for material type
+            material_types = MaterialConfigs.get_available_materials()
+            material_type, ok = QInputDialog.getItem(
+                self, "Select Material Type", 
+                "Choose the material type for analysis:",
+                material_types, 0, False
+            )
+            
+            if not ok:
+                return
+            
+            # Create analyzer instance with selected material
+            analyzer = RamanDensityAnalyzer(material_type)
+            
+            # Use current spectrum data
+            wavenumbers = self.wavenumbers
+            intensities = self.intensities
+            
+            # Preprocess spectrum
+            wn, corrected_int = analyzer.preprocess_spectrum(wavenumbers, intensities)
+            
+            # Calculate CDI and density
+            cdi, metrics = analyzer.calculate_crystalline_density_index(wn, corrected_int)
+            apparent_density = analyzer.calculate_apparent_density(cdi)
+            
+            # Use appropriate density calculation
+            if material_type == 'Kidney Stones (COM)':
+                specialized_density = analyzer.calculate_biofilm_density(cdi, 'mixed')
+                density_label = "Biofilm-Calibrated Density"
+            else:
+                specialized_density = analyzer.calculate_density_by_type(cdi, 'mixed')
+                density_label = "Specialized Density"
+            
+            # Get classification
+            thresholds = analyzer.classification_thresholds
+            if cdi < thresholds['low']:
+                classification = 'Low crystallinity'
+            elif cdi < thresholds['medium']:
+                classification = 'Mixed regions'
+            elif cdi < thresholds['high']:
+                classification = 'Mixed crystalline'
+            else:
+                classification = 'Pure crystalline'
+            
+            # Display results
+            result_text = f"""
+Density Analysis Results ({material_type}):
+
+Crystalline Density Index (CDI): {cdi:.4f}
+Standard Apparent Density: {apparent_density:.3f} g/cm³
+{density_label}: {specialized_density:.3f} g/cm³
+
+Metrics:
+• Main Peak Height: {metrics['main_peak_height']:.1f}
+• Main Peak Position: {metrics['main_peak_position']} cm⁻¹
+• Baseline Intensity: {metrics['baseline_intensity']:.1f}
+• Peak Width (FWHM): {metrics['peak_width']:.1f} cm⁻¹
+• Spectral Contrast: {metrics['spectral_contrast']:.4f}
+
+Classification: {classification} region
+
+Material-Specific Guidelines:
+• CDI < {thresholds['low']:.2f}: Low crystallinity regions
+• CDI {thresholds['low']:.2f}-{thresholds['medium']:.2f}: Mixed regions
+• CDI {thresholds['medium']:.2f}-{thresholds['high']:.2f}: Mixed crystalline
+• CDI > {thresholds['high']:.2f}: Pure crystalline
+            """
+            
+            QMessageBox.information(self, "Density Analysis Results", result_text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", 
+                               f"Failed to perform density analysis:\n{str(e)}")
+        
     def create_visualization_panel(self):
         """Create the visualization panel."""
         panel = QWidget()
@@ -843,6 +1135,9 @@ class BatchPeakFittingQt6(QDialog):
         # Create tab widget for different views
         self.viz_tab_widget = QTabWidget()
         layout.addWidget(self.viz_tab_widget)
+        
+        # Connect tab change signal to update plots when needed
+        self.viz_tab_widget.currentChanged.connect(self.on_viz_tab_changed)
         
         # Current spectrum tab
         current_tab = self.create_current_spectrum_tab()
@@ -856,6 +1151,10 @@ class BatchPeakFittingQt6(QDialog):
         trends_tab = self.create_trends_tab()
         self.viz_tab_widget.addTab(trends_tab, "Trends")
         
+        # Fitting Quality tab
+        fitting_quality_tab = self.create_fitting_quality_tab()
+        self.viz_tab_widget.addTab(fitting_quality_tab, "Fitting Quality")
+        
         # Waterfall tab
         waterfall_tab = self.create_waterfall_tab()
         self.viz_tab_widget.addTab(waterfall_tab, "Waterfall")
@@ -864,8 +1163,23 @@ class BatchPeakFittingQt6(QDialog):
         heatmap_tab = self.create_heatmap_tab()
         self.viz_tab_widget.addTab(heatmap_tab, "Heatmap")
         
+        # Specialized tab
+        specialized_tab = self.create_specialized_tab()
+        self.viz_tab_widget.addTab(specialized_tab, "Specialized")
+        
         return panel
         
+    def on_viz_tab_changed(self, index):
+        """Handle visualization tab changes to update plots as needed."""
+        tab_names = ["Current Spectrum", "Live View", "Trends", "Fitting Quality", "Waterfall", "Heatmap", "Specialized"]
+        if 0 <= index < len(tab_names):
+            tab_name = tab_names[index]
+            print(f"DEBUG: Switched to {tab_name} tab (index {index})")
+            
+            # Update the fitting quality plot when its tab is selected
+            if tab_name == "Fitting Quality":
+                self.update_fitting_quality_plot()
+                
     def create_current_spectrum_tab(self):
         """Create current spectrum visualization tab."""
         tab = QWidget()
@@ -900,6 +1214,39 @@ class BatchPeakFittingQt6(QDialog):
         
         layout.addWidget(self.toolbar_trends)
         layout.addWidget(self.canvas_trends)
+        
+        return tab
+        
+    def create_fitting_quality_tab(self):
+        """Create fitting quality visualization tab with 3x3 grid."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Create matplotlib figure for fitting quality grid
+        self.figure_fitting_quality = Figure(figsize=(15, 12))
+        self.canvas_fitting_quality = FigureCanvas(self.figure_fitting_quality)
+        self.toolbar_fitting_quality = NavigationToolbar(self.canvas_fitting_quality, tab)
+        
+        # Create 3x3 grid of subplots
+        self.figure_fitting_quality.clear()
+        gs = self.figure_fitting_quality.add_gridspec(3, 3, hspace=0.4, wspace=0.3)
+        
+        # Store axes for easy access
+        self.axes_fitting_quality = []
+        for i in range(3):
+            row_axes = []
+            for j in range(3):
+                ax = self.figure_fitting_quality.add_subplot(gs[i, j])
+                row_axes.append(ax)
+            self.axes_fitting_quality.append(row_axes)
+        
+        # Set row titles
+        self.axes_fitting_quality[0][1].set_title("Best Fitting Results (Top R²)", fontsize=14, fontweight='bold', pad=20)
+        self.axes_fitting_quality[1][1].set_title("Median Fitting Results", fontsize=14, fontweight='bold', pad=20)
+        self.axes_fitting_quality[2][1].set_title("Poorest Fitting Results (Lowest R²)", fontsize=14, fontweight='bold', pad=20)
+        
+        layout.addWidget(self.toolbar_fitting_quality)
+        layout.addWidget(self.canvas_fitting_quality)
         
         return tab
         
@@ -1494,6 +1841,9 @@ class BatchPeakFittingQt6(QDialog):
                 # Update Live View with current spectrum for analysis
                 self.update_live_view_with_current_spectrum()
                 
+                # Update peak info display for batch result
+                self.update_peak_info_display_for_batch_result(batch_result)
+                
                 # Highlight current file in list
                 self.file_list_widget.setCurrentRow(index)
                 
@@ -1512,12 +1862,21 @@ class BatchPeakFittingQt6(QDialog):
                 self.fit_params = []
                 self.fit_result = None
                 self.background = None
+                self.background_preview = None  # Clear background preview
+                self.background_preview_active = False
                 self.residuals = None
                 
                 # Update UI
                 self.update_file_status()
                 self.update_peak_count_display()
                 self.update_current_plot()
+                
+                # Auto-enable background preview when spectrum is loaded
+                if len(self.original_intensities) > 0:
+                    self.preview_background_subtraction()
+                
+                # Update peak info display for regular spectrum
+                self.update_peak_info_display()
                 
                 # Highlight current file in list
                 self.file_list_widget.setCurrentRow(index)
@@ -1575,8 +1934,17 @@ class BatchPeakFittingQt6(QDialog):
         if self.spectra_files:
             filename = os.path.basename(self.spectra_files[self.current_spectrum_index]) if self.current_spectrum_index < len(self.spectra_files) else "None"
             status = f"File {self.current_spectrum_index + 1} of {len(self.spectra_files)}: {filename}"
+            
+            # Enable density analysis button if files are loaded and density analysis is enabled
+            if hasattr(self, 'enable_density_analysis') and self.enable_density_analysis.isChecked():
+                self.batch_density_btn.setEnabled(True)
         else:
             status = "No files loaded"
+            
+            # Disable density analysis button if no files are loaded
+            if hasattr(self, 'batch_density_btn'):
+                self.batch_density_btn.setEnabled(False)
+                
         self.current_file_label.setText(status)
         
     def clear_current_spectrum(self):
@@ -1588,6 +1956,8 @@ class BatchPeakFittingQt6(QDialog):
         self.fit_params = []
         self.fit_result = None
         self.background = None
+        self.background_preview = None  # Clear background preview
+        self.background_preview_active = False
         self.residuals = None
         self.update_current_plot()
         
@@ -1647,8 +2017,9 @@ class BatchPeakFittingQt6(QDialog):
             # Update peak count display (which should update the list)
             self.update_peak_count_display()
             
-            # Update plot
+            # Update plot and peak info display
             self.update_current_plot()
+            self.update_peak_info_display()
             
         except Exception as e:
             self.peak_count_label.setText(f"Peak detection error: {str(e)}")
@@ -1679,16 +2050,41 @@ class BatchPeakFittingQt6(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Background subtraction failed: {str(e)}")
 
+    def preview_background_subtraction(self):
+        """Preview background subtraction in real-time as sliders move."""
+        if len(self.original_intensities) == 0:
+            return
+            
+        try:
+            # Get current slider parameters
+            lambda_value = 10 ** self.lambda_slider.value()
+            p_value = self.p_slider.value() / 1000.0
+            
+            # Calculate background preview
+            self.background_preview = self.baseline_als(self.original_intensities, lambda_value, p_value)
+            self.background_preview_active = True
+            
+            # Update plot to show preview
+            self.update_current_plot()
+            
+        except Exception as e:
+            print(f"Background preview error: {e}")
+            self.background_preview = None
+            self.background_preview_active = False
+
     def clear_background_preview(self):
-        """Clear any background preview (placeholder for consistency)."""
-        # This is for UI consistency with main app - batch mode doesn't use preview
-        pass
+        """Clear background preview and return to original view."""
+        self.background_preview = None
+        self.background_preview_active = False
+        self.update_current_plot()
 
     def reset_spectrum(self):
         """Reset spectrum to original state."""
         if len(self.original_intensities) > 0:
             self.intensities = self.original_intensities.copy()
             self.background = None
+            self.background_preview = None  # Clear background preview
+            self.background_preview_active = False
             self.peaks = np.array([], dtype=int)
             self.manual_peaks = np.array([], dtype=int)  # Also clear manual peaks
             self.fit_params = []
@@ -1752,6 +2148,7 @@ class BatchPeakFittingQt6(QDialog):
         self.residuals = None
         self.update_peak_count_display()
         self.update_current_plot()
+        self.update_peak_info_display()
 
     def baseline_als(self, y, lam=1e5, p=0.01, niter=10):
         """Asymmetric Least Squares baseline correction."""
@@ -1817,8 +2214,9 @@ class BatchPeakFittingQt6(QDialog):
                 fitted_curve = self.multi_peak_model(self.wavenumbers, *popt)
                 self.residuals = self.intensities - fitted_curve
                 
-                # Update the current plot
+                # Update the current plot and peak info display
                 self.update_current_plot()
+                self.update_peak_info_display()
             else:
                 QMessageBox.warning(self, "Error", "Invalid fit parameters generated.")
                 return
@@ -2053,8 +2451,9 @@ class BatchPeakFittingQt6(QDialog):
                         
                         self.batch_results.append(result_data)
                         
-                        # Update live view
+                        # Update live view and peak info panel
                         self.update_live_view(result_data, wavenumbers, popt)
+                        self.update_peak_info_display_for_batch_result(result_data)
                         
                         self.batch_status_text.append(f"SUCCESS: {os.path.basename(file_path)} - R² = {r_squared:.4f}")
                         
@@ -2108,8 +2507,9 @@ class BatchPeakFittingQt6(QDialog):
                                 
                                 self.batch_results.append(result_data)
                                 
-                                # Update live view
+                                # Update live view and peak info panel
                                 self.update_live_view(result_data, wavenumbers, popt)
+                                self.update_peak_info_display_for_batch_result(result_data)
                                 
                                 self.batch_status_text.append(f"SUCCESS (fallback): {os.path.basename(file_path)} - R² = {r_squared:.4f}")
                                 fallback_success = True
@@ -2158,9 +2558,10 @@ class BatchPeakFittingQt6(QDialog):
         progress.setValue(len(self.spectra_files))
         progress.close()
         
-        # Update visibility controls and trends plot
+        # Update visibility controls and plots
         self.update_peak_visibility_controls()
         self.update_trends_plot()
+        self.update_fitting_quality_plot()
         
         successful = sum(1 for result in self.batch_results if not result.get('fit_failed', True))
         self.batch_status_text.append(f"\nBatch processing complete: {successful}/{len(self.spectra_files)} successful")
@@ -2174,7 +2575,238 @@ class BatchPeakFittingQt6(QDialog):
         """Stop batch processing."""
         self._stop_batch = True
         self.batch_status_text.append("Batch processing stopped by user.")
+    
+    def on_density_analysis_toggle(self, checked):
+        """Handle density analysis checkbox toggle."""
+        self.batch_material_combo.setEnabled(checked)
+        self.batch_density_type_combo.setEnabled(checked)
+        self.batch_density_btn.setEnabled(checked and len(self.spectra_files) > 0)
+    
+    def run_batch_density_analysis(self):
+        """Run density analysis on all loaded spectra."""
+        if not DENSITY_AVAILABLE:
+            QMessageBox.warning(self, "Not Available", "Density analysis module is not available.")
+            return
         
+        if len(self.spectra_files) == 0:
+            QMessageBox.warning(self, "No Data", "No spectra loaded for analysis.")
+            return
+        
+        try:
+            from Density.raman_density_analysis import RamanDensityAnalyzer
+            
+            # Get analysis parameters
+            material_type = self.batch_material_combo.currentText()
+            density_type = self.batch_density_type_combo.currentText()
+            
+            # Create analyzer
+            analyzer = RamanDensityAnalyzer(material_type)
+            
+            # Progress dialog
+            progress = QProgressDialog("Running density analysis...", "Cancel", 0, len(self.spectra_files), self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            
+            # Initialize density results storage
+            if not hasattr(self, 'density_results'):
+                self.density_results = []
+            self.density_results.clear()
+            
+            self.batch_status_text.append(f"\nStarting batch density analysis ({material_type})...")
+            
+            success_count = 0
+            
+            for i, file_path in enumerate(self.spectra_files):
+                if progress.wasCanceled():
+                    break
+                    
+                progress.setValue(i)
+                progress.setLabelText(f"Analyzing: {os.path.basename(file_path)}")
+                QApplication.processEvents()
+                
+                try:
+                    # Load spectrum
+                    wavenumbers, intensities = self.load_spectrum_robust(file_path)
+                    
+                    if wavenumbers is None or intensities is None:
+                        raise ValueError("Failed to load spectrum data")
+                    
+                    # Preprocess spectrum
+                    wn, corrected_int = analyzer.preprocess_spectrum(wavenumbers, intensities)
+                    
+                    # Calculate density metrics
+                    cdi, metrics = analyzer.calculate_crystalline_density_index(wn, corrected_int)
+                    apparent_density = analyzer.calculate_apparent_density(cdi)
+                    
+                    # Use appropriate density calculation
+                    if material_type == 'Kidney Stones (COM)':
+                        specialized_density = analyzer.calculate_biofilm_density(cdi, density_type)
+                    else:
+                        specialized_density = analyzer.calculate_density_by_type(cdi, density_type)
+                    
+                    # Get classification
+                    thresholds = analyzer.classification_thresholds
+                    if cdi < thresholds['low']:
+                        classification = 'Low crystallinity'
+                    elif cdi < thresholds['medium']:
+                        classification = 'Mixed regions'
+                    elif cdi < thresholds['high']:
+                        classification = 'Mixed crystalline'
+                    else:
+                        classification = 'Pure crystalline'
+                    
+                    # Store results
+                    density_result = {
+                        'file': file_path,
+                        'material_type': material_type,
+                        'density_type': density_type,
+                        'cdi': cdi,
+                        'apparent_density': apparent_density,
+                        'specialized_density': specialized_density,
+                        'classification': classification,
+                        'metrics': metrics,
+                        'wavenumbers': wn,
+                        'corrected_intensity': corrected_int,
+                        'success': True
+                    }
+                    
+                    self.density_results.append(density_result)
+                    success_count += 1
+                    
+                    self.batch_status_text.append(f"DENSITY SUCCESS: {os.path.basename(file_path)} - CDI={cdi:.4f}, ρ={specialized_density:.3f} g/cm³")
+                    
+                except Exception as e:
+                    # Store failed result
+                    density_result = {
+                        'file': file_path,
+                        'material_type': material_type,
+                        'density_type': density_type,
+                        'success': False,
+                        'error': str(e)
+                    }
+                    
+                    self.density_results.append(density_result)
+                    self.batch_status_text.append(f"DENSITY FAILED: {os.path.basename(file_path)} - {str(e)}")
+            
+            progress.setValue(len(self.spectra_files))
+            progress.close()
+            
+            # Update plots if we have density results
+            if success_count > 0:
+                self.update_trends_plot()  # This will now include density data
+                self.update_heatmap_plot()  # This will now include density data
+            
+            self.batch_status_text.append(f"\nDensity analysis complete: {success_count}/{len(self.spectra_files)} successful")
+            
+            QMessageBox.information(self, "Density Analysis Complete", 
+                                  f"Analyzed {len(self.spectra_files)} spectra for density.\n"
+                                  f"Successful: {success_count}\n"
+                                  f"Failed: {len(self.spectra_files) - success_count}\n\n"
+                                  f"Material: {material_type}\n"
+                                  f"Density Type: {density_type}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"Failed to run batch density analysis:\n{str(e)}")
+    
+    def update_peak_info_display(self):
+        """Update the peak information display in the left panel."""
+        if not hasattr(self, 'peak_info_text'):
+            return
+            
+        self.peak_info_text.clear()
+        
+        if (self.fit_result and 
+            self.fit_params is not None and 
+            hasattr(self.fit_params, '__len__') and 
+            len(self.fit_params) > 0 and
+            len(self.peaks) > 0):
+            
+            # Calculate overall R²
+            if self.residuals is not None:
+                ss_res = np.sum(self.residuals ** 2)
+                ss_tot = np.sum((self.intensities - np.mean(self.intensities)) ** 2)
+                overall_r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            else:
+                overall_r2 = 0
+            
+            self.peak_info_text.append(f"📊 FITTED PEAKS SUMMARY")
+            self.peak_info_text.append(f"Overall R²: {overall_r2:.4f}")
+            self.peak_info_text.append(f"Model: {self.current_model}")
+            self.peak_info_text.append(f"Total Peaks: {len(self.peaks)}")
+            self.peak_info_text.append("")
+            
+            # Display individual peak parameters
+            n_peaks = len(self.peaks)
+            for i in range(n_peaks):
+                start_idx = i * 3
+                if start_idx + 2 < len(self.fit_params):
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+                    
+                    self.peak_info_text.append(f"Peak {i+1}:")
+                    self.peak_info_text.append(f"  Position: {cen:.1f} cm⁻¹")
+                    self.peak_info_text.append(f"  Amplitude: {amp:.0f}")
+                    self.peak_info_text.append(f"  Width: {wid:.2f}")
+                    self.peak_info_text.append("")
+        
+        elif len(self.peaks) > 0:
+            self.peak_info_text.append(f"📍 DETECTED PEAKS")
+            self.peak_info_text.append(f"Total Peaks: {len(self.peaks)}")
+            self.peak_info_text.append("Status: Detected but not fitted")
+            self.peak_info_text.append("")
+            
+            for i, peak_idx in enumerate(self.peaks):
+                if 0 <= peak_idx < len(self.wavenumbers):
+                    wavenumber = self.wavenumbers[peak_idx]
+                    intensity = self.intensities[peak_idx] if peak_idx < len(self.intensities) else 0
+                    self.peak_info_text.append(f"Peak {i+1}: {wavenumber:.1f} cm⁻¹ (I={intensity:.0f})")
+        
+        else:
+            self.peak_info_text.append("No peaks detected")
+            self.peak_info_text.append("")
+            self.peak_info_text.append("Use Peak Detection controls to find peaks,")
+            self.peak_info_text.append("then click 'Fit Peaks' to get detailed parameters.")
+    
+    def update_peak_info_display_for_batch_result(self, result_data):
+        """Update the peak information display for a batch result."""
+        if not hasattr(self, 'peak_info_text'):
+            return
+            
+        self.peak_info_text.clear()
+        
+        if result_data.get('fit_failed', True):
+            self.peak_info_text.append("❌ BATCH PROCESSING FAILED")
+            self.peak_info_text.append(f"Error: {result_data.get('error', 'Unknown error')}")
+            return
+        
+        # Display batch processing results
+        filename = os.path.basename(result_data['file'])
+        r_squared = result_data.get('r_squared', 0)
+        fit_params = result_data.get('fit_params', [])
+        
+        self.peak_info_text.append(f"🔄 BATCH PROCESSING RESULT")
+        self.peak_info_text.append(f"File: {filename}")
+        self.peak_info_text.append(f"Overall R²: {r_squared:.4f}")
+        self.peak_info_text.append(f"Model: {self.current_model}")
+        
+        if len(fit_params) > 0:
+            n_peaks = len(fit_params) // 3
+            self.peak_info_text.append(f"Total Peaks: {n_peaks}")
+            self.peak_info_text.append("")
+            
+            # Display individual peak parameters
+            for i in range(n_peaks):
+                start_idx = i * 3
+                if start_idx + 2 < len(fit_params):
+                    amp, cen, wid = fit_params[start_idx:start_idx+3]
+                    
+                    self.peak_info_text.append(f"Peak {i+1}:")
+                    self.peak_info_text.append(f"  Position: {cen:.1f} cm⁻¹")
+                    self.peak_info_text.append(f"  Amplitude: {amp:.0f}")
+                    self.peak_info_text.append(f"  Width: {wid:.2f}")
+                    self.peak_info_text.append("")
+        else:
+            self.peak_info_text.append("No peak parameters available")
+    
     # Plotting methods
     def initial_plot(self):
         """Create initial plot."""
@@ -2200,6 +2832,16 @@ class BatchPeakFittingQt6(QDialog):
         if self.background is not None:
             self.ax_main.plot(self.wavenumbers, self.background, 'r--', 
                              linewidth=1, alpha=0.7, label='Background')
+        
+        # Plot background preview if active
+        if self.background_preview_active and self.background_preview is not None:
+            self.ax_main.plot(self.wavenumbers, self.background_preview, 'orange', 
+                             linewidth=2, alpha=0.8, linestyle='--', label='Background Preview')
+            
+            # Also show the preview corrected spectrum
+            preview_corrected = self.original_intensities - self.background_preview
+            self.ax_main.plot(self.wavenumbers, preview_corrected, 'g-', 
+                             linewidth=1.5, alpha=0.7, label='Preview Corrected')
         
         # Plot peaks
         if len(self.peaks) > 0:
@@ -2237,7 +2879,8 @@ class BatchPeakFittingQt6(QDialog):
         self.ax_main.set_xlabel('Wavenumber (cm⁻¹)')
         self.ax_main.set_ylabel('Intensity')
         self.ax_main.set_title('Current Spectrum')
-        self.ax_main.legend()
+        self.ax_main.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
+                           facecolor='white', edgecolor='black', framealpha=1.0)
         if self.show_grid_check.isChecked():
             self.ax_main.grid(True, alpha=0.3)
         
@@ -2282,11 +2925,8 @@ class BatchPeakFittingQt6(QDialog):
                 else:
                     peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
                 
-                # Calculate individual R² for this peak
-                individual_r2 = self.calculate_individual_peak_r2(i, self.fit_params)
-                    
-                # Plot individual peak curve with individual R² in legend
-                label = f'Peak {i+1}: {cen:.0f}cm⁻¹ (R²={individual_r2:.3f})'
+                # Plot individual peak curve
+                label = f'Peak {i+1}: {cen:.0f}cm⁻¹'
                 self.ax_main.plot(self.wavenumbers, peak_curve, '--', 
                                 linewidth=1, alpha=0.7, label=label)
     
@@ -2348,12 +2988,28 @@ class BatchPeakFittingQt6(QDialog):
             self.canvas_trends.draw()
             return
         
-        # Create subplots
+        # Check if we have density results to show alongside peak fitting
+        has_density_results = hasattr(self, 'density_results') and self.density_results
+        successful_density_results = []
+        if has_density_results:
+            successful_density_results = [r for r in self.density_results if r.get('success', False)]
+        
+        # Create subplots layout based on available data
         fig = self.figure_trends
-        ax1 = fig.add_subplot(2, 2, 1)  # Position
-        ax2 = fig.add_subplot(2, 2, 2)  # Amplitude
-        ax3 = fig.add_subplot(2, 2, 3)  # Width
-        ax4 = fig.add_subplot(2, 2, 4)  # R-squared
+        if has_density_results and successful_density_results:
+            # 2x3 layout: peak data (top row) + density data (bottom row)
+            ax1 = fig.add_subplot(2, 3, 1)  # Position
+            ax2 = fig.add_subplot(2, 3, 2)  # Amplitude
+            ax3 = fig.add_subplot(2, 3, 3)  # R-squared
+            ax4 = fig.add_subplot(2, 3, 4)  # CDI
+            ax5 = fig.add_subplot(2, 3, 5)  # Apparent Density
+            ax6 = fig.add_subplot(2, 3, 6)  # Specialized Density
+        else:
+            # Original 2x2 layout for peak data only
+            ax1 = fig.add_subplot(2, 2, 1)  # Position
+            ax2 = fig.add_subplot(2, 2, 2)  # Amplitude
+            ax3 = fig.add_subplot(2, 2, 3)  # Width
+            ax4 = fig.add_subplot(2, 2, 4)  # R-squared
         
         # Extract data
         file_indices = list(range(len(successful_results)))
@@ -2483,6 +3139,41 @@ class BatchPeakFittingQt6(QDialog):
                             else:
                                 background = self.baseline_als(original_intensities, 1e5, 0.01)
                                 intensities = original_intensities - background
+                        elif data_type == "Residuals":
+                            # Calculate residuals on-the-fly
+                            bg_method = self.bg_method_combo.currentText()
+                            if bg_method.startswith("ALS"):
+                                lambda_value = 10 ** self.lambda_slider.value()
+                                p_value = self.p_slider.value() / 1000.0
+                                background = self.baseline_als(original_intensities, lambda_value, p_value)
+                                bg_corrected_intensities = original_intensities - background
+                            else:
+                                background = self.baseline_als(original_intensities, 1e5, 0.01)
+                                bg_corrected_intensities = original_intensities - background
+                            
+                            # Calculate fitted curve if we have reference peaks and fit parameters
+                            if (self.reference_peaks is not None and len(self.reference_peaks) > 0 and 
+                                self.fit_params is not None and len(self.fit_params) > 0):
+                                
+                                # Temporarily store data for model function
+                                temp_wavenumbers = self.wavenumbers
+                                temp_peaks = self.peaks
+                                self.wavenumbers = wavenumbers
+                                self.peaks = self.reference_peaks
+                                
+                                try:
+                                    fitted_curve = self.multi_peak_model(wavenumbers, *self.fit_params)
+                                    intensities = bg_corrected_intensities - fitted_curve  # Calculate residuals
+                                except Exception as e:
+                                    # If fitting fails, show zeros or background corrected data
+                                    intensities = np.zeros_like(bg_corrected_intensities)
+                                finally:
+                                    # Restore original data
+                                    self.wavenumbers = temp_wavenumbers
+                                    self.peaks = temp_peaks
+                            else:
+                                # No fit available, show zeros or inform user
+                                intensities = np.zeros_like(bg_corrected_intensities)
                         
                         loaded_spectra.append({
                             'file': file_path,
@@ -2496,6 +3187,13 @@ class BatchPeakFittingQt6(QDialog):
                            ha='center', va='center', transform=ax.transAxes, fontsize=14)
                     self.canvas_waterfall.draw()
                     return
+                
+                # Add warning message for residuals without proper fitting
+                if data_type == "Residuals" and (self.reference_peaks is None or len(self.reference_peaks) == 0 or 
+                                               self.fit_params is None or len(self.fit_params) == 0):
+                    ax.text(0.5, 0.95, 'Warning: No reference peaks or fit parameters available.\nRun peak fitting and "Set Reference" first, then "Apply to All" for proper residuals.', 
+                           ha='center', va='top', transform=ax.transAxes, fontsize=10, 
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7))
                 
                 # Use loaded spectra
                 data_source = loaded_spectra
@@ -2735,12 +3433,27 @@ class BatchPeakFittingQt6(QDialog):
             
         self.figure_heatmap.clear()
         
-        # First try to use loaded spectrum files directly
-        if self.spectra_files:
+        data_type = self.heatmap_data_combo.currentText()
+        
+        # For residuals and fitted peaks, we need batch results
+        if data_type in ["Residuals", "Fitted Peaks"] and self.batch_results:
+            # Get successful results
+            successful_results = [r for r in self.batch_results if not r.get('fit_failed', True)]
+            
+            if not successful_results:
+                ax = self.figure_heatmap.add_subplot(1, 1, 1)
+                ax.text(0.5, 0.5, 'No successful fits available\nfor residuals or fitted peaks', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=14)
+                self.canvas_heatmap.draw()
+                return
+            
+            data_source = successful_results
+        
+        # For other data types, try to use loaded spectrum files directly
+        elif self.spectra_files:
             try:
                 # Load spectra data directly from files
                 loaded_spectra = []
-                data_type = self.heatmap_data_combo.currentText()
                 
                 for file_path in self.spectra_files:
                     spectrum_data = self.load_spectrum_robust(file_path)
@@ -2801,8 +3514,16 @@ class BatchPeakFittingQt6(QDialog):
             
         else:
             ax = self.figure_heatmap.add_subplot(1, 1, 1)
-            ax.text(0.5, 0.5, 'No spectrum files loaded\nAdd files in File Selection tab', 
-                   ha='center', va='center', transform=ax.transAxes, fontsize=14)
+            if data_type in ["Residuals", "Fitted Peaks"]:
+                ax.text(0.5, 0.5, f'No batch results available for {data_type}\n\n'
+                       'To view residuals or fitted peaks:\n'
+                       '1. Load spectrum files\n'
+                       '2. Fit peaks and set reference\n'
+                       '3. Run "Apply to All" batch processing', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=12)
+            else:
+                ax.text(0.5, 0.5, 'No spectrum files loaded\nAdd files in File Selection tab', 
+                       ha='center', va='center', transform=ax.transAxes, fontsize=14)
             self.canvas_heatmap.draw()
             return
         
@@ -2836,6 +3557,9 @@ class BatchPeakFittingQt6(QDialog):
                         intensities = np.array(result.get('intensities', []))
                 elif data_type == "Residuals":
                     intensities = np.array(result.get('residuals', []))
+                    # If no residuals available, skip this spectrum
+                    if len(intensities) == 0:
+                        continue
                 else:
                     intensities = np.array(result.get('intensities', []))
                 
@@ -2845,8 +3569,15 @@ class BatchPeakFittingQt6(QDialog):
             
             if not heatmap_data:
                 ax = self.figure_heatmap.add_subplot(1, 1, 1)
-                ax.text(0.5, 0.5, 'No valid data for heatmap', 
-                       ha='center', va='center', transform=ax.transAxes, fontsize=14)
+                if data_type == "Residuals":
+                    ax.text(0.5, 0.5, 'No residuals data available\n\n'
+                           'Residuals are calculated during batch processing.\n'
+                           'Make sure to run "Apply to All" after setting\n'
+                           'reference peaks to generate residuals data.', 
+                           ha='center', va='center', transform=ax.transAxes, fontsize=12)
+                else:
+                    ax.text(0.5, 0.5, 'No valid data for heatmap', 
+                           ha='center', va='center', transform=ax.transAxes, fontsize=14)
                 self.canvas_heatmap.draw()
                 return
             
@@ -2940,9 +3671,11 @@ class BatchPeakFittingQt6(QDialog):
             ax.set_ylabel('Spectrum Index')
             ax.set_title(f'Heatmap: {data_type}')
             
-            # Grid
+            # Grid - explicitly control grid display
             if self.heatmap_grid.isChecked():
                 ax.grid(True, alpha=0.3, color='white', linewidth=0.5)
+            else:
+                ax.grid(False)  # Explicitly turn off grid
             
             # Format y-axis to show file names if not too many spectra
             if len(data_source) <= 20:
@@ -2960,6 +3693,169 @@ class BatchPeakFittingQt6(QDialog):
             ax.text(0.5, 0.5, f'Error creating heatmap:\n{str(e)}', 
                    ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
             self.canvas_heatmap.draw()
+
+    def update_fitting_quality_plot(self):
+        """Update fitting quality plot with 3x3 grid showing best, median, and worst fits."""
+        if not hasattr(self, 'figure_fitting_quality') or not hasattr(self, 'canvas_fitting_quality'):
+            print("DEBUG: No fitting quality figure or canvas found")
+            return
+        
+        # Clear all axes
+        for i in range(3):
+            for j in range(3):
+                self.axes_fitting_quality[i][j].clear()
+        
+        # Check if we have batch results
+        print(f"DEBUG: batch_results length: {len(self.batch_results) if hasattr(self, 'batch_results') else 'No batch_results attribute'}")
+        if not self.batch_results:
+            # Show message in center plot
+            ax = self.axes_fitting_quality[1][1]
+            ax.text(0.5, 0.5, 'No batch results available.\nRun batch processing first.',
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, style='italic')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self.canvas_fitting_quality.draw()
+            return
+        
+        # Get successful results and sort by R²
+        successful_results = [r for r in self.batch_results if not r.get('fit_failed', True)]
+        print(f"DEBUG: successful_results length: {len(successful_results)}")
+        if len(successful_results) > 0:
+            print(f"DEBUG: First result keys: {list(successful_results[0].keys())}")
+        
+        if len(successful_results) == 0:
+            # Show message in center plot
+            ax = self.axes_fitting_quality[1][1]
+            ax.text(0.5, 0.5, 'No successful fits available.',
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, style='italic')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self.canvas_fitting_quality.draw()
+            return
+        
+        # Sort by R² value (descending - best first)
+        successful_results.sort(key=lambda x: x.get('r_squared', 0), reverse=True)
+        
+        n_results = len(successful_results)
+        
+        # Determine which results to show in each row
+        if n_results >= 9:
+            # Best 3 (top R²)
+            best_results = successful_results[:3]
+            # Median 3 (middle R²)
+            median_start = max(0, n_results // 2 - 1)
+            median_results = successful_results[median_start:median_start + 3]
+            # Worst 3 (bottom R²)
+            worst_results = successful_results[-3:]
+        elif n_results >= 6:
+            # Best 2, median 2, worst 2 (pad with empty)
+            best_results = successful_results[:2] + [None]
+            median_start = max(0, n_results // 2 - 1)
+            median_results = successful_results[median_start:median_start + 2] + [None]
+            worst_results = successful_results[-2:] + [None]
+        elif n_results >= 3:
+            # Show available results across the three rows
+            best_results = [successful_results[0]] + [None, None]
+            median_idx = n_results // 2
+            median_results = [successful_results[median_idx]] + [None, None]
+            worst_results = [successful_results[-1]] + [None, None]
+        else:
+            # Very few results - distribute what we have
+            best_results = [successful_results[0] if n_results > 0 else None] + [None, None]
+            median_results = [successful_results[1] if n_results > 1 else None] + [None, None]
+            worst_results = [successful_results[-1] if n_results > 2 else None] + [None, None]
+        
+        # Plot each row
+        rows = [best_results, median_results, worst_results]
+        row_labels = ["Best", "Median", "Worst"]
+        
+        for row_idx, (results, label) in enumerate(zip(rows, row_labels)):
+            for col_idx, result in enumerate(results):
+                ax = self.axes_fitting_quality[row_idx][col_idx]
+                
+                if result is None:
+                    # Empty subplot
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+                    ax.spines['bottom'].set_visible(False)
+                    ax.spines['left'].set_visible(False)
+                    continue
+                
+                # Extract data safely
+                wavenumbers = np.array(result.get('wavenumbers', []))
+                intensities = np.array(result.get('intensities', []))  # Background corrected
+                original_intensities = np.array(result.get('original_intensities', []))  # Raw data
+                background = np.array(result.get('background', []))
+                fitted_curve = result.get('fitted_curve', None)
+                r_squared = result.get('r_squared', 0)
+                filename = os.path.basename(result['file'])
+                
+                # Check if we have valid data
+                if len(wavenumbers) == 0 or len(intensities) == 0:
+                    ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+                    continue
+                
+                # Plot original spectrum (raw data)
+                if len(original_intensities) > 0:
+                    ax.plot(wavenumbers, original_intensities, 'lightblue', linewidth=1, alpha=0.6, label='Raw')
+                
+                # Plot background if available
+                if len(background) > 0:
+                    ax.plot(wavenumbers, background, 'orange', linewidth=1, alpha=0.7, label='Background')
+                
+                # Plot background-corrected spectrum
+                ax.plot(wavenumbers, intensities, 'b-', linewidth=1.2, alpha=0.8, label='Corrected')
+                
+                # Plot fitted curve if available
+                if fitted_curve is not None and len(fitted_curve) > 0:
+                    ax.plot(wavenumbers, fitted_curve, 'r-', linewidth=1.5, label='Fitted')
+                
+                    # Plot individual peaks if available
+                    if 'fit_params' in result and result['fit_params'] is not None:
+                        fit_params = result['fit_params']
+                        if len(fit_params) >= 3:  # At least one peak (amp, cen, wid)
+                            # Plot individual peak contributions
+                            colors = ['green', 'purple', 'brown', 'pink', 'gray', 'olive']
+                            peak_count = 0
+                            for i in range(0, len(fit_params), 3):
+                                if i + 2 < len(fit_params):
+                                    amp, cen, wid = fit_params[i:i+3]
+                                    # Create individual peak curve
+                                    peak_curve = self.gaussian(wavenumbers, amp, cen, wid)
+                                    color = colors[peak_count % len(colors)]
+                                    ax.plot(wavenumbers, peak_curve, '--', linewidth=1, alpha=0.6, color=color,
+                                           label=f'Peak {peak_count+1}' if peak_count < 3 else '')
+                                    peak_count += 1
+                
+                # Set title with filename and R²
+                short_filename = filename[:12] + '...' if len(filename) > 15 else filename
+                ax.set_title(f"{short_filename}\nR² = {r_squared:.4f}", fontsize=8, pad=3)
+                
+                # Format axes
+                ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=8)
+                ax.set_ylabel('Intensity', fontsize=8)
+                ax.tick_params(labelsize=7)
+                
+                # Add grid
+                ax.grid(True, alpha=0.3)
+                
+                # Add legend only to first plot of each row
+                if col_idx == 0:
+                    ax.legend(fontsize=6, loc='upper right', frameon=True, fancybox=True, 
+                             framealpha=0.8, edgecolor='gray')
+        
+        # Set overall row titles
+        self.axes_fitting_quality[0][1].set_title("Best Fitting Results (Top R²)", fontsize=12, fontweight='bold', pad=15)
+        self.axes_fitting_quality[1][1].set_title("Median Fitting Results", fontsize=12, fontweight='bold', pad=15)
+        self.axes_fitting_quality[2][1].set_title("Poorest Fitting Results (Lowest R²)", fontsize=12, fontweight='bold', pad=15)
+        
+        # Tight layout and draw
+        self.figure_fitting_quality.tight_layout(pad=2.0)
+        self.canvas_fitting_quality.draw()
 
     def clear_manual_peaks(self):
         """Clear only manually selected peaks."""
@@ -2991,6 +3887,7 @@ class BatchPeakFittingQt6(QDialog):
         # Update display
         self.update_peak_count_display()
         self.update_current_plot()
+        self.update_peak_info_display()
         
         # Show confirmation
         QMessageBox.information(self, "Peaks Combined", 
@@ -3099,7 +3996,8 @@ class BatchPeakFittingQt6(QDialog):
             
             self.ax_live_main.set_ylabel('Intensity')
             self.ax_live_main.set_title(title)
-            self.ax_live_main.legend()
+            self.ax_live_main.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
+                                    facecolor='white', edgecolor='black', framealpha=1.0)
             self.ax_live_main.grid(True, alpha=0.3)
             
             # Residuals plot - only if residuals exist
@@ -3166,32 +4064,8 @@ class BatchPeakFittingQt6(QDialog):
                 else:
                     peak_curve = self.gaussian(wavenumbers, amp, cen, wid)
                 
-                # Calculate individual R² for this peak using the live data
-                individual_r2 = 0
-                if hasattr(self, 'current_live_data') and 'residuals' in self.current_live_data:
-                    try:
-                        # Temporarily use live data for calculation
-                        temp_wavenumbers = self.wavenumbers
-                        temp_intensities = self.intensities
-                        temp_residuals = self.residuals
-                        
-                        self.wavenumbers = wavenumbers
-                        self.intensities = self.current_live_data['intensities']
-                        self.residuals = self.current_live_data['residuals']
-                        
-                        individual_r2 = self.calculate_individual_peak_r2(i, fit_params)
-                        
-                        # Restore original data
-                        self.wavenumbers = temp_wavenumbers
-                        self.intensities = temp_intensities
-                        self.residuals = temp_residuals
-                        
-                    except Exception as e:
-                        print(f"Error calculating live peak R²: {e}")
-                        individual_r2 = 0
-                    
-                # Plot individual peak curve with individual R² in legend
-                label = f'Peak {i+1}: {cen:.0f}cm⁻¹ (R²={individual_r2:.3f})'
+                # Plot individual peak curve
+                label = f'Peak {i+1}: {cen:.0f}cm⁻¹'
                 self.ax_live_main.plot(wavenumbers, peak_curve, '--', 
                                      linewidth=1, alpha=0.6, label=label)
     
@@ -3441,7 +4315,7 @@ class BatchPeakFittingQt6(QDialog):
                         ax.set_xlabel('Wavenumber Index')
                         ax.set_ylabel('Spectrum Index')
                         ax.set_title('Intensity Heatmap')
-                        if self.show_grid_check.isChecked():
+                        if self.heatmap_grid.isChecked():
                             ax.grid(True, alpha=0.3)
                         
                         figure.tight_layout()
@@ -3478,7 +4352,7 @@ class BatchPeakFittingQt6(QDialog):
             ax.set_xlabel('Wavenumber Index')
             ax.set_ylabel('Spectrum Index')
             ax.set_title('Intensity Heatmap')
-            if self.show_grid_check.isChecked():
+            if self.heatmap_grid.isChecked():
                 ax.grid(True, alpha=0.3)
         
         figure.tight_layout()
@@ -3538,80 +4412,122 @@ class BatchPeakFittingQt6(QDialog):
     def show_help(self):
         """Show help dialog."""
         help_text = """
-        Batch Peak Fitting Help
-        
-        This tool allows you to process multiple Raman spectra with consistent peak fitting parameters.
-        
-        Workflow:
-        1. File Selection: Add spectrum files for batch processing
-        2. Peak Controls: Adjust background subtraction and peak detection parameters
-        3. Manual Peak Selection: Use interactive mode to add/remove peaks by clicking
-        4. Batch Processing: Set current spectrum as reference and apply to all files
-        5. Live View: Monitor real-time fitting with live visualization and statistics (right panel)
-        6. Results: View trends and export data
-        
-        Navigation:
-        - Double-click files to view them
-        - Use navigation buttons to move between spectra
-        
-        Peak Detection & Manual Selection:
-        - Adjust height, distance, and prominence sliders for automatic detection
-        - Enable Interactive Selection mode to manually add/remove peaks
-        - Click near peaks to remove them, click elsewhere to add new peaks
-        - Use "Clear Manual" to remove only manually added peaks
-        - Use "Combine Auto + Manual" to merge both types into main peak list
-        - Green squares show manual peaks, red circles show automatic peaks
-        
-        Background Subtraction:
-        - Background is automatically calculated for each spectrum individually
-        - ALS (Asymmetric Least Squares) parameters are applied consistently
-        - Adjust λ (smoothness) and p (asymmetry) for optimal background removal
-        - Background correction significantly improves R² values
-        
-        Peak Fitting:
-        - Choose appropriate peak model (Gaussian/Lorentzian)
-        - Fit peaks before setting as reference
-        - Improved bounds handling with automatic fallback strategies
-        
-        Batch Processing:
-        - Set a well-fitted spectrum as reference
-        - 'Apply to All' processes all loaded files with individual background correction
-        - View progress in the log with detailed R² values
-        - Automatic fallback to unbounded fitting if bounds fail
-        - Automatically switches to Live View tab (right panel) during processing
-        
-        Live View Features (Right Panel):
-        - Real-time visualization during batch processing
-        - Shows original spectrum, background, corrected data, and fitted curves
-        - Individual peak components displayed as dashed lines
-        - Live statistics: Overall R² and individual peak parameters
-        - Save interesting fits for later review
-        - View saved fits with full interactive plots
-        
-        Visualization Tabs (Right Panel):
-        - Current Spectrum: View individual spectra with fits (3:1 ratio main:residuals)
-        - Live View: Real-time fitting visualization with statistics
-        - Trends: See how peak parameters change across spectra
-        - Waterfall: Stacked view of multiple spectra (works with imported files)
-        - Heatmap: 2D intensity visualization (works with imported files)
-        
-        Plot Interaction:
-        - Double-click any plot to open it in a popup window
-        - Use Results tab checkboxes to control grid and boundary display
-        - Export all plot data as comprehensive CSV files
-        
-        Peak Status Display:
-        - Shows count of automatic peaks, manual peaks, and total
-        - Interactive mode indicator shows current selection state
-        - Live R² values for overall fit and individual peak contributions
-        
-        Tips for Better Results:
-        - Ensure proper background subtraction parameters for your data
-        - Use manual peak selection to refine automatic detection
-        - Monitor live view during batch processing to catch issues early
-        - Save fits with good R² values for comparison and validation
-        - Waterfall and heatmap plots work immediately after loading files
-        - Live View tab (right panel) provides real-time feedback during processing
+        <html>
+        <head>
+            <title>Batch Peak Fitting Help</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                h1 { color: #2E86AB; }
+                h2 { color: #A23B72; }
+                h3 { color: #F18F01; }
+                .step { background-color: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+                .warning { background-color: #fff3cd; padding: 10px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #ffc107; }
+                .tip { background-color: #d1ecf1; padding: 10px; margin: 10px 0; border-radius: 5px; border-left: 4px solid #17a2b8; }
+                code { background-color: #f8f9fa; padding: 2px 4px; border-radius: 3px; }
+            </style>
+        </head>
+        <body>
+            <h1>📊 Batch Peak Fitting Tool</h1>
+            <p>This tool allows you to fit peaks across multiple Raman spectra using a reference spectrum approach.</p>
+            
+            <h2>🚀 Quick Start Guide</h2>
+            
+            <div class="step">
+                <h3>Step 1: Load Spectrum Files</h3>
+                <p>Go to the <strong>File Selection</strong> tab and click "Add Files" to load your Raman spectra (.txt files).</p>
+            </div>
+            
+            <div class="step">
+                <h3>Step 2: Set Up Peak Detection</h3>
+                <p>Navigate through spectra using the arrow buttons and use the <strong>Peak Detection</strong> tab to find peaks in a representative spectrum.</p>
+            </div>
+            
+            <div class="step">
+                <h3>Step 3: Fit Peaks</h3>
+                <p>Click "Fit Peaks" to perform the fitting on the current spectrum. Adjust parameters as needed.</p>
+            </div>
+            
+            <div class="step">
+                <h3>Step 4: Set Reference</h3>
+                <p>Once you have a good fit, go to the <strong>Batch</strong> tab and click "Set Reference" to use the current spectrum as your template.</p>
+            </div>
+            
+            <div class="step">
+                <h3>Step 5: Apply to All</h3>
+                <p>Click "Apply to All" to fit all loaded spectra using the reference peak positions.</p>
+            </div>
+            
+            <h2>📈 Visualization Options</h2>
+            
+            <h3>Waterfall Plot</h3>
+            <p>The waterfall plot supports multiple data types:</p>
+            <ul>
+                <li><strong>Raw Intensity:</strong> Original spectrum data</li>
+                <li><strong>Background Corrected:</strong> Data after background subtraction</li>
+                <li><strong>Fitted Peaks:</strong> Reconstructed spectra from fitted peak parameters</li>
+                <li><strong>Residuals:</strong> Difference between measured and fitted data</li>
+            </ul>
+            
+            <div class="tip">
+                <h4>💡 Residuals Analysis</h4>
+                <p>Residuals show the difference between your measured data and the fitted model. This is useful for:</p>
+                <ul>
+                    <li>Evaluating fit quality - smaller residuals indicate better fits</li>
+                    <li>Identifying systematic errors or missed peaks</li>
+                    <li>Comparing fit performance across different spectra</li>
+                </ul>
+                <p><strong>To view residuals:</strong></p>
+                <ol>
+                    <li>Complete peak fitting and set a reference spectrum</li>
+                    <li>Run "Apply to All" to generate batch results</li>
+                    <li>In the Waterfall tab, select "Residuals" from the Data Type dropdown</li>
+                </ol>
+            </div>
+            
+            <div class="warning">
+                <h4>⚠️ Important Note for Residuals</h4>
+                <p>Residuals are only meaningful after peak fitting has been performed. If you select "Residuals" without first fitting peaks and running batch processing, you'll see a warning message and either zero values or incomplete data.</p>
+            </div>
+            
+            <h3>Trends Plot</h3>
+            <p>Shows how peak parameters (position, amplitude, width) change across spectra.</p>
+            
+            <h3>Heatmap</h3>
+            <p>2D visualization of intensity variations across wavenumber and spectrum index.</p>
+            
+            <h2>🎛️ Advanced Features</h2>
+            
+            <h3>Background Subtraction</h3>
+            <p>Use the <strong>Background/Smoothing</strong> tab to apply ALS (Asymmetric Least Squares) background correction.</p>
+            
+            <h3>Interactive Mode</h3>
+            <p>Enable interactive mode to manually add or remove peaks by clicking on the spectrum.</p>
+            
+            <h3>Smart Residual Analyzer</h3>
+            <p>The Live View tab includes a Smart Residual Analyzer that provides detailed analysis of fitting quality.</p>
+            
+            <h2>📁 File Export</h2>
+            <p>Export results as CSV files containing peak parameters, R² values, and fitted data for further analysis.</p>
+            
+            <h2>🔧 Tips for Best Results</h2>
+            <ul>
+                <li>Choose a high-quality spectrum with clear peaks as your reference</li>
+                <li>Adjust background subtraction parameters for your specific data</li>
+                <li>Use the Live View to monitor fitting progress during batch processing</li>
+                <li>Check residuals to validate fit quality</li>
+                <li>Export comprehensive data for external analysis</li>
+            </ul>
+            
+            <div class="tip">
+                <h4>💡 Troubleshooting Common Issues</h4>
+                <ul>
+                    <li><strong>Residuals showing zeros:</strong> Make sure you've completed peak fitting and set a reference before viewing residuals</li>
+                    <li><strong>Poor fits:</strong> Check background subtraction parameters and peak detection settings</li>
+                    <li><strong>Batch processing fails:</strong> Ensure all spectra have similar wavenumber ranges and data quality</li>
+                </ul>
+            </div>
+        </body>
+        </html>
         """
         
         QMessageBox.information(self, "Help", help_text)
@@ -3743,6 +4659,9 @@ class BatchPeakFittingQt6(QDialog):
         # Update trends plot
         self.update_trends_plot()
         
+        # Update fitting quality plot
+        self.update_fitting_quality_plot()
+        
         # Update waterfall plot
         self.update_waterfall_plot()
         
@@ -3759,6 +4678,10 @@ class BatchPeakFittingQt6(QDialog):
         if hasattr(self, 'canvas_trends'):
             self.canvas_trends.mpl_connect('button_press_event', 
                                          lambda event: self.on_plot_click(event, 'trends'))
+        
+        if hasattr(self, 'canvas_fitting_quality'):
+            self.canvas_fitting_quality.mpl_connect('button_press_event', 
+                                                   lambda event: self.on_plot_click(event, 'fitting_quality'))
         
         if hasattr(self, 'canvas_waterfall'):
             self.canvas_waterfall.mpl_connect('button_press_event', 
@@ -3823,7 +4746,8 @@ class BatchPeakFittingQt6(QDialog):
                 ax_main.set_xlabel('Wavenumber (cm⁻¹)')
                 ax_main.set_ylabel('Intensity')
                 ax_main.set_title('Current Spectrum')
-                ax_main.legend()
+                ax_main.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, 
+                              facecolor='white', edgecolor='black', framealpha=1.0)
                 if self.show_grid_check.isChecked():
                     ax_main.grid(True, alpha=0.3)
                 
@@ -3846,6 +4770,14 @@ class BatchPeakFittingQt6(QDialog):
             
             # Recreate trends plot
             self._create_trends_plot_in_figure(figure)
+            
+        elif plot_type == 'fitting_quality':
+            figure = Figure(figsize=(16, 12))
+            canvas = FigureCanvas(figure)
+            toolbar = NavigationToolbar(canvas, popup)
+            
+            # Recreate fitting quality plot
+            self._create_fitting_quality_plot_in_figure(figure)
             
         elif plot_type == 'waterfall':
             figure = Figure(figsize=(14, 10))
@@ -3977,6 +4909,167 @@ class BatchPeakFittingQt6(QDialog):
             ax4.grid(True, alpha=0.3)
         
         figure.tight_layout()
+
+    def _create_fitting_quality_plot_in_figure(self, figure):
+        """Helper method to create fitting quality plot in a specific figure for popup."""
+        figure.clear()
+        
+        # Create 3x3 grid of subplots
+        gs = figure.add_gridspec(3, 3, hspace=0.4, wspace=0.3)
+        
+        # Store axes
+        axes = []
+        for i in range(3):
+            row_axes = []
+            for j in range(3):
+                ax = figure.add_subplot(gs[i, j])
+                row_axes.append(ax)
+            axes.append(row_axes)
+        
+        # Check if we have batch results
+        if not self.batch_results:
+            # Show message in center plot
+            ax = axes[1][1]
+            ax.text(0.5, 0.5, 'No batch results available.\nRun batch processing first.',
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, style='italic')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            return
+        
+        # Get successful results and sort by R²
+        successful_results = [r for r in self.batch_results if not r.get('fit_failed', True)]
+        
+        if len(successful_results) == 0:
+            # Show message in center plot
+            ax = axes[1][1]
+            ax.text(0.5, 0.5, 'No successful fits available.',
+                   ha='center', va='center', transform=ax.transAxes,
+                   fontsize=12, style='italic')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            return
+        
+        # Sort by R² value (descending - best first)
+        successful_results.sort(key=lambda x: x.get('r_squared', 0), reverse=True)
+        
+        n_results = len(successful_results)
+        
+        # Determine which results to show in each row
+        if n_results >= 9:
+            # Best 3 (top R²)
+            best_results = successful_results[:3]
+            # Median 3 (middle R²)
+            median_start = max(0, n_results // 2 - 1)
+            median_results = successful_results[median_start:median_start + 3]
+            # Worst 3 (bottom R²)
+            worst_results = successful_results[-3:]
+        elif n_results >= 6:
+            # Best 2, median 2, worst 2 (pad with empty)
+            best_results = successful_results[:2] + [None]
+            median_start = max(0, n_results // 2 - 1)
+            median_results = successful_results[median_start:median_start + 2] + [None]
+            worst_results = successful_results[-2:] + [None]
+        elif n_results >= 3:
+            # Show available results across the three rows
+            best_results = [successful_results[0]] + [None, None]
+            median_idx = n_results // 2
+            median_results = [successful_results[median_idx]] + [None, None]
+            worst_results = [successful_results[-1]] + [None, None]
+        else:
+            # Very few results - distribute what we have
+            best_results = [successful_results[0] if n_results > 0 else None] + [None, None]
+            median_results = [successful_results[1] if n_results > 1 else None] + [None, None]
+            worst_results = [successful_results[-1] if n_results > 2 else None] + [None, None]
+        
+        # Plot each row
+        rows = [best_results, median_results, worst_results]
+        row_labels = ["Best", "Median", "Worst"]
+        
+        for row_idx, (results, label) in enumerate(zip(rows, row_labels)):
+            for col_idx, result in enumerate(results):
+                ax = axes[row_idx][col_idx]
+                
+                if result is None:
+                    # Empty subplot
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    ax.spines['top'].set_visible(False)
+                    ax.spines['right'].set_visible(False)
+                    ax.spines['bottom'].set_visible(False)
+                    ax.spines['left'].set_visible(False)
+                    continue
+                
+                # Extract data safely
+                wavenumbers = np.array(result.get('wavenumbers', []))
+                intensities = np.array(result.get('intensities', []))  # Background corrected
+                original_intensities = np.array(result.get('original_intensities', []))  # Raw data
+                background = np.array(result.get('background', []))
+                fitted_curve = result.get('fitted_curve', None)
+                r_squared = result.get('r_squared', 0)
+                filename = os.path.basename(result['file'])
+                
+                # Check if we have valid data
+                if len(wavenumbers) == 0 or len(intensities) == 0:
+                    ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+                    continue
+                
+                # Plot original spectrum (raw data)
+                if len(original_intensities) > 0:
+                    ax.plot(wavenumbers, original_intensities, 'lightblue', linewidth=1.2, alpha=0.6, label='Raw')
+                
+                # Plot background if available
+                if len(background) > 0:
+                    ax.plot(wavenumbers, background, 'orange', linewidth=1.2, alpha=0.7, label='Background')
+                
+                # Plot background-corrected spectrum
+                ax.plot(wavenumbers, intensities, 'b-', linewidth=1.5, alpha=0.8, label='Corrected')
+                
+                # Plot fitted curve if available
+                if fitted_curve is not None and len(fitted_curve) > 0:
+                    ax.plot(wavenumbers, fitted_curve, 'r-', linewidth=2, label='Fitted')
+                
+                    # Plot individual peaks if available
+                    if 'fit_params' in result and result['fit_params'] is not None:
+                        fit_params = result['fit_params']
+                        if len(fit_params) >= 3:  # At least one peak (amp, cen, wid)
+                            # Plot individual peak contributions
+                            colors = ['green', 'purple', 'brown', 'pink', 'gray', 'olive']
+                            peak_count = 0
+                            for i in range(0, len(fit_params), 3):
+                                if i + 2 < len(fit_params):
+                                    amp, cen, wid = fit_params[i:i+3]
+                                    # Create individual peak curve
+                                    peak_curve = self.gaussian(wavenumbers, amp, cen, wid)
+                                    color = colors[peak_count % len(colors)]
+                                    ax.plot(wavenumbers, peak_curve, '--', linewidth=1.2, alpha=0.7, color=color,
+                                           label=f'Peak {peak_count+1}' if peak_count < 4 else '')
+                                    peak_count += 1
+                
+                # Set title with filename and R²
+                short_filename = filename[:12] + '...' if len(filename) > 15 else filename
+                ax.set_title(f"{short_filename}\nR² = {r_squared:.4f}", fontsize=11, pad=5)
+                
+                # Format axes
+                ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
+                ax.set_ylabel('Intensity', fontsize=9)
+                ax.tick_params(labelsize=8)
+                
+                # Add grid
+                ax.grid(True, alpha=0.3)
+                
+                # Add legend only to first plot of each row
+                if col_idx == 0:
+                    ax.legend(fontsize=7, loc='upper right', frameon=True, fancybox=True, 
+                             framealpha=0.8, edgecolor='gray')
+        
+        # Set overall row titles
+        axes[0][1].set_title("Best Fitting Results (Top R²)", fontsize=14, fontweight='bold', pad=20)
+        axes[1][1].set_title("Median Fitting Results", fontsize=14, fontweight='bold', pad=20)
+        axes[2][1].set_title("Poorest Fitting Results (Lowest R²)", fontsize=14, fontweight='bold', pad=20)
+        
+        # Tight layout
+        figure.tight_layout(pad=2.0)
 
     def update_waterfall_line_width_label(self):
         """Update waterfall line width label."""
@@ -4228,6 +5321,9 @@ class BatchPeakFittingQt6(QDialog):
                     if start_idx + 2 < len(params):
                         amp, cen, wid = params[start_idx:start_idx+3]
                         
+                        # Find corresponding density data if available
+                        density_data = self._get_density_data_for_file(result['file'])
+                        
                         row = {
                             'SpectrumIndex': spec_idx,
                             'Filename': filename,
@@ -4239,13 +5335,36 @@ class BatchPeakFittingQt6(QDialog):
                             'ResidualStd': residual_std,
                             'MaxResidual': max_residual,
                             'NoiseLevel_percent': noise_level,
-                            'FitQuality': 'Excellent' if r_squared > 0.95 else 'Good' if r_squared > 0.85 else 'Poor'
+                            'FitQuality': 'Excellent' if r_squared > 0.95 else 'Good' if r_squared > 0.85 else 'Poor',
+                            # Density analysis columns
+                            'DensityAnalysis_Available': 'Yes' if density_data else 'No',
+                            'Material_Type': density_data.get('material_type', '') if density_data else '',
+                            'Density_Type': density_data.get('density_type', '') if density_data else '',
+                            'CDI': density_data.get('cdi', '') if density_data else '',
+                            'Apparent_Density_g_cm3': density_data.get('apparent_density', '') if density_data else '',
+                            'Specialized_Density_g_cm3': density_data.get('specialized_density', '') if density_data else '',
+                            'Density_Classification': density_data.get('classification', '') if density_data else '',
+                            'Main_Peak_Height': density_data.get('metrics', {}).get('main_peak_height', '') if density_data else '',
+                            'Main_Peak_Position_cm': density_data.get('metrics', {}).get('main_peak_position', '') if density_data else '',
+                            'Baseline_Intensity': density_data.get('metrics', {}).get('baseline_intensity', '') if density_data else '',
+                            'Spectral_Contrast': density_data.get('metrics', {}).get('spectral_contrast', '') if density_data else ''
                         }
                         all_data.append(row)
         
         # Convert to DataFrame and save
         df = pd.DataFrame(all_data)
         df.to_csv(file_path, index=False)
+    
+    def _get_density_data_for_file(self, file_path):
+        """Get density analysis data for a specific file."""
+        if not hasattr(self, 'density_results') or not self.density_results:
+            return None
+            
+        for density_result in self.density_results:
+            if density_result.get('file') == file_path and density_result.get('success', False):
+                return density_result
+        
+        return None
 
     def update_live_view_with_current_spectrum(self):
         """Update the live view with the current spectrum data."""
@@ -4360,48 +5479,7 @@ class BatchPeakFittingQt6(QDialog):
         else:
             QMessageBox.warning(self, "No Deletion", "No valid peaks were selected for deletion.")
 
-    def calculate_individual_peak_r2(self, peak_index, fit_params):
-        """Calculate R² for an individual peak."""
-        if (self.residuals is None or 
-            fit_params is None or 
-            len(fit_params) < (peak_index + 1) * 3):
-            return 0
-            
-        try:
-            # Get parameters for this specific peak
-            start_idx = peak_index * 3
-            amp, cen, wid = fit_params[start_idx:start_idx+3]
-            
-            # Create individual peak curve
-            if self.current_model == "Gaussian":
-                individual_peak = self.gaussian(self.wavenumbers, amp, cen, wid)
-            elif self.current_model == "Lorentzian":
-                individual_peak = self.lorentzian(self.wavenumbers, amp, cen, wid)
-            else:
-                individual_peak = self.gaussian(self.wavenumbers, amp, cen, wid)
-            
-            # Find data points near this peak (within 3*width)
-            peak_center_idx = np.argmin(np.abs(self.wavenumbers - cen))
-            width_in_points = int(wid * 3 / (self.wavenumbers[1] - self.wavenumbers[0])) if len(self.wavenumbers) > 1 else 20
-            
-            start_idx = max(0, peak_center_idx - width_in_points)
-            end_idx = min(len(self.wavenumbers), peak_center_idx + width_in_points)
-            
-            # Calculate R² for this peak region
-            y_true = self.intensities[start_idx:end_idx]
-            y_pred = individual_peak[start_idx:end_idx]
-            
-            if len(y_true) > 1:
-                ss_res = np.sum((y_true - y_pred) ** 2)
-                ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-                r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                return max(0, min(1, r_squared))  # Clamp between 0 and 1
-            else:
-                return 0
-                
-        except Exception as e:
-            print(f"Error calculating individual peak R²: {e}")
-            return 0
+
 
     def calculate_fitted_curve(self, wavenumbers, params, model_type="Gaussian"):
         """Calculate fitted curve without relying on internal state."""
