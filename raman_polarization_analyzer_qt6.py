@@ -1110,7 +1110,37 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             content_layout.addWidget(opt_info_label)
     
     def setup_3d_visualization_tab(self, side_panel, content_area):
-        """Setup the 3D Visualization tab."""
+        """Setup the 3D Visualization tab with advanced features."""
+        try:
+            # Import the 3D visualization widget
+            from polarization_ui.visualization_3d import Advanced3DVisualizationWidget
+            
+            # Create the advanced 3D visualization widget
+            self.visualization_3d_widget = Advanced3DVisualizationWidget(parent=self)
+            
+            # Add to content area
+            content_layout = QVBoxLayout(content_area)
+            content_layout.addWidget(self.visualization_3d_widget)
+            
+            # Hide side panel for this tab since controls are integrated
+            side_panel.hide()
+            
+            # Refresh data on tab setup
+            self.visualization_3d_widget.refresh_data()
+            
+            print("✓ Advanced 3D visualization widget loaded successfully")
+            
+        except ImportError as e:
+            print(f"Could not import 3D visualization module: {e}")
+            # Fallback to basic implementation
+            self.setup_3d_visualization_tab_fallback(side_panel, content_area)
+        except Exception as e:
+            print(f"Error setting up 3D visualization: {e}")
+            # Fallback to basic implementation
+            self.setup_3d_visualization_tab_fallback(side_panel, content_area)
+            
+    def setup_3d_visualization_tab_fallback(self, side_panel, content_area):
+        """Fallback 3D visualization setup if advanced module fails."""
         # Side panel layout
         side_layout = QVBoxLayout(side_panel)
         
@@ -1125,21 +1155,52 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         vis_layout = QVBoxLayout(vis_group)
         
         render_3d_btn = QPushButton("Render 3D Structure")
+        render_3d_btn.clicked.connect(self.render_basic_3d_visualization)
         self.apply_flat_rounded_style(render_3d_btn)
         vis_layout.addWidget(render_3d_btn)
         
-        side_layout.addWidget(vis_group)
+        # Tensor selection
+        vis_layout.addWidget(QLabel("Select Tensor:"))
+        self.fallback_tensor_combo = QComboBox()
+        self.update_fallback_tensor_combo()
+        vis_layout.addWidget(self.fallback_tensor_combo)
         
-        # Add stretch
+        # Options
+        self.fallback_show_axes_cb = QCheckBox("Show Optical Axes")
+        self.fallback_show_axes_cb.setChecked(True)
+        vis_layout.addWidget(self.fallback_show_axes_cb)
+        
+        self.fallback_show_crystal_cb = QCheckBox("Show Crystal Shape")
+        self.fallback_show_crystal_cb.setChecked(True)
+        vis_layout.addWidget(self.fallback_show_crystal_cb)
+        
+        side_layout.addWidget(vis_group)
         side_layout.addStretch()
         
-        # Content area - placeholder
+        # Content area with matplotlib
         content_layout = QVBoxLayout(content_area)
         
-        vis_info_label = QLabel("3D visualization will be implemented here")
-        vis_info_label.setAlignment(Qt.AlignCenter)
-        vis_info_label.setStyleSheet("color: gray; font-style: italic;")
-        content_layout.addWidget(vis_info_label)
+        # Create matplotlib figure for 3D
+        try:
+            import matplotlib.pyplot as plt
+            from mpl_toolkits.mplot3d import Axes3D
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+            
+            self.fallback_3d_figure = Figure(figsize=(8, 6))
+            self.fallback_3d_canvas = FigureCanvas(self.fallback_3d_figure)
+            self.fallback_3d_ax = self.fallback_3d_figure.add_subplot(111, projection='3d')
+            
+            content_layout.addWidget(self.fallback_3d_canvas)
+            
+            # Initialize with basic view
+            self.render_basic_3d_visualization()
+            
+        except ImportError:
+            vis_info_label = QLabel("3D visualization requires matplotlib with 3D support")
+            vis_info_label.setAlignment(Qt.AlignCenter)
+            vis_info_label.setStyleSheet("color: gray; font-style: italic;")
+            content_layout.addWidget(vis_info_label)
     
     # === Core Functionality Methods ===
     
@@ -1559,6 +1620,13 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             # Update reference mineral selections across all subtabs when switching to Peak Fitting
             # This ensures combo boxes are always populated with available minerals
             self.update_reference_mineral_selections()
+        elif current_tab == "3D Visualization":
+            # Refresh 3D visualization when tab is activated
+            if hasattr(self, 'visualization_3d_widget'):
+                self.visualization_3d_widget.refresh_data()
+            elif hasattr(self, 'fallback_tensor_combo'):
+                self.update_fallback_tensor_combo()
+                self.render_basic_3d_visualization()
     
     def on_peak_fitting_subtab_changed(self, index):
         """Handle Peak Fitting subtab change events."""
@@ -5016,6 +5084,15 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             # Update status and visualization
             phi, theta, psi = best_result['orientation']
             confidence = uncertainty_analysis['confidence']
+            
+            # Store the optimized orientation for use in other parts of the application
+            self.optimized_orientation = {
+                'phi': phi,
+                'theta': theta,
+                'psi': psi,
+                'source': 'stage1'
+            }
+            
             self.optimization_status.setText(
                 f"🚀 Stage 1 Complete!\n"
                 f"Orientation: φ={phi:.1f}°±{uncertainty_analysis['orientation_std'][0]:.1f}°, "
@@ -5183,6 +5260,14 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             )
             self.optimization_status.setStyleSheet("color: blue;")
             
+            # Store the optimized orientation for use in other parts of the application
+            self.optimized_orientation = {
+                'phi': phi,
+                'theta': theta,
+                'psi': psi,
+                'source': 'stage2'
+            }
+            
             self.update_optimization_plot()
             
             QMessageBox.information(self, "Stage 2 Complete", 
@@ -5304,6 +5389,14 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             )
             self.optimization_status.setStyleSheet("color: purple;")
             
+            # Store the optimized orientation for use in other parts of the application
+            self.optimized_orientation = {
+                'phi': phi,
+                'theta': theta,
+                'psi': psi,
+                'source': 'stage3'
+            }
+            
             self.update_optimization_plot()
             
             QMessageBox.information(self, "Stage 3 Complete", 
@@ -5359,6 +5452,10 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         if not hasattr(self, 'opt_figure'):
             return
         
+        # Clear any cached intensity calculations to ensure fresh calculations
+        if hasattr(self, '_cached_theoretical_intensities'):
+            delattr(self, '_cached_theoretical_intensities')
+        
         # Clear previous plots
         for ax in [self.opt_ax1, self.opt_ax2, self.opt_ax3, self.opt_ax4]:
             ax.clear()
@@ -5377,6 +5474,11 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         
         self.opt_figure.tight_layout()
         self.opt_canvas.draw()
+        
+        # Force a complete refresh of the canvas
+        if hasattr(self, 'opt_canvas'):
+            self.opt_canvas.draw_idle()
+            self.opt_canvas.flush_events()
     
     def show_detailed_results(self):
         """Show detailed optimization results in a comprehensive dialog."""
@@ -6276,6 +6378,11 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
                     if max(calc_intensities) > 0:
                         scale_factor = max(intensities) / max(calc_intensities) * 0.9
                         calc_intensities = [i * scale_factor for i in calc_intensities]
+                    
+                    # Debug print to verify intensities are being calculated
+                    print(f"DEBUG: Updating calculated intensities from {stage_source.upper()}")
+                    print(f"DEBUG: Best orientation: φ={best_orientation[0]:.1f}°, θ={best_orientation[1]:.1f}°, ψ={best_orientation[2]:.1f}°")
+                    print(f"DEBUG: Calculated intensities: {[round(i, 2) for i in calc_intensities]}")
                     
                     # Plot calculated peaks as red vertical lines
                     for i, (freq, intensity) in enumerate(zip(calc_frequencies, calc_intensities)):
@@ -8665,6 +8772,197 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
     def on_bonds_calculated(self, bond_data):
         """Handle bond calculation event from the crystal structure widget."""
         print(f"Bonds calculated: {bond_data.get('count', 0)}")
+        
+    # === 3D Visualization Support Methods ===
+    
+    def update_fallback_tensor_combo(self):
+        """Update the fallback tensor combo box."""
+        if not hasattr(self, 'fallback_tensor_combo'):
+            return
+            
+        self.fallback_tensor_combo.clear()
+        self.fallback_tensor_combo.addItem("Select Tensor...")
+        
+        if hasattr(self, 'calculated_raman_tensors') and self.calculated_raman_tensors:
+            for freq, data in sorted(self.calculated_raman_tensors.items()):
+                character = data.get('character', 'Unknown')
+                self.fallback_tensor_combo.addItem(f"{freq:.1f} cm⁻¹ - {character}")
+                
+    def render_basic_3d_visualization(self):
+        """Render basic 3D visualization in fallback mode."""
+        if not hasattr(self, 'fallback_3d_ax'):
+            return
+            
+        # Clear the plot
+        self.fallback_3d_ax.clear()
+        
+        # Setup basic axes
+        self.fallback_3d_ax.set_xlabel('X')
+        self.fallback_3d_ax.set_ylabel('Y') 
+        self.fallback_3d_ax.set_zlabel('Z')
+        self.fallback_3d_ax.set_xlim(-2, 2)
+        self.fallback_3d_ax.set_ylim(-2, 2)
+        self.fallback_3d_ax.set_zlim(-2, 2)
+        
+        # Draw coordinate system
+        arrow_length = 1.5
+        self.fallback_3d_ax.quiver(0, 0, 0, arrow_length, 0, 0, 
+                                  color='red', arrow_length_ratio=0.1, linewidth=2, alpha=0.8)
+        self.fallback_3d_ax.quiver(0, 0, 0, 0, arrow_length, 0, 
+                                  color='green', arrow_length_ratio=0.1, linewidth=2, alpha=0.8)
+        self.fallback_3d_ax.quiver(0, 0, 0, 0, 0, arrow_length, 
+                                  color='blue', arrow_length_ratio=0.1, linewidth=2, alpha=0.8)
+        
+        # Draw laser direction (Z-axis, gold)
+        self.fallback_3d_ax.quiver(0, 0, 0, 0, 0, 1.8, 
+                                  color='gold', arrow_length_ratio=0.15, linewidth=3, alpha=0.9)
+        
+        # Add labels
+        self.fallback_3d_ax.text(arrow_length + 0.1, 0, 0, 'X', fontsize=12, color='red')
+        self.fallback_3d_ax.text(0, arrow_length + 0.1, 0, 'Y', fontsize=12, color='green')
+        self.fallback_3d_ax.text(0, 0, arrow_length + 0.1, 'Z', fontsize=12, color='blue')
+        self.fallback_3d_ax.text(0, 0, 2.0, 'Laser', fontsize=10, color='gold', weight='bold')
+        
+        # Draw selected tensor if available
+        selected_text = self.fallback_tensor_combo.currentText()
+        if selected_text and selected_text != "Select Tensor..." and hasattr(self, 'calculated_raman_tensors'):
+            freq_str = selected_text.split()[0]
+            try:
+                freq = float(freq_str)
+                if freq in self.calculated_raman_tensors:
+                    print(f"Drawing fallback tensor surface for {freq} cm⁻¹")
+                    self.draw_fallback_tensor_shape(freq)
+            except ValueError:
+                pass
+        elif hasattr(self, 'calculated_raman_tensors') and self.calculated_raman_tensors:
+            # Auto-select first tensor if none selected
+            first_freq = list(self.calculated_raman_tensors.keys())[0]
+            print(f"Auto-drawing first tensor: {first_freq} cm⁻¹")
+            self.draw_fallback_tensor_shape(first_freq)
+                
+        # Draw optical axes if enabled
+        if hasattr(self, 'fallback_show_axes_cb') and self.fallback_show_axes_cb.isChecked():
+            self.draw_fallback_optical_axes()
+            
+        # Draw crystal shape if enabled
+        if hasattr(self, 'fallback_show_crystal_cb') and self.fallback_show_crystal_cb.isChecked():
+            self.draw_fallback_crystal_shape()
+            
+        # Set title
+        title = "3D Raman Polarization Visualization"
+        if hasattr(self, 'current_crystal_system') and self.current_crystal_system != 'Unknown':
+            title += f"\nCrystal System: {self.current_crystal_system}"
+        elif hasattr(self, 'selected_reference_mineral') and self.selected_reference_mineral:
+            mineral_data = self.mineral_database.get(self.selected_reference_mineral, {})
+            crystal_system = mineral_data.get('crystal_system', 'Unknown')
+            if crystal_system != 'Unknown':
+                title += f"\nCrystal System: {crystal_system}"
+                
+        self.fallback_3d_ax.set_title(title, fontsize=12, fontweight='bold')
+        
+        # Update canvas
+        self.fallback_3d_canvas.draw()
+        
+    def draw_fallback_tensor_shape(self, frequency):
+        """Draw basic tensor shape in fallback mode."""
+        if frequency not in self.calculated_raman_tensors:
+            return
+            
+        tensor_data = self.calculated_raman_tensors[frequency]
+        tensor = tensor_data['tensor']
+        character = tensor_data.get('character', 'Unknown')
+        
+        # Simple spherical representation
+        theta = np.linspace(0, np.pi, 20)
+        phi = np.linspace(0, 2*np.pi, 30)
+        theta_mesh, phi_mesh = np.meshgrid(theta, phi)
+        
+        # Convert to Cartesian
+        x = np.sin(theta_mesh) * np.cos(phi_mesh)
+        y = np.sin(theta_mesh) * np.sin(phi_mesh)
+        z = np.cos(theta_mesh)
+        
+        # Calculate intensity based on tensor
+        intensity = np.zeros_like(x)
+        for i in range(x.shape[0]):
+            for j in range(x.shape[1]):
+                e_vec = np.array([x[i,j], y[i,j], z[i,j]])
+                amplitude = np.dot(e_vec, np.dot(tensor, e_vec))
+                intensity[i,j] = amplitude**2
+                
+        # Normalize and scale
+        max_intensity = np.max(intensity)
+        if max_intensity > 0:
+            intensity_norm = intensity / max_intensity
+        else:
+            intensity_norm = np.ones_like(intensity) * 0.1
+            
+        radius_scale = 0.5 + 0.5 * intensity_norm
+        
+        # Scale coordinates
+        x_surface = radius_scale * x
+        y_surface = radius_scale * y
+        z_surface = radius_scale * z
+        
+        # Plot surface
+        self.fallback_3d_ax.plot_surface(x_surface, y_surface, z_surface, 
+                                        alpha=0.6, cmap='RdYlBu_r')
+                                        
+    def draw_fallback_optical_axes(self):
+        """Draw optical axes in fallback mode."""
+        crystal_system = getattr(self, 'current_crystal_system', 'Unknown')
+        
+        if crystal_system == 'Unknown' and hasattr(self, 'selected_reference_mineral'):
+            mineral_data = self.mineral_database.get(self.selected_reference_mineral, {})
+            crystal_system = mineral_data.get('crystal_system', 'Unknown')
+            
+        if crystal_system.lower() in ['tetragonal', 'hexagonal', 'trigonal']:
+            # Uniaxial - c-axis
+            self.fallback_3d_ax.quiver(0, 0, 0, 0, 0, 1.2, 
+                                      color='orange', arrow_length_ratio=0.1, 
+                                      linewidth=2, alpha=0.8)
+            self.fallback_3d_ax.text(0, 0, 1.3, 'Optic Axis', fontsize=9, color='orange')
+        elif crystal_system.lower() in ['orthorhombic', 'monoclinic', 'triclinic']:
+            # Biaxial
+            self.fallback_3d_ax.quiver(0, 0, 0, 1.2, 0, 0, 
+                                      color='orange', arrow_length_ratio=0.1, 
+                                      linewidth=2, alpha=0.8)
+            self.fallback_3d_ax.quiver(0, 0, 0, 0, 1.2, 0, 
+                                      color='purple', arrow_length_ratio=0.1, 
+                                      linewidth=2, alpha=0.8)
+            self.fallback_3d_ax.text(1.3, 0, 0, 'Axis 1', fontsize=9, color='orange')
+            self.fallback_3d_ax.text(0, 1.3, 0, 'Axis 2', fontsize=9, color='purple')
+            
+    def draw_fallback_crystal_shape(self):
+        """Draw basic crystal shape in fallback mode."""
+        crystal_system = getattr(self, 'current_crystal_system', 'Unknown')
+        
+        if crystal_system == 'Unknown' and hasattr(self, 'selected_reference_mineral'):
+            mineral_data = self.mineral_database.get(self.selected_reference_mineral, {})
+            crystal_system = mineral_data.get('crystal_system', 'Unknown')
+            
+        if crystal_system.lower() == 'cubic':
+            # Draw cube outline
+            vertices = np.array([[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
+                               [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]]) * 0.8
+        elif crystal_system.lower() == 'tetragonal':
+            # Draw tetragonal prism
+            vertices = np.array([[-1, -1, -1.2], [1, -1, -1.2], [1, 1, -1.2], [-1, 1, -1.2],
+                               [-1, -1, 1.2], [1, -1, 1.2], [1, 1, 1.2], [-1, 1, 1.2]]) * 0.8
+        else:
+            # Default box shape
+            vertices = np.array([[-1, -0.8, -1.2], [1, -0.8, -1.2], [1, 0.8, -1.2], [-1, 0.8, -1.2],
+                               [-1, -0.8, 1.2], [1, -0.8, 1.2], [1, 0.8, 1.2], [-1, 0.8, 1.2]]) * 0.8
+                               
+        # Draw edges
+        edges = [(0, 1), (1, 2), (2, 3), (3, 0),  # Bottom face
+                (4, 5), (5, 6), (6, 7), (7, 4),  # Top face  
+                (0, 4), (1, 5), (2, 6), (3, 7)]  # Vertical edges
+                
+        for edge in edges:
+            p1, p2 = vertices[edge[0]], vertices[edge[1]]
+            self.fallback_3d_ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], 
+                                    'k-', alpha=0.5, linewidth=1)
 
 
 def main():

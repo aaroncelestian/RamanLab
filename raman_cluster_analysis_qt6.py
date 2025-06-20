@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 RamanLab Qt6 Version - Raman Cluster Analysis
-Qt6 conversion of the Raman Cluster Analysis GUI with Advanced Ion Exchange Analysis
+Raman Cluster Analysis GUI with Advanced Ion Exchange Analysis
 """
 
 import os
@@ -496,26 +496,118 @@ class RamanClusterAnalysisQt6(QMainWindow):
         scatter_widget = QWidget()
         layout = QVBoxLayout(scatter_widget)
         
-        # Add visualization method selector
+        # Add visualization method selector and parameters
         method_frame = QFrame()
-        method_layout = QHBoxLayout(method_frame)
+        method_layout = QVBoxLayout(method_frame)
         
-        method_layout.addWidget(QLabel("Visualization Method:"))
+        # Method selection row
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel("Visualization Method:"))
         self.visualization_method_combo = QComboBox()
         self.visualization_method_combo.addItems(['PCA'])
         if UMAP_AVAILABLE:
             self.visualization_method_combo.addItem('UMAP')
         self.visualization_method_combo.setCurrentText('PCA')
-        self.visualization_method_combo.currentTextChanged.connect(self.update_scatter_plot)
-        method_layout.addWidget(self.visualization_method_combo)
+        self.visualization_method_combo.currentTextChanged.connect(self.update_visualization_params)
+        method_row.addWidget(self.visualization_method_combo)
         
-        method_layout.addStretch()
+        # Colormap selection
+        method_row.addWidget(QLabel("Colormap:"))
+        self.colormap_combo = QComboBox()
+        # Add common matplotlib colormaps
+        colormaps = [
+            'Set1', 'Set2', 'Set3', 'tab10', 'tab20', 
+            'viridis', 'plasma', 'inferno', 'magma', 'cividis',
+            'Blues', 'Greens', 'Reds', 'Oranges', 'Purples',
+            'coolwarm', 'RdYlBu', 'RdBu', 'Spectral', 'rainbow',
+            'hsv', 'spring', 'summer', 'autumn', 'winter',
+            'Pastel1', 'Pastel2', 'Dark2', 'Accent', 'Paired'
+        ]
+        self.colormap_combo.addItems(colormaps)
+        self.colormap_combo.setCurrentText('Set1')
+        self.colormap_combo.setToolTip("Select colormap for cluster visualization")
+        self.colormap_combo.currentTextChanged.connect(self.update_scatter_plot)
+        method_row.addWidget(self.colormap_combo)
+        
+        # Reverse colormap checkbox
+        self.reverse_colormap_cb = QCheckBox("Reverse")
+        self.reverse_colormap_cb.setToolTip("Reverse the colormap order")
+        self.reverse_colormap_cb.stateChanged.connect(self.update_scatter_plot)
+        method_row.addWidget(self.reverse_colormap_cb)
+        
+        # Colormap preview button
+        self.colormap_preview_btn = QPushButton("Preview")
+        self.colormap_preview_btn.setToolTip("Show a preview of the selected colormap")
+        self.colormap_preview_btn.clicked.connect(self.show_colormap_preview)
+        self.colormap_preview_btn.setMaximumWidth(60)
+        method_row.addWidget(self.colormap_preview_btn)
+        
+        method_row.addStretch()
+        method_layout.addLayout(method_row)
+        
+        # UMAP parameters (initially hidden)
+        self.umap_params_frame = QFrame()
+        umap_params_layout = QGridLayout(self.umap_params_frame)
+        
+        # n_neighbors parameter
+        umap_params_layout.addWidget(QLabel("Neighbors:"), 0, 0)
+        self.umap_n_neighbors = QSpinBox()
+        self.umap_n_neighbors.setRange(2, 200)
+        self.umap_n_neighbors.setValue(15)
+        self.umap_n_neighbors.setToolTip("Number of neighbors for UMAP (2-200). Higher values preserve more global structure.")
+        umap_params_layout.addWidget(self.umap_n_neighbors, 0, 1)
+        
+        # min_dist parameter  
+        umap_params_layout.addWidget(QLabel("Min Distance:"), 0, 2)
+        self.umap_min_dist = QDoubleSpinBox()
+        self.umap_min_dist.setRange(0.001, 0.99)
+        self.umap_min_dist.setSingleStep(0.05)
+        self.umap_min_dist.setValue(0.1)
+        self.umap_min_dist.setDecimals(3)
+        self.umap_min_dist.setToolTip("Minimum distance between points (0.001-0.99). Lower values allow more clustering.")
+        umap_params_layout.addWidget(self.umap_min_dist, 0, 3)
+        
+        # metric parameter
+        umap_params_layout.addWidget(QLabel("Metric:"), 1, 0)
+        self.umap_metric = QComboBox()
+        self.umap_metric.addItems(['euclidean', 'manhattan', 'chebyshev', 'minkowski', 'cosine', 'correlation'])
+        self.umap_metric.setCurrentText('euclidean')
+        self.umap_metric.setToolTip("Distance metric for UMAP")
+        umap_params_layout.addWidget(self.umap_metric, 1, 1)
+        
+        # spread parameter
+        umap_params_layout.addWidget(QLabel("Spread:"), 1, 2) 
+        self.umap_spread = QDoubleSpinBox()
+        self.umap_spread.setRange(0.1, 3.0)
+        self.umap_spread.setSingleStep(0.1)
+        self.umap_spread.setValue(1.0)
+        self.umap_spread.setDecimals(1)
+        self.umap_spread.setToolTip("Effective scale of embedded points")
+        umap_params_layout.addWidget(self.umap_spread, 1, 3)
+        
+        # Update button
+        self.update_umap_btn = QPushButton("Update UMAP")
+        self.update_umap_btn.clicked.connect(self.update_scatter_plot)
+        umap_params_layout.addWidget(self.update_umap_btn, 2, 0, 1, 4)
+        
+        # Initially hide UMAP parameters
+        self.umap_params_frame.setVisible(False)
+        method_layout.addWidget(self.umap_params_frame)
+        
         layout.addWidget(method_frame)
         
         # Create scatter figure
         self.viz_fig = Figure(figsize=(10, 6))
         self.viz_ax = self.viz_fig.add_subplot(111)
         self.viz_canvas = FigureCanvas(self.viz_fig)
+        
+        # Initialize hover annotation (hidden initially)
+        self.hover_annotation = None
+        self.scatter_points = []  # Store scatter plot objects for hover detection
+        
+        # Connect mouse events for hover tooltips
+        self.viz_canvas.mpl_connect('motion_notify_event', self.on_hover)
+        
         layout.addWidget(self.viz_canvas)
         
         # Add toolbar
@@ -523,6 +615,311 @@ class RamanClusterAnalysisQt6(QMainWindow):
         layout.addWidget(self.viz_toolbar)
         
         self.viz_tab_widget.addTab(scatter_widget, "Scatter Plot")
+
+    def update_visualization_params(self):
+        """Update parameter visibility based on selected visualization method."""
+        if hasattr(self, 'umap_params_frame'):
+            method = self.visualization_method_combo.currentText()
+            self.umap_params_frame.setVisible(method == 'UMAP')
+            # Auto-update when switching methods
+            if hasattr(self, 'cluster_data') and self.cluster_data['features_scaled'] is not None:
+                self.update_scatter_plot()
+
+    def update_scatter_plot(self):
+        """Update the scatter plot visualization with improved UMAP implementation."""
+        if (self.cluster_data['features_scaled'] is None or 
+            self.cluster_data['labels'] is None):
+            return
+        
+        try:
+            self.viz_ax.clear()
+            
+            # Clear previous scatter points data and hover annotation
+            self.scatter_points = []
+            self.hover_annotation = None  # Reset hover annotation when clearing axes
+            
+            # Get visualization method
+            method = self.visualization_method_combo.currentText()
+            
+            features = self.cluster_data['features_scaled']
+            labels = self.cluster_data['labels']
+            
+            # Get hover labels (last 8 characters of filenames)
+            hover_labels = self.get_hover_labels()
+            
+            if method == 'PCA':
+                # Perform PCA
+                pca = PCA(n_components=2)
+                coords = pca.fit_transform(features)
+                
+                # Store PCA results
+                self.cluster_data['pca_coords'] = coords
+                self.cluster_data['pca_model'] = pca
+                
+                xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)'
+                ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)'
+                title = 'PCA Visualization of Clusters'
+                
+            elif method == 'UMAP' and UMAP_AVAILABLE:
+                # Get UMAP parameters from UI
+                n_neighbors = self.umap_n_neighbors.value() if hasattr(self, 'umap_n_neighbors') else 15
+                min_dist = self.umap_min_dist.value() if hasattr(self, 'umap_min_dist') else 0.1
+                metric = self.umap_metric.currentText() if hasattr(self, 'umap_metric') else 'euclidean'
+                spread = self.umap_spread.value() if hasattr(self, 'umap_spread') else 1.0
+                
+                # Ensure n_neighbors is not larger than number of samples
+                n_neighbors = min(n_neighbors, len(features) - 1)
+                
+                try:
+                    # Perform UMAP with tuned parameters
+                    umap_model = umap.UMAP(
+                        n_components=2, 
+                        n_neighbors=n_neighbors,
+                        min_dist=min_dist,
+                        metric=metric,
+                        spread=spread,
+                        random_state=42,
+                        n_jobs=1  # Use single thread for stability
+                    )
+                    
+                    # Show progress for large datasets
+                    if len(features) > 1000:
+                        print(f"Computing UMAP for {len(features)} samples...")
+                    
+                    coords = umap_model.fit_transform(features)
+                    
+                    # Store UMAP results
+                    self.cluster_data['umap_coords'] = coords
+                    self.cluster_data['umap_model'] = umap_model
+                    
+                    xlabel = f'UMAP 1 (neighbors={n_neighbors}, min_dist={min_dist:.3f})'
+                    ylabel = f'UMAP 2 (metric={metric}, spread={spread:.1f})'
+                    title = 'UMAP Visualization of Clusters'
+                    
+                except Exception as e:
+                    print(f"UMAP failed: {e}")
+                    # Fallback to PCA if UMAP fails
+                    pca = PCA(n_components=2)
+                    coords = pca.fit_transform(features)
+                    xlabel = f'PC1 (UMAP fallback - {pca.explained_variance_ratio_[0]:.1%})'
+                    ylabel = f'PC2 (UMAP fallback - {pca.explained_variance_ratio_[1]:.1%})'
+                    title = 'PCA Visualization (UMAP Failed)'
+                
+            else:
+                # Fallback to first two features or PCA if UMAP not available
+                if features.shape[1] >= 2:
+                    coords = features[:, :2]
+                    xlabel = 'Feature 1'
+                    ylabel = 'Feature 2'
+                    title = 'Feature Space Visualization'
+                else:
+                    # Use PCA if not enough features
+                    pca = PCA(n_components=2)
+                    coords = pca.fit_transform(features)
+                    xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%})'
+                    ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%})'
+                    title = 'PCA Visualization'
+            
+            # Create scatter plot with improved visualization and store hover data
+            unique_labels = np.unique(labels)
+            
+            # Get selected colormap
+            colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Set1'
+            reverse_colormap = self.reverse_colormap_cb.isChecked() if hasattr(self, 'reverse_colormap_cb') else False
+            
+            try:
+                colormap = plt.cm.get_cmap(colormap_name)
+                if reverse_colormap:
+                    colormap = colormap.reversed()
+                colors = colormap(np.linspace(0, 1, len(unique_labels)))
+            except Exception as e:
+                print(f"Error loading colormap '{colormap_name}': {e}")
+                # Fallback to Set1 if colormap fails
+                colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            
+            for i, label in enumerate(unique_labels):
+                mask = labels == label
+                cluster_coords = coords[mask]
+                cluster_hover_labels = [hover_labels[j] for j in range(len(hover_labels)) if mask[j]]
+                
+                # Create scatter plot for this cluster
+                scatter = self.viz_ax.scatter(
+                    cluster_coords[:, 0], 
+                    cluster_coords[:, 1], 
+                    c=[colors[i]], 
+                    label=f'Cluster {label}',
+                    alpha=0.7,
+                    s=50,
+                    edgecolors='white',
+                    linewidths=0.5
+                )
+                
+                # Store scatter point information for hover detection
+                self.scatter_points.append({
+                    'scatter': scatter,
+                    'coords': cluster_coords,
+                    'labels': cluster_hover_labels,
+                    'cluster': label
+                })
+                
+
+            
+            self.viz_ax.set_xlabel(xlabel)
+            self.viz_ax.set_ylabel(ylabel)
+            self.viz_ax.set_title(title)
+            self.viz_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            self.viz_ax.grid(True, alpha=0.3)
+            
+            self.viz_fig.tight_layout()
+            self.viz_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error updating scatter plot: {str(e)}")
+
+    def get_hover_labels(self):
+        """Get hover labels (last 8 characters of filenames) for each spectrum."""
+        hover_labels = []
+        
+        if 'spectrum_metadata' in self.cluster_data and self.cluster_data['spectrum_metadata']:
+            for metadata in self.cluster_data['spectrum_metadata']:
+                filename = metadata.get('filename', 'Unknown')
+                # Extract last 8 characters of filename (excluding extension)
+                if '.' in filename:
+                    name_part = filename.rsplit('.', 1)[0]  # Remove extension
+                else:
+                    name_part = filename
+                
+                # Get last 8 characters
+                short_name = name_part[-8:] if len(name_part) > 8 else name_part
+                hover_labels.append(short_name)
+        else:
+            # Fallback if no metadata available
+            n_spectra = len(self.cluster_data['labels']) if self.cluster_data['labels'] is not None else 0
+            hover_labels = [f"Spec_{i:03d}" for i in range(n_spectra)]
+        
+        return hover_labels
+
+    def on_hover(self, event):
+        """Handle mouse hover events for showing spectrum tooltips."""
+        if event.inaxes != self.viz_ax or not hasattr(self, 'scatter_points') or not self.scatter_points:
+            if hasattr(self, 'hover_annotation') and self.hover_annotation:
+                self.hover_annotation.set_visible(False)
+                self.viz_canvas.draw_idle()
+            return
+        
+        # Check if mouse is over any scatter point
+        found_point = False
+        
+
+        
+        for cluster_info in self.scatter_points:
+            scatter = cluster_info['scatter']
+            coords = cluster_info['coords']
+            labels = cluster_info['labels']
+            cluster = cluster_info['cluster']
+            
+            # Check if mouse is over this cluster's points
+            for i, (x, y) in enumerate(coords):
+                # Calculate distance from mouse to point
+                if event.xdata is not None and event.ydata is not None:
+                    distance = np.sqrt((event.xdata - x)**2 + (event.ydata - y)**2)
+                    
+                    # Convert to display coordinates for more accurate detection
+                    point_display = self.viz_ax.transData.transform([[x, y]])[0]
+                    mouse_display = [event.x, event.y]
+                    display_distance = np.sqrt((mouse_display[0] - point_display[0])**2 + 
+                                             (mouse_display[1] - point_display[1])**2)
+                    
+                    # If close enough (within 10 pixels), show tooltip
+                    if display_distance < 10:
+                        self.show_hover_tooltip(event, labels[i], cluster, x, y)
+                        found_point = True
+                        break
+            
+            if found_point:
+                break
+        
+        # Hide tooltip if not over any point
+        if not found_point and hasattr(self, 'hover_annotation') and self.hover_annotation:
+            self.hover_annotation.set_visible(False)
+            self.viz_canvas.draw_idle()
+
+    def show_hover_tooltip(self, event, label, cluster, x, y):
+        """Show hover tooltip with spectrum information."""
+        try:
+            if not hasattr(self, 'hover_annotation') or self.hover_annotation is None:
+                # Create annotation if it doesn't exist
+                self.hover_annotation = self.viz_ax.annotate(
+                    '', 
+                    xy=(0, 0), 
+                    xytext=(10, 10), 
+                    textcoords="offset points",
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.8),
+                    arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0")
+                )
+            
+            # Update annotation content and position
+            tooltip_text = f"{label}\nCluster {cluster}"
+            self.hover_annotation.set_text(tooltip_text)
+            self.hover_annotation.xy = (x, y)
+            self.hover_annotation.set_visible(True)
+            
+            # Redraw canvas
+            self.viz_canvas.draw_idle()
+        except Exception as e:
+            print(f"Error showing tooltip: {e}")
+            # Reset hover annotation if there's an error
+            self.hover_annotation = None
+
+    def show_colormap_preview(self):
+        """Show a preview of the selected colormap."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel
+        from matplotlib.backends.qt_compat import QtWidgets
+        import matplotlib.pyplot as plt
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+        
+        try:
+            # Create preview dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Colormap Preview")
+            dialog.setFixedSize(500, 200)
+            layout = QVBoxLayout(dialog)
+            
+            # Get colormap settings
+            colormap_name = self.colormap_combo.currentText()
+            reverse_colormap = self.reverse_colormap_cb.isChecked()
+            
+            # Create figure for preview
+            fig = Figure(figsize=(8, 2))
+            canvas = FigureCanvas(fig)
+            ax = fig.add_subplot(111)
+            
+            # Create colormap preview
+            colormap = plt.cm.get_cmap(colormap_name)
+            if reverse_colormap:
+                colormap = colormap.reversed()
+            
+            # Create sample data to show colormap
+            gradient = np.linspace(0, 1, 256).reshape(1, -1)
+            ax.imshow(gradient, aspect='auto', cmap=colormap)
+            ax.set_xlim(0, 256)
+            ax.set_yticks([])
+            ax.set_xlabel('Color Values')
+            ax.set_title(f'Colormap: {colormap_name}{"_r" if reverse_colormap else ""}')
+            
+            fig.tight_layout()
+            layout.addWidget(canvas)
+            
+            # Add info label
+            info_label = QLabel(f"Preview of '{colormap_name}' colormap")
+            info_label.setStyleSheet("font-weight: bold; margin: 5px;")
+            layout.addWidget(info_label)
+            
+            dialog.exec()
+            
+        except Exception as e:
+            print(f"Error showing colormap preview: {e}")
 
     def create_pca_components_tab(self):
         """Create the PCA components analysis tab."""
@@ -586,6 +983,29 @@ class RamanClusterAnalysisQt6(QMainWindow):
         controls_group = QGroupBox("Refinement Controls")
         controls_layout = QVBoxLayout(controls_group)
         controls_layout.setSpacing(6)  # Tighter spacing within group
+        
+        # Visualization method control
+        viz_frame = QFrame()
+        viz_layout = QHBoxLayout(viz_frame)
+        viz_layout.setContentsMargins(0, 0, 0, 0)
+        viz_layout.setSpacing(8)
+        
+        viz_layout.addWidget(QLabel("Visualization:"))
+        self.refinement_viz_combo = QComboBox()
+        self.refinement_viz_combo.addItems(['PCA'])
+        # Add UMAP if available
+        try:
+            import umap
+            self.refinement_viz_combo.addItem('UMAP')
+        except ImportError:
+            pass
+        self.refinement_viz_combo.setCurrentText('PCA')
+        self.refinement_viz_combo.currentTextChanged.connect(self.update_refinement_plot)
+        viz_layout.addWidget(self.refinement_viz_combo)
+        
+        viz_layout.addStretch()
+        
+        controls_layout.addWidget(viz_frame)
         
         # Mode control row
         mode_frame = QFrame()
@@ -736,6 +1156,10 @@ class RamanClusterAnalysisQt6(QMainWindow):
         # Add toolbar
         self.refinement_toolbar = NavigationToolbar(self.refinement_canvas, refinement_widget)
         layout.addWidget(self.refinement_toolbar)
+        
+        # Initialize refinement state
+        self.selected_points = set()
+        self.update_refinement_controls()
         
         self.tab_widget.addTab(refinement_widget, "Refinement")
 
@@ -1039,6 +1463,77 @@ class RamanClusterAnalysisQt6(QMainWindow):
         
         left_layout.addWidget(regions_group)
         
+        # Biofilm/COM Analysis Section
+        biofilm_group = QGroupBox("Biofilm & COM Analysis")
+        biofilm_layout = QVBoxLayout(biofilm_group)
+        
+        # Enable biofilm analysis
+        self.enable_biofilm_analysis_cb = QCheckBox("Enable COM vs Bacterial Analysis")
+        self.enable_biofilm_analysis_cb.setChecked(False)
+        self.enable_biofilm_analysis_cb.stateChanged.connect(self.update_biofilm_controls)
+        biofilm_layout.addWidget(self.enable_biofilm_analysis_cb)
+        
+        # COM peak settings
+        com_frame = QFrame()
+        com_layout = QFormLayout(com_frame)
+        
+        self.com_peak1_spinbox = QDoubleSpinBox()
+        self.com_peak1_spinbox.setRange(1200, 1400)
+        self.com_peak1_spinbox.setValue(1320.0)
+        self.com_peak1_spinbox.setSuffix(" cm⁻¹")
+        com_layout.addRow("COM Peak 1 (C-O stretch):", self.com_peak1_spinbox)
+        
+        self.com_peak2_spinbox = QDoubleSpinBox()
+        self.com_peak2_spinbox.setRange(1500, 1700)
+        self.com_peak2_spinbox.setValue(1620.0)
+        self.com_peak2_spinbox.setSuffix(" cm⁻¹")
+        com_layout.addRow("COM Peak 2 (C=O stretch):", self.com_peak2_spinbox)
+        
+        # Bacterial signature settings
+        self.protein_peak_spinbox = QDoubleSpinBox()
+        self.protein_peak_spinbox.setRange(1600, 1700)
+        self.protein_peak_spinbox.setValue(1655.0)
+        self.protein_peak_spinbox.setSuffix(" cm⁻¹")
+        com_layout.addRow("Bacterial Protein (Amide I):", self.protein_peak_spinbox)
+        
+        self.lipid_peak_spinbox = QDoubleSpinBox()
+        self.lipid_peak_spinbox.setRange(1400, 1500)
+        self.lipid_peak_spinbox.setValue(1450.0)
+        self.lipid_peak_spinbox.setSuffix(" cm⁻¹")
+        com_layout.addRow("Bacterial Lipid (CH₂):", self.lipid_peak_spinbox)
+        
+        # Peak window size
+        self.peak_window_spinbox = QDoubleSpinBox()
+        self.peak_window_spinbox.setRange(5.0, 50.0)
+        self.peak_window_spinbox.setValue(15.0)
+        self.peak_window_spinbox.setSuffix(" cm⁻¹")
+        com_layout.addRow("Peak Window (±):", self.peak_window_spinbox)
+        
+        biofilm_layout.addWidget(com_frame)
+        
+        # Biofilm analysis buttons
+        biofilm_buttons = QHBoxLayout()
+        
+        analyze_biofilm_btn = QPushButton("Analyze COM vs Bacterial Ratios")
+        analyze_biofilm_btn.clicked.connect(self.analyze_com_bacterial_ratios)
+        biofilm_buttons.addWidget(analyze_biofilm_btn)
+        
+        correlate_clusters_btn = QPushButton("Correlate with Clusters")
+        correlate_clusters_btn.clicked.connect(self.correlate_ratios_with_clusters)
+        biofilm_buttons.addWidget(correlate_clusters_btn)
+        
+        biofilm_layout.addLayout(biofilm_buttons)
+        
+        # Initially hide biofilm controls
+        com_frame.setVisible(False)
+        analyze_biofilm_btn.setVisible(False)
+        correlate_clusters_btn.setVisible(False)
+        
+        # Store references for visibility control
+        self.biofilm_controls = [com_frame, analyze_biofilm_btn, correlate_clusters_btn]
+        
+        left_layout.addWidget(biofilm_group)
+
         # Analysis controls
         analysis_group = QGroupBox("Analysis Options")
         analysis_layout = QVBoxLayout(analysis_group)
@@ -2559,6 +3054,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.update_heatmap()
             self.update_scatter_plot()
             self.update_pca_components_plot()
+            self.update_refinement_plot()  # Add refinement plot update
         except Exception as e:
             print(f"Error updating visualizations: {str(e)}")
     
@@ -2748,81 +3244,6 @@ class RamanClusterAnalysisQt6(QMainWindow):
         except Exception as e:
             print(f"Error updating heatmap: {str(e)}")
 
-    def update_scatter_plot(self):
-        """Update the scatter plot visualization."""
-        if (self.cluster_data['features_scaled'] is None or 
-            self.cluster_data['labels'] is None):
-            return
-        
-        try:
-            self.viz_ax.clear()
-            
-            # Get visualization method
-            method = self.visualization_method_combo.currentText()
-            
-            features = self.cluster_data['features_scaled']
-            labels = self.cluster_data['labels']
-            
-            if method == 'PCA':
-                # Perform PCA
-                pca = PCA(n_components=2)
-                coords = pca.fit_transform(features)
-                
-                # Store PCA results
-                self.cluster_data['pca_coords'] = coords
-                self.cluster_data['pca_model'] = pca
-                
-                xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)'
-                ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)'
-                title = 'PCA Visualization of Clusters'
-                
-            elif method == 'UMAP' and UMAP_AVAILABLE:
-                # Perform UMAP
-                umap_model = umap.UMAP(n_components=2, random_state=42)
-                coords = umap_model.fit_transform(features)
-                
-                # Store UMAP results
-                self.cluster_data['umap_coords'] = coords
-                self.cluster_data['umap_model'] = umap_model
-                
-                xlabel = 'UMAP 1'
-                ylabel = 'UMAP 2'
-                title = 'UMAP Visualization of Clusters'
-                
-            else:
-                # Fallback to first two features
-                coords = features[:, :2]
-                xlabel = 'Feature 1'
-                ylabel = 'Feature 2'
-                title = 'Feature Space Visualization'
-            
-            # Create scatter plot
-            unique_labels = np.unique(labels)
-            colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
-            
-            for i, label in enumerate(unique_labels):
-                mask = labels == label
-                self.viz_ax.scatter(
-                    coords[mask, 0], 
-                    coords[mask, 1], 
-                    c=[colors[i]], 
-                    label=f'Cluster {label}',
-                                        alpha=0.7,
-                    s=50
-                )
-            
-            self.viz_ax.set_xlabel(xlabel)
-            self.viz_ax.set_ylabel(ylabel)
-            self.viz_ax.set_title(title)
-            self.viz_ax.legend()
-            self.viz_ax.grid(True, alpha=0.3)
-            
-            self.viz_fig.tight_layout()
-            self.viz_canvas.draw()
-            
-        except Exception as e:
-            print(f"Error updating scatter plot: {str(e)}")
-
     def update_pca_components_plot(self):
         """Update the PCA components visualization."""
         if self.cluster_data['features_scaled'] is None:
@@ -2925,10 +3346,163 @@ Cluster Sizes:
                 results_text += f"\nPCA Information:\n"
                 results_text += f"• First 2 components explain {pca.explained_variance_ratio_[:2].sum():.1%} of variance\n"
             
+            # Add detailed cluster composition
+            results_text += self.generate_cluster_composition_details(labels, unique_labels)
+            
             self.analysis_results_text.setText(results_text)
             
         except Exception as e:
             print(f"Error updating analysis results: {str(e)}")
+    
+    def generate_cluster_composition_details(self, labels, unique_labels):
+        """Generate detailed cluster composition with spectrum listings."""
+        composition_text = "\n\nDetailed Cluster Composition:\n"
+        composition_text += "=" * 40 + "\n\n"
+        
+        # Get spectrum metadata if available
+        spectrum_metadata = self.cluster_data.get('spectrum_metadata', [])
+        has_metadata = len(spectrum_metadata) > 0
+        
+        for cluster_id in sorted(unique_labels):
+            cluster_mask = labels == cluster_id
+            cluster_indices = np.where(cluster_mask)[0]
+            
+            composition_text += f"Cluster {cluster_id} ({len(cluster_indices)} spectra):\n"
+            composition_text += "-" * (15 + len(str(cluster_id))) + "\n"
+            
+            # Group spectra by type if metadata is available
+            if has_metadata:
+                cluster_spectra = self.organize_cluster_spectra(cluster_indices, spectrum_metadata)
+                composition_text += self.format_cluster_spectra(cluster_spectra)
+            else:
+                # Simple listing if no metadata
+                for i, idx in enumerate(cluster_indices, 1):
+                    composition_text += f"  {i:2d}. Spectrum {idx:03d}\n"
+            
+            composition_text += "\n"
+        
+        return composition_text
+    
+    def organize_cluster_spectra(self, cluster_indices, spectrum_metadata):
+        """Organize cluster spectra by available metadata categories."""
+        organized = {
+            'database_spectra': [],
+            'file_spectra': [],
+            'main_app_spectra': [],
+            'unknown_spectra': []
+        }
+        
+        for idx in cluster_indices:
+            if idx < len(spectrum_metadata):
+                metadata = spectrum_metadata[idx]
+                filename = metadata.get('filename', f'spectrum_{idx}')
+                source = metadata.get('source', 'unknown')
+                
+                spectrum_info = {
+                    'index': idx,
+                    'filename': filename,
+                    'metadata': metadata
+                }
+                
+                if source == 'database':
+                    organized['database_spectra'].append(spectrum_info)
+                elif source == 'main_application':
+                    organized['main_app_spectra'].append(spectrum_info)
+                elif 'file_path' in metadata:
+                    organized['file_spectra'].append(spectrum_info)
+                else:
+                    organized['unknown_spectra'].append(spectrum_info)
+            else:
+                # Fallback for missing metadata
+                organized['unknown_spectra'].append({
+                    'index': idx,
+                    'filename': f'spectrum_{idx}',
+                    'metadata': {}
+                })
+        
+        return organized
+    
+    def format_cluster_spectra(self, cluster_spectra):
+        """Format the organized cluster spectra for display with sorting."""
+        formatted_text = ""
+        
+        # Database spectra
+        if cluster_spectra['database_spectra']:
+            formatted_text += "  Database Spectra:\n"
+            # Sort by filename
+            sorted_db_spectra = sorted(cluster_spectra['database_spectra'], 
+                                     key=lambda x: x['filename'].lower())
+            for i, spec_info in enumerate(sorted_db_spectra, 1):
+                metadata = spec_info['metadata']
+                filename = spec_info['filename']
+                
+                # Get additional database info
+                mineral_name = metadata.get('mineral_name', metadata.get('NAME', ''))
+                hey_class = metadata.get('hey_classification', metadata.get('HEY CLASSIFICATION', ''))
+                formula = metadata.get('formula', metadata.get('FORMULA', ''))
+                
+                formatted_text += f"    {i:2d}. {filename}"
+                
+                # Add mineral information if available
+                if mineral_name:
+                    formatted_text += f" ({mineral_name}"
+                    if hey_class:
+                        formatted_text += f", {hey_class}"
+                    if formula:
+                        formatted_text += f", {formula}"
+                    formatted_text += ")"
+                
+                formatted_text += "\n"
+            formatted_text += "\n"
+        
+        # File-based spectra
+        if cluster_spectra['file_spectra']:
+            formatted_text += "  File-based Spectra:\n"
+            # Sort by filename
+            sorted_file_spectra = sorted(cluster_spectra['file_spectra'], 
+                                       key=lambda x: x['filename'].lower())
+            for i, spec_info in enumerate(sorted_file_spectra, 1):
+                filename = spec_info['filename']
+                metadata = spec_info['metadata']
+                
+                formatted_text += f"    {i:2d}. {filename}"
+                
+                # Add file path info if available
+                file_path = metadata.get('file_path', '')
+                if file_path:
+                    # Show just the parent directory
+                    import os
+                    parent_dir = os.path.basename(os.path.dirname(file_path))
+                    if parent_dir:
+                        formatted_text += f" (from {parent_dir}/)"
+                
+                formatted_text += "\n"
+            formatted_text += "\n"
+        
+        # Main application spectra
+        if cluster_spectra['main_app_spectra']:
+            formatted_text += "  Main Application Spectra:\n"
+            # Sort by filename
+            sorted_main_spectra = sorted(cluster_spectra['main_app_spectra'], 
+                                       key=lambda x: x['filename'].lower())
+            for i, spec_info in enumerate(sorted_main_spectra, 1):
+                filename = spec_info['filename']
+                formatted_text += f"    {i:2d}. {filename}\n"
+            formatted_text += "\n"
+        
+        # Unknown/other spectra
+        if cluster_spectra['unknown_spectra']:
+            formatted_text += "  Other Spectra:\n"
+            # Sort by filename
+            sorted_unknown_spectra = sorted(cluster_spectra['unknown_spectra'], 
+                                          key=lambda x: x['filename'].lower())
+            for i, spec_info in enumerate(sorted_unknown_spectra, 1):
+                filename = spec_info['filename']
+                idx = spec_info['index']
+                formatted_text += f"    {i:2d}. {filename} (index {idx})\n"
+            formatted_text += "\n"
+        
+        return formatted_text
 
     # ... existing code ...
 
@@ -3161,7 +3735,7 @@ Cluster Sizes:
             self.reset_selection_btn.setEnabled(True)
 
     def update_refinement_plot(self):
-        """Update the refinement visualization plot."""
+        """Update the refinement visualization plot with interactive cluster selection."""
         try:
             if (self.cluster_data['features_scaled'] is None or 
                 self.cluster_data['labels'] is None):
@@ -3169,55 +3743,477 @@ Cluster Sizes:
         
             self.refinement_ax.clear()
             
-            # Use PCA for 2D visualization
             features = self.cluster_data['features_scaled']
             labels = self.cluster_data['labels']
             
-            pca = PCA(n_components=2)
-            coords = pca.fit_transform(features)
+            # Get visualization method
+            viz_method = self.refinement_viz_combo.currentText() if hasattr(self, 'refinement_viz_combo') else 'PCA'
+            
+            # Apply dimensionality reduction
+            if viz_method == 'UMAP':
+                try:
+                    import umap
+                    reducer = umap.UMAP(n_components=2, random_state=42)
+                    coords = reducer.fit_transform(features)
+                    xlabel, ylabel = 'UMAP 1', 'UMAP 2'
+                except ImportError:
+                    # Fallback to PCA if UMAP not available
+                    pca = PCA(n_components=2)
+                    coords = pca.fit_transform(features)
+                    xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)'
+                    ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)'
+            else:  # PCA
+                pca = PCA(n_components=2)
+                coords = pca.fit_transform(features)
+                xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)'
+                ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)'
+            
+            # Store coordinates for interaction
+            self.refinement_coords = coords
+            self.refinement_labels = labels
             
             # Plot clusters with different colors
             unique_labels = np.unique(labels)
             colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            
+            # Store scatter plot objects for interaction
+            self.refinement_scatters = {}
             
             for i, label in enumerate(unique_labels):
                 mask = labels == label
                 color = colors[i]
                 
                 # Highlight selected clusters
-                if label in self.selected_points:
-                    self.refinement_ax.scatter(
+                if hasattr(self, 'selected_points') and label in self.selected_points:
+                    scatter = self.refinement_ax.scatter(
                         coords[mask, 0], coords[mask, 1], 
                         c=[color], label=f'Cluster {label} (selected)',
-                        alpha=0.8, s=100, edgecolors='red', linewidths=2
+                        alpha=0.8, s=100, edgecolors='red', linewidths=2,
+                        picker=True
                     )
                 else:
-                    self.refinement_ax.scatter(
+                    scatter = self.refinement_ax.scatter(
                         coords[mask, 0], coords[mask, 1], 
                         c=[color], label=f'Cluster {label}',
-                        alpha=0.7, s=50
+                        alpha=0.7, s=50, picker=True
                     )
+                
+                self.refinement_scatters[label] = scatter
             
-            self.refinement_ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)')
-            self.refinement_ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)')
-            self.refinement_ax.set_title('Cluster Refinement View')
-            self.refinement_ax.legend()
+            self.refinement_ax.set_xlabel(xlabel)
+            self.refinement_ax.set_ylabel(ylabel)
+            self.refinement_ax.set_title(f'Cluster Refinement View ({viz_method})')
+            self.refinement_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             self.refinement_ax.grid(True, alpha=0.3)
+            
+            # Connect click event for cluster selection
+            self.refinement_canvas.mpl_connect('button_press_event', self.on_refinement_click)
             
             self.refinement_fig.tight_layout()
             self.refinement_canvas.draw()
                 
         except Exception as e:
             print(f"Error updating refinement plot: {str(e)}")
+    
+    def on_refinement_click(self, event):
+        """Handle click events in refinement plot for cluster selection."""
+        if event.inaxes != self.refinement_ax or not hasattr(self, 'refinement_coords'):
+            return
+        
+        # Find nearest cluster point
+        click_point = np.array([event.xdata, event.ydata])
+        
+        # Calculate distances to all points
+        distances = np.linalg.norm(self.refinement_coords - click_point, axis=1)
+        nearest_idx = np.argmin(distances)
+        
+        # Get the cluster label of the nearest point
+        clicked_cluster = self.refinement_labels[nearest_idx]
+        
+        # Initialize selected_points if not exists
+        if not hasattr(self, 'selected_points'):
+            self.selected_points = set()
+        
+        # Toggle cluster selection
+        if clicked_cluster in self.selected_points:
+            self.selected_points.remove(clicked_cluster)
+        else:
+            self.selected_points.add(clicked_cluster)
+        
+        # Update selection status and refinement controls
+        self.update_selection_status()
+        self.update_refinement_controls()
+        
+        # Refresh the plot to show selection changes
+        self.update_refinement_plot()
+    
+    def update_refinement_controls(self):
+        """Update refinement control button states based on selection."""
+        if not hasattr(self, 'selected_points'):
+            self.selected_points = set()
+        
+        num_selected = len(self.selected_points)
+        
+        # Enable/disable buttons based on selection
+        if hasattr(self, 'split_btn'):
+            self.split_btn.setEnabled(num_selected == 1)
+        
+        if hasattr(self, 'merge_btn'):
+            self.merge_btn.setEnabled(num_selected >= 2)
+        
+        if hasattr(self, 'reset_selection_btn'):
+            self.reset_selection_btn.setEnabled(num_selected > 0)
+        
+        if hasattr(self, 'apply_refinement_btn'):
+            self.apply_refinement_btn.setEnabled(num_selected > 0)
+        
+        if hasattr(self, 'cancel_refinement_btn'):
+            self.cancel_refinement_btn.setEnabled(num_selected > 0)
 
     # ... existing code ...
 
     # Advanced Analysis Methods
     def analyze_time_series_progression(self):
         """Analyze temporal cluster ordering and progression pathways."""
-        QMessageBox.information(self, "Time-Series Analysis", 
-                              "Time-series progression analysis functionality will be implemented.\n\n"
-                              "This will analyze temporal cluster ordering and identify progression pathways.")
+        try:
+            if (self.cluster_data['features_scaled'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            # Check if temporal data is available
+            if 'temporal_data' not in self.cluster_data or self.cluster_data['temporal_data'] is None:
+                QMessageBox.warning(self, "No Time Data", 
+                                  "No temporal data available. Please generate or load time data first.")
+                return
+            
+            features = self.cluster_data['features_scaled']
+            labels = self.cluster_data['labels']
+            time_data = self.cluster_data['temporal_data']
+            
+            # Get analysis parameters
+            ordering_method = self.temporal_ordering_combo.currentText()
+            reference_cluster = self.reference_cluster_spinbox.value()
+            
+            # Calculate cluster centroids and temporal evolution
+            unique_labels = np.unique(labels)
+            cluster_centroids = {}
+            cluster_time_evolution = {}
+            
+            for label in unique_labels:
+                cluster_mask = labels == label
+                cluster_features = features[cluster_mask]
+                cluster_times = time_data[cluster_mask]
+                
+                # Calculate centroid
+                centroid = np.mean(cluster_features, axis=0)
+                cluster_centroids[label] = centroid
+                
+                # Calculate temporal evolution (mean time point for cluster)
+                mean_time = np.mean(cluster_times)
+                cluster_time_evolution[label] = {
+                    'mean_time': mean_time,
+                    'time_range': (np.min(cluster_times), np.max(cluster_times)),
+                    'sample_count': len(cluster_times)
+                }
+            
+            # Calculate progression pathway based on selected method
+            if ordering_method == 'UMAP Distance':
+                progression_order = self.calculate_umap_progression(cluster_centroids, reference_cluster)
+            elif ordering_method == 'Cluster Centroid Distance':
+                progression_order = self.calculate_centroid_progression(cluster_centroids, reference_cluster)
+            else:  # Manual Ordering
+                progression_order = sorted(unique_labels)
+            
+            # Calculate transition probabilities (if temporal overlap exists)
+            transition_matrix = self.calculate_transition_probabilities(labels, time_data, unique_labels)
+            
+            # Create comprehensive visualization
+            self.plot_time_series_analysis(
+                cluster_centroids, cluster_time_evolution, progression_order, 
+                transition_matrix, time_data, labels
+            )
+            
+            # Generate detailed results
+            results_text = self.generate_time_series_results(
+                cluster_time_evolution, progression_order, transition_matrix, ordering_method
+            )
+            
+            self.time_series_results.setText(results_text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"Time-series progression analysis failed:\n{str(e)}")
+    
+    def calculate_umap_progression(self, cluster_centroids, reference_cluster):
+        """Calculate progression order using UMAP embedding distances."""
+        try:
+            if not UMAP_AVAILABLE:
+                # Fallback to centroid distance method
+                return self.calculate_centroid_progression(cluster_centroids, reference_cluster)
+            
+            # Get centroids as array
+            labels = list(cluster_centroids.keys())
+            centroids = np.array([cluster_centroids[label] for label in labels])
+            
+            # Apply UMAP to centroids
+            umap_model = umap.UMAP(n_components=2, n_neighbors=min(3, len(labels)-1), 
+                                 random_state=42)
+            umap_coords = umap_model.fit_transform(centroids)
+            
+            # Find reference cluster index
+            ref_idx = labels.index(reference_cluster) if reference_cluster in labels else 0
+            ref_coord = umap_coords[ref_idx]
+            
+            # Calculate distances from reference in UMAP space
+            distances = []
+            for i, coord in enumerate(umap_coords):
+                dist = np.linalg.norm(coord - ref_coord)
+                distances.append((dist, labels[i]))
+            
+            # Sort by distance to create progression order
+            distances.sort()
+            progression_order = [label for _, label in distances]
+            
+            return progression_order
+            
+        except Exception as e:
+            print(f"UMAP progression calculation failed: {e}")
+            return self.calculate_centroid_progression(cluster_centroids, reference_cluster)
+    
+    def calculate_centroid_progression(self, cluster_centroids, reference_cluster):
+        """Calculate progression order using centroid distances."""
+        labels = list(cluster_centroids.keys())
+        
+        # Find reference cluster
+        if reference_cluster not in labels:
+            reference_cluster = labels[0]
+        
+        ref_centroid = cluster_centroids[reference_cluster]
+        
+        # Calculate distances from reference cluster
+        distances = []
+        for label in labels:
+            if label != reference_cluster:
+                dist = np.linalg.norm(cluster_centroids[label] - ref_centroid)
+                distances.append((dist, label))
+        
+        # Sort by distance
+        distances.sort()
+        progression_order = [reference_cluster] + [label for _, label in distances]
+        
+        return progression_order
+    
+    def calculate_transition_probabilities(self, labels, time_data, unique_labels):
+        """Calculate transition probabilities between clusters based on temporal overlap."""
+        n_clusters = len(unique_labels)
+        transition_matrix = np.zeros((n_clusters, n_clusters))
+        
+        # Create label to index mapping
+        label_to_idx = {label: i for i, label in enumerate(unique_labels)}
+        
+        # Sort data by time
+        time_sorted_indices = np.argsort(time_data)
+        sorted_labels = labels[time_sorted_indices]
+        sorted_times = time_data[time_sorted_indices]
+        
+        # Count transitions in temporal sequence
+        for i in range(len(sorted_labels) - 1):
+            current_cluster = sorted_labels[i]
+            next_cluster = sorted_labels[i + 1]
+            
+            # Only count transitions within a reasonable time window
+            time_diff = sorted_times[i + 1] - sorted_times[i]
+            max_time_diff = np.std(time_data) * 2  # Within 2 standard deviations
+            
+            if time_diff <= max_time_diff:
+                current_idx = label_to_idx[current_cluster]
+                next_idx = label_to_idx[next_cluster]
+                transition_matrix[current_idx, next_idx] += 1
+        
+        # Normalize rows to get probabilities
+        row_sums = transition_matrix.sum(axis=1)
+        for i in range(n_clusters):
+            if row_sums[i] > 0:
+                transition_matrix[i, :] /= row_sums[i]
+        
+        return transition_matrix
+    
+    def plot_time_series_analysis(self, cluster_centroids, cluster_time_evolution, 
+                                progression_order, transition_matrix, time_data, labels):
+        """Create comprehensive time-series analysis visualization."""
+        try:
+            self.time_series_fig.clear()
+            
+            # Create 2x2 subplot layout
+            ax1 = self.time_series_fig.add_subplot(2, 2, 1)  # Temporal distribution
+            ax2 = self.time_series_fig.add_subplot(2, 2, 2)  # Progression pathway
+            ax3 = self.time_series_fig.add_subplot(2, 2, 3)  # Transition matrix
+            ax4 = self.time_series_fig.add_subplot(2, 2, 4)  # Cluster timeline
+            
+            unique_labels = list(cluster_centroids.keys())
+            colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+            
+            # 1. Temporal Distribution Plot
+            for label in unique_labels:
+                cluster_mask = labels == label
+                cluster_times = time_data[cluster_mask]
+                ax1.hist(cluster_times, alpha=0.6, label=f'Cluster {label}', 
+                        color=color_map[label], bins=20)
+            
+            ax1.set_xlabel('Time')
+            ax1.set_ylabel('Frequency')
+            ax1.set_title('Temporal Distribution of Clusters')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Progression Pathway Plot
+            # Create a simple 2D representation of progression
+            if len(progression_order) > 1:
+                x_coords = np.arange(len(progression_order))
+                y_coords = np.zeros(len(progression_order))
+                
+                for i, label in enumerate(progression_order):
+                    evolution = cluster_time_evolution[label]
+                    y_coords[i] = evolution['mean_time']
+                    
+                    ax2.scatter(x_coords[i], y_coords[i], 
+                              c=[color_map[label]], s=100, 
+                              label=f'Cluster {label}')
+                
+                # Draw progression arrows
+                for i in range(len(progression_order) - 1):
+                    ax2.annotate('', xy=(x_coords[i+1], y_coords[i+1]), 
+                               xytext=(x_coords[i], y_coords[i]),
+                               arrowprops=dict(arrowstyle='->', lw=2, alpha=0.7))
+                
+                ax2.set_xlabel('Progression Step')
+                ax2.set_ylabel('Mean Time')
+                ax2.set_title('Cluster Progression Pathway')
+                ax2.grid(True, alpha=0.3)
+                
+                # Set x-axis labels
+                ax2.set_xticks(x_coords)
+                ax2.set_xticklabels([f'C{label}' for label in progression_order])
+            
+            # 3. Transition Matrix Heatmap
+            if transition_matrix.size > 0:
+                im = ax3.imshow(transition_matrix, cmap='Blues', aspect='auto')
+                ax3.set_xlabel('To Cluster')
+                ax3.set_ylabel('From Cluster')
+                ax3.set_title('Transition Probability Matrix')
+                
+                # Add colorbar
+                self.time_series_fig.colorbar(im, ax=ax3, fraction=0.046, pad=0.04)
+                
+                # Set tick labels
+                ax3.set_xticks(range(len(unique_labels)))
+                ax3.set_yticks(range(len(unique_labels)))
+                ax3.set_xticklabels([f'C{label}' for label in unique_labels])
+                ax3.set_yticklabels([f'C{label}' for label in unique_labels])
+                
+                # Add probability values as text
+                for i in range(len(unique_labels)):
+                    for j in range(len(unique_labels)):
+                        if transition_matrix[i, j] > 0.01:  # Only show significant transitions
+                            ax3.text(j, i, f'{transition_matrix[i, j]:.2f}',
+                                   ha='center', va='center', fontsize=8)
+            
+            # 4. Cluster Timeline
+            for i, label in enumerate(unique_labels):
+                cluster_mask = labels == label
+                cluster_times = time_data[cluster_mask]
+                y_positions = np.full_like(cluster_times, i)
+                
+                ax4.scatter(cluster_times, y_positions, 
+                          c=[color_map[label]], alpha=0.6, s=30)
+                
+                # Add mean time line
+                mean_time = cluster_time_evolution[label]['mean_time']
+                ax4.axvline(x=mean_time, color=color_map[label], 
+                          linestyle='--', alpha=0.8, linewidth=2)
+            
+            ax4.set_xlabel('Time')
+            ax4.set_ylabel('Cluster')
+            ax4.set_title('Cluster Timeline Distribution')
+            ax4.set_yticks(range(len(unique_labels)))
+            ax4.set_yticklabels([f'Cluster {label}' for label in unique_labels])
+            ax4.grid(True, alpha=0.3)
+            
+            self.time_series_fig.tight_layout()
+            self.time_series_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting time-series analysis: {str(e)}")
+    
+    def generate_time_series_results(self, cluster_time_evolution, progression_order, 
+                                   transition_matrix, ordering_method):
+        """Generate detailed text results for time-series analysis."""
+        results_text = f"Time-Series Progression Analysis Results\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Analysis Method: {ordering_method}\n"
+        results_text += f"Number of Clusters: {len(cluster_time_evolution)}\n\n"
+        
+        # Cluster temporal characteristics
+        results_text += "Cluster Temporal Characteristics:\n"
+        results_text += "-" * 35 + "\n"
+        
+        for label, evolution in cluster_time_evolution.items():
+            mean_time = evolution['mean_time']
+            time_range = evolution['time_range']
+            sample_count = evolution['sample_count']
+            
+            results_text += f"Cluster {label}:\n"
+            results_text += f"  • Mean time: {mean_time:.2f}\n"
+            results_text += f"  • Time range: {time_range[0]:.2f} - {time_range[1]:.2f}\n"
+            results_text += f"  • Sample count: {sample_count}\n"
+            results_text += f"  • Time span: {time_range[1] - time_range[0]:.2f}\n\n"
+        
+        # Progression pathway
+        results_text += "Suggested Progression Pathway:\n"
+        results_text += "-" * 30 + "\n"
+        
+        pathway_text = " → ".join([f"Cluster {label}" for label in progression_order])
+        results_text += f"{pathway_text}\n\n"
+        
+        # Temporal ordering
+        results_text += "Temporal Ordering (by mean time):\n"
+        results_text += "-" * 35 + "\n"
+        
+        # Sort clusters by mean time
+        temporal_order = sorted(cluster_time_evolution.items(), 
+                              key=lambda x: x[1]['mean_time'])
+        
+        for i, (label, evolution) in enumerate(temporal_order):
+            results_text += f"{i+1}. Cluster {label} (t = {evolution['mean_time']:.2f})\n"
+        
+        results_text += "\n"
+        
+        # Transition analysis
+        if transition_matrix.size > 0:
+            results_text += "Significant Transitions (>10% probability):\n"
+            results_text += "-" * 45 + "\n"
+            
+            unique_labels = list(cluster_time_evolution.keys())
+            significant_transitions = []
+            
+            for i, from_label in enumerate(unique_labels):
+                for j, to_label in enumerate(unique_labels):
+                    prob = transition_matrix[i, j]
+                    if prob > 0.1 and i != j:  # Significant non-self transitions
+                        significant_transitions.append((from_label, to_label, prob))
+            
+            if significant_transitions:
+                # Sort by probability
+                significant_transitions.sort(key=lambda x: x[2], reverse=True)
+                
+                for from_label, to_label, prob in significant_transitions:
+                    results_text += f"  • Cluster {from_label} → Cluster {to_label}: {prob:.1%}\n"
+            else:
+                results_text += "  • No significant transitions detected\n"
+        
+        return results_text
 
     def calculate_intercluster_distances(self):
         """Calculate inter-cluster distances for progression analysis."""
@@ -3233,31 +4229,261 @@ Cluster Sizes:
             # Calculate cluster centroids
             unique_labels = np.unique(labels)
             centroids = []
+            cluster_info = {}
             
             for label in unique_labels:
                 cluster_mask = labels == label
-                centroid = np.mean(features[cluster_mask], axis=0)
+                cluster_features = features[cluster_mask]
+                centroid = np.mean(cluster_features, axis=0)
                 centroids.append(centroid)
+                
+                # Calculate cluster statistics
+                cluster_info[label] = {
+                    'size': np.sum(cluster_mask),
+                    'centroid': centroid,
+                    'std': np.std(cluster_features, axis=0),
+                    'mean_std': np.mean(np.std(cluster_features, axis=0))
+                }
             
             centroids = np.array(centroids)
             
-            # Calculate pairwise distances between centroids
-            distances = pdist(centroids, metric='euclidean')
-            distance_matrix = squareform(distances)
+            # Calculate pairwise distances between centroids using multiple metrics
+            euclidean_distances = pdist(centroids, metric='euclidean')
+            cosine_distances = pdist(centroids, metric='cosine')
+            correlation_distances = pdist(centroids, metric='correlation')
             
-            # Display results
-            results_text = "Inter-cluster Distances:\n" + "="*30 + "\n\n"
+            euclidean_matrix = squareform(euclidean_distances)
+            cosine_matrix = squareform(cosine_distances)
+            correlation_matrix = squareform(correlation_distances)
             
-            for i, label_i in enumerate(unique_labels):
-                for j, label_j in enumerate(unique_labels):
-                    if i < j:  # Only show upper triangle
-                        dist = distance_matrix[i, j]
-                        results_text += f"Cluster {label_i} ↔ Cluster {label_j}: {dist:.3f}\n"
+            # Create comprehensive visualization
+            self.plot_intercluster_distances(
+                euclidean_matrix, cosine_matrix, correlation_matrix, 
+                unique_labels, cluster_info
+            )
+            
+            # Generate detailed text results
+            results_text = self.generate_distance_results(
+                euclidean_matrix, cosine_matrix, correlation_matrix, 
+                unique_labels, cluster_info
+            )
             
             self.time_series_results.setText(results_text)
             
         except Exception as e:
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate distances:\n{str(e)}")
+    
+    def plot_intercluster_distances(self, euclidean_matrix, cosine_matrix, correlation_matrix, 
+                                  unique_labels, cluster_info):
+        """Create comprehensive visualization of inter-cluster distances."""
+        try:
+            self.time_series_fig.clear()
+            
+            # Create 2x2 subplot layout
+            ax1 = self.time_series_fig.add_subplot(2, 2, 1)  # Euclidean distance heatmap
+            ax2 = self.time_series_fig.add_subplot(2, 2, 2)  # Cosine distance heatmap
+            ax3 = self.time_series_fig.add_subplot(2, 2, 3)  # Correlation distance heatmap
+            ax4 = self.time_series_fig.add_subplot(2, 2, 4)  # Distance comparison plot
+            
+            # 1. Euclidean Distance Heatmap
+            im1 = ax1.imshow(euclidean_matrix, cmap='viridis', aspect='auto')
+            ax1.set_title('Euclidean Distances')
+            ax1.set_xlabel('Cluster')
+            ax1.set_ylabel('Cluster')
+            
+            # Add text annotations
+            for i in range(len(unique_labels)):
+                for j in range(len(unique_labels)):
+                    if i != j:  # Don't show diagonal (distance to self = 0)
+                        text_color = 'white' if euclidean_matrix[i, j] > np.max(euclidean_matrix) * 0.6 else 'black'
+                        ax1.text(j, i, f'{euclidean_matrix[i, j]:.2f}',
+                               ha='center', va='center', color=text_color, fontsize=9)
+            
+            ax1.set_xticks(range(len(unique_labels)))
+            ax1.set_yticks(range(len(unique_labels)))
+            ax1.set_xticklabels([f'C{label}' for label in unique_labels])
+            ax1.set_yticklabels([f'C{label}' for label in unique_labels])
+            
+            # Add colorbar
+            self.time_series_fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+            
+            # 2. Cosine Distance Heatmap
+            im2 = ax2.imshow(cosine_matrix, cmap='plasma', aspect='auto')
+            ax2.set_title('Cosine Distances')
+            ax2.set_xlabel('Cluster')
+            ax2.set_ylabel('Cluster')
+            
+            # Add text annotations
+            for i in range(len(unique_labels)):
+                for j in range(len(unique_labels)):
+                    if i != j:
+                        text_color = 'white' if cosine_matrix[i, j] > np.max(cosine_matrix) * 0.6 else 'black'
+                        ax2.text(j, i, f'{cosine_matrix[i, j]:.3f}',
+                               ha='center', va='center', color=text_color, fontsize=9)
+            
+            ax2.set_xticks(range(len(unique_labels)))
+            ax2.set_yticks(range(len(unique_labels)))
+            ax2.set_xticklabels([f'C{label}' for label in unique_labels])
+            ax2.set_yticklabels([f'C{label}' for label in unique_labels])
+            
+            # Add colorbar
+            self.time_series_fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+            
+            # 3. Correlation Distance Heatmap
+            im3 = ax3.imshow(correlation_matrix, cmap='coolwarm', aspect='auto')
+            ax3.set_title('Correlation Distances')
+            ax3.set_xlabel('Cluster')
+            ax3.set_ylabel('Cluster')
+            
+            # Add text annotations
+            for i in range(len(unique_labels)):
+                for j in range(len(unique_labels)):
+                    if i != j:
+                        text_color = 'white' if correlation_matrix[i, j] > np.max(correlation_matrix) * 0.6 else 'black'
+                        ax3.text(j, i, f'{correlation_matrix[i, j]:.3f}',
+                               ha='center', va='center', color=text_color, fontsize=9)
+            
+            ax3.set_xticks(range(len(unique_labels)))
+            ax3.set_yticks(range(len(unique_labels)))
+            ax3.set_xticklabels([f'C{label}' for label in unique_labels])
+            ax3.set_yticklabels([f'C{label}' for label in unique_labels])
+            
+            # Add colorbar
+            self.time_series_fig.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+            
+            # 4. Distance Comparison Plot
+            # Create a comparison of different distance metrics for cluster pairs
+            cluster_pairs = []
+            euclidean_vals = []
+            cosine_vals = []
+            correlation_vals = []
+            
+            for i in range(len(unique_labels)):
+                for j in range(i + 1, len(unique_labels)):
+                    cluster_pairs.append(f'C{unique_labels[i]}-C{unique_labels[j]}')
+                    euclidean_vals.append(euclidean_matrix[i, j])
+                    cosine_vals.append(cosine_matrix[i, j])
+                    correlation_vals.append(correlation_matrix[i, j])
+            
+            x_pos = np.arange(len(cluster_pairs))
+            width = 0.25
+            
+            # Normalize values to [0, 1] for comparison
+            euclidean_norm = np.array(euclidean_vals) / np.max(euclidean_vals) if np.max(euclidean_vals) > 0 else np.zeros_like(euclidean_vals)
+            cosine_norm = np.array(cosine_vals) / np.max(cosine_vals) if np.max(cosine_vals) > 0 else np.zeros_like(cosine_vals)
+            correlation_norm = np.array(correlation_vals) / np.max(correlation_vals) if np.max(correlation_vals) > 0 else np.zeros_like(correlation_vals)
+            
+            ax4.bar(x_pos - width, euclidean_norm, width, label='Euclidean', alpha=0.8)
+            ax4.bar(x_pos, cosine_norm, width, label='Cosine', alpha=0.8)
+            ax4.bar(x_pos + width, correlation_norm, width, label='Correlation', alpha=0.8)
+            
+            ax4.set_xlabel('Cluster Pairs')
+            ax4.set_ylabel('Normalized Distance')
+            ax4.set_title('Distance Metric Comparison')
+            ax4.set_xticks(x_pos)
+            ax4.set_xticklabels(cluster_pairs, rotation=45, ha='right')
+            ax4.legend()
+            ax4.grid(True, alpha=0.3)
+            
+            self.time_series_fig.tight_layout()
+            self.time_series_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting inter-cluster distances: {str(e)}")
+    
+    def generate_distance_results(self, euclidean_matrix, cosine_matrix, correlation_matrix, 
+                                unique_labels, cluster_info):
+        """Generate detailed text results for inter-cluster distance analysis."""
+        results_text = "Inter-cluster Distance Analysis Results\n"
+        results_text += "=" * 45 + "\n\n"
+        
+        results_text += f"Number of Clusters: {len(unique_labels)}\n\n"
+        
+        # Cluster characteristics
+        results_text += "Cluster Characteristics:\n"
+        results_text += "-" * 25 + "\n"
+        
+        for label in unique_labels:
+            info = cluster_info[label]
+            results_text += f"Cluster {label}:\n"
+            results_text += f"  • Size: {info['size']} spectra\n"
+            results_text += f"  • Mean std deviation: {info['mean_std']:.3f}\n"
+            results_text += f"  • Compactness: {'High' if info['mean_std'] < 0.5 else 'Medium' if info['mean_std'] < 1.0 else 'Low'}\n\n"
+        
+        # Distance analysis for each metric
+        metrics = [
+            ('Euclidean', euclidean_matrix),
+            ('Cosine', cosine_matrix),
+            ('Correlation', correlation_matrix)
+        ]
+        
+        for metric_name, distance_matrix in metrics:
+            results_text += f"{metric_name} Distance Analysis:\n"
+            results_text += "-" * (len(metric_name) + 18) + "\n"
+            
+            # Find closest and farthest cluster pairs
+            distances_list = []
+            for i in range(len(unique_labels)):
+                for j in range(i + 1, len(unique_labels)):
+                    dist = distance_matrix[i, j]
+                    distances_list.append((dist, unique_labels[i], unique_labels[j]))
+            
+            distances_list.sort()
+            
+            # Closest pairs
+            results_text += "Closest cluster pairs:\n"
+            for i, (dist, label1, label2) in enumerate(distances_list[:3]):
+                results_text += f"  {i+1}. Cluster {label1} ↔ Cluster {label2}: {dist:.3f}\n"
+            
+            # Farthest pairs
+            results_text += "\nFarthest cluster pairs:\n"
+            for i, (dist, label1, label2) in enumerate(distances_list[-3:]):
+                results_text += f"  {i+1}. Cluster {label1} ↔ Cluster {label2}: {dist:.3f}\n"
+            
+            # Distance statistics
+            all_distances = [dist for dist, _, _ in distances_list]
+            results_text += f"\nDistance Statistics:\n"
+            results_text += f"  • Mean distance: {np.mean(all_distances):.3f}\n"
+            results_text += f"  • Std deviation: {np.std(all_distances):.3f}\n"
+            results_text += f"  • Min distance: {np.min(all_distances):.3f}\n"
+            results_text += f"  • Max distance: {np.max(all_distances):.3f}\n\n"
+        
+        # Similarity recommendations
+        results_text += "Cluster Similarity Recommendations:\n"
+        results_text += "-" * 35 + "\n"
+        
+        # Use euclidean distance for recommendations
+        euclidean_list = []
+        for i in range(len(unique_labels)):
+            for j in range(i + 1, len(unique_labels)):
+                dist = euclidean_matrix[i, j]
+                euclidean_list.append((dist, unique_labels[i], unique_labels[j]))
+        
+        euclidean_list.sort()
+        
+        # Very similar clusters (might be over-segmented)
+        threshold_similar = np.percentile([d[0] for d in euclidean_list], 25)
+        similar_pairs = [pair for pair in euclidean_list if pair[0] <= threshold_similar]
+        
+        if similar_pairs:
+            results_text += "Very similar clusters (consider merging):\n"
+            for dist, label1, label2 in similar_pairs:
+                results_text += f"  • Cluster {label1} ↔ Cluster {label2} (distance: {dist:.3f})\n"
+        else:
+            results_text += "• No overly similar clusters detected\n"
+        
+        results_text += "\n"
+        
+        # Well-separated clusters
+        threshold_separated = np.percentile([d[0] for d in euclidean_list], 75)
+        separated_pairs = [pair for pair in euclidean_list if pair[0] >= threshold_separated]
+        
+        if separated_pairs:
+            results_text += "Well-separated clusters:\n"
+            for dist, label1, label2 in separated_pairs[:5]:  # Show top 5
+                results_text += f"  • Cluster {label1} ↔ Cluster {label2} (distance: {dist:.3f})\n"
+        
+        return results_text
 
     def update_time_input_controls(self):
         """Update visibility and content of time input controls based on method selection."""
@@ -3370,15 +4596,589 @@ Cluster Sizes:
 
     def fit_kinetic_models(self):
         """Fit kinetic models to cluster populations over time."""
-        QMessageBox.information(self, "Kinetic Modeling", 
-                              "Kinetic modeling functionality will be implemented.\n\n"
-                              "This will fit cluster populations to kinetic models for rate constants.")
+        try:
+            # Check data availability
+            if (self.cluster_data['intensities'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            if 'temporal_data' not in self.cluster_data or self.cluster_data['temporal_data'] is None:
+                QMessageBox.warning(self, "No Time Data", 
+                                  "Please generate or load time data first.")
+                return
+            
+            # Get data
+            labels = self.cluster_data['labels']
+            time_data = self.cluster_data['temporal_data']
+            unique_labels = np.unique(labels)
+            
+            # Calculate cluster populations over time
+            cluster_populations = {}
+            for label in unique_labels:
+                cluster_mask = labels == label
+                cluster_populations[label] = np.sum(cluster_mask)
+            
+            # If only one time point per cluster, create time series based on ordering
+            if len(time_data) == len(unique_labels):
+                # Assume data is ordered by time
+                time_points = time_data
+                population_data = [cluster_populations[label] for label in unique_labels]
+            else:
+                # Multiple spectra per time point - calculate average populations
+                time_points = np.unique(time_data)
+                population_data = {}
+                
+                for label in unique_labels:
+                    populations = []
+                    for t in time_points:
+                        time_mask = time_data == t
+                        cluster_at_time = labels[time_mask]
+                        pop_at_time = np.sum(cluster_at_time == label) / len(cluster_at_time)
+                        populations.append(pop_at_time)
+                    population_data[label] = np.array(populations)
+            
+            # Get selected kinetic model
+            model_name = self.kinetic_model_combo.currentText()
+            
+            # Define kinetic model functions
+            def pseudo_first_order(t, k, A0, C):
+                """Pseudo-first-order: A(t) = A0 * exp(-k*t) + C"""
+                return A0 * np.exp(-k * t) + C
+            
+            def pseudo_second_order(t, k, A0, C):
+                """Pseudo-second-order: A(t) = A0 / (1 + k*A0*t) + C"""
+                return A0 / (1 + k * A0 * t) + C
+            
+            def avrami_equation(t, k, n, A0, C):
+                """Avrami equation: A(t) = A0 * exp(-(k*t)^n) + C"""
+                return A0 * np.exp(-np.power(k * t, n)) + C
+            
+            def diffusion_controlled(t, k, A0, C):
+                """Diffusion-controlled: A(t) = A0 * (1 - (k*t)^0.5) + C"""
+                return A0 * (1 - np.sqrt(k * t)) + C
+            
+            def multi_exponential(t, k1, k2, A1, A2, C):
+                """Multi-exponential: A(t) = A1*exp(-k1*t) + A2*exp(-k2*t) + C"""
+                return A1 * np.exp(-k1 * t) + A2 * np.exp(-k2 * t) + C
+            
+            # Select model function
+            if model_name == 'Pseudo-first-order':
+                model_func = pseudo_first_order
+                param_names = ['Rate constant k', 'Initial amount A0', 'Constant C']
+                initial_guess = [0.1, 1.0, 0.0]
+            elif model_name == 'Pseudo-second-order':
+                model_func = pseudo_second_order
+                param_names = ['Rate constant k', 'Initial amount A0', 'Constant C']
+                initial_guess = [0.1, 1.0, 0.0]
+            elif model_name == 'Avrami Equation':
+                model_func = avrami_equation
+                param_names = ['Rate constant k', 'Avrami exponent n', 'Initial amount A0', 'Constant C']
+                initial_guess = [0.1, 1.5, 1.0, 0.0]
+            elif model_name == 'Diffusion-controlled':
+                model_func = diffusion_controlled
+                param_names = ['Rate constant k', 'Initial amount A0', 'Constant C']
+                initial_guess = [0.1, 1.0, 0.0]
+            elif model_name == 'Multi-exponential':
+                model_func = multi_exponential
+                param_names = ['Rate constant k1', 'Rate constant k2', 'Amplitude A1', 'Amplitude A2', 'Constant C']
+                initial_guess = [0.1, 0.01, 0.5, 0.5, 0.0]
+            
+            # Store fitted models
+            fitted_models = {}
+            fit_statistics = {}
+            
+            # Fit models for each cluster or overall population
+            if isinstance(population_data, dict):
+                # Multiple clusters
+                for label in unique_labels:
+                    pop_values = population_data[label]
+                    
+                    try:
+                        # Fit the model
+                        popt, pcov = curve_fit(model_func, time_points, pop_values, 
+                                             p0=initial_guess, maxfev=5000)
+                        
+                        # Calculate fit statistics
+                        y_pred = model_func(time_points, *popt)
+                        r_squared = 1 - np.sum((pop_values - y_pred)**2) / np.sum((pop_values - np.mean(pop_values))**2)
+                        rmse = np.sqrt(np.mean((pop_values - y_pred)**2))
+                        
+                        fitted_models[label] = {
+                            'parameters': popt,
+                            'covariance': pcov,
+                            'r_squared': r_squared,
+                            'rmse': rmse,
+                            'time_points': time_points,
+                            'experimental_data': pop_values,
+                            'fitted_data': y_pred
+                        }
+                        
+                        # Calculate parameter uncertainties
+                        param_errors = np.sqrt(np.diag(pcov))
+                        fit_statistics[label] = {
+                            'parameters': dict(zip(param_names, popt)),
+                            'errors': dict(zip(param_names, param_errors)),
+                            'r_squared': r_squared,
+                            'rmse': rmse
+                        }
+                        
+                    except Exception as e:
+                        print(f"Failed to fit model for cluster {label}: {str(e)}")
+                        fitted_models[label] = None
+                        fit_statistics[label] = {'error': str(e)}
+            else:
+                # Single population data
+                try:
+                    popt, pcov = curve_fit(model_func, time_points, population_data, 
+                                         p0=initial_guess, maxfev=5000)
+                    
+                    y_pred = model_func(time_points, *popt)
+                    r_squared = 1 - np.sum((population_data - y_pred)**2) / np.sum((population_data - np.mean(population_data))**2)
+                    rmse = np.sqrt(np.mean((population_data - y_pred)**2))
+                    
+                    fitted_models['overall'] = {
+                        'parameters': popt,
+                        'covariance': pcov,
+                        'r_squared': r_squared,
+                        'rmse': rmse,
+                        'time_points': time_points,
+                        'experimental_data': population_data,
+                        'fitted_data': y_pred
+                    }
+                    
+                    param_errors = np.sqrt(np.diag(pcov))
+                    fit_statistics['overall'] = {
+                        'parameters': dict(zip(param_names, popt)),
+                        'errors': dict(zip(param_names, param_errors)),
+                        'r_squared': r_squared,
+                        'rmse': rmse
+                    }
+                    
+                except Exception as e:
+                    QMessageBox.critical(self, "Fitting Error", f"Failed to fit kinetic model:\n{str(e)}")
+                    return
+            
+            # Store results
+            self.analysis_results['kinetic_models'] = {
+                'model_name': model_name,
+                'fitted_models': fitted_models,
+                'fit_statistics': fit_statistics,
+                'model_function': model_func,
+                'parameter_names': param_names
+            }
+            
+            # Plot results
+            self.plot_kinetic_models(fitted_models, model_name)
+            
+            # Display results
+            self.display_kinetic_results(fit_statistics, model_name)
+            
+            QMessageBox.information(self, "Kinetic Modeling Complete", 
+                                  f"Successfully fitted {model_name} model to cluster populations.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Kinetic Modeling Error", 
+                               f"Failed to fit kinetic models:\n{str(e)}")
 
     def compare_kinetic_models(self):
         """Compare different kinetic models for best fit."""
-        QMessageBox.information(self, "Model Comparison", 
-                              "Kinetic model comparison functionality will be implemented.\n\n"
-                              "This will compare different kinetic models and provide statistics.")
+        try:
+            # Check data availability
+            if (self.cluster_data['intensities'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            if 'temporal_data' not in self.cluster_data or self.cluster_data['temporal_data'] is None:
+                QMessageBox.warning(self, "No Time Data", 
+                                  "Please generate or load time data first.")
+                return
+            
+            # Get data
+            labels = self.cluster_data['labels']
+            time_data = self.cluster_data['temporal_data']
+            unique_labels = np.unique(labels)
+            
+            # Calculate cluster populations over time
+            if len(time_data) == len(unique_labels):
+                time_points = time_data
+                # Use relative populations
+                total_spectra = len(labels)
+                population_data = {}
+                for label in unique_labels:
+                    cluster_mask = labels == label
+                    population_data[label] = np.sum(cluster_mask) / total_spectra
+            else:
+                time_points = np.unique(time_data)
+                population_data = {}
+                
+                for label in unique_labels:
+                    populations = []
+                    for t in time_points:
+                        time_mask = time_data == t
+                        cluster_at_time = labels[time_mask]
+                        if len(cluster_at_time) > 0:
+                            pop_at_time = np.sum(cluster_at_time == label) / len(cluster_at_time)
+                        else:
+                            pop_at_time = 0
+                        populations.append(pop_at_time)
+                    population_data[label] = np.array(populations)
+            
+            # Define all kinetic models
+            models = {
+                'Pseudo-first-order': {
+                    'func': lambda t, k, A0, C: A0 * np.exp(-k * t) + C,
+                    'initial_guess': [0.1, 1.0, 0.0],
+                    'param_names': ['Rate constant k', 'Initial amount A0', 'Constant C']
+                },
+                'Pseudo-second-order': {
+                    'func': lambda t, k, A0, C: A0 / (1 + k * A0 * t) + C,
+                    'initial_guess': [0.1, 1.0, 0.0],
+                    'param_names': ['Rate constant k', 'Initial amount A0', 'Constant C']
+                },
+                'Avrami Equation': {
+                    'func': lambda t, k, n, A0, C: A0 * np.exp(-np.power(k * t, n)) + C,
+                    'initial_guess': [0.1, 1.5, 1.0, 0.0],
+                    'param_names': ['Rate constant k', 'Avrami exponent n', 'Initial amount A0', 'Constant C']
+                },
+                'Diffusion-controlled': {
+                    'func': lambda t, k, A0, C: A0 * (1 - np.sqrt(np.maximum(k * t, 0))) + C,
+                    'initial_guess': [0.1, 1.0, 0.0],
+                    'param_names': ['Rate constant k', 'Initial amount A0', 'Constant C']
+                }
+            }
+            
+            # Fit all models and compare
+            model_comparison = {}
+            
+            for model_name, model_info in models.items():
+                model_func = model_info['func']
+                initial_guess = model_info['initial_guess']
+                param_names = model_info['param_names']
+                
+                cluster_fits = {}
+                total_aic = 0
+                total_bic = 0
+                total_r_squared = 0
+                successful_fits = 0
+                
+                for label in unique_labels:
+                    if isinstance(population_data, dict):
+                        pop_values = population_data[label]
+                    else:
+                        pop_values = population_data
+                    
+                    try:
+                        # Fit the model
+                        popt, pcov = curve_fit(model_func, time_points, pop_values, 
+                                             p0=initial_guess, maxfev=5000)
+                        
+                        # Calculate statistics
+                        y_pred = model_func(time_points, *popt)
+                        n = len(time_points)
+                        k = len(popt)  # number of parameters
+                        
+                        # R-squared
+                        ss_res = np.sum((pop_values - y_pred)**2)
+                        ss_tot = np.sum((pop_values - np.mean(pop_values))**2)
+                        r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+                        
+                        # AIC and BIC
+                        mse = ss_res / n
+                        if mse > 0:
+                            aic = n * np.log(mse) + 2 * k
+                            bic = n * np.log(mse) + k * np.log(n)
+                        else:
+                            aic = float('inf')
+                            bic = float('inf')
+                        
+                        cluster_fits[label] = {
+                            'parameters': popt,
+                            'r_squared': r_squared,
+                            'aic': aic,
+                            'bic': bic,
+                            'rmse': np.sqrt(mse)
+                        }
+                        
+                        total_aic += aic
+                        total_bic += bic
+                        total_r_squared += r_squared
+                        successful_fits += 1
+                        
+                    except Exception as e:
+                        cluster_fits[label] = {'error': str(e)}
+                
+                if successful_fits > 0:
+                    avg_r_squared = total_r_squared / successful_fits
+                    avg_aic = total_aic / successful_fits
+                    avg_bic = total_bic / successful_fits
+                else:
+                    avg_r_squared = 0
+                    avg_aic = float('inf')
+                    avg_bic = float('inf')
+                
+                model_comparison[model_name] = {
+                    'cluster_fits': cluster_fits,
+                    'avg_r_squared': avg_r_squared,
+                    'avg_aic': avg_aic,
+                    'avg_bic': avg_bic,
+                    'successful_fits': successful_fits,
+                    'total_clusters': len(unique_labels)
+                }
+            
+            # Find best model based on average R-squared
+            best_model = max(model_comparison.keys(), 
+                           key=lambda x: model_comparison[x]['avg_r_squared'])
+            
+            # Store comparison results
+            self.analysis_results['model_comparison'] = {
+                'comparison': model_comparison,
+                'best_model': best_model,
+                'ranking_metric': 'avg_r_squared'
+            }
+            
+            # Plot comparison
+            self.plot_model_comparison(model_comparison, population_data, time_points)
+            
+            # Display comparison results
+            self.display_model_comparison(model_comparison, best_model)
+            
+            QMessageBox.information(self, "Model Comparison Complete", 
+                                  f"Best fitting model: {best_model}\n"
+                                  f"Based on average R-squared: {model_comparison[best_model]['avg_r_squared']:.4f}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Model Comparison Error", 
+                               f"Failed to compare kinetic models:\n{str(e)}")
+
+    def plot_kinetic_models(self, fitted_models, model_name):
+        """Plot kinetic model fitting results."""
+        try:
+            self.kinetics_fig.clear()
+            
+            # Create subplots
+            if len(fitted_models) == 1:
+                # Single plot
+                ax = self.kinetics_fig.add_subplot(111)
+                
+                for label, fit_data in fitted_models.items():
+                    if fit_data is not None:
+                        time_points = fit_data['time_points']
+                        experimental = fit_data['experimental_data']
+                        fitted = fit_data['fitted_data']
+                        r_squared = fit_data['r_squared']
+                        
+                        ax.scatter(time_points, experimental, label=f'Experimental (Cluster {label})', 
+                                 alpha=0.7, s=60)
+                        ax.plot(time_points, fitted, '--', linewidth=2, 
+                               label=f'Fitted {model_name} (R² = {r_squared:.3f})')
+                
+                ax.set_xlabel('Time')
+                ax.set_ylabel('Population')
+                ax.set_title(f'Kinetic Model Fitting: {model_name}')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                
+            else:
+                # Multiple subplots for multiple clusters
+                n_clusters = len([f for f in fitted_models.values() if f is not None])
+                if n_clusters == 0:
+                    return
+                
+                n_cols = min(3, n_clusters)
+                n_rows = (n_clusters + n_cols - 1) // n_cols
+                
+                plot_idx = 1
+                for label, fit_data in fitted_models.items():
+                    if fit_data is not None:
+                        ax = self.kinetics_fig.add_subplot(n_rows, n_cols, plot_idx)
+                        
+                        time_points = fit_data['time_points']
+                        experimental = fit_data['experimental_data']
+                        fitted = fit_data['fitted_data']
+                        r_squared = fit_data['r_squared']
+                        
+                        ax.scatter(time_points, experimental, alpha=0.7, s=50, 
+                                 color=f'C{plot_idx-1}', label='Experimental')
+                        ax.plot(time_points, fitted, '--', linewidth=2, 
+                               color=f'C{plot_idx-1}', label=f'Fitted (R² = {r_squared:.3f})')
+                        
+                        ax.set_title(f'Cluster {label}')
+                        ax.set_xlabel('Time')
+                        ax.set_ylabel('Population')
+                        ax.legend(fontsize=8)
+                        ax.grid(True, alpha=0.3)
+                        
+                        plot_idx += 1
+                
+                self.kinetics_fig.suptitle(f'Kinetic Model Fitting: {model_name}', fontsize=14)
+            
+            self.kinetics_fig.tight_layout()
+            self.kinetics_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting kinetic models: {str(e)}")
+    
+    def display_kinetic_results(self, fit_statistics, model_name):
+        """Display kinetic model fitting results in text form."""
+        try:
+            results_text = f"Kinetic Model Fitting Results: {model_name}\n"
+            results_text += "=" * 60 + "\n\n"
+            
+            for label, stats in fit_statistics.items():
+                if 'error' in stats:
+                    results_text += f"Cluster {label}: FITTING FAILED\n"
+                    results_text += f"  Error: {stats['error']}\n\n"
+                    continue
+                
+                results_text += f"Cluster {label}:\n"
+                results_text += f"  R-squared: {stats['r_squared']:.4f}\n"
+                results_text += f"  RMSE: {stats['rmse']:.4f}\n"
+                results_text += "  Parameters:\n"
+                
+                for param_name, value in stats['parameters'].items():
+                    error = stats['errors'][param_name]
+                    results_text += f"    {param_name}: {value:.4f} ± {error:.4f}\n"
+                
+                results_text += "\n"
+            
+            self.kinetics_results.setText(results_text)
+            
+        except Exception as e:
+            print(f"Error displaying kinetic results: {str(e)}")
+    
+    def plot_model_comparison(self, model_comparison, population_data, time_points):
+        """Plot comparison of different kinetic models."""
+        try:
+            self.kinetics_fig.clear()
+            
+            # Create subplots for model comparison
+            n_models = len(model_comparison)
+            n_cols = min(2, n_models)
+            n_rows = (n_models + n_cols - 1) // n_cols
+            
+            # First plot: R-squared comparison
+            ax1 = self.kinetics_fig.add_subplot(2, 2, 1)
+            model_names = list(model_comparison.keys())
+            r_squared_values = [model_comparison[name]['avg_r_squared'] for name in model_names]
+            
+            bars = ax1.bar(model_names, r_squared_values, alpha=0.7)
+            ax1.set_ylabel('Average R-squared')
+            ax1.set_title('Model Comparison: R-squared')
+            ax1.set_ylim(0, 1)
+            ax1.tick_params(axis='x', rotation=45)
+            
+            # Annotate bars with values
+            for bar, value in zip(bars, r_squared_values):
+                ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f'{value:.3f}', ha='center', va='bottom')
+            
+            # Second plot: AIC comparison
+            ax2 = self.kinetics_fig.add_subplot(2, 2, 2)
+            aic_values = [model_comparison[name]['avg_aic'] for name in model_names]
+            finite_aic = [v for v in aic_values if np.isfinite(v)]
+            
+            if finite_aic:
+                bars2 = ax2.bar(model_names, aic_values, alpha=0.7, color='orange')
+                ax2.set_ylabel('Average AIC')
+                ax2.set_title('Model Comparison: AIC (lower is better)')
+                ax2.tick_params(axis='x', rotation=45)
+                
+                for bar, value in zip(bars2, aic_values):
+                    if np.isfinite(value):
+                        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                                f'{value:.1f}', ha='center', va='bottom')
+            
+            # Third plot: Successful fits comparison
+            ax3 = self.kinetics_fig.add_subplot(2, 2, 3)
+            success_rates = [model_comparison[name]['successful_fits'] / model_comparison[name]['total_clusters'] 
+                           for name in model_names]
+            
+            bars3 = ax3.bar(model_names, success_rates, alpha=0.7, color='green')
+            ax3.set_ylabel('Success Rate')
+            ax3.set_title('Model Comparison: Fitting Success Rate')
+            ax3.set_ylim(0, 1)
+            ax3.tick_params(axis='x', rotation=45)
+            
+            for bar, value in zip(bars3, success_rates):
+                ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                        f'{value:.2f}', ha='center', va='bottom')
+            
+            # Fourth plot: Example fits for best model
+            ax4 = self.kinetics_fig.add_subplot(2, 2, 4)
+            best_model = max(model_comparison.keys(), 
+                           key=lambda x: model_comparison[x]['avg_r_squared'])
+            
+            # Plot experimental data points and example fits
+            if isinstance(population_data, dict):
+                for i, (label, pop_values) in enumerate(population_data.items()):
+                    color = f'C{i}'
+                    ax4.scatter(time_points, pop_values, alpha=0.7, color=color, 
+                              label=f'Cluster {label}', s=50)
+                    
+                    # Try to plot fitted line for best model
+                    if label in model_comparison[best_model]['cluster_fits']:
+                        fit_info = model_comparison[best_model]['cluster_fits'][label]
+                        if 'error' not in fit_info:
+                            # Recreate the fitted line
+                            models = {
+                                'Pseudo-first-order': lambda t, k, A0, C: A0 * np.exp(-k * t) + C,
+                                'Pseudo-second-order': lambda t, k, A0, C: A0 / (1 + k * A0 * t) + C,
+                                'Avrami Equation': lambda t, k, n, A0, C: A0 * np.exp(-np.power(k * t, n)) + C,
+                                'Diffusion-controlled': lambda t, k, A0, C: A0 * (1 - np.sqrt(np.maximum(k * t, 0))) + C
+                            }
+                            
+                            if best_model in models:
+                                model_func = models[best_model]
+                                params = fit_info['parameters']
+                                fitted_y = model_func(time_points, *params)
+                                ax4.plot(time_points, fitted_y, '--', color=color, linewidth=2)
+            
+            ax4.set_xlabel('Time')
+            ax4.set_ylabel('Population')
+            ax4.set_title(f'Best Model Fits: {best_model}')
+            ax4.legend(fontsize=8)
+            ax4.grid(True, alpha=0.3)
+            
+            self.kinetics_fig.tight_layout()
+            self.kinetics_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting model comparison: {str(e)}")
+    
+    def display_model_comparison(self, model_comparison, best_model):
+        """Display model comparison results in text form."""
+        try:
+            results_text = "Kinetic Model Comparison Results\n"
+            results_text += "=" * 50 + "\n\n"
+            
+            # Sort models by R-squared (descending)
+            sorted_models = sorted(model_comparison.items(), 
+                                 key=lambda x: x[1]['avg_r_squared'], reverse=True)
+            
+            results_text += "Model Rankings (by Average R-squared):\n"
+            results_text += "-" * 40 + "\n"
+            
+            for i, (model_name, stats) in enumerate(sorted_models, 1):
+                results_text += f"{i}. {model_name}\n"
+                results_text += f"   R-squared: {stats['avg_r_squared']:.4f}\n"
+                results_text += f"   AIC: {stats['avg_aic']:.2f}\n"
+                results_text += f"   BIC: {stats['avg_bic']:.2f}\n"
+                results_text += f"   Success rate: {stats['successful_fits']}/{stats['total_clusters']}\n"
+                
+                if model_name == best_model:
+                    results_text += "   *** BEST MODEL ***\n"
+                
+                results_text += "\n"
+            
+            results_text += f"\nRecommended Model: {best_model}\n"
+            results_text += f"Average R-squared: {model_comparison[best_model]['avg_r_squared']:.4f}\n"
+            
+            self.kinetics_results.setText(results_text)
+            
+        except Exception as e:
+            print(f"Error displaying model comparison: {str(e)}")
 
     def analyze_structural_changes(self):
         """Analyze structural changes in defined spectral regions."""
@@ -3554,55 +5354,1450 @@ Cluster Sizes:
         except Exception as e:
             QMessageBox.critical(self, "Calculation Error", f"Failed to calculate differential spectra:\n{str(e)}")
 
+    def update_biofilm_controls(self):
+        """Update visibility of biofilm analysis controls."""
+        is_enabled = self.enable_biofilm_analysis_cb.isChecked()
+        for control in self.biofilm_controls:
+            control.setVisible(is_enabled)
+
+    def analyze_com_bacterial_ratios(self):
+        """Analyze COM vs bacterial peak intensity ratios."""
+        try:
+            if (self.cluster_data['intensities'] is None or 
+                self.cluster_data['wavenumbers'] is None):
+                QMessageBox.warning(self, "No Data", "No spectral data available.")
+                return
+
+            wavenumbers = self.cluster_data['wavenumbers']
+            intensities = self.cluster_data['intensities']
+            
+            # Get peak positions from UI
+            com_peak1 = self.com_peak1_spinbox.value()
+            com_peak2 = self.com_peak2_spinbox.value()
+            protein_peak = self.protein_peak_spinbox.value()
+            lipid_peak = self.lipid_peak_spinbox.value()
+            window = self.peak_window_spinbox.value()
+            
+            # Calculate ratios for each spectrum
+            com_ratios = []
+            bacterial_ratios = []
+            com_scores = []
+            bacterial_scores = []
+            
+            for spectrum in intensities:
+                # Calculate COM ratio (peak1/peak2)
+                com1_intensity = self._get_peak_intensity(spectrum, wavenumbers, com_peak1, window)
+                com2_intensity = self._get_peak_intensity(spectrum, wavenumbers, com_peak2, window)
+                com_ratio = com1_intensity / (com2_intensity + 1e-6)
+                com_ratios.append(com_ratio)
+                
+                # Calculate bacterial ratio (protein/lipid)
+                protein_intensity = self._get_peak_intensity(spectrum, wavenumbers, protein_peak, window)
+                lipid_intensity = self._get_peak_intensity(spectrum, wavenumbers, lipid_peak, window)
+                bacterial_ratio = protein_intensity / (lipid_intensity + 1e-6)
+                bacterial_ratios.append(bacterial_ratio)
+                
+                # Calculate COM score (combined COM peak intensity)
+                com_score = (com1_intensity + com2_intensity) / 2.0
+                com_scores.append(com_score)
+                
+                # Calculate bacterial score (combined bacterial peak intensity)
+                bacterial_score = (protein_intensity + lipid_intensity) / 2.0
+                bacterial_scores.append(bacterial_score)
+            
+            # Store results for correlation analysis
+            self.cluster_data['com_ratios'] = np.array(com_ratios)
+            self.cluster_data['bacterial_ratios'] = np.array(bacterial_ratios)
+            self.cluster_data['com_scores'] = np.array(com_scores)
+            self.cluster_data['bacterial_scores'] = np.array(bacterial_scores)
+            
+            # Create visualization
+            self._plot_biofilm_analysis(com_ratios, bacterial_ratios, com_scores, bacterial_scores)
+            
+            # Display results
+            results_text = "COM vs Bacterial Analysis Results:\n" + "="*50 + "\n\n"
+            results_text += f"Analyzed {len(intensities)} spectra\n\n"
+            results_text += f"COM Ratio (I₁₃₂₀/I₁₆₂₀):\n"
+            results_text += f"  Mean: {np.mean(com_ratios):.3f} ± {np.std(com_ratios):.3f}\n"
+            results_text += f"  Range: {np.min(com_ratios):.3f} - {np.max(com_ratios):.3f}\n\n"
+            results_text += f"Bacterial Ratio (Protein/Lipid):\n"
+            results_text += f"  Mean: {np.mean(bacterial_ratios):.3f} ± {np.std(bacterial_ratios):.3f}\n"
+            results_text += f"  Range: {np.min(bacterial_ratios):.3f} - {np.max(bacterial_ratios):.3f}\n\n"
+            
+            # Classification thresholds
+            high_com_threshold = np.percentile(com_scores, 75)
+            high_bacterial_threshold = np.percentile(bacterial_scores, 75)
+            
+            results_text += f"Classification Thresholds:\n"
+            results_text += f"  High COM Score: >{high_com_threshold:.3f}\n"
+            results_text += f"  High Bacterial Score: >{high_bacterial_threshold:.3f}\n"
+            
+            self.structural_results.setText(results_text)
+            
+            QMessageBox.information(self, "Analysis Complete", 
+                                  "COM vs bacterial analysis completed. Use 'Correlate with Clusters' to see cluster relationships.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", f"COM vs bacterial analysis failed:\n{str(e)}")
+
+    def correlate_ratios_with_clusters(self):
+        """Correlate peak ratios with cluster assignments."""
+        try:
+            if (self.cluster_data['labels'] is None or 
+                'com_ratios' not in self.cluster_data):
+                QMessageBox.warning(self, "No Data", "Run COM vs bacterial analysis first.")
+                return
+
+            labels = self.cluster_data['labels']
+            com_ratios = self.cluster_data['com_ratios']
+            bacterial_ratios = self.cluster_data['bacterial_ratios']
+            com_scores = self.cluster_data['com_scores']
+            bacterial_scores = self.cluster_data['bacterial_scores']
+            
+            unique_labels = np.unique(labels)
+            
+            # Calculate cluster statistics
+            cluster_stats = {}
+            for label in unique_labels:
+                mask = labels == label
+                cluster_stats[label] = {
+                    'count': np.sum(mask),
+                    'com_ratio_mean': np.mean(com_ratios[mask]),
+                    'com_ratio_std': np.std(com_ratios[mask]),
+                    'bacterial_ratio_mean': np.mean(bacterial_ratios[mask]),
+                    'bacterial_ratio_std': np.std(bacterial_ratios[mask]),
+                    'com_score_mean': np.mean(com_scores[mask]),
+                    'bacterial_score_mean': np.mean(bacterial_scores[mask]),
+                }
+            
+            # Classify clusters
+            self._classify_clusters_biofilm(cluster_stats)
+            
+            # Create correlation visualization
+            self._plot_cluster_correlations(labels, com_ratios, bacterial_ratios, com_scores, bacterial_scores, cluster_stats)
+            
+            # Display correlation results
+            results_text = "Cluster-Ratio Correlation Results:\n" + "="*60 + "\n\n"
+            
+            for label in unique_labels:
+                stats = cluster_stats[label]
+                results_text += f"Cluster {label} (n={stats['count']}):\n"
+                results_text += f"  COM Ratio: {stats['com_ratio_mean']:.3f} ± {stats['com_ratio_std']:.3f}\n"
+                results_text += f"  Bacterial Ratio: {stats['bacterial_ratio_mean']:.3f} ± {stats['bacterial_ratio_std']:.3f}\n"
+                results_text += f"  COM Score: {stats['com_score_mean']:.3f}\n"
+                results_text += f"  Bacterial Score: {stats['bacterial_score_mean']:.3f}\n"
+                
+                # Add classification
+                if 'classification' in stats:
+                    results_text += f"  Classification: {stats['classification']}\n"
+                
+                results_text += "\n"
+            
+            # Statistical tests
+            from scipy.stats import f_oneway, kruskal
+            try:
+                # ANOVA for COM ratios
+                com_groups = [com_ratios[labels == label] for label in unique_labels]
+                f_stat_com, p_val_com = f_oneway(*com_groups)
+                
+                # ANOVA for bacterial ratios
+                bacterial_groups = [bacterial_ratios[labels == label] for label in unique_labels]
+                f_stat_bacterial, p_val_bacterial = f_oneway(*bacterial_groups)
+                
+                results_text += "Statistical Significance:\n"
+                results_text += f"  COM Ratio ANOVA: F={f_stat_com:.3f}, p={p_val_com:.4f}\n"
+                results_text += f"  Bacterial Ratio ANOVA: F={f_stat_bacterial:.3f}, p={p_val_bacterial:.4f}\n"
+                
+                if p_val_com < 0.05:
+                    results_text += "  ✓ COM ratios show significant cluster differences\n"
+                if p_val_bacterial < 0.05:
+                    results_text += "  ✓ Bacterial ratios show significant cluster differences\n"
+                    
+            except Exception as e:
+                results_text += f"Statistical analysis error: {str(e)}\n"
+            
+            self.structural_results.setText(results_text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Correlation Error", f"Cluster correlation analysis failed:\n{str(e)}")
+
+    def _get_peak_intensity(self, spectrum, wavenumbers, peak_center, window):
+        """Get peak intensity within specified window."""
+        mask = (wavenumbers >= peak_center - window) & (wavenumbers <= peak_center + window)
+        if not np.any(mask):
+            return 0.0
+        return np.max(spectrum[mask])
+
+    def _plot_biofilm_analysis(self, com_ratios, bacterial_ratios, com_scores, bacterial_scores):
+        """Plot biofilm analysis results."""
+        self.structural_fig.clear()
+        
+        # Create 2x2 subplot layout
+        gs = self.structural_fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+        
+        # 1. COM vs Bacterial Ratios scatter plot
+        ax1 = self.structural_fig.add_subplot(gs[0, 0])
+        scatter = ax1.scatter(com_ratios, bacterial_ratios, alpha=0.6, c='blue', s=50)
+        ax1.set_xlabel('COM Ratio (I₁₃₂₀/I₁₆₂₀)')
+        ax1.set_ylabel('Bacterial Ratio (Protein/Lipid)')
+        ax1.set_title('COM vs Bacterial Signatures')
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. COM vs Bacterial Scores
+        ax2 = self.structural_fig.add_subplot(gs[0, 1])
+        ax2.scatter(com_scores, bacterial_scores, alpha=0.6, c='green', s=50)
+        ax2.set_xlabel('COM Score (Average Intensity)')
+        ax2.set_ylabel('Bacterial Score (Average Intensity)')
+        ax2.set_title('COM vs Bacterial Intensity Scores')
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Histogram of COM ratios
+        ax3 = self.structural_fig.add_subplot(gs[1, 0])
+        ax3.hist(com_ratios, bins=20, alpha=0.7, color='red', edgecolor='black')
+        ax3.set_xlabel('COM Ratio (I₁₃₂₀/I₁₆₂₀)')
+        ax3.set_ylabel('Frequency')
+        ax3.set_title('Distribution of COM Ratios')
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Histogram of bacterial ratios
+        ax4 = self.structural_fig.add_subplot(gs[1, 1])
+        ax4.hist(bacterial_ratios, bins=20, alpha=0.7, color='purple', edgecolor='black')
+        ax4.set_xlabel('Bacterial Ratio (Protein/Lipid)')
+        ax4.set_ylabel('Frequency')
+        ax4.set_title('Distribution of Bacterial Ratios')
+        ax4.grid(True, alpha=0.3)
+        
+        self.structural_canvas.draw()
+
+    def _plot_cluster_correlations(self, labels, com_ratios, bacterial_ratios, com_scores, bacterial_scores, cluster_stats):
+        """Plot cluster correlations with biofilm metrics."""
+        self.structural_fig.clear()
+        
+        unique_labels = np.unique(labels)
+        colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+        
+        # Create 2x2 subplot layout
+        gs = self.structural_fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+        
+        # 1. Colored scatter plot by cluster
+        ax1 = self.structural_fig.add_subplot(gs[0, 0])
+        for i, label in enumerate(unique_labels):
+            mask = labels == label
+            ax1.scatter(com_ratios[mask], bacterial_ratios[mask], 
+                       c=[colors[i]], label=f'Cluster {label}', alpha=0.7, s=50)
+        ax1.set_xlabel('COM Ratio (I₁₃₂₀/I₁₆₂₀)')
+        ax1.set_ylabel('Bacterial Ratio (Protein/Lipid)')
+        ax1.set_title('Clusters in COM vs Bacterial Space')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Box plots of COM ratios by cluster
+        ax2 = self.structural_fig.add_subplot(gs[0, 1])
+        com_data = [com_ratios[labels == label] for label in unique_labels]
+        bp1 = ax2.boxplot(com_data, labels=[f'C{label}' for label in unique_labels], patch_artist=True)
+        for patch, color in zip(bp1['boxes'], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+        ax2.set_xlabel('Cluster')
+        ax2.set_ylabel('COM Ratio')
+        ax2.set_title('COM Ratios by Cluster')
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Box plots of bacterial ratios by cluster
+        ax3 = self.structural_fig.add_subplot(gs[1, 0])
+        bacterial_data = [bacterial_ratios[labels == label] for label in unique_labels]
+        bp2 = ax3.boxplot(bacterial_data, labels=[f'C{label}' for label in unique_labels], patch_artist=True)
+        for patch, color in zip(bp2['boxes'], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+        ax3.set_xlabel('Cluster')
+        ax3.set_ylabel('Bacterial Ratio')
+        ax3.set_title('Bacterial Ratios by Cluster')
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Cluster means comparison
+        ax4 = self.structural_fig.add_subplot(gs[1, 1])
+        cluster_labels = [f'Cluster {label}' for label in unique_labels]
+        com_means = [cluster_stats[label]['com_ratio_mean'] for label in unique_labels]
+        bacterial_means = [cluster_stats[label]['bacterial_ratio_mean'] for label in unique_labels]
+        
+        x = np.arange(len(cluster_labels))
+        width = 0.35
+        
+        ax4.bar(x - width/2, com_means, width, label='COM Ratio', alpha=0.7)
+        ax4.bar(x + width/2, bacterial_means, width, label='Bacterial Ratio', alpha=0.7)
+        
+        ax4.set_xlabel('Cluster')
+        ax4.set_ylabel('Mean Ratio')
+        ax4.set_title('Mean Ratios by Cluster')
+        ax4.set_xticks(x)
+        ax4.set_xticklabels(cluster_labels, rotation=45)
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        self.structural_canvas.draw()
+
+    def _classify_clusters_biofilm(self, cluster_stats):
+        """Classify clusters based on COM vs bacterial signatures."""
+        # Calculate global thresholds
+        all_com_scores = [stats['com_score_mean'] for stats in cluster_stats.values()]
+        all_bacterial_scores = [stats['bacterial_score_mean'] for stats in cluster_stats.values()]
+        
+        com_threshold = np.median(all_com_scores)
+        bacterial_threshold = np.median(all_bacterial_scores)
+        
+        for label, stats in cluster_stats.items():
+            com_high = stats['com_score_mean'] > com_threshold
+            bacterial_high = stats['bacterial_score_mean'] > bacterial_threshold
+            
+            if com_high and not bacterial_high:
+                classification = "COM-dominant"
+            elif bacterial_high and not com_high:
+                classification = "Bacterial-dominant"
+            elif com_high and bacterial_high:
+                classification = "Mixed (COM + Bacterial)"
+            else:
+                classification = "Low signature/Background"
+            
+            stats['classification'] = classification
+
     # Validation Methods
     def calculate_silhouette_analysis(self):
         """Calculate silhouette analysis for cluster validation."""
-        QMessageBox.information(self, "Silhouette Analysis", 
-                              "Silhouette analysis functionality will be implemented.\n\n"
-                              "This will calculate silhouette scores for cluster validation.")
+        try:
+            if (self.cluster_data['features_scaled'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            features = self.cluster_data['features_scaled']
+            labels = self.cluster_data['labels']
+            
+            # Calculate silhouette scores
+            silhouette_avg = silhouette_score(features, labels)
+            sample_silhouette_values = silhouette_samples(features, labels)
+            
+            # Store results
+            self.cluster_data['silhouette_scores'] = {
+                'average': silhouette_avg,
+                'samples': sample_silhouette_values,
+                'threshold': self.min_silhouette_threshold.value()
+            }
+            
+            # Analyze results
+            unique_labels = np.unique(labels)
+            cluster_silhouettes = {}
+            
+            for label in unique_labels:
+                cluster_mask = labels == label
+                cluster_silhouettes[label] = {
+                    'mean': np.mean(sample_silhouette_values[cluster_mask]),
+                    'std': np.std(sample_silhouette_values[cluster_mask]),
+                    'min': np.min(sample_silhouette_values[cluster_mask]),
+                    'max': np.max(sample_silhouette_values[cluster_mask]),
+                    'samples': sample_silhouette_values[cluster_mask]
+                }
+            
+            # Create silhouette plot
+            self.plot_silhouette_analysis(unique_labels, cluster_silhouettes, silhouette_avg)
+            
+            # Generate results text
+            results_text = self.generate_silhouette_results(
+                silhouette_avg, cluster_silhouettes, sample_silhouette_values, labels
+            )
+            
+            self.validation_results.setText(results_text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Silhouette Analysis Error", 
+                               f"Failed to calculate silhouette analysis:\n{str(e)}")
 
     def analyze_cluster_transitions(self):
         """Analyze cluster transition boundaries."""
-        QMessageBox.information(self, "Cluster Transitions", 
-                              "Cluster transition analysis functionality will be implemented.\n\n"
-                              "This will analyze cluster boundaries and transition regions.")
+        try:
+            if (self.cluster_data['features_scaled'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            features = self.cluster_data['features_scaled']
+            labels = self.cluster_data['labels']
+            
+            # Calculate inter-cluster boundaries using PCA for visualization
+            pca = PCA(n_components=2)
+            coords_2d = pca.fit_transform(features)
+            
+            unique_labels = np.unique(labels)
+            n_clusters = len(unique_labels)
+            
+            # Calculate cluster centroids in 2D space
+            centroids_2d = []
+            for label in unique_labels:
+                cluster_mask = labels == label
+                centroid = np.mean(coords_2d[cluster_mask], axis=0)
+                centroids_2d.append(centroid)
+            centroids_2d = np.array(centroids_2d)
+            
+            # Find boundary/transition points
+            transition_analysis = {}
+            
+            for i, label_i in enumerate(unique_labels):
+                for j, label_j in enumerate(unique_labels):
+                    if i < j:
+                        # Find points near the boundary between clusters
+                        mask_i = labels == label_i
+                        mask_j = labels == label_j
+                        
+                        coords_i = coords_2d[mask_i]
+                        coords_j = coords_2d[mask_j]
+                        
+                        # Calculate distances from each cluster's points to the other cluster's centroid
+                        centroid_i = centroids_2d[i]
+                        centroid_j = centroids_2d[j]
+                        
+                        # Find boundary points (points that are close to the other cluster)
+                        distances_i_to_j = np.linalg.norm(coords_i - centroid_j, axis=1)
+                        distances_j_to_i = np.linalg.norm(coords_j - centroid_i, axis=1)
+                        
+                        # Define boundary threshold as percentile of distances
+                        boundary_threshold = np.percentile(
+                            np.concatenate([distances_i_to_j, distances_j_to_i]), 25
+                        )
+                        
+                        boundary_points_i = coords_i[distances_i_to_j <= boundary_threshold]
+                        boundary_points_j = coords_j[distances_j_to_i <= boundary_threshold]
+                        
+                        transition_analysis[f"{label_i}-{label_j}"] = {
+                            'centroid_distance': np.linalg.norm(centroid_i - centroid_j),
+                            'boundary_thickness': boundary_threshold,
+                            'boundary_points_i': boundary_points_i,
+                            'boundary_points_j': boundary_points_j,
+                            'n_boundary_i': len(boundary_points_i),
+                            'n_boundary_j': len(boundary_points_j)
+                        }
+            
+            # Store results
+            self.cluster_data['transition_analysis'] = transition_analysis
+            
+            # Create transition visualization
+            self.plot_transition_analysis(coords_2d, labels, centroids_2d, transition_analysis, unique_labels)
+            
+            # Generate results text
+            results_text = self.generate_transition_results(transition_analysis, unique_labels)
+            
+            self.validation_results.setText(results_text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Transition Analysis Error", 
+                               f"Failed to analyze cluster transitions:\n{str(e)}")
 
     def test_cluster_stability(self):
         """Test cluster stability through bootstrap analysis."""
-        QMessageBox.information(self, "Stability Analysis", 
-                              "Cluster stability analysis functionality will be implemented.\n\n"
-                              "This will test cluster stability using bootstrap methods.")
+        try:
+            if (self.cluster_data['features_scaled'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            features = self.cluster_data['features_scaled']
+            original_labels = self.cluster_data['labels']
+            n_iterations = self.bootstrap_iterations.value()
+            
+            # Get original clustering parameters
+            n_clusters = len(np.unique(original_labels))
+            linkage_method = self.linkage_method_combo.currentText() if hasattr(self, 'linkage_method_combo') else 'ward'
+            distance_metric = self.distance_metric_combo.currentText() if hasattr(self, 'distance_metric_combo') else 'euclidean'
+            
+            # Bootstrap stability analysis
+            stability_scores = []
+            cluster_consistency = {label: [] for label in np.unique(original_labels)}
+            
+            for iteration in range(n_iterations):
+                # Bootstrap sample
+                n_samples = len(features)
+                bootstrap_indices = np.random.choice(n_samples, size=n_samples, replace=True)
+                bootstrap_features = features[bootstrap_indices]
+                
+                # Perform clustering on bootstrap sample
+                try:
+                    bootstrap_labels, _, _ = self.perform_hierarchical_clustering(
+                        bootstrap_features, n_clusters, linkage_method, distance_metric
+                    )
+                    
+                    # Map bootstrap labels back to original indices
+                    original_bootstrap_labels = np.full(n_samples, -1)
+                    for i, bootstrap_idx in enumerate(bootstrap_indices):
+                        original_bootstrap_labels[bootstrap_idx] = bootstrap_labels[i]
+                    
+                    # Calculate stability using Adjusted Rand Index
+                    # Only consider samples that were selected in bootstrap
+                    valid_mask = original_bootstrap_labels != -1
+                    if np.sum(valid_mask) > 1:
+                        from sklearn.metrics import adjusted_rand_score
+                        ari = adjusted_rand_score(
+                            original_labels[valid_mask], 
+                            original_bootstrap_labels[valid_mask]
+                        )
+                        stability_scores.append(ari)
+                        
+                        # Track cluster consistency
+                        for original_label in np.unique(original_labels):
+                            original_cluster_mask = (original_labels == original_label) & valid_mask
+                            if np.sum(original_cluster_mask) > 0:
+                                bootstrap_cluster_labels = original_bootstrap_labels[original_cluster_mask]
+                                # Calculate most common label in bootstrap
+                                unique_bootstrap_labels, counts = np.unique(bootstrap_cluster_labels, return_counts=True)
+                                if len(unique_bootstrap_labels) > 0:
+                                    consistency = np.max(counts) / len(bootstrap_cluster_labels)
+                                    cluster_consistency[original_label].append(consistency)
+                
+                except Exception as e:
+                    print(f"Bootstrap iteration {iteration} failed: {e}")
+                    continue
+            
+            # Calculate stability statistics
+            stability_stats = {
+                'mean_ari': np.mean(stability_scores) if stability_scores else 0.0,
+                'std_ari': np.std(stability_scores) if stability_scores else 0.0,
+                'min_ari': np.min(stability_scores) if stability_scores else 0.0,
+                'max_ari': np.max(stability_scores) if stability_scores else 0.0,
+                'successful_iterations': len(stability_scores),
+                'total_iterations': n_iterations
+            }
+            
+            # Calculate cluster-specific stability
+            cluster_stability = {}
+            for label, consistencies in cluster_consistency.items():
+                if consistencies:
+                    cluster_stability[label] = {
+                        'mean_consistency': np.mean(consistencies),
+                        'std_consistency': np.std(consistencies),
+                        'min_consistency': np.min(consistencies),
+                        'max_consistency': np.max(consistencies)
+                    }
+                else:
+                    cluster_stability[label] = {
+                        'mean_consistency': 0.0,
+                        'std_consistency': 0.0,
+                        'min_consistency': 0.0,
+                        'max_consistency': 0.0
+                    }
+            
+            # Store results
+            self.cluster_data['stability_analysis'] = {
+                'stability_stats': stability_stats,
+                'cluster_stability': cluster_stability,
+                'stability_scores': stability_scores
+            }
+            
+            # Create stability visualization
+            self.plot_stability_analysis(stability_stats, cluster_stability, stability_scores)
+            
+            # Generate results text
+            results_text = self.generate_stability_results(stability_stats, cluster_stability)
+            
+            self.validation_results.setText(results_text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Stability Analysis Error", 
+                               f"Failed to test cluster stability:\n{str(e)}")
 
     def run_complete_validation(self):
         """Run complete validation suite."""
-        QMessageBox.information(self, "Complete Validation", 
-                              "Complete validation suite functionality will be implemented.\n\n"
-                              "This will run all validation methods and provide comprehensive results.")
+        try:
+            if (self.cluster_data['features_scaled'] is None or 
+                self.cluster_data['labels'] is None):
+                QMessageBox.warning(self, "No Data", "No clustering data available.")
+                return
+            
+            # Run all validation analyses
+            validation_results = {}
+            
+            # 1. Silhouette Analysis
+            if self.silhouette_analysis_cb.isChecked():
+                try:
+                    self.calculate_silhouette_analysis()
+                    validation_results['silhouette'] = self.cluster_data.get('silhouette_scores', {})
+                except Exception as e:
+                    validation_results['silhouette'] = {'error': str(e)}
+            
+            # 2. Transition Analysis  
+            if self.transition_analysis_cb.isChecked():
+                try:
+                    self.analyze_cluster_transitions()
+                    validation_results['transitions'] = self.cluster_data.get('transition_analysis', {})
+                except Exception as e:
+                    validation_results['transitions'] = {'error': str(e)}
+            
+            # 3. Stability Analysis
+            if self.stability_analysis_cb.isChecked():
+                try:
+                    self.test_cluster_stability()
+                    validation_results['stability'] = self.cluster_data.get('stability_analysis', {})
+                except Exception as e:
+                    validation_results['stability'] = {'error': str(e)}
+            
+            # Create comprehensive validation visualization
+            self.plot_comprehensive_validation(validation_results)
+            
+            # Generate comprehensive results text
+            results_text = self.generate_comprehensive_validation_results(validation_results)
+            
+            self.validation_results.setText(results_text)
+            
+            # Store complete validation results
+            self.cluster_data['complete_validation'] = validation_results
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Complete Validation Error", 
+                               f"Failed to run complete validation:\n{str(e)}")
 
     # Advanced Statistics Methods
     def calculate_feature_importance(self):
         """Calculate feature importance for cluster discrimination."""
-        QMessageBox.information(self, "Feature Importance", 
-                              "Feature importance analysis functionality will be implemented.\n\n"
-                              "This will calculate feature importance using the selected method.")
+        try:
+            if self.cluster_data['labels'] is None:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            # Get the method
+            method = self.feature_method_combo.currentText()
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            wavenumbers = self.cluster_data['wavenumbers']
+            
+            # Calculate feature importance
+            if method == 'Random Forest':
+                importance_scores = self._calculate_rf_importance(intensities, labels)
+            elif method == 'Linear Discriminant Analysis':
+                importance_scores = self._calculate_lda_importance(intensities, labels)
+            elif method == 'Mutual Information':
+                importance_scores = self._calculate_mutual_info_importance(intensities, labels)
+            else:
+                importance_scores = self._calculate_rf_importance(intensities, labels)
+            
+            # Find top features
+            top_indices = np.argsort(importance_scores)[-20:][::-1]  # Top 20 features
+            top_wavenumbers = wavenumbers[top_indices]
+            top_scores = importance_scores[top_indices]
+            
+            # Plot results
+            self._plot_feature_importance(wavenumbers, importance_scores, 
+                                        top_wavenumbers, top_scores, method)
+            
+            # Display results
+            self._display_feature_importance_results(top_wavenumbers, top_scores, method)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Feature Importance Error", 
+                               f"Failed to calculate feature importance:\n{str(e)}")
+
+    def _calculate_rf_importance(self, intensities, labels):
+        """Calculate feature importance using Random Forest."""
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.preprocessing import StandardScaler
+        
+        # Standardize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(intensities)
+        
+        # Train Random Forest
+        rf = RandomForestClassifier(n_estimators=100, random_state=42)
+        rf.fit(X_scaled, labels)
+        
+        return rf.feature_importances_
+    
+    def _calculate_lda_importance(self, intensities, labels):
+        """Calculate feature importance using Linear Discriminant Analysis."""
+        from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+        from sklearn.preprocessing import StandardScaler
+        
+        # Standardize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(intensities)
+        
+        # Train LDA
+        lda = LinearDiscriminantAnalysis()
+        lda.fit(X_scaled, labels)
+        
+        # Calculate importance as absolute value of LDA coefficients
+        if hasattr(lda, 'coef_') and lda.coef_ is not None:
+            if lda.coef_.ndim > 1:
+                importance = np.abs(lda.coef_[0])  # First component
+            else:
+                importance = np.abs(lda.coef_)
+        else:
+            # Fallback to between-class to within-class scatter ratio
+            n_features = intensities.shape[1]
+            importance = np.zeros(n_features)
+            
+            for i in range(n_features):
+                feature_data = intensities[:, i]
+                between_variance = np.var([np.mean(feature_data[labels == label]) 
+                                         for label in np.unique(labels)])
+                within_variance = np.mean([np.var(feature_data[labels == label]) 
+                                         for label in np.unique(labels)])
+                importance[i] = between_variance / (within_variance + 1e-8)
+        
+        return importance
+    
+    def _calculate_mutual_info_importance(self, intensities, labels):
+        """Calculate feature importance using Mutual Information."""
+        from sklearn.feature_selection import mutual_info_classif
+        from sklearn.preprocessing import StandardScaler
+        
+        # Standardize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(intensities)
+        
+        # Calculate mutual information
+        mi_scores = mutual_info_classif(X_scaled, labels, random_state=42)
+        
+        return mi_scores
+    
+    def _plot_feature_importance(self, wavenumbers, importance_scores, 
+                                top_wavenumbers, top_scores, method):
+        """Plot feature importance results."""
+        self.stats_fig.clear()
+        
+        # Create subplots
+        ax1 = self.stats_fig.add_subplot(2, 2, 1)  # Full spectrum importance
+        ax2 = self.stats_fig.add_subplot(2, 2, 2)  # Top features bar plot
+        ax3 = self.stats_fig.add_subplot(2, 2, 3)  # Cumulative importance
+        ax4 = self.stats_fig.add_subplot(2, 2, 4)  # Importance distribution
+        
+        # 1. Full spectrum importance plot
+        ax1.plot(wavenumbers, importance_scores, 'b-', alpha=0.7)
+        ax1.scatter(top_wavenumbers, top_scores, color='red', s=30, zorder=5)
+        ax1.set_xlabel('Wavenumber (cm⁻¹)')
+        ax1.set_ylabel('Feature Importance')
+        ax1.set_title(f'Feature Importance - {method}')
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Top features bar plot
+        x_pos = np.arange(len(top_wavenumbers))
+        bars = ax2.bar(x_pos, top_scores, color='skyblue', edgecolor='navy')
+        ax2.set_xlabel('Top Features (Wavenumber)')
+        ax2.set_ylabel('Importance Score')
+        ax2.set_title('Top 20 Most Important Features')
+        ax2.set_xticks(x_pos[::2])  # Show every other tick
+        ax2.set_xticklabels([f'{int(wn)}' for wn in top_wavenumbers[::2]], rotation=45)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Cumulative importance
+        sorted_importance = np.sort(importance_scores)[::-1]
+        cumulative_importance = np.cumsum(sorted_importance)
+        cumulative_importance /= cumulative_importance[-1]  # Normalize to 1
+        
+        ax3.plot(range(len(cumulative_importance)), cumulative_importance, 'g-', linewidth=2)
+        ax3.axhline(y=0.8, color='red', linestyle='--', alpha=0.7, label='80% threshold')
+        ax3.axhline(y=0.9, color='orange', linestyle='--', alpha=0.7, label='90% threshold')
+        ax3.set_xlabel('Number of Features')
+        ax3.set_ylabel('Cumulative Importance')
+        ax3.set_title('Cumulative Feature Importance')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Importance distribution
+        ax4.hist(importance_scores, bins=30, alpha=0.7, color='purple', edgecolor='black')
+        ax4.axvline(x=np.mean(importance_scores), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(importance_scores):.4f}')
+        ax4.axvline(x=np.median(importance_scores), color='orange', linestyle='--', 
+                   label=f'Median: {np.median(importance_scores):.4f}')
+        ax4.set_xlabel('Importance Score')
+        ax4.set_ylabel('Frequency')
+        ax4.set_title('Distribution of Feature Importance')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        self.stats_fig.tight_layout()
+        self.stats_canvas.draw()
+    
+    def _display_feature_importance_results(self, top_wavenumbers, top_scores, method):
+        """Display feature importance results in the text area."""
+        results_text = f"Feature Importance Analysis - {method}\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Top 20 Most Important Features:\n"
+        results_text += "-" * 35 + "\n"
+        
+        for i, (wavenumber, score) in enumerate(zip(top_wavenumbers, top_scores)):
+            results_text += f"{i+1:2d}. {wavenumber:6.1f} cm⁻¹ : {score:.6f}\n"
+        
+        # Calculate some statistics
+        total_importance = np.sum(top_scores)
+        mean_importance = np.mean(top_scores)
+        std_importance = np.std(top_scores)
+        
+        results_text += f"\nStatistics for Top Features:\n"
+        results_text += f"• Total importance: {total_importance:.6f}\n"
+        results_text += f"• Mean importance: {mean_importance:.6f}\n"
+        results_text += f"• Std deviation: {std_importance:.6f}\n"
+        results_text += f"• Highest importance: {top_scores[0]:.6f} at {top_wavenumbers[0]:.1f} cm⁻¹\n"
+        
+        # Check for known spectral regions
+        known_regions = {
+            'Protein (Amide I)': (1600, 1700),
+            'Lipids (CH₂)': (1400, 1500),
+            'COM (C-O stretch)': (1300, 1350),
+            'COM (C=O stretch)': (1580, 1650),
+            'Nucleic acids': (750, 850),
+            'Carbohydrates': (900, 1200),
+        }
+        
+        results_text += f"\nSpectral Region Analysis:\n"
+        for region_name, (min_wn, max_wn) in known_regions.items():
+            region_mask = (top_wavenumbers >= min_wn) & (top_wavenumbers <= max_wn)
+            if np.any(region_mask):
+                region_importance = np.sum(top_scores[region_mask])
+                region_count = np.sum(region_mask)
+                results_text += f"• {region_name}: {region_count} features, total importance: {region_importance:.6f}\n"
+        
+        results_text += f"\nInterpretation:\n"
+        results_text += f"The {method} method identified {len(top_wavenumbers)} key spectral features "
+        results_text += f"that best distinguish between clusters. Higher importance scores indicate "
+        results_text += f"wavenumbers that contribute more to cluster separation.\n"
+        
+        self.stats_results.setText(results_text)
+    
+    def _display_significance_results(self, results, method, alpha):
+        """Display statistical significance results."""
+        results_text = f"Statistical Significance Testing - {method}\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Test Parameters:\n"
+        results_text += f"• Significance level (α): {alpha:.3f}\n"
+        
+        if method in ['PERMANOVA', 'ANOSIM']:
+            results_text += f"• Permutations: {len(results['permuted_stats'])}\n\n"
+            
+            results_text += f"Test Results:\n"
+            results_text += f"• {method} statistic: {results['test_statistic']:.4f}\n"
+            results_text += f"• p-value: {results['p_value']:.4f}\n"
+            results_text += f"• Significant: {'Yes' if results['significant'] else 'No'}\n\n"
+            
+            if method == 'PERMANOVA':
+                results_text += f"• Degrees of freedom (between): {results['df_between']}\n"
+                results_text += f"• Degrees of freedom (within): {results['df_within']}\n"
+            
+            # Interpretation
+            if results['significant']:
+                results_text += f"\nInterpretation:\n"
+                results_text += f"The clusters show statistically significant differences "
+                results_text += f"(p < {alpha:.3f}). The observed clustering is unlikely "
+                results_text += f"to have occurred by chance.\n"
+            else:
+                results_text += f"\nInterpretation:\n"
+                results_text += f"The clusters do not show statistically significant differences "
+                results_text += f"(p ≥ {alpha:.3f}). The observed clustering may have "
+                results_text += f"occurred by chance.\n"
+        
+        else:
+            # Feature-wise methods
+            results_text += f"\nTest Results:\n"
+            results_text += f"• Average test statistic: {results['test_statistic']:.4f}\n"
+            results_text += f"• Minimum p-value: {results['p_value']:.4f}\n"
+            results_text += f"• Significant features: {results['significant_features']}/{results['total_features']}\n"
+            results_text += f"• Percentage significant: {results['significant_features']/results['total_features']*100:.1f}%\n"
+            results_text += f"• Overall significant: {'Yes' if results['significant'] else 'No'}\n\n"
+            
+            # Interpretation
+            if results['significant']:
+                results_text += f"Interpretation:\n"
+                results_text += f"Multiple spectral features show statistically significant "
+                results_text += f"differences between clusters after Bonferroni correction. "
+                results_text += f"The clustering reveals meaningful chemical differences.\n"
+            else:
+                results_text += f"Interpretation:\n"
+                results_text += f"No spectral features show statistically significant "
+                results_text += f"differences between clusters after multiple testing correction. "
+                results_text += f"The clustering may not reflect meaningful chemical differences.\n"
+        
+        self.stats_results.setText(results_text)
 
     def perform_discriminant_analysis(self):
         """Perform discriminant analysis on clusters."""
-        QMessageBox.information(self, "Discriminant Analysis", 
-                              "Discriminant analysis functionality will be implemented.\n\n"
-                              "This will perform Linear Discriminant Analysis on the clusters.")
+        try:
+            if self.cluster_data['labels'] is None:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.model_selection import cross_val_score
+            
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            wavenumbers = self.cluster_data['wavenumbers']
+            
+            # Standardize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(intensities)
+            
+            # Perform LDA
+            lda = LinearDiscriminantAnalysis()
+            lda.fit(X_scaled, labels)
+            
+            # Transform data to LDA space
+            X_lda = lda.transform(X_scaled)
+            
+            # Calculate cross-validation accuracy
+            cv_scores = cross_val_score(lda, X_scaled, labels, cv=5)
+            
+            # Calculate explained variance ratio
+            explained_variance = lda.explained_variance_ratio_
+            
+            # Plot results
+            self._plot_discriminant_analysis(X_lda, labels, explained_variance, cv_scores)
+            
+            # Display results
+            self._display_discriminant_results(cv_scores, explained_variance, lda)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Discriminant Analysis Error", 
+                               f"Failed to perform discriminant analysis:\n{str(e)}")
+
+    def _plot_discriminant_analysis(self, X_lda, labels, explained_variance, cv_scores):
+        """Plot discriminant analysis results."""
+        self.stats_fig.clear()
+        
+        # Create subplots
+        ax1 = self.stats_fig.add_subplot(2, 2, 1)  # LDA scatter plot
+        ax2 = self.stats_fig.add_subplot(2, 2, 2)  # Explained variance
+        ax3 = self.stats_fig.add_subplot(2, 2, 3)  # Cross-validation scores
+        ax4 = self.stats_fig.add_subplot(2, 2, 4)  # Cluster separation
+        
+        # 1. LDA scatter plot (first two components)
+        unique_labels = np.unique(labels)
+        colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+        
+        for i, label in enumerate(unique_labels):
+            mask = labels == label
+            if X_lda.shape[1] >= 2:
+                ax1.scatter(X_lda[mask, 0], X_lda[mask, 1], 
+                           c=[colors[i]], label=f'Cluster {label}', alpha=0.7)
+            else:
+                # If only one component, plot against index
+                ax1.scatter(range(np.sum(mask)), X_lda[mask, 0], 
+                           c=[colors[i]], label=f'Cluster {label}', alpha=0.7)
+        
+        if X_lda.shape[1] >= 2:
+            ax1.set_xlabel(f'LD1 ({explained_variance[0]:.1%} variance)')
+            ax1.set_ylabel(f'LD2 ({explained_variance[1]:.1%} variance)')
+        else:
+            ax1.set_xlabel('Sample Index')
+            ax1.set_ylabel(f'LD1 ({explained_variance[0]:.1%} variance)')
+        ax1.set_title('Linear Discriminant Analysis')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Explained variance plot
+        components = range(1, len(explained_variance) + 1)
+        ax2.bar(components, explained_variance, color='skyblue', edgecolor='navy')
+        ax2.set_xlabel('Linear Discriminant')
+        ax2.set_ylabel('Explained Variance Ratio')
+        ax2.set_title('Explained Variance by Component')
+        ax2.set_xticks(components)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Cross-validation scores
+        fold_numbers = range(1, len(cv_scores) + 1)
+        bars = ax3.bar(fold_numbers, cv_scores, color='lightgreen', edgecolor='darkgreen')
+        ax3.axhline(y=np.mean(cv_scores), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(cv_scores):.3f}')
+        ax3.set_xlabel('Cross-Validation Fold')
+        ax3.set_ylabel('Accuracy Score')
+        ax3.set_title('Cross-Validation Performance')
+        ax3.set_ylim(0, 1)
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Cluster separation analysis
+        if X_lda.shape[1] >= 1:
+            # Calculate pairwise distances between cluster centroids
+            centroids = []
+            for label in unique_labels:
+                mask = labels == label
+                centroid = np.mean(X_lda[mask], axis=0)
+                centroids.append(centroid)
+            
+            centroids = np.array(centroids)
+            n_clusters = len(unique_labels)
+            
+            # Calculate separation matrix
+            separation_matrix = np.zeros((n_clusters, n_clusters))
+            for i in range(n_clusters):
+                for j in range(n_clusters):
+                    if i != j:
+                        separation_matrix[i, j] = np.linalg.norm(centroids[i] - centroids[j])
+            
+            # Plot separation heatmap
+            im = ax4.imshow(separation_matrix, cmap='viridis', aspect='auto')
+            ax4.set_xticks(range(n_clusters))
+            ax4.set_yticks(range(n_clusters))
+            ax4.set_xticklabels([f'C{label}' for label in unique_labels])
+            ax4.set_yticklabels([f'C{label}' for label in unique_labels])
+            ax4.set_title('Cluster Separation Matrix')
+            
+            # Add text annotations
+            for i in range(n_clusters):
+                for j in range(n_clusters):
+                    if i != j:
+                        ax4.text(j, i, f'{separation_matrix[i, j]:.2f}', 
+                               ha='center', va='center', color='white')
+            
+            self.stats_fig.colorbar(im, ax=ax4)
+        
+        self.stats_fig.tight_layout()
+        self.stats_canvas.draw()
+
+    def _display_discriminant_results(self, cv_scores, explained_variance, lda):
+        """Display discriminant analysis results."""
+        results_text = "Linear Discriminant Analysis Results\n"
+        results_text += "=" * 40 + "\n\n"
+        
+        results_text += f"Cross-Validation Performance:\n"
+        results_text += f"• Mean accuracy: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}\n"
+        results_text += f"• Best fold: {np.max(cv_scores):.3f}\n"
+        results_text += f"• Worst fold: {np.min(cv_scores):.3f}\n\n"
+        
+        results_text += f"Explained Variance by Component:\n"
+        for i, var in enumerate(explained_variance):
+            results_text += f"• LD{i+1}: {var:.3f} ({var*100:.1f}%)\n"
+        
+        cumulative_var = np.cumsum(explained_variance)
+        results_text += f"\nCumulative Explained Variance:\n"
+        for i, cum_var in enumerate(cumulative_var):
+            results_text += f"• First {i+1} component(s): {cum_var:.3f} ({cum_var*100:.1f}%)\n"
+        
+        # Model interpretation
+        results_text += f"\nModel Interpretation:\n"
+        if np.mean(cv_scores) >= 0.9:
+            interpretation = "Excellent cluster separation"
+        elif np.mean(cv_scores) >= 0.8:
+            interpretation = "Good cluster separation"
+        elif np.mean(cv_scores) >= 0.7:
+            interpretation = "Moderate cluster separation"
+        else:
+            interpretation = "Poor cluster separation"
+        
+        results_text += f"• Classification quality: {interpretation}\n"
+        results_text += f"• Number of discriminant functions: {len(explained_variance)}\n"
+        
+        self.stats_results.setText(results_text)
 
     def test_statistical_significance(self):
         """Test statistical significance of cluster differences."""
-        QMessageBox.information(self, "Statistical Significance", 
-                              "Statistical significance testing functionality will be implemented.\n\n"
-                              "This will test significance using the selected method.")
+        try:
+            if self.cluster_data['labels'] is None:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            method = self.significance_method_combo.currentText()
+            alpha = self.significance_level.value()
+            n_permutations = self.permutations.value()
+            
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            
+            if method == 'PERMANOVA':
+                results = self._perform_permanova(intensities, labels, alpha, n_permutations)
+            elif method == 'ANOSIM':
+                results = self._perform_anosim(intensities, labels, alpha, n_permutations)
+            elif method == 'Kruskal-Wallis':
+                results = self._perform_kruskal_wallis(intensities, labels, alpha)
+            elif method == 'ANOVA':
+                results = self._perform_anova(intensities, labels, alpha)
+            else:
+                results = self._perform_permanova(intensities, labels, alpha, n_permutations)
+            
+            # Plot results
+            self._plot_significance_results(results, method)
+            
+            # Display results
+            self._display_significance_results(results, method, alpha)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Statistical Significance Error", 
+                               f"Failed to test statistical significance:\n{str(e)}")
+
+    def _perform_permanova(self, intensities, labels, alpha, n_permutations):
+        """Perform PERMANOVA test."""
+        from scipy.spatial.distance import pdist, squareform
+        
+        # Calculate distance matrix
+        distances = pdist(intensities, metric='euclidean')
+        distance_matrix = squareform(distances)
+        
+        # Calculate observed F-statistic
+        def calculate_f_stat(dist_matrix, group_labels):
+            unique_groups = np.unique(group_labels)
+            n_total = len(group_labels)
+            n_groups = len(unique_groups)
+            
+            # Total sum of squares
+            grand_mean_distances = np.mean(dist_matrix)
+            total_ss = np.sum((dist_matrix - grand_mean_distances) ** 2)
+            
+            # Within-group sum of squares
+            within_ss = 0
+            for group in unique_groups:
+                group_mask = group_labels == group
+                group_distances = dist_matrix[np.ix_(group_mask, group_mask)]
+                group_mean = np.mean(group_distances)
+                within_ss += np.sum((group_distances - group_mean) ** 2)
+            
+            # Between-group sum of squares
+            between_ss = total_ss - within_ss
+            
+            # Degrees of freedom
+            df_between = n_groups - 1
+            df_within = n_total - n_groups
+            
+            # F-statistic
+            if df_within > 0 and within_ss > 0:
+                f_stat = (between_ss / df_between) / (within_ss / df_within)
+            else:
+                f_stat = 0
+            
+            return f_stat, df_between, df_within
+        
+        observed_f, df_between, df_within = calculate_f_stat(distance_matrix, labels)
+        
+        # Permutation test
+        permuted_f_stats = []
+        for _ in range(n_permutations):
+            permuted_labels = np.random.permutation(labels)
+            perm_f, _, _ = calculate_f_stat(distance_matrix, permuted_labels)
+            permuted_f_stats.append(perm_f)
+        
+        permuted_f_stats = np.array(permuted_f_stats)
+        p_value = np.sum(permuted_f_stats >= observed_f) / n_permutations
+        
+        return {
+            'test_statistic': observed_f,
+            'p_value': p_value,
+            'df_between': df_between,
+            'df_within': df_within,
+            'significant': p_value < alpha,
+            'permuted_stats': permuted_f_stats,
+            'method': 'PERMANOVA'
+        }
+
+    def _perform_anosim(self, intensities, labels, alpha, n_permutations):
+        """Perform ANOSIM test."""
+        from scipy.spatial.distance import pdist, squareform
+        
+        # Calculate distance matrix
+        distances = pdist(intensities, metric='euclidean')
+        distance_matrix = squareform(distances)
+        
+        def calculate_anosim_r(dist_matrix, group_labels):
+            unique_groups = np.unique(group_labels)
+            n_samples = len(group_labels)
+            
+            # Calculate within-group and between-group distances
+            within_distances = []
+            between_distances = []
+            
+            for i in range(n_samples):
+                for j in range(i + 1, n_samples):
+                    if group_labels[i] == group_labels[j]:
+                        within_distances.append(dist_matrix[i, j])
+                    else:
+                        between_distances.append(dist_matrix[i, j])
+            
+            within_distances = np.array(within_distances)
+            between_distances = np.array(between_distances)
+            
+            # Calculate ANOSIM R statistic
+            if len(within_distances) > 0 and len(between_distances) > 0:
+                mean_within = np.mean(within_distances)
+                mean_between = np.mean(between_distances)
+                r_stat = (mean_between - mean_within) / (mean_between + mean_within) * 2
+            else:
+                r_stat = 0
+            
+            return r_stat
+        
+        observed_r = calculate_anosim_r(distance_matrix, labels)
+        
+        # Permutation test
+        permuted_r_stats = []
+        for _ in range(n_permutations):
+            permuted_labels = np.random.permutation(labels)
+            perm_r = calculate_anosim_r(distance_matrix, permuted_labels)
+            permuted_r_stats.append(perm_r)
+        
+        permuted_r_stats = np.array(permuted_r_stats)
+        p_value = np.sum(permuted_r_stats >= observed_r) / n_permutations
+        
+        return {
+            'test_statistic': observed_r,
+            'p_value': p_value,
+            'significant': p_value < alpha,
+            'permuted_stats': permuted_r_stats,
+            'method': 'ANOSIM'
+        }
+
+    def _perform_kruskal_wallis(self, intensities, labels, alpha):
+        """Perform Kruskal-Wallis test."""
+        from scipy.stats import kruskal
+        
+        # Test each wavenumber separately
+        n_features = intensities.shape[1]
+        h_statistics = []
+        p_values = []
+        
+        unique_labels = np.unique(labels)
+        
+        for feature_idx in range(n_features):
+            feature_data = intensities[:, feature_idx]
+            group_data = [feature_data[labels == label] for label in unique_labels]
+            
+            try:
+                h_stat, p_val = kruskal(*group_data)
+                h_statistics.append(h_stat)
+                p_values.append(p_val)
+            except:
+                h_statistics.append(0)
+                p_values.append(1)
+        
+        h_statistics = np.array(h_statistics)
+        p_values = np.array(p_values)
+        
+        # Multiple testing correction (Bonferroni)
+        corrected_p_values = p_values * n_features
+        corrected_p_values = np.minimum(corrected_p_values, 1.0)
+        
+        # Overall test result
+        significant_features = np.sum(corrected_p_values < alpha)
+        overall_significant = significant_features > 0
+        
+        return {
+            'test_statistic': np.mean(h_statistics),
+            'p_value': np.min(p_values),
+            'corrected_p_values': corrected_p_values,
+            'significant': overall_significant,
+            'significant_features': significant_features,
+            'total_features': n_features,
+            'method': 'Kruskal-Wallis'
+        }
+
+    def _perform_anova(self, intensities, labels, alpha):
+        """Perform one-way ANOVA test."""
+        from scipy.stats import f_oneway
+        
+        # Test each wavenumber separately
+        n_features = intensities.shape[1]
+        f_statistics = []
+        p_values = []
+        
+        unique_labels = np.unique(labels)
+        
+        for feature_idx in range(n_features):
+            feature_data = intensities[:, feature_idx]
+            group_data = [feature_data[labels == label] for label in unique_labels]
+            
+            try:
+                f_stat, p_val = f_oneway(*group_data)
+                f_statistics.append(f_stat)
+                p_values.append(p_val)
+            except:
+                f_statistics.append(0)
+                p_values.append(1)
+        
+        f_statistics = np.array(f_statistics)
+        p_values = np.array(p_values)
+        
+        # Multiple testing correction (Bonferroni)
+        corrected_p_values = p_values * n_features
+        corrected_p_values = np.minimum(corrected_p_values, 1.0)
+        
+        # Overall test result
+        significant_features = np.sum(corrected_p_values < alpha)
+        overall_significant = significant_features > 0
+        
+        return {
+            'test_statistic': np.mean(f_statistics),
+            'p_value': np.min(p_values),
+            'corrected_p_values': corrected_p_values,
+            'significant': overall_significant,
+            'significant_features': significant_features,
+            'total_features': n_features,
+            'method': 'ANOVA'
+        }
+
+    def _plot_significance_results(self, results, method):
+        """Plot statistical significance results."""
+        self.stats_fig.clear()
+        
+        if method in ['PERMANOVA', 'ANOSIM']:
+            # Permutation-based methods
+            ax1 = self.stats_fig.add_subplot(2, 2, 1)  # Null distribution
+            ax2 = self.stats_fig.add_subplot(2, 2, 2)  # Test result
+            
+            # Plot null distribution
+            permuted_stats = results['permuted_stats']
+            observed_stat = results['test_statistic']
+            
+            ax1.hist(permuted_stats, bins=50, alpha=0.7, color='lightblue', 
+                    edgecolor='black', label='Null distribution')
+            ax1.axvline(x=observed_stat, color='red', linestyle='--', linewidth=2,
+                       label=f'Observed: {observed_stat:.3f}')
+            ax1.set_xlabel(f'{method} Statistic')
+            ax1.set_ylabel('Frequency')
+            ax1.set_title(f'{method} Null Distribution')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot test result
+            p_value = results['p_value']
+            significance = "Significant" if results['significant'] else "Not Significant"
+            
+            colors = ['red' if results['significant'] else 'green']
+            bars = ax2.bar(['Test Result'], [p_value], color=colors, alpha=0.7)
+            ax2.axhline(y=0.05, color='black', linestyle='--', alpha=0.7, label='α = 0.05')
+            ax2.set_ylabel('p-value')
+            ax2.set_title(f'{method} Test Result\n{significance}')
+            ax2.set_ylim(0, max(0.1, p_value * 1.2))
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            # Add text annotation
+            ax2.text(0, p_value + 0.01, f'p = {p_value:.4f}', 
+                    ha='center', va='bottom', fontweight='bold')
+            
+        else:
+            # Feature-wise methods (ANOVA, Kruskal-Wallis)
+            ax1 = self.stats_fig.add_subplot(2, 2, 1)  # p-value distribution
+            ax2 = self.stats_fig.add_subplot(2, 2, 2)  # Significant features
+            ax3 = self.stats_fig.add_subplot(2, 2, 3)  # Corrected p-values
+            
+            corrected_p_values = results['corrected_p_values']
+            wavenumbers = self.cluster_data['wavenumbers']
+            
+            # p-value distribution
+            ax1.hist(corrected_p_values, bins=30, alpha=0.7, color='skyblue', edgecolor='black')
+            ax1.axvline(x=0.05, color='red', linestyle='--', label='α = 0.05')
+            ax1.set_xlabel('Corrected p-value')
+            ax1.set_ylabel('Frequency')
+            ax1.set_title('Distribution of Corrected p-values')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Significant features summary
+            significant_features = results['significant_features']
+            total_features = results['total_features']
+            
+            labels = ['Significant', 'Not Significant']
+            sizes = [significant_features, total_features - significant_features]
+            colors = ['red', 'lightgray']
+            
+            ax2.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
+            ax2.set_title(f'Feature Significance\n({significant_features}/{total_features} significant)')
+            
+            # Plot corrected p-values vs wavenumber
+            if len(wavenumbers) == len(corrected_p_values):
+                significant_mask = corrected_p_values < 0.05
+                ax3.scatter(wavenumbers[~significant_mask], corrected_p_values[~significant_mask], 
+                           c='gray', alpha=0.5, s=20, label='Not significant')
+                if np.any(significant_mask):
+                    ax3.scatter(wavenumbers[significant_mask], corrected_p_values[significant_mask], 
+                               c='red', s=30, label='Significant')
+                ax3.axhline(y=0.05, color='black', linestyle='--', alpha=0.7)
+                ax3.set_xlabel('Wavenumber (cm⁻¹)')
+                ax3.set_ylabel('Corrected p-value')
+                ax3.set_title('Significance by Wavenumber')
+                ax3.legend()
+                ax3.grid(True, alpha=0.3)
+        
+        self.stats_fig.tight_layout()
+        self.stats_canvas.draw()
 
     def run_comprehensive_statistics(self):
         """Run comprehensive statistical analysis."""
-        QMessageBox.information(self, "Comprehensive Statistics", 
-                              "Comprehensive statistical analysis functionality will be implemented.\n\n"
-                              "This will run all statistical analyses and provide detailed results.")
+        try:
+            if self.cluster_data['labels'] is None:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            # Run all analyses if their checkboxes are checked
+            results = {}
+            
+            if self.feature_importance_cb.isChecked():
+                self.calculate_feature_importance()
+                results['feature_importance'] = "Completed"
+            
+            if self.discriminant_analysis_cb.isChecked():
+                self.perform_discriminant_analysis()
+                results['discriminant_analysis'] = "Completed"
+            
+            if self.significance_testing_cb.isChecked():
+                self.test_statistical_significance()
+                results['significance_testing'] = "Completed"
+            
+            # Display comprehensive summary
+            self._display_comprehensive_summary(results)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Comprehensive Statistics Error", 
+                               f"Failed to run comprehensive statistics:\n{str(e)}")
+    
+    def _display_comprehensive_summary(self, results):
+        """Display comprehensive analysis summary."""
+        from PySide6.QtCore import QDateTime
+        
+        results_text = "Comprehensive Statistical Analysis Summary\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Analysis Date: {QDateTime.currentDateTime().toString()}\n"
+        results_text += f"Dataset: {len(self.cluster_data['labels'])} spectra, "
+        results_text += f"{len(np.unique(self.cluster_data['labels']))} clusters\n\n"
+        
+        results_text += "Completed Analyses:\n"
+        results_text += "-" * 20 + "\n"
+        
+        for analysis, status in results.items():
+            analysis_name = analysis.replace('_', ' ').title()
+            results_text += f"• {analysis_name}: {status}\n"
+        
+        if not results:
+            results_text += "No analyses were selected or completed.\n"
+        
+        results_text += f"\nRecommendations:\n"
+        results_text += "-" * 15 + "\n"
+        
+        n_clusters = len(np.unique(self.cluster_data['labels']))
+        n_samples = len(self.cluster_data['labels'])
+        
+        if n_samples < 30:
+            results_text += "• Consider collecting more data for robust statistical analysis\n"
+        
+        if n_clusters > n_samples / 10:
+            results_text += "• Large number of clusters relative to sample size may indicate overfitting\n"
+        
+        results_text += "• Examine feature importance results to identify key spectral regions\n"
+        results_text += "• Use discriminant analysis results to assess cluster separability\n"
+        results_text += "• Consider significance testing results when interpreting clustering validity\n"
+        
+        results_text += f"\nNext Steps:\n"
+        results_text += "• Export results for further analysis\n"
+        results_text += "• Consider validation with independent datasets\n"
+        results_text += "• Investigate chemical interpretation of important features\n"
+        
+        # Append to existing results (don't overwrite)
+        current_text = self.stats_results.toPlainText()
+        if current_text:
+            full_text = current_text + "\n\n" + results_text
+        else:
+            full_text = results_text
+        
+        self.stats_results.setText(full_text)
 
     # Database Import Dialog placeholder class
     def open_database_import_dialog(self):
@@ -3646,11 +6841,420 @@ Cluster Sizes:
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export results:\n{str(e)}")
 
-    # ... existing code ...
+    def plot_silhouette_analysis(self, unique_labels, cluster_silhouettes, silhouette_avg):
+        """Plot silhouette analysis results."""
+        try:
+            self.validation_fig.clear()
+            
+            # Create 2x2 subplot layout
+            ax1 = self.validation_fig.add_subplot(2, 2, 1)  # Silhouette plot
+            ax2 = self.validation_fig.add_subplot(2, 2, 2)  # Cluster silhouette scores
+            ax3 = self.validation_fig.add_subplot(2, 2, 3)  # Sample distribution
+            ax4 = self.validation_fig.add_subplot(2, 2, 4)  # Threshold analysis
+            
+            # 1. Classic silhouette plot
+            colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            y_lower = 10
+            
+            for i, label in enumerate(unique_labels):
+                cluster_silhouette_values = cluster_silhouettes[label]['samples']
+                cluster_silhouette_values.sort()
+                
+                size_cluster = len(cluster_silhouette_values)
+                y_upper = y_lower + size_cluster
+                
+                color = colors[i]
+                ax1.fill_betweenx(np.arange(y_lower, y_upper),
+                                0, cluster_silhouette_values,
+                                facecolor=color, edgecolor=color, alpha=0.7)
+                
+                # Label the silhouette plots with their cluster numbers at the middle
+                ax1.text(-0.05, y_lower + 0.5 * size_cluster, str(label))
+                y_lower = y_upper + 10
+            
+            ax1.set_xlabel('Silhouette coefficient values')
+            ax1.set_ylabel('Cluster label')
+            ax1.set_title('Silhouette Plot for Individual Samples')
+            
+            # Add average silhouette line
+            ax1.axvline(x=silhouette_avg, color="red", linestyle="--", 
+                       label=f'Average Score: {silhouette_avg:.3f}')
+            ax1.legend()
+            
+            # 2. Cluster silhouette scores
+            cluster_means = [cluster_silhouettes[label]['mean'] for label in unique_labels]
+            cluster_stds = [cluster_silhouettes[label]['std'] for label in unique_labels]
+            
+            x_pos = np.arange(len(unique_labels))
+            bars = ax2.bar(x_pos, cluster_means, yerr=cluster_stds, 
+                          capsize=5, color=colors, alpha=0.7)
+            
+            ax2.set_xlabel('Cluster')
+            ax2.set_ylabel('Mean Silhouette Score')
+            ax2.set_title('Mean Silhouette Score by Cluster')
+            ax2.set_xticks(x_pos)
+            ax2.set_xticklabels([f'C{label}' for label in unique_labels])
+            ax2.axhline(y=silhouette_avg, color="red", linestyle="--", alpha=0.7)
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. Sample distribution histogram
+            all_samples = np.concatenate([cluster_silhouettes[label]['samples'] 
+                                        for label in unique_labels])
+            ax3.hist(all_samples, bins=30, alpha=0.7, color='skyblue', edgecolor='black')
+            ax3.axvline(x=silhouette_avg, color="red", linestyle="--", 
+                       label=f'Average: {silhouette_avg:.3f}')
+            ax3.axvline(x=self.min_silhouette_threshold.value(), color="orange", 
+                       linestyle="--", label=f'Threshold: {self.min_silhouette_threshold.value():.3f}')
+            ax3.set_xlabel('Silhouette Score')
+            ax3.set_ylabel('Frequency')
+            ax3.set_title('Distribution of Silhouette Scores')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # 4. Threshold analysis
+            threshold = self.min_silhouette_threshold.value()
+            good_samples = np.sum(all_samples >= threshold)
+            poor_samples = np.sum(all_samples < threshold)
+            
+            wedges, texts, autotexts = ax4.pie([good_samples, poor_samples], 
+                                              labels=[f'Good (≥{threshold:.1f})', f'Poor (<{threshold:.1f})'],
+                                              autopct='%1.1f%%', colors=['lightgreen', 'lightcoral'])
+            ax4.set_title('Sample Quality Distribution')
+            
+            self.validation_fig.tight_layout()
+            self.validation_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting silhouette analysis: {str(e)}")
+    
+    def generate_silhouette_results(self, silhouette_avg, cluster_silhouettes, sample_silhouette_values, labels):
+        """Generate detailed silhouette analysis results text."""
+        results_text = "Silhouette Analysis Results\n"
+        results_text += "=" * 30 + "\n\n"
+        
+        results_text += f"Overall Silhouette Score: {silhouette_avg:.3f}\n"
+        threshold = self.min_silhouette_threshold.value()
+        results_text += f"Quality Threshold: {threshold:.3f}\n\n"
+        
+        # Overall assessment
+        if silhouette_avg >= 0.7:
+            assessment = "Excellent clustering quality"
+        elif silhouette_avg >= 0.5:
+            assessment = "Good clustering quality"
+        elif silhouette_avg >= 0.3:
+            assessment = "Moderate clustering quality"
+        else:
+            assessment = "Poor clustering quality"
+        
+        results_text += f"Assessment: {assessment}\n\n"
+        
+        # Cluster-specific results
+        results_text += "Cluster-Specific Silhouette Scores:\n"
+        results_text += "-" * 35 + "\n"
+        
+        for label in sorted(cluster_silhouettes.keys()):
+            stats = cluster_silhouettes[label]
+            results_text += f"Cluster {label}:\n"
+            results_text += f"  • Mean score: {stats['mean']:.3f}\n"
+            results_text += f"  • Std deviation: {stats['std']:.3f}\n"
+            results_text += f"  • Range: {stats['min']:.3f} to {stats['max']:.3f}\n"
+            
+            # Quality assessment for this cluster
+            if stats['mean'] >= threshold:
+                quality = "Good"
+            else:
+                quality = "Needs improvement"
+            results_text += f"  • Quality: {quality}\n\n"
+        
+        # Sample quality statistics
+        good_samples = np.sum(sample_silhouette_values >= threshold)
+        total_samples = len(sample_silhouette_values)
+        poor_samples = total_samples - good_samples
+        
+        results_text += "Sample Quality Distribution:\n"
+        results_text += "-" * 28 + "\n"
+        results_text += f"• Good samples (≥{threshold:.1f}): {good_samples} ({good_samples/total_samples*100:.1f}%)\n"
+        results_text += f"• Poor samples (<{threshold:.1f}): {poor_samples} ({poor_samples/total_samples*100:.1f}%)\n\n"
+        
+        # Recommendations
+        results_text += "Recommendations:\n"
+        results_text += "-" * 15 + "\n"
+        
+        if silhouette_avg < 0.3:
+            results_text += "• Consider different clustering parameters\n"
+            results_text += "• Try different number of clusters\n"
+            results_text += "• Check data preprocessing\n"
+        elif poor_samples > total_samples * 0.3:
+            results_text += "• Some samples may be outliers\n"
+            results_text += "• Consider outlier detection\n"
+        else:
+            results_text += "• Clustering quality is acceptable\n"
+            results_text += "• Consider fine-tuning if needed\n"
+        
+        return results_text
+    
+    def plot_transition_analysis(self, coords_2d, labels, centroids_2d, transition_analysis, unique_labels):
+        """Plot cluster transition analysis results."""
+        try:
+            self.validation_fig.clear()
+            
+            # Create 2x2 subplot layout
+            ax1 = self.validation_fig.add_subplot(2, 2, 1)  # 2D cluster plot with boundaries
+            ax2 = self.validation_fig.add_subplot(2, 2, 2)  # Boundary thickness analysis
+            ax3 = self.validation_fig.add_subplot(2, 2, 3)  # Centroid distances
+            ax4 = self.validation_fig.add_subplot(2, 2, 4)  # Boundary points count
+            
+            colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            color_map = {label: colors[i] for i, label in enumerate(unique_labels)}
+            
+            # 1. 2D cluster plot with boundary regions
+            for i, label in enumerate(unique_labels):
+                cluster_mask = labels == label
+                cluster_coords = coords_2d[cluster_mask]
+                
+                ax1.scatter(cluster_coords[:, 0], cluster_coords[:, 1], 
+                          c=[color_map[label]], label=f'Cluster {label}', 
+                          alpha=0.7, s=30)
+                
+                # Plot centroid
+                ax1.scatter(centroids_2d[i, 0], centroids_2d[i, 1], 
+                          c=[color_map[label]], marker='x', s=100, linewidths=3)
+            
+            # Highlight boundary points
+            for pair_key, analysis in transition_analysis.items():
+                boundary_points_i = analysis['boundary_points_i']
+                boundary_points_j = analysis['boundary_points_j']
+                
+                if len(boundary_points_i) > 0:
+                    ax1.scatter(boundary_points_i[:, 0], boundary_points_i[:, 1], 
+                              c='red', marker='o', s=20, alpha=0.5)
+                if len(boundary_points_j) > 0:
+                    ax1.scatter(boundary_points_j[:, 0], boundary_points_j[:, 1], 
+                              c='red', marker='o', s=20, alpha=0.5)
+            
+            ax1.set_xlabel('PC1')
+            ax1.set_ylabel('PC2')
+            ax1.set_title('Clusters with Boundary Points (red)')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. Boundary thickness analysis
+            pair_names = list(transition_analysis.keys())
+            boundary_thicknesses = [transition_analysis[pair]['boundary_thickness'] 
+                                  for pair in pair_names]
+            
+            x_pos = np.arange(len(pair_names))
+            bars = ax2.bar(x_pos, boundary_thicknesses, alpha=0.7, color='orange')
+            
+            ax2.set_xlabel('Cluster Pairs')
+            ax2.set_ylabel('Boundary Thickness')
+            ax2.set_title('Boundary Thickness Between Clusters')
+            ax2.set_xticks(x_pos)
+            ax2.set_xticklabels([f'C{pair}' for pair in pair_names], rotation=45)
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. Centroid distances
+            centroid_distances = [transition_analysis[pair]['centroid_distance'] 
+                                for pair in pair_names]
+            
+            bars = ax3.bar(x_pos, centroid_distances, alpha=0.7, color='skyblue')
+            
+            ax3.set_xlabel('Cluster Pairs')
+            ax3.set_ylabel('Centroid Distance')
+            ax3.set_title('Distance Between Cluster Centroids')
+            ax3.set_xticks(x_pos)
+            ax3.set_xticklabels([f'C{pair}' for pair in pair_names], rotation=45)
+            ax3.grid(True, alpha=0.3)
+            
+                        # 4. Boundary points count
+            boundary_counts = [(transition_analysis[pair]['n_boundary_i'] + 
+                              transition_analysis[pair]['n_boundary_j']) 
+                             for pair in pair_names]
+            
+            bars = ax4.bar(x_pos, boundary_counts, alpha=0.7, color='lightgreen')
+            
+            ax4.set_xlabel('Cluster Pairs')
+            ax4.set_ylabel('Number of Boundary Points')
+            ax4.set_title('Boundary Points Count')
+            ax4.set_xticks(x_pos)
+            ax4.set_xticklabels([f'C{pair}' for pair in pair_names], rotation=45)
+            ax4.grid(True, alpha=0.3)
+            
+            self.validation_fig.tight_layout()
+            self.validation_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting transition analysis: {str(e)}")
+    
+    def generate_transition_results(self, transition_analysis, unique_labels):
+        """Generate detailed transition analysis results text."""
+        results_text = "Cluster Transition Analysis Results\n"
+        results_text += "=" * 35 + "\n\n"
+        
+        results_text += f"Number of Cluster Pairs Analyzed: {len(transition_analysis)}\n\n"
+        
+        # Analyze each cluster pair
+        results_text += "Cluster Pair Analysis:\n"
+        results_text += "-" * 22 + "\n"
+        
+        # Sort by centroid distance
+        sorted_pairs = sorted(transition_analysis.items(), 
+                            key=lambda x: x[1]['centroid_distance'])
+        
+        for pair_key, analysis in sorted_pairs:
+            results_text += f"Clusters {pair_key}:\n"
+            results_text += f"  • Centroid distance: {analysis['centroid_distance']:.3f}\n"
+            results_text += f"  • Boundary thickness: {analysis['boundary_thickness']:.3f}\n"
+            results_text += f"  • Boundary points: {analysis['n_boundary_i'] + analysis['n_boundary_j']}\n"
+            
+            # Separation assessment
+            separation_ratio = analysis['centroid_distance'] / analysis['boundary_thickness']
+            if separation_ratio > 3:
+                separation = "Well separated"
+            elif separation_ratio > 2:
+                separation = "Moderately separated"
+            else:
+                separation = "Poorly separated"
+            
+            results_text += f"  • Separation: {separation} (ratio: {separation_ratio:.2f})\n\n"
+        
+        # Overall statistics
+        all_distances = [analysis['centroid_distance'] for analysis in transition_analysis.values()]
+        all_thicknesses = [analysis['boundary_thickness'] for analysis in transition_analysis.values()]
+        all_boundary_counts = [(analysis['n_boundary_i'] + analysis['n_boundary_j']) 
+                             for analysis in transition_analysis.values()]
+        
+        results_text += "Overall Statistics:\n"
+        results_text += "-" * 18 + "\n"
+        results_text += f"• Mean centroid distance: {np.mean(all_distances):.3f}\n"
+        results_text += f"• Mean boundary thickness: {np.mean(all_thicknesses):.3f}\n"
+        results_text += f"• Mean boundary points: {np.mean(all_boundary_counts):.1f}\n\n"
+        
+        # Recommendations
+        results_text += "Separation Quality Assessment:\n"
+        results_text += "-" * 28 + "\n"
+        
+        well_separated = sum(1 for analysis in transition_analysis.values() 
+                           if analysis['centroid_distance'] / analysis['boundary_thickness'] > 3)
+        total_pairs = len(transition_analysis)
+        
+        results_text += f"• Well separated pairs: {well_separated}/{total_pairs} ({well_separated/total_pairs*100:.1f}%)\n"
+        
+        if well_separated < total_pairs * 0.5:
+            results_text += "\nRecommendations:\n"
+            results_text += "• Consider increasing number of clusters\n"
+            results_text += "• Some clusters may need to be merged\n"
+            results_text += "• Review clustering parameters\n"
+        else:
+            results_text += "\nGood cluster separation achieved!\n"
+        
+        return results_text
+    
+    def plot_stability_analysis(self, stability_stats, cluster_stability, stability_scores):
+        """Plot cluster stability analysis results."""
+        try:
+            self.validation_fig.clear()
+            
+            # Create 2x2 subplot layout
+            ax1 = self.validation_fig.add_subplot(2, 2, 1)  # ARI distribution
+            ax2 = self.validation_fig.add_subplot(2, 2, 2)  # Cluster consistency
+            ax3 = self.validation_fig.add_subplot(2, 2, 3)  # Stability over iterations
+            ax4 = self.validation_fig.add_subplot(2, 2, 4)  # Summary statistics
+            
+            # 1. ARI distribution histogram
+            if stability_scores:
+                ax1.hist(stability_scores, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+                ax1.axvline(x=stability_stats['mean_ari'], color='red', linestyle='--', 
+                           label=f"Mean: {stability_stats['mean_ari']:.3f}")
+                ax1.set_xlabel('Adjusted Rand Index')
+                ax1.set_ylabel('Frequency')
+                ax1.set_title('Distribution of Stability Scores')
+                ax1.legend()
+                ax1.grid(True, alpha=0.3)
+            else:
+                ax1.text(0.5, 0.5, 'No stability data available', 
+                         transform=ax1.transAxes, ha='center', va='center')
+                ax1.set_title('Stability Score Distribution')
+            
+            # 2. Cluster consistency
+            cluster_labels = list(cluster_stability.keys())
+            if cluster_labels:
+                consistencies = [cluster_stability[label]['mean_consistency'] for label in cluster_labels]
+                consistency_stds = [cluster_stability[label]['std_consistency'] for label in cluster_labels]
+                
+                x_pos = np.arange(len(cluster_labels))
+                bars = ax2.bar(x_pos, consistencies, yerr=consistency_stds, 
+                              capsize=5, alpha=0.7, color='lightgreen')
+                
+                ax2.set_xlabel('Cluster')
+                ax2.set_ylabel('Consistency Score')
+                ax2.set_title('Cluster Consistency Across Bootstrap Samples')
+                ax2.set_xticks(x_pos)
+                ax2.set_xticklabels([f'C{label}' for label in cluster_labels])
+                ax2.set_ylim(0, 1)
+                ax2.grid(True, alpha=0.3)
+            else:
+                ax2.text(0.5, 0.5, 'No cluster data available', 
+                         transform=ax2.transAxes, ha='center', va='center')
+                ax2.set_title('Cluster Consistency')
+            
+            # 3. Stability over iterations
+            if stability_scores:
+                iterations = range(1, len(stability_scores) + 1)
+                ax3.plot(iterations, stability_scores, 'b-', alpha=0.7, linewidth=1)
+                ax3.axhline(y=stability_stats['mean_ari'], color='red', linestyle='--', 
+                           label=f"Mean: {stability_stats['mean_ari']:.3f}")
+                ax3.set_xlabel('Bootstrap Iteration')
+                ax3.set_ylabel('Adjusted Rand Index')
+                ax3.set_title('Stability Across Bootstrap Iterations')
+                ax3.legend()
+                ax3.grid(True, alpha=0.3)
+            else:
+                ax3.text(0.5, 0.5, 'No iteration data available', 
+                         transform=ax3.transAxes, ha='center', va='center')
+                ax3.set_title('Stability Over Iterations')
+            
+            # 4. Summary statistics
+            ax4.axis('off')
+            
+            summary_text = f"""Stability Analysis Summary
+            
+Mean ARI: {stability_stats['mean_ari']:.3f}
+Std ARI: {stability_stats['std_ari']:.3f}
+Min ARI: {stability_stats['min_ari']:.3f}
+Max ARI: {stability_stats['max_ari']:.3f}
+
+Successful Iterations: {stability_stats['successful_iterations']}
+Total Iterations: {stability_stats['total_iterations']}
+Success Rate: {stability_stats['successful_iterations']/stability_stats['total_iterations']*100:.1f}%
+
+Stability Assessment:"""
+            
+            # Add stability assessment
+            mean_ari = stability_stats['mean_ari']
+            if mean_ari >= 0.8:
+                assessment = "Excellent"
+            elif mean_ari >= 0.6:
+                assessment = "Good"
+            elif mean_ari >= 0.4:
+                assessment = "Moderate"
+            else:
+                assessment = "Poor"
+            
+            summary_text += f" {assessment}"
+            
+            ax4.text(0.1, 0.9, summary_text, transform=ax4.transAxes, 
+                    verticalalignment='top', fontfamily='monospace', fontsize=10)
+            
+            self.validation_fig.tight_layout()
+            self.validation_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting stability analysis: {str(e)}")
 
 
 def launch_cluster_analysis(parent, raman_app):
     """Launch the cluster analysis window."""
     cluster_window = RamanClusterAnalysisQt6(parent, raman_app)
     cluster_window.show()
-    return cluster_window 
+    return cluster_window

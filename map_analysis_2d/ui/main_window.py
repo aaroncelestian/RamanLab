@@ -5352,8 +5352,7 @@ All spectra have been processed and cleaned data is now available for analysis."
         """Test shape analysis on current spectrum with real-time visual feedback."""
         from .base_widgets import StandardButton
         import matplotlib.pyplot as plt
-        from matplotlib.backends.qt_compat import QtWidgets
-        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
         from matplotlib.figure import Figure
         
         if self.map_data is None:

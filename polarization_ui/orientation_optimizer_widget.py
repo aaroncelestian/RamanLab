@@ -19,29 +19,21 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Qt imports
-try:
-    from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                                 QGroupBox, QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
-                                 QFormLayout, QProgressDialog, QDialog, QTextEdit, 
-                                 QTabWidget, QMessageBox, QFileDialog, QSplitter)
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-    from PyQt6.QtGui import QFont, QPixmap, QIcon
-except ImportError:
-    print("PyQt6 not found, trying PyQt5...")
-    from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                                 QGroupBox, QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
-                                 QFormLayout, QProgressDialog, QDialog, QTextEdit, 
-                                 QTabWidget, QMessageBox, QFileDialog, QSplitter)
-    from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
-    from PyQt5.QtGui import QFont, QPixmap, QIcon
+# Use PySide6 as the official Qt for Python binding
+from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+                               QGroupBox, QLabel, QPushButton, QSpinBox, QDoubleSpinBox,
+                               QFormLayout, QProgressDialog, QDialog, QTextEdit, 
+                               QTabWidget, QMessageBox, QFileDialog, QSplitter)
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtGui import QFont, QPixmap, QIcon
 
 # Scientific computing imports
 try:
     import matplotlib
-    matplotlib.use('Qt5Agg')
+    matplotlib.use('QtAgg')
     from matplotlib.figure import Figure
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -81,10 +73,10 @@ except ImportError:
 class OptimizationWorker(QThread):
     """Worker thread for running optimization algorithms."""
     
-    progress_updated = pyqtSignal(int)
-    status_updated = pyqtSignal(str)
-    results_ready = pyqtSignal(dict)
-    error_occurred = pyqtSignal(str)
+    progress_updated = Signal(int)
+    status_updated = Signal(str)
+    results_ready = Signal(dict)
+    error_occurred = Signal(str)
     
     def __init__(self, optimization_type: str, widget_ref, **kwargs):
         super().__init__()

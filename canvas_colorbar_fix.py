@@ -188,11 +188,7 @@ class CanvasManager:
                 from PySide6.QtCore import QCoreApplication
                 QCoreApplication.processEvents()
             except ImportError:
-                try:
-                    from PyQt6.QtCore import QCoreApplication
-                    QCoreApplication.processEvents()
-                except ImportError:
-                    pass
+                pass
                     
         except Exception as e:
             logger.debug(f"Error refreshing canvas: {e}")

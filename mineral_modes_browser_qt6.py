@@ -34,8 +34,9 @@ try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    # Fallback - use PySide6/Qt6 compatible backend
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 from polarization_ui.matplotlib_config import configure_compact_ui, apply_theme
 

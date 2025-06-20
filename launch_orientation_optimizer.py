@@ -49,7 +49,7 @@ except ImportError as e:
     print("1. Make sure you're in the RamanLab directory")
     print("2. Check that polarization_ui/orientation_optimizer_widget.py exists")
     print("3. Install required dependencies:")
-    print("   pip install PyQt6 matplotlib numpy scipy")
+    print("   pip install PySide6 matplotlib numpy scipy")
     print("   pip install scikit-learn emcee  # optional for advanced features")
     sys.exit(1)
     

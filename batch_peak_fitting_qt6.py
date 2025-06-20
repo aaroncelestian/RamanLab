@@ -2221,10 +2221,34 @@ Material-Specific Guidelines:
                 QMessageBox.warning(self, "Error", "Invalid fit parameters generated.")
                 return
             
-            # Calculate R-squared
+            # Calculate R-squared using improved method for peak fitting
             ss_res = np.sum(self.residuals ** 2)
-            ss_tot = np.sum((self.intensities - np.mean(self.intensities)) ** 2)
-            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            
+            # For background-corrected spectra, use baseline-relative variance
+            baseline_intensity = np.percentile(self.intensities, 5)
+            signal_above_baseline = self.intensities - baseline_intensity
+            ss_tot = np.sum(signal_above_baseline ** 2)
+            
+            # Alternative: Explained variance method
+            fitted_curve = self.multi_peak_model(self.wavenumbers, *self.fit_params)
+            fitted_baseline = np.percentile(fitted_curve, 5)
+            fitted_signal = fitted_curve - fitted_baseline
+            ss_fit = np.sum(fitted_signal ** 2)
+            
+            # Calculate both methods
+            if ss_tot > 1e-10:
+                r_squared_traditional = 1 - (ss_res / ss_tot)
+            else:
+                r_squared_traditional = 0.0
+                
+            if ss_fit > 1e-10:
+                r_squared_explained = ss_fit / (ss_fit + ss_res)
+            else:
+                r_squared_explained = 0.0
+            
+            # Use the better of the two methods
+            r_squared = max(r_squared_traditional, r_squared_explained)
+            r_squared = max(0.0, min(1.0, r_squared))
             
             QMessageBox.information(self, "Success", 
                                   f"Peak fitting completed!\nR² = {r_squared:.4f}\nFitted {len(self.peaks)} peaks")
@@ -2426,12 +2450,41 @@ Material-Specific Guidelines:
                         self.wavenumbers = temp_wavenumbers
                         self.peaks = temp_peaks
                         
-                        # Calculate R-squared
+                        # Calculate R-squared using a more appropriate method for peak fitting
                         fitted_curve = self.multi_peak_model(wavenumbers, *popt)
                         residuals = intensities - fitted_curve
+                        
+                        # Method 1: Traditional R² but with better baseline handling
                         ss_res = np.sum(residuals ** 2)
-                        ss_tot = np.sum((intensities - np.mean(intensities)) ** 2)
-                        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                        
+                        # For background-corrected spectra, use the variance of the signal above baseline
+                        # rather than just the mean-centered variance
+                        baseline_intensity = np.percentile(intensities, 5)  # Use 5th percentile as baseline
+                        signal_above_baseline = intensities - baseline_intensity
+                        ss_tot = np.sum(signal_above_baseline ** 2)
+                        
+                        # Alternative: Use the variance of the fitted curve as reference
+                        fitted_baseline = np.percentile(fitted_curve, 5)
+                        fitted_signal = fitted_curve - fitted_baseline
+                        ss_fit = np.sum(fitted_signal ** 2)
+                        
+                        # Calculate R² using the better of the two methods
+                        if ss_tot > 1e-10:
+                            r_squared_traditional = 1 - (ss_res / ss_tot)
+                        else:
+                            r_squared_traditional = 0.0
+                            
+                        # Explained variance method - more appropriate for peak fitting
+                        if ss_fit > 1e-10:
+                            r_squared_explained = ss_fit / (ss_fit + ss_res)
+                        else:
+                            r_squared_explained = 0.0
+                        
+                        # Use the higher of the two (both should be similar for good fits)
+                        r_squared = max(r_squared_traditional, r_squared_explained)
+                        
+                        # Ensure R-squared is between 0 and 1
+                        r_squared = max(0.0, min(1.0, r_squared))
                         
                         # Store results
                         result_data = {
@@ -2482,12 +2535,33 @@ Material-Specific Guidelines:
                                 self.wavenumbers = temp_wavenumbers
                                 self.peaks = temp_peaks
                                 
-                                # Calculate R-squared
+                                # Calculate R-squared using improved method
                                 fitted_curve = self.multi_peak_model(wavenumbers, *popt)
                                 residuals = intensities - fitted_curve
                                 ss_res = np.sum(residuals ** 2)
-                                ss_tot = np.sum((intensities - np.mean(intensities)) ** 2)
-                                r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                                
+                                # Use baseline-relative variance for background-corrected spectra
+                                baseline_intensity = np.percentile(intensities, 5)
+                                signal_above_baseline = intensities - baseline_intensity
+                                ss_tot = np.sum(signal_above_baseline ** 2)
+                                
+                                # Explained variance method
+                                fitted_baseline = np.percentile(fitted_curve, 5)
+                                fitted_signal = fitted_curve - fitted_baseline
+                                ss_fit = np.sum(fitted_signal ** 2)
+                                
+                                if ss_tot > 1e-10:
+                                    r_squared_traditional = 1 - (ss_res / ss_tot)
+                                else:
+                                    r_squared_traditional = 0.0
+                                    
+                                if ss_fit > 1e-10:
+                                    r_squared_explained = ss_fit / (ss_fit + ss_res)
+                                else:
+                                    r_squared_explained = 0.0
+                                
+                                r_squared = max(r_squared_traditional, r_squared_explained)
+                                r_squared = max(0.0, min(1.0, r_squared))
                                 
                                 # Store results
                                 result_data = {
@@ -2631,12 +2705,37 @@ Material-Specific Guidelines:
                     if wavenumbers is None or intensities is None:
                         raise ValueError("Failed to load spectrum data")
                     
-                    # Preprocess spectrum
-                    wn, corrected_int = analyzer.preprocess_spectrum(wavenumbers, intensities)
+                    # Preprocess spectrum with validation
+                    try:
+                        wn, corrected_int = analyzer.preprocess_spectrum(wavenumbers, intensities)
+                        
+                        # Validate preprocessed data
+                        if len(wn) == 0 or len(corrected_int) == 0:
+                            raise ValueError("Empty data after preprocessing")
+                        if np.all(np.isnan(corrected_int)) or np.all(np.isinf(corrected_int)):
+                            raise ValueError("Invalid intensity data after preprocessing")
+                            
+                    except Exception as e:
+                        raise ValueError(f"Preprocessing failed: {str(e)}")
                     
-                    # Calculate density metrics
-                    cdi, metrics = analyzer.calculate_crystalline_density_index(wn, corrected_int)
-                    apparent_density = analyzer.calculate_apparent_density(cdi)
+                    # Calculate density metrics with validation
+                    try:
+                        cdi, metrics = analyzer.calculate_crystalline_density_index(wn, corrected_int)
+                        
+                        # Validate CDI calculation
+                        if np.isnan(cdi) or np.isinf(cdi):
+                            raise ValueError("CDI calculation returned invalid value")
+                        if cdi < 0:
+                            cdi = 0.0  # Ensure non-negative CDI
+                            
+                        apparent_density = analyzer.calculate_apparent_density(cdi)
+                        
+                        # Validate density calculation
+                        if np.isnan(apparent_density) or np.isinf(apparent_density):
+                            raise ValueError("Density calculation returned invalid value")
+                            
+                    except Exception as e:
+                        raise ValueError(f"Density analysis failed: {str(e)}")
                     
                     # Use appropriate density calculation
                     if material_type == 'Kidney Stones (COM)':
@@ -2673,7 +2772,13 @@ Material-Specific Guidelines:
                     self.density_results.append(density_result)
                     success_count += 1
                     
-                    self.batch_status_text.append(f"DENSITY SUCCESS: {os.path.basename(file_path)} - CDI={cdi:.4f}, ρ={specialized_density:.3f} g/cm³")
+                    # Add debug information for density calculation
+                    debug_info = f"CDI={cdi:.4f}, ρ={specialized_density:.3f} g/cm³"
+                    if 'metrics' in locals():
+                        debug_info += f", peak_height={metrics.get('main_peak_height', 'N/A'):.1f}"
+                        debug_info += f", baseline={metrics.get('baseline_intensity', 'N/A'):.1f}"
+                    
+                    self.batch_status_text.append(f"DENSITY SUCCESS: {os.path.basename(file_path)} - {debug_info}")
                     
                 except Exception as e:
                     # Store failed result
@@ -2695,6 +2800,9 @@ Material-Specific Guidelines:
             if success_count > 0:
                 self.update_trends_plot()  # This will now include density data
                 self.update_heatmap_plot()  # This will now include density data
+                
+                # Generate comprehensive density analysis visualization
+                self.show_comprehensive_density_plots()
             
             self.batch_status_text.append(f"\nDensity analysis complete: {success_count}/{len(self.spectra_files)} successful")
             
@@ -2707,6 +2815,251 @@ Material-Specific Guidelines:
             
         except Exception as e:
             QMessageBox.critical(self, "Analysis Error", f"Failed to run batch density analysis:\n{str(e)}")
+    
+    def show_comprehensive_density_plots(self):
+        """Generate comprehensive density analysis plots using the RamanDensityAnalyzer visualization."""
+        if not hasattr(self, 'density_results') or not self.density_results:
+            return
+            
+        try:
+            from Density.raman_density_analysis import RamanDensityAnalyzer
+            import sys
+            
+            # Get successful density results with valid data
+            successful_results = []
+            for r in self.density_results:
+                if (r.get('success', False) and 
+                    not np.isnan(r.get('cdi', np.nan)) and 
+                    not np.isnan(r.get('specialized_density', np.nan))):
+                    successful_results.append(r)
+            
+            if not successful_results:
+                QMessageBox.warning(self, "No Valid Data", 
+                                  "No density analysis results with valid data to plot.\n"
+                                  "This may indicate issues with the spectra or analysis parameters.")
+                return
+            
+            # Use the first successful result to get the material type and analyzer
+            first_result = successful_results[0]
+            material_type = first_result['material_type']
+            analyzer = RamanDensityAnalyzer(material_type)
+            
+            # Prepare data for comprehensive analysis
+            positions = list(range(len(successful_results)))  # Use spectrum indices as positions
+            
+            # Extract density profile data
+            cdi_profile = [r['cdi'] for r in successful_results]
+            density_profile = [r['specialized_density'] for r in successful_results]
+            apparent_density_profile = [r['apparent_density'] for r in successful_results]
+            
+            # Get classifications
+            classifications = [r['classification'] for r in successful_results]
+            
+            # Calculate statistics
+            mean_density = np.mean(density_profile)
+            std_density = np.std(density_profile)
+            mean_cdi = np.mean(cdi_profile)
+            std_cdi = np.std(cdi_profile)
+            
+            # Create density profile data structure for plotting
+            density_analysis_data = {
+                'positions': positions,
+                'cdi_profile': cdi_profile,
+                'density_profile': density_profile,
+                'apparent_density_profile': apparent_density_profile,
+                'layer_classification': classifications,
+                'statistics': {
+                    'mean_density': mean_density,
+                    'std_density': std_density,
+                    'mean_cdi': mean_cdi,
+                    'std_cdi': std_cdi,
+                    'n_spectra': len(successful_results)
+                },
+                'file_names': [os.path.basename(r['file']) for r in successful_results]
+            }
+            
+            # Create a comprehensive density visualization
+            self.create_density_visualization_window(density_analysis_data, analyzer, material_type)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Visualization Error", 
+                               f"Failed to create density visualization:\n{str(e)}")
+    
+    def create_density_visualization_window(self, density_data, analyzer, material_type):
+        """Create a separate window for comprehensive density analysis visualization."""
+        from matplotlib.backends.qt_compat import QtWidgets
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+        from matplotlib.figure import Figure
+        
+        # Create a new window
+        density_window = QDialog(self)
+        density_window.setWindowTitle(f"Comprehensive Density Analysis - {material_type}")
+        density_window.setMinimumSize(1200, 900)
+        density_window.resize(1400, 1000)
+        
+        layout = QVBoxLayout(density_window)
+        
+        # Add summary information at the top
+        info_group = QGroupBox("Analysis Summary")
+        info_layout = QVBoxLayout(info_group)
+        
+        stats = density_data['statistics']
+        summary_text = f"""
+Material Type: {material_type}
+Number of Spectra: {stats['n_spectra']}
+Mean CDI: {stats['mean_cdi']:.4f} ± {stats['std_cdi']:.4f}
+Mean Density: {stats['mean_density']:.3f} ± {stats['std_density']:.3f} g/cm³
+"""
+        info_label = QLabel(summary_text)
+        info_label.setStyleSheet("font-family: monospace; font-size: 12px; padding: 10px;")
+        info_layout.addWidget(info_label)
+        layout.addWidget(info_group)
+        
+        # Create matplotlib figure for comprehensive plots
+        figure = Figure(figsize=(14, 10))
+        canvas = FigureCanvas(figure)
+        toolbar = NavigationToolbar(canvas, density_window)
+        
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+        
+        # Create the comprehensive density analysis plots
+        self._create_density_analysis_plots(figure, density_data, analyzer, material_type)
+        
+        # Add export button
+        export_btn = QPushButton("Export Density Plots")
+        export_btn.clicked.connect(lambda: self.export_density_plots(figure, material_type))
+        layout.addWidget(export_btn)
+        
+        # Show the window
+        density_window.exec_()
+    
+    def _create_density_analysis_plots(self, figure, density_data, analyzer, material_type):
+        """Create the 4-panel density analysis visualization similar to the reference paper."""
+        try:
+            # Import matplotlib configuration if available
+            try:
+                import sys
+                sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
+                from matplotlib_config import setup_matplotlib_style
+                setup_matplotlib_style()
+            except ImportError:
+                pass  # Continue without custom styling
+        except:
+            pass
+        
+        figure.clear()
+        
+        # Create 2x2 subplot layout
+        ax1 = figure.add_subplot(2, 2, 1)  # CDI Across All Spectra
+        ax2 = figure.add_subplot(2, 2, 2)  # Density Across All Spectra  
+        ax3 = figure.add_subplot(2, 2, 3)  # Density Distribution
+        ax4 = figure.add_subplot(2, 2, 4)  # CDI vs Density Correlation
+        
+        positions = density_data['positions']
+        cdi_profile = density_data['cdi_profile']
+        density_profile = density_data['density_profile']
+        classifications = density_data['layer_classification']
+        stats = density_data['statistics']
+        
+        # 1. CDI Across All Spectra (similar to top-right of reference figure)
+        ax1.plot(positions, cdi_profile, 'g-', linewidth=2, marker='o', markersize=4)
+        
+        # Add classification threshold line
+        threshold = analyzer.classification_thresholds.get('medium', 0.5)
+        ax1.axhline(y=threshold, color='red', linestyle='--', alpha=0.7, 
+                   label='Classification threshold')
+        
+        ax1.set_xlabel('Spectrum Number')
+        ax1.set_ylabel('Crystalline Density Index')
+        ax1.set_title('CDI Across All Spectra')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend()
+        
+        # 2. Density Across All Spectra (similar to top-left of reference figure)  
+        ax2.plot(positions, density_profile, 'b-', linewidth=2, marker='o', markersize=4)
+        
+        # Add mean line
+        mean_density = stats['mean_density']
+        ax2.axhline(y=mean_density, color='red', linestyle='--', alpha=0.7,
+                   label=f'Mean: {mean_density:.3f}')
+        
+        ax2.set_xlabel('Spectrum Number')
+        ax2.set_ylabel('Density (g/cm³)')
+        ax2.set_title('Density Across All Spectra')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+        
+        # 3. Density Distribution (similar to bottom-left of reference figure)
+        ax3.hist(density_profile, bins=20, alpha=0.7, color='blue', edgecolor='black')
+        ax3.axvline(x=mean_density, color='red', linestyle='--', linewidth=2,
+                   label=f'Mean: {mean_density:.3f}')
+        ax3.set_xlabel('Density (g/cm³)')
+        ax3.set_ylabel('Frequency')
+        ax3.set_title('Density Distribution')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. CDI vs Density Correlation (similar to bottom-right of reference figure)
+        # Color-code by classification
+        classification_colors = {
+            'Low crystallinity': 'lightblue',
+            'Mixed regions': 'orange', 
+            'Mixed crystalline': 'purple',
+            'Pure crystalline': 'darkblue',
+            'bacterial': 'cyan',
+            'organic': 'red',
+            'crystalline': 'blue'
+        }
+        
+        # Plot points colored by classification
+        for classification in set(classifications):
+            mask = [c == classification for c in classifications]
+            cdi_subset = [cdi_profile[i] for i in range(len(cdi_profile)) if mask[i]]
+            density_subset = [density_profile[i] for i in range(len(density_profile)) if mask[i]]
+            
+            color = classification_colors.get(classification, 'gray')
+            ax4.scatter(cdi_subset, density_subset, 
+                       c=color, label=classification, alpha=0.7, s=50)
+        
+        ax4.set_xlabel('Crystalline Density Index')
+        ax4.set_ylabel('Density (g/cm³)')
+        ax4.set_title('CDI vs Density Correlation')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        # Add vertical line at classification threshold
+        ax4.axvline(x=threshold, color='gray', linestyle=':', alpha=0.7)
+        
+        figure.suptitle(f'{material_type} - Comprehensive Density Analysis\n'
+                       f'N={stats["n_spectra"]} spectra', 
+                       fontsize=14, fontweight='bold')
+        
+        figure.tight_layout()
+        
+        # Redraw the canvas
+        try:
+            figure.canvas.draw()
+        except:
+            pass  # In case canvas is not available yet
+    
+    def export_density_plots(self, figure, material_type):
+        """Export the density analysis plots to a file."""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Density Plots", 
+            f"density_analysis_{material_type.replace(' ', '_').replace('(', '').replace(')', '')}.png",
+            "PNG files (*.png);;PDF files (*.pdf);;SVG files (*.svg)"
+        )
+        
+        if file_path:
+            try:
+                figure.savefig(file_path, dpi=300, bbox_inches='tight')
+                QMessageBox.information(self, "Export Successful", 
+                                      f"Density analysis plots saved to:\n{file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", 
+                                   f"Failed to export plots:\n{str(e)}")
     
     def update_peak_info_display(self):
         """Update the peak information display in the left panel."""

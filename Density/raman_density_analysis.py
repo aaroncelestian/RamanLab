@@ -257,19 +257,55 @@ class RamanDensityAnalyzer:
         # Find main characteristic peak intensity
         main_peak = self.characteristic_peaks['main']
         peak_idx = np.argmin(np.abs(wavenumber - main_peak))
-        peak_intensity = intensity[peak_idx]
+        
+        # Ensure valid peak index
+        if 0 <= peak_idx < len(intensity):
+            peak_intensity = intensity[peak_idx]
+        else:
+            # Fallback to maximum intensity if peak not found
+            peak_intensity = np.nanmax(intensity) if len(intensity) > 0 else 0.0
+        
+        # Ensure valid peak intensity
+        if np.isnan(peak_intensity) or np.isinf(peak_intensity):
+            peak_intensity = 0.0
         
         # Calculate baseline intensity in reference region
         baseline_region = list(self.reference_regions.values())[0]  # Use first reference region as baseline
         baseline_mask = (wavenumber >= baseline_region[0]) & (wavenumber <= baseline_region[1])
-        baseline_intensity = np.mean(intensity[baseline_mask])
+        
+        # Ensure we have valid baseline data
+        if np.any(baseline_mask):
+            baseline_data = intensity[baseline_mask]
+            if len(baseline_data) > 0 and not np.all(np.isnan(baseline_data)):
+                baseline_intensity = np.nanmean(baseline_data)  # Use nanmean to handle any NaN values
+            else:
+                baseline_intensity = np.nanmin(intensity) if len(intensity) > 0 else 0.0
+        else:
+            # If no baseline region found, use minimum intensity
+            baseline_intensity = np.nanmin(intensity) if len(intensity) > 0 else 0.0
+        
+        # Ensure valid baseline
+        if np.isnan(baseline_intensity) or np.isinf(baseline_intensity):
+            baseline_intensity = 0.0
         
         # Calculate peak-to-baseline ratio
         peak_height = peak_intensity - baseline_intensity
         peak_height = max(peak_height, 0)  # Ensure non-negative
         
-        # Normalize using material-specific reference intensity
-        cdi = min(peak_height / self.reference_intensity, 1.0)
+        # Normalize using material-specific reference intensity with safe division
+        if self.reference_intensity > 0 and not np.isnan(self.reference_intensity):
+            cdi = min(peak_height / self.reference_intensity, 1.0)
+        else:
+            # Fallback: use a normalized intensity ratio
+            max_intensity = np.max(intensity) if len(intensity) > 0 else 1.0
+            if max_intensity > 0:
+                cdi = min(peak_height / max_intensity, 1.0)
+            else:
+                cdi = 0.0
+        
+        # Ensure valid CDI value
+        if np.isnan(cdi) or np.isinf(cdi) or cdi < 0:
+            cdi = 0.0
         
         # Additional metrics for validation
         metrics = {

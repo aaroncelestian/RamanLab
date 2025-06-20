@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RamanLab Qt6 Version - Main Application Window
+RamanLab PySide6 Version - Main Application Window
 """
 
 import os
@@ -8,18 +8,18 @@ import sys
 from pathlib import Path
 import numpy as np
 
-# Fix matplotlib backend for Qt6/PySide6
+# Fix matplotlib backend for PySide6
 import matplotlib
 matplotlib.use("QtAgg")  # Use QtAgg backend which works with PySide6
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
-# Import Qt6-compatible matplotlib backends and UI toolbar
+# Import PySide6-compatible matplotlib backends and UI toolbar
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
-    # Fallback for older matplotlib versions
+    # Fallback for older matplotlib versions - still works with PySide6
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
     from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
@@ -28,7 +28,7 @@ from polarization_ui.matplotlib_config import configure_compact_ui, apply_theme
 from scipy.signal import find_peaks, savgol_filter
 import pandas as pd
 
-# Qt6 imports
+# PySide6 imports
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QPushButton, QLineEdit, QTextEdit, QSlider, QCheckBox, QComboBox,
@@ -64,10 +64,10 @@ from scipy.interpolate import griddata
 
 
 class RamanAnalysisAppQt6(QMainWindow):
-    """RamanLab Qt6: Main application window for Raman spectrum analysis."""
+    """RamanLab PySide6: Main application window for Raman spectrum analysis."""
 
     def __init__(self):
-        """Initialize the Qt6 application."""
+        """Initialize the PySide6 application."""
         super().__init__()
         
         # Apply compact UI configuration for consistent toolbar sizing
@@ -90,7 +90,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             self.raman_db = RamanSpectraQt6(parent_widget=self)
         else:
             self.raman_db = None
-            print("Warning: RamanSpectraQt6 not available, database functionality will be limited")
+            print("Warning: RamanSpectra not available, database functionality will be limited")
         
         # Background subtraction state
         self.background_preview = None
@@ -122,7 +122,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.show_startup_message()
 
     def load_database(self):
-        """Load the database using RamanSpectraQt6."""
+        """Load the database using RamanSpectra."""
         if self.raman_db:
             try:
                 self.raman_db.load_database()
@@ -960,7 +960,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         """Set up the status bar."""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("RamanLab Qt6 - Ready (Cross-platform file operations enabled!)")
+        self.status_bar.showMessage("RamanLab PySide6 - Ready (Cross-platform file operations enabled!)")
 
     def center_on_screen(self):
         """Center the window on the screen."""
@@ -972,7 +972,7 @@ class RamanAnalysisAppQt6(QMainWindow):
     def show_startup_message(self):
         """Show startup message in the plot area."""
         self.ax.text(0.5, 0.5, 
-                     'RamanLab Qt6\n\n'
+                     'RamanLab PySide6\n\n'
                      'Enhanced File Loading Capabilities:\n'
                      '• CSV, TXT (tab/space delimited)\n'
                      '• Headers and metadata (# lines)\n'
@@ -987,7 +987,7 @@ class RamanAnalysisAppQt6(QMainWindow):
 
     # Cross-platform file operations (replacing your platform-specific code!)
     def import_spectrum(self):
-        """Import a Raman spectrum file using Qt6 file dialog."""
+        """Import a Raman spectrum file using PySide6 file dialog."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import Raman Spectrum",
@@ -1577,7 +1577,7 @@ class RamanAnalysisAppQt6(QMainWindow):
     def show_about(self):
         """Show about dialog."""
         about_text = f"""
-        RamanLab Qt6 Version
+        RamanLab PySide6 Version
         
         Version: {__version__}
         Author: {__author__}
@@ -1592,14 +1592,14 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         This is the beginning of your cross-platform journey!
         """
-        QMessageBox.about(self, "About RamanLab Qt6", about_text)
+        QMessageBox.about(self, "About RamanLab PySide6", about_text)
 
     def closeEvent(self, event):
         """Handle application close event."""
         reply = QMessageBox.question(
             self,
             "Confirm Exit",
-            "Are you sure you want to exit RamanLab Qt6?",
+            "Are you sure you want to exit RamanLab PySide6?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
@@ -2953,11 +2953,11 @@ class RamanAnalysisAppQt6(QMainWindow):
             }
         """
         
-        # Peak fitting analysis
-        peak_fitting_btn = QPushButton("Peak Fitting Analysis")
-        peak_fitting_btn.clicked.connect(self.launch_peak_fitting)
-        peak_fitting_btn.setStyleSheet(additional_style)
-        processing_layout.addWidget(peak_fitting_btn)
+        # Spectra calibration
+        spectra_calibration_btn = QPushButton("Spectra Calibration")
+        spectra_calibration_btn.clicked.connect(self.launch_spectra_calibration)
+        spectra_calibration_btn.setStyleSheet(additional_style)
+        processing_layout.addWidget(spectra_calibration_btn)
         
         # Baseline correction tools
         baseline_btn = QPushButton("Advanced Baseline Correction")
@@ -2965,11 +2965,11 @@ class RamanAnalysisAppQt6(QMainWindow):
         baseline_btn.setStyleSheet(additional_style)
         processing_layout.addWidget(baseline_btn)
         
-        # Normalization tools
-        normalization_btn = QPushButton("Advanced Normalization")
-        normalization_btn.clicked.connect(self.launch_normalization_tools)
-        normalization_btn.setStyleSheet(additional_style)
-        processing_layout.addWidget(normalization_btn)
+        # Data conversion tools
+        data_conversion_btn = QPushButton("Advanced Data Conversion")
+        data_conversion_btn.clicked.connect(self.launch_data_conversion_tools)
+        data_conversion_btn.setStyleSheet(additional_style)
+        processing_layout.addWidget(data_conversion_btn)
         
         layout.addWidget(processing_group)
         
@@ -3014,17 +3014,17 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         return tab
 
-    def launch_peak_fitting(self):
-        """Launch peak fitting analysis tool."""
+    def launch_spectra_calibration(self):
+        """Launch spectra calibration tool."""
         QMessageBox.information(
             self,
-            "Peak Fitting",
-            "Peak fitting analysis tool will be implemented.\n\n"
+            "Spectra Calibration",
+            "Spectra calibration tool will be implemented.\n\n"
             "This will provide:\n"
-            "• Gaussian and Lorentzian peak fitting\n"
-            "• Multi-peak deconvolution\n"
-            "• Peak parameter analysis\n"
-            "• Goodness of fit statistics"
+            "• Wavelength calibration and correction\n"
+            "• Intensity calibration using standards\n"
+            "• Instrument response correction\n"
+            "• Calibration curve generation"
         )
 
     def launch_baseline_tools(self):
@@ -3040,17 +3040,17 @@ class RamanAnalysisAppQt6(QMainWindow):
             "• Preview and comparison modes"
         )
 
-    def launch_normalization_tools(self):
-        """Launch advanced normalization tools."""
+    def launch_data_conversion_tools(self):
+        """Launch advanced data conversion tools."""
         QMessageBox.information(
             self,
-            "Normalization Tools",
-            "Advanced normalization tools will be implemented.\n\n"
+            "Data Conversion Tools",
+            "Advanced data conversion tools will be implemented.\n\n"
             "This will provide:\n"
-            "• Vector normalization\n"
-            "• Area under curve normalization\n"
-            "• Standard normal variate (SNV)\n"
-            "• Multiple scatter correction (MSC)"
+            "• Format conversion (CSV, TXT, SPC, etc.)\n"
+            "• Unit conversion (wavenumber, wavelength)\n"
+            "• Data interpolation and resampling\n"
+            "• Batch file format conversion"
         )
 
     def launch_deconvolution(self):
