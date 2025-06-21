@@ -3265,33 +3265,243 @@ class RamanAnalysisAppQt6(QMainWindow):
             )
 
     def launch_chemical_strain_analysis(self):
-        """Launch chemical strain analysis tool."""
-        if self.current_wavenumbers is None or self.current_intensities is None:
-            QMessageBox.warning(self, "No Data", "Load a spectrum first to perform chemical strain analysis.")
-            return
-            
+        """Launch chemical strain analysis tool with material selection."""
         try:
-            # Import and launch the chemical strain analysis module
-            QMessageBox.information(
-                self,
-                "Chemical Strain Analysis",
-                "Launching Chemical Strain Analysis...\n\n"
-                "This feature provides:\n"
-                "• Chemical composition-induced strain analysis\n"
-                "• Lattice parameter variation studies\n"
-                "• Solid solution strain effects\n"
-                "• Compositional gradient analysis"
-            )
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QButtonGroup, QRadioButton
             
-            # TODO: Replace with actual chemical strain analysis module
-            # from chemical_strain_analysis_qt6 import launch_chemical_strain_analysis
-            # launch_chemical_strain_analysis(self, self.current_wavenumbers, self.processed_intensities)
+            # Create material selection dialog
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Chemical Strain Analysis - Material Selection")
+            dialog.setFixedSize(500, 300)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # Title
+            title = QLabel("Select Material System for Analysis:")
+            title.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px;")
+            layout.addWidget(title)
+            
+            # Create button group for exclusive selection
+            button_group = QButtonGroup(dialog)
+            
+            # General chemical strain analysis option
+            general_radio = QRadioButton("General Chemical Strain Analysis")
+            general_radio.setChecked(True)  # Default selection
+            button_group.addButton(general_radio, 0)
+            layout.addWidget(general_radio)
+            
+            general_desc = QLabel("• Chemical composition-induced strain analysis\n"
+                                 "• Lattice parameter variation studies\n"
+                                 "• Solid solution strain effects\n"
+                                 "• Compositional gradient analysis")
+            general_desc.setStyleSheet("margin-left: 20px; margin-bottom: 15px; color: #666;")
+            layout.addWidget(general_desc)
+            
+            # LiMn2O4 battery analysis option
+            battery_radio = QRadioButton("LiMn2O4 Battery Material Analysis")
+            button_group.addButton(battery_radio, 1)
+            layout.addWidget(battery_radio)
+            
+            battery_desc = QLabel("• H/Li exchange strain analysis for battery materials\n"
+                                 "• Jahn-Teller distortion tracking\n"
+                                 "• Time series strain evolution\n"
+                                 "• Spinel structure symmetry breaking analysis")
+            battery_desc.setStyleSheet("margin-left: 20px; margin-bottom: 15px; color: #666;")
+            layout.addWidget(battery_desc)
+            
+            # Buttons
+            button_layout = QHBoxLayout()
+            launch_btn = QPushButton("Launch Analysis")
+            cancel_btn = QPushButton("Cancel")
+            
+            launch_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #7C3AED;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #8B5CF6;
+                }
+            """)
+            
+            cancel_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #6B7280;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #4B5563;
+                }
+            """)
+            
+            def on_launch():
+                selected_id = button_group.checkedId()
+                dialog.accept()
+                
+                if selected_id == 0:
+                    # Launch general chemical strain analysis
+                    self.launch_general_chemical_strain_analysis()
+                elif selected_id == 1:
+                    # Launch LiMn2O4 battery analysis
+                    self.launch_limn2o4_strain_analysis()
+            
+            def on_cancel():
+                dialog.reject()
+            
+            launch_btn.clicked.connect(on_launch)
+            cancel_btn.clicked.connect(on_cancel)
+            
+            button_layout.addStretch()
+            button_layout.addWidget(launch_btn)
+            button_layout.addWidget(cancel_btn)
+            
+            layout.addStretch()
+            layout.addLayout(button_layout)
+            
+            # Show dialog
+            dialog.exec()
             
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Chemical Strain Analysis Error",
                 f"Failed to launch chemical strain analysis:\n{str(e)}"
+            )
+    
+    def launch_general_chemical_strain_analysis(self):
+        """Launch general chemical strain analysis tool."""
+        if self.current_wavenumbers is None or self.current_intensities is None:
+            QMessageBox.warning(self, "No Data", "Load a spectrum first to perform chemical strain analysis.")
+            return
+            
+        try:
+            # Import and launch the general chemical strain analysis module
+            from chemical_strain_enhancement import ChemicalStrainAnalyzer
+            
+            QMessageBox.information(
+                self,
+                "General Chemical Strain Analysis",
+                "Launching General Chemical Strain Analysis...\n\n"
+                "This module provides comprehensive chemical strain analysis\n"
+                "for various material systems using the loaded spectrum data."
+            )
+            
+            # TODO: Implement general chemical strain analysis GUI
+            # For now, create a basic analyzer instance
+            analyzer = ChemicalStrainAnalyzer()
+            
+            QMessageBox.information(
+                self,
+                "Chemical Strain Analysis",
+                "Chemical strain analyzer initialized successfully.\n\n"
+                "A full GUI interface for general chemical strain analysis\n"
+                "will be implemented in a future update."
+            )
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import chemical strain analysis module:\n{str(e)}\n\n"
+                "Please ensure chemical_strain_enhancement.py is available."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Chemical Strain Analysis Error",
+                f"Failed to launch general chemical strain analysis:\n{str(e)}"
+            )
+    
+    def launch_limn2o4_strain_analysis(self):
+        """Launch LiMn2O4 battery strain analysis tool."""
+        try:
+            # Import the battery strain analysis demo
+            from battery_strain_analysis.demo_limn2o4_analysis import main as run_limn2o4_demo
+            
+            # Show information dialog
+            reply = QMessageBox.question(
+                self,
+                "LiMn2O4 Battery Strain Analysis",
+                "Launch LiMn2O4 Battery Strain Analysis Demo?\n\n"
+                "This will demonstrate:\n"
+                "• H/Li exchange strain analysis\n"
+                "• Jahn-Teller distortion tracking\n"
+                "• Time series strain evolution\n"
+                "• Spinel structure analysis\n\n"
+                "The demo will generate synthetic time series data\n"
+                "and perform comprehensive strain analysis.\n\n"
+                "Results will be displayed and saved to:\n"
+                "battery_strain_analysis/limn2o4_analysis_results/\n\n"
+                "Continue with demo?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Show progress dialog
+                progress = QProgressDialog("Running LiMn2O4 strain analysis...", None, 0, 0, self)
+                progress.setWindowTitle("Battery Strain Analysis")
+                progress.setModal(True)
+                progress.show()
+                
+                # Process events to show the dialog
+                QApplication.processEvents()
+                
+                try:
+                    # Run the demo analysis
+                    run_limn2o4_demo()
+                    
+                    progress.close()
+                    
+                    # Show success message
+                    QMessageBox.information(
+                        self,
+                        "Analysis Complete",
+                        "LiMn2O4 battery strain analysis completed successfully!\n\n"
+                        "Results saved to:\n"
+                        "battery_strain_analysis/limn2o4_analysis_results/\n\n"
+                        "Files generated:\n"
+                        "• time_series_overview.png - Overview plot\n"
+                        "• final_strain_3d.png - 3D strain visualization\n"
+                        "• strain_evolution.csv - Strain vs time data\n"
+                        "• composition_evolution.csv - Composition data\n"
+                        "• analysis_report.txt - Full analysis report\n\n"
+                        "Check the results folder for detailed analysis output."
+                    )
+                    
+                    # Update status bar
+                    self.statusBar().showMessage("LiMn2O4 battery strain analysis completed successfully")
+                    
+                except Exception as e:
+                    progress.close()
+                    raise e
+                    
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import LiMn2O4 battery strain analysis module:\n{str(e)}\n\n"
+                "Please ensure the battery_strain_analysis package is available\n"
+                "with all required components:\n"
+                "• battery_strain_analysis/__init__.py\n"
+                "• battery_strain_analysis/demo_limn2o4_analysis.py\n"
+                "• battery_strain_analysis/limn2o4_analyzer.py\n"
+                "• And other required modules"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "LiMn2O4 Analysis Error",
+                f"Failed to run LiMn2O4 strain analysis:\n{str(e)}\n\n"
+                "Please check that all required dependencies are installed\n"
+                "and the battery_strain_analysis package is properly configured."
             )
 
     def export_database_file(self):

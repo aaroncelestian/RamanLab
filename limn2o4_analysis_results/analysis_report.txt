@@ -1,0 +1,27 @@
+LiMn2O4 Strain Analysis Report
+========================================
+
+Experiment Overview:
+  Material: LiMn2O4 spinel
+  Process: H/Li exchange
+  Temperature: 298.0K
+  Duration: 1000 seconds
+  Data points: 20
+
+Key Findings:
+  Final strain tensor: [-0.0014, -0.0009, 0.0090, 0.0038, 0.0038, 0.0038]
+  Hydrostatic strain: 0.0022
+  Deviatoric strain: 0.0083
+  Initial H content: 0.00
+  Final H content: 0.77
+  H content change: +0.77
+  Maximum Jahn-Teller parameter: 0.0890
+
+Peak Assignments and Changes:
+  A1g (625 cm⁻¹): +11.0 cm⁻¹ shift
+  Eg (580 cm⁻¹): +11.0 cm⁻¹ shift
+  T2g_1 (480 cm⁻¹): +7.0 cm⁻¹ shift
+  T2g_2 (430 cm⁻¹): +1.5 cm⁻¹ shift
+
+Analysis completed successfully.
+Results saved in: /Users/aaroncelestian/Library/CloudStorage/Dropbox/Python/RamanLab/limn2o4_analysis_results
