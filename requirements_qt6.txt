@@ -1,51 +1,140 @@
-# RamanLab Qt6 Version - Requirements
+# RamanLab v1.0.0 - Qt6 Requirements
 # ===================================
-# Updated requirements with all dependencies marked as required
-# All packages listed here are necessary for full functionality
-
-# Qt6 GUI Framework
-PySide6>=6.5.0              # Official Qt6 Python bindings
-
-# Core Scientific Dependencies
-numpy>=1.21.0               # Numerical computations and arrays
-matplotlib>=3.5.0           # Plotting and visualization
-scipy>=1.7.0                # Scientific computing and optimization
-pandas>=1.3.0               # Data manipulation and analysis
-
-# Visualization and UI
-seaborn>=0.11.0             # Statistical data visualization
-pillow>=8.0.0               # Image processing and manipulation
-
-# Data Processing and Export
-openpyxl>=3.0.0             # Excel file support
-fastdtw>=0.3.4              # Fast Dynamic Time Warping
-
-# Machine Learning and Advanced Analysis
-scikit-learn>=1.0.0         # Machine learning algorithms
-pymatgen>=2022.0.0          # Materials analysis and crystallography
-
-# Development and Packaging Tools
-pyinstaller>=5.0.0          # Creating standalone executables
-
-# Additional Processing Libraries
-tqdm>=4.60.0                # Progress bars for long operations
-psutil>=5.8.0               # System and process utilities
-dask>=2021.0.0              # Parallel computing and data processing
-
-# Installation Notes:
-# ==================
-# 
-# INSTALLATION COMMAND:
+# Complete dependency list for RamanLab Qt6 cross-platform Raman analysis tool
+# Updated: 2025-01-26
+#
+# INSTALLATION:
 # pip install -r requirements_qt6.txt
 #
-# INDIVIDUAL INSTALLATION:
-# pip install PySide6 numpy matplotlib scipy pandas seaborn pillow openpyxl fastdtw scikit-learn pymatgen pyinstaller tqdm psutil dask
-#
-# Qt6 Framework:
-# - PySide6: Official Qt bindings, LGPL license, recommended for this project
-# - All other dependencies are required for full RamanLab functionality
-#
-# System Requirements:
-# - Python 3.8+ (Python 3.9+ recommended)
+# SYSTEM REQUIREMENTS:
+# - Python 3.8+ (3.9+ recommended)
 # - 64-bit system recommended for large datasets
-# - Minimum 4GB RAM for complex analyses 
+# - Minimum 4GB RAM (8GB+ recommended for complex analyses)
+
+# ============================================================================
+# CORE GUI FRAMEWORK (Required)
+# ============================================================================
+PySide6>=6.5.0              # Official Qt6 Python bindings (LGPL license)
+                            # Primary GUI framework for cross-platform interface
+
+# ============================================================================
+# SCIENTIFIC COMPUTING STACK (Required)
+# ============================================================================
+numpy>=1.21.0               # Core numerical computations and array operations
+scipy>=1.7.0                # Scientific computing algorithms and optimization
+matplotlib>=3.5.0           # Plotting, visualization, and publication graphics
+pandas>=1.3.0               # Data manipulation, analysis, and I/O operations
+
+# ============================================================================
+# VISUALIZATION & USER INTERFACE (Required)
+# ============================================================================
+seaborn>=0.11.0             # Statistical data visualization and styling
+pillow>=8.0.0               # Image processing and manipulation
+                            # Required for icon display and image export
+
+# ============================================================================
+# DATA PROCESSING & FILE I/O (Required)
+# ============================================================================
+openpyxl>=3.0.0             # Excel file reading and writing support
+fastdtw>=0.3.4              # Fast Dynamic Time Warping for spectral matching
+tqdm>=4.60.0                # Progress bars for long-running operations
+psutil>=5.8.0               # System and process monitoring utilities
+
+# ============================================================================
+# MACHINE LEARNING & ADVANCED ANALYSIS (Required)
+# ============================================================================
+scikit-learn>=1.0.0         # Machine learning algorithms and preprocessing
+                            # PCA, clustering, classification, regression
+
+# ============================================================================
+# PARALLEL COMPUTING & PERFORMANCE (Required)
+# ============================================================================
+dask>=2021.0.0              # Parallel computing and out-of-core processing
+                            # Essential for large dataset handling
+
+# ============================================================================
+# ADVANCED CRYSTALLOGRAPHY (Optional but Recommended)
+# ============================================================================
+pymatgen>=2022.0.0          # Materials analysis and crystal structure processing
+                            # Required for advanced polarization analysis
+                            # CIF file parsing and tensor calculations
+
+# ============================================================================
+# REPORT GENERATION & EXPORT (Optional but Recommended)
+# ============================================================================
+reportlab>=3.5.0            # PDF report generation and document creation
+                            # Professional analysis reports
+
+# ============================================================================
+# DEVELOPMENT & PACKAGING TOOLS (Optional)
+# ============================================================================
+pyinstaller>=5.0.0          # Creating standalone executable distributions
+                            # For packaging RamanLab into standalone apps
+
+# ============================================================================
+# DEEP LEARNING & AI (Optional)
+# ============================================================================
+# tensorflow>=2.12.0        # Deep learning framework (uncomment if needed)
+# keras>=2.12.0             # High-level neural network API (uncomment if needed)
+                            # Note: Large downloads, only install if using ML features
+
+# ============================================================================
+# ADVANCED VISUALIZATION (Optional)
+# ============================================================================
+# umap-learn>=0.5.0         # UMAP dimensionality reduction (uncomment if needed)
+                            # For advanced group analysis visualization
+
+# ============================================================================
+# MCMC SAMPLING (Optional)
+# ============================================================================
+# emcee>=3.0.0              # MCMC sampling for Bayesian analysis (uncomment if needed)
+                            # For advanced statistical analysis
+
+# ============================================================================
+# ALTERNATIVE DEPENDENCIES (Not Recommended)
+# ============================================================================
+# PyQt6>=6.5.0             # Alternative to PySide6 (licensing differences)
+                            # Only install if specifically needed instead of PySide6
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+#
+# QUICK INSTALL (All Required + Recommended):
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil scikit-learn dask pymatgen reportlab pyinstaller
+#
+# MINIMAL INSTALL (Core Features Only):
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil scikit-learn dask
+#
+# DEVELOPMENT INSTALL (All Features):
+# pip install -r requirements_qt6.txt
+# pip install tensorflow keras umap-learn emcee  # Optional advanced features
+#
+# VIRTUAL ENVIRONMENT SETUP (Recommended):
+# python -m venv ramanlab_env
+# source ramanlab_env/bin/activate  # Windows: ramanlab_env\Scripts\activate
+# pip install -r requirements_qt6.txt
+#
+# DEPENDENCY VERIFICATION:
+# python check_dependencies.py
+#
+# TROUBLESHOOTING:
+# - If installation fails, try upgrading pip: pip install --upgrade pip
+# - For Windows users: Install Microsoft Visual C++ Build Tools if needed
+# - For macOS users: Install Xcode Command Line Tools if needed
+# - For Linux users: Install system packages for Qt6 development
+#
+# SYSTEM-SPECIFIC NOTES:
+# - Windows: All packages should install via pip
+# - macOS: May need to install system dependencies via Homebrew
+# - Linux: May need system packages (python3-dev, build-essential, qt6-dev)
+#
+# PERFORMANCE OPTIMIZATION:
+# - Use conda for scientific packages on some systems
+# - Consider using Intel MKL builds for numpy/scipy on Intel processors
+# - Enable GPU acceleration where available for machine learning features
+#
+# LICENSE INFORMATION:
+# - PySide6: LGPL license (commercial use allowed)
+# - Most scientific packages: BSD/MIT licenses
+# - Check individual package licenses for specific requirements 
