@@ -87,6 +87,9 @@ class MapAnalysisMainWindow(QMainWindow):
         self.current_marker_position = None
         self.current_selected_spectrum = None
         
+        # Initialize template extraction mode
+        self.template_extraction_mode = False
+        
         # Setup UI
         self.setup_ui()
         self.setup_menu_bar()
@@ -1264,6 +1267,113 @@ class MapAnalysisMainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error clearing templates:\n{str(e)}")
             logger.error(f"Error clearing templates: {e}")
+    
+    def start_template_extraction_mode(self):
+        """Start template extraction mode - allows clicking on map to extract spectra as templates."""
+        if self.map_data is None:
+            QMessageBox.warning(self, "No Data", "Load map data first to extract templates.")
+            return
+            
+        try:
+            # Enable template extraction mode
+            self.template_extraction_mode = True
+            
+            # Switch to Map View tab so user can click on map
+            self.tab_widget.setCurrentIndex(0)
+            
+            # Show instruction message
+            QMessageBox.information(
+                self, "Template Extraction Mode", 
+                "Template extraction mode enabled!\n\n"
+                "Click on any point in the map to extract that spectrum as a template.\n"
+                "The extracted spectrum will be automatically added to your template list.\n\n"
+                "Switch back to Template Analysis tab when done."
+            )
+            
+            self.statusBar().showMessage("Template extraction mode enabled - click on map to extract spectra as templates")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Error starting template extraction mode:\n{str(e)}")
+            logger.error(f"Error starting template extraction mode: {e}")
+    
+    def _extract_template_from_position(self, x: float, y: float):
+        """Extract a spectrum from the given position as a template."""
+        try:
+            # Find the closest spectrum to the clicked position
+            closest_spectrum = self.find_closest_spectrum(x, y)
+            if closest_spectrum is None:
+                QMessageBox.warning(self, "No Spectrum", "No spectrum found at the clicked position.")
+                return
+            
+            # Get spectrum data
+            wavenumbers = closest_spectrum.wavenumbers
+            intensities = (closest_spectrum.processed_intensities 
+                         if self.use_processed and closest_spectrum.processed_intensities is not None
+                         else closest_spectrum.intensities)
+            
+            if wavenumbers is None or intensities is None:
+                QMessageBox.warning(self, "Invalid Spectrum", "Selected spectrum has no valid data.")
+                return
+            
+            # Create a unique name for the extracted template
+            template_name = f"Map_Extract_{closest_spectrum.x_pos:.1f}_{closest_spectrum.y_pos:.1f}"
+            
+            # Create temporary file with the spectrum data
+            import tempfile
+            import os
+            import numpy as np
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+                # Write header
+                temp_file.write(f"# Extracted from map at position ({closest_spectrum.x_pos:.2f}, {closest_spectrum.y_pos:.2f})\n")
+                temp_file.write("# Wavenumber(cm-1)\tIntensity\n")
+                
+                # Write data
+                for wn, intensity in zip(wavenumbers, intensities):
+                    temp_file.write(f"{wn:.2f}\t{intensity:.6f}\n")
+                
+                temp_filename = temp_file.name
+            
+            # Load the temporary file as a template
+            success = self.template_manager.load_template(temp_filename, name=template_name)
+            
+            # Clean up temporary file
+            try:
+                os.unlink(temp_filename)
+            except:
+                pass
+            
+            if success:
+                # Update template control panel
+                self.update_template_control_panel()
+                self.update_map_template_status()
+                
+                # Add position marker on map
+                self.add_position_marker(closest_spectrum.x_pos, closest_spectrum.y_pos)
+                
+                # Show success message
+                QMessageBox.information(
+                    self, "Template Extracted", 
+                    f"Template '{template_name}' extracted successfully!\n\n"
+                    f"Position: ({closest_spectrum.x_pos:.2f}, {closest_spectrum.y_pos:.2f})\n"
+                    f"Data points: {len(wavenumbers)}\n"
+                    f"Wavenumber range: {wavenumbers.min():.1f} - {wavenumbers.max():.1f} cm⁻¹"
+                )
+                
+                self.statusBar().showMessage(f"Template '{template_name}' extracted from map position ({closest_spectrum.x_pos:.2f}, {closest_spectrum.y_pos:.2f})")
+            else:
+                QMessageBox.warning(self, "Extraction Failed", f"Failed to extract template from position ({closest_spectrum.x_pos:.2f}, {closest_spectrum.y_pos:.2f})")
+                
+            # Disable extraction mode after successful extraction
+            self.template_extraction_mode = False
+            self.statusBar().showMessage("Template extracted - extraction mode disabled")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Extraction Error", f"Error extracting template:\n{str(e)}")
+            logger.error(f"Error extracting template from position ({x}, {y}): {e}")
+            
+            # Disable extraction mode on error
+            self.template_extraction_mode = False
           
     def plot_templates(self):
         """Plot loaded template spectra."""
