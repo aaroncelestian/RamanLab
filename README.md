@@ -33,6 +33,12 @@ python launch_ramanlab.py
 python install_desktop_icon.py
 ```
 
+**# 6. Download the database and metadata correlation file that I made from:**
+- Find the pre-compiled Raman datases here: 10.6084/m9.figshare.28928345
+- https://figshare.com/s/220f7de3c17172dbaae6 (Compiled RRUFF and SLOPP/SLOPP-E)
+- https://figshare.com/s/b55e31e89743d246895b (Compiled database of Raman calculated mdoes from WURM.info)
+- Place these files in the RamanLab directory.
+
 *Note: Always use `python` (not `python3`) when in the conda environment.*
 
 ---
