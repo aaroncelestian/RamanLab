@@ -63,6 +63,507 @@ except ImportError:
     print("UMAP not available. Install with 'pip install umap-learn' for additional visualization options.")
 
 
+class DatabaseImportDialog(QDialog):
+    """Dialog for selecting spectra from the database for import into cluster analysis."""
+    
+    def __init__(self, raman_db, parent=None):
+        """Initialize the database import dialog."""
+        super().__init__(parent)
+        self.raman_db = raman_db
+        self.selected_spectra = {}
+        
+        self.setWindowTitle("Import Spectra from Database")
+        self.setMinimumSize(800, 600)
+        self.resize(1000, 700)
+        
+        self.setup_ui()
+        self.load_database_spectra()
+    
+    def setup_ui(self):
+        """Set up the user interface."""
+        layout = QVBoxLayout(self)
+        
+        # Search controls
+        search_group = QGroupBox("Search & Filter")
+        search_group_layout = QVBoxLayout(search_group)
+        
+        # Text search
+        text_search_layout = QHBoxLayout()
+        text_search_layout.addWidget(QLabel("Text Search:"))
+        self.search_entry = QLineEdit()
+        self.search_entry.setPlaceholderText("Search by name, mineral, formula, description...")
+        self.search_entry.textChanged.connect(self.filter_spectra)
+        text_search_layout.addWidget(self.search_entry)
+        
+        clear_search_btn = QPushButton("Clear")
+        clear_search_btn.clicked.connect(self.clear_search)
+        text_search_layout.addWidget(clear_search_btn)
+        
+        search_group_layout.addLayout(text_search_layout)
+        
+        # Filter dropdowns
+        filter_layout = QHBoxLayout()
+        
+        # Hey Classification filter
+        filter_layout.addWidget(QLabel("Hey Classification:"))
+        self.hey_filter = QComboBox()
+        self.hey_filter.setEditable(True)
+        self.hey_filter.addItem("")  # Empty option for "All"
+        self.hey_filter.currentTextChanged.connect(self.filter_spectra)
+        filter_layout.addWidget(self.hey_filter)
+        
+        # Chemical Family filter (anion types)
+        filter_layout.addWidget(QLabel("Chemical Family:"))
+        self.family_filter = QComboBox()
+        self.family_filter.setEditable(True)
+        self.family_filter.addItem("")  # Empty option for "All"
+        self.family_filter.currentTextChanged.connect(self.filter_spectra)
+        filter_layout.addWidget(self.family_filter)
+        
+        search_group_layout.addLayout(filter_layout)
+        layout.addWidget(search_group)
+        
+        # Spectra table
+        self.spectra_table = QTableWidget()
+        self.spectra_table.setColumnCount(8)
+        self.spectra_table.setHorizontalHeaderLabels([
+            "Select", "Name", "Mineral", "Formula", "Hey Classification", "Chemical Family", "Data Points", "Description"
+        ])
+        
+        # Set column widths
+        header = self.spectra_table.horizontalHeader()
+        header.setStretchLastSection(True)
+        header.resizeSection(0, 60)   # Select column
+        header.resizeSection(1, 150)  # Name column
+        header.resizeSection(2, 120)  # Mineral column
+        header.resizeSection(3, 100)  # Formula column
+        header.resizeSection(4, 150)  # Hey Classification column
+        header.resizeSection(5, 120)  # Chemical Family column
+        header.resizeSection(6, 80)   # Data Points column
+        
+        layout.addWidget(self.spectra_table)
+        
+        # Selection controls
+        selection_layout = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self.select_all)
+        selection_layout.addWidget(select_all_btn)
+        
+        select_none_btn = QPushButton("Select None")
+        select_none_btn.clicked.connect(self.select_none)
+        selection_layout.addWidget(select_none_btn)
+        
+        selection_layout.addStretch()
+        
+        self.selection_label = QLabel("0 spectra selected")
+        selection_layout.addWidget(self.selection_label)
+        
+        layout.addLayout(selection_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        import_btn = QPushButton("Import Selected")
+        import_btn.clicked.connect(self.accept_selection)
+        import_btn.setDefault(True)
+        button_layout.addWidget(import_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def load_database_spectra(self):
+        """Load spectra from the database into the table."""
+        try:
+            if not hasattr(self.raman_db, 'database') or not self.raman_db.database:
+                self.spectra_table.setRowCount(1)
+                self.spectra_table.setItem(0, 1, QTableWidgetItem("No spectra found in database"))
+                return
+            
+            spectra_list = []
+            for name, spectrum_data in self.raman_db.database.items():
+                try:
+                    # Extract metadata - handle both nested metadata and direct structure
+                    metadata = spectrum_data.get('metadata', spectrum_data)
+                    
+                    # Extract mineral name with multiple fallbacks
+                    mineral_name = (metadata.get('NAME') or 
+                                   metadata.get('name') or 
+                                   metadata.get('mineral_name') or 
+                                   name or 'Unknown')
+                    
+                    # Extract formula with comprehensive fallback options, including Ideal Chemistry
+                    formula = (metadata.get('FORMULA') or 
+                              metadata.get('Formula') or 
+                              metadata.get('formula') or 
+                              metadata.get('CHEMICAL_FORMULA') or 
+                              metadata.get('Chemical_Formula') or 
+                              metadata.get('chemical_formula') or 
+                              metadata.get('IDEAL CHEMISTRY') or
+                              metadata.get('Ideal Chemistry') or
+                              metadata.get('ideal_chemistry') or
+                              metadata.get('IDEAL_CHEMISTRY') or
+                              metadata.get('composition') or 
+                              spectrum_data.get('formula', ''))
+                    
+                    # Extract description with multiple fallbacks
+                    description = (metadata.get('DESCRIPTION') or 
+                                  metadata.get('Description') or 
+                                  metadata.get('description') or 
+                                  metadata.get('desc') or '')
+                    
+                    # Hey classification with comprehensive fallbacks
+                    hey_class = (metadata.get('HEY CLASSIFICATION') or 
+                               metadata.get('Hey Classification') or 
+                               metadata.get('hey_classification') or 
+                               metadata.get('HEY_CLASSIFICATION') or
+                               metadata.get('classification') or
+                               metadata.get('mineral_class') or
+                               metadata.get('MINERAL_CLASS') or '')
+                    
+                    # Chemical family (anion type) with comprehensive fallbacks
+                    chemical_family = (metadata.get('CHEMICAL FAMILY') or 
+                                     metadata.get('Chemical Family') or 
+                                     metadata.get('chemical_family') or 
+                                     metadata.get('CHEMICAL_FAMILY') or
+                                     metadata.get('family') or
+                                     metadata.get('anion_group') or
+                                     metadata.get('ANION_GROUP') or '')
+                    
+                    # Get data points count
+                    wavenumbers = spectrum_data.get('wavenumbers', [])
+                    data_points = len(wavenumbers) if wavenumbers is not None else 0
+                    
+                    spectra_list.append({
+                        'name': name,
+                        'mineral': mineral_name,
+                        'formula': formula,
+                        'hey_classification': hey_class,
+                        'chemical_family': chemical_family,
+                        'description': description,
+                        'data_points': data_points,
+                        'spectrum_data': spectrum_data
+                    })
+                    
+                except Exception as e:
+                    print(f"Error processing spectrum {name}: {str(e)}")
+                    continue
+            
+            # Sort by name
+            spectra_list.sort(key=lambda x: x['name'])
+            
+            # Populate table
+            self.spectra_table.setRowCount(len(spectra_list))
+            self.all_spectra = spectra_list  # Store for filtering
+            
+            # Collect unique values for filters
+            hey_classifications = set()
+            chemical_families = set()
+            
+            for row, spectrum_info in enumerate(spectra_list):
+                # Collect filter values
+                if spectrum_info['hey_classification']:
+                    hey_classifications.add(spectrum_info['hey_classification'])
+                if spectrum_info['chemical_family']:
+                    chemical_families.add(spectrum_info['chemical_family'])
+                
+                # Checkbox for selection
+                checkbox = QCheckBox()
+                checkbox.stateChanged.connect(self.update_selection_count)
+                self.spectra_table.setCellWidget(row, 0, checkbox)
+                
+                # Spectrum information
+                self.spectra_table.setItem(row, 1, QTableWidgetItem(spectrum_info['name']))
+                self.spectra_table.setItem(row, 2, QTableWidgetItem(spectrum_info['mineral']))
+                self.spectra_table.setItem(row, 3, QTableWidgetItem(spectrum_info['formula']))
+                self.spectra_table.setItem(row, 4, QTableWidgetItem(spectrum_info['hey_classification']))
+                self.spectra_table.setItem(row, 5, QTableWidgetItem(spectrum_info['chemical_family']))
+                self.spectra_table.setItem(row, 6, QTableWidgetItem(str(spectrum_info['data_points'])))
+                self.spectra_table.setItem(row, 7, QTableWidgetItem(spectrum_info['description']))
+                
+                # Store spectrum data in the table item
+                self.spectra_table.item(row, 1).setData(Qt.UserRole, spectrum_info['spectrum_data'])
+            
+            # Populate filter dropdowns with improved organization
+            self._populate_hey_filter(hey_classifications)
+            self._populate_family_filter(chemical_families)
+            
+            self.update_selection_count()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to load database spectra:\n{str(e)}")
+    
+    def filter_spectra(self):
+        """Filter the spectra table based on search text and dropdown filters."""
+        search_text = self.search_entry.text().lower()
+        hey_filter = self.hey_filter.currentText().strip()
+        family_filter = self.family_filter.currentText().strip()
+        
+        for row in range(self.spectra_table.rowCount()):
+            should_show = True
+            
+            # Text search filter
+            if search_text:
+                text_match = False
+                # Check all text columns
+                for col in range(1, self.spectra_table.columnCount()):
+                    item = self.spectra_table.item(row, col)
+                    if item and search_text in item.text().lower():
+                        text_match = True
+                        break
+                if not text_match:
+                    should_show = False
+            
+            # Hey classification filter - improved selective matching
+            if should_show and hey_filter:
+                hey_item = self.spectra_table.item(row, 4)
+                if not hey_item:
+                    should_show = False
+                else:
+                    should_show = self._matches_hey_classification(hey_item.text(), hey_filter)
+            
+            # Chemical family filter - improved selective matching
+            if should_show and family_filter:
+                family_item = self.spectra_table.item(row, 5)
+                if not family_item:
+                    should_show = False
+                else:
+                    should_show = self._matches_chemical_family(family_item.text(), family_filter)
+            
+            self.spectra_table.setRowHidden(row, not should_show)
+    
+    def _matches_hey_classification(self, classification_text, filter_text):
+        """
+        Strict Hey classification matching logic.
+        
+        Returns True if the classification matches the filter criteria.
+        For pure classifications (e.g., "Borates"), only matches exact "Borates", 
+        not "Borates with other anions".
+        """
+        if not classification_text or not filter_text:
+            return False
+        
+        classification_lower = classification_text.lower().strip()
+        filter_lower = filter_text.lower().strip()
+        
+        # Handle compound filter option (remove [Compound] prefix)
+        if filter_lower.startswith('[compound] '):
+            compound_filter = filter_lower[11:]  # Remove '[compound] ' prefix
+            # For compound filters, allow exact match of the full compound string
+            return classification_lower == compound_filter
+        
+        # Exact match first (highest priority)
+        if classification_lower == filter_lower:
+            return True
+        
+        # For strict filtering, only allow exact matches of individual components
+        # Split classification on common delimiters
+        class_parts = []
+        for delimiter in [',', ' or ', ' and ', ';', '/', '|']:
+            if delimiter in classification_text:
+                class_parts = [part.strip() for part in classification_text.split(delimiter)]
+                break
+        
+        if not class_parts:
+            class_parts = [classification_text.strip()]
+        
+        # Check if any part is an EXACT match to the filter
+        for part in class_parts:
+            part_lower = part.lower().strip()
+            if part_lower == filter_lower:
+                return True
+        
+        return False
+    
+    def _matches_chemical_family(self, family_text, filter_text):
+        """
+        Strict chemical family matching logic.
+        
+        Returns True if the family matches the filter criteria.
+        For pure families (e.g., "Borates"), only matches exact "Borates", 
+        not "Borates with other anions".
+        """
+        if not family_text or not filter_text:
+            return False
+        
+        family_lower = family_text.lower().strip()
+        filter_lower = filter_text.lower().strip()
+        
+        # Handle compound filter option (remove [Compound] prefix)
+        if filter_lower.startswith('[compound] '):
+            compound_filter = filter_lower[11:]  # Remove '[compound] ' prefix
+            # For compound filters, allow exact match of the full compound string
+            return family_lower == compound_filter
+        
+        # Exact match first
+        if family_lower == filter_lower:
+            return True
+        
+        # For strict filtering, only allow exact matches of individual components
+        # Split family on common delimiters
+        family_parts = []
+        for delimiter in [',', ' or ', ' and ', ';', '/', '|', ' - ']:
+            if delimiter in family_text:
+                family_parts = [part.strip() for part in family_text.split(delimiter)]
+                break
+        
+        if not family_parts:
+            family_parts = [family_text.strip()]
+        
+        # Check if any part is an EXACT match to the filter
+        for part in family_parts:
+            part_lower = part.lower().strip()
+            if part_lower == filter_lower:
+                return True
+        
+        return False
+    
+    def _populate_hey_filter(self, hey_classifications):
+        """
+        Populate Hey classification filter with organized options.
+        
+        Separates simple classifications from compound ones and provides
+        individual classification options for better filtering.
+        """
+        simple_classes = set()
+        compound_classes = set()
+        all_individual_classes = set()
+        
+        for classification in hey_classifications:
+            if not classification:
+                continue
+                
+            # Check if it's a compound classification
+            is_compound = any(delimiter in classification for delimiter in [',', ' or ', ' and ', ';', '/', '|'])
+            
+            if is_compound:
+                compound_classes.add(classification)
+                # Extract individual components
+                for delimiter in [',', ' or ', ' and ', ';', '/', '|']:
+                    if delimiter in classification:
+                        parts = [part.strip() for part in classification.split(delimiter)]
+                        for part in parts:
+                            # Clean up the part (remove trailing descriptors)
+                            clean_part = part.split(' with ')[0].split(' - ')[0].strip()
+                            if clean_part and len(clean_part) > 2:  # Avoid very short fragments
+                                all_individual_classes.add(clean_part)
+                        break
+            else:
+                simple_classes.add(classification)
+                all_individual_classes.add(classification)
+        
+        # Combine and sort options
+        filter_options = sorted(all_individual_classes)
+        
+        # Add compound classifications at the end if they provide unique information
+        for compound in sorted(compound_classes):
+            if compound not in filter_options:
+                filter_options.append(f"[Compound] {compound}")
+        
+        self.hey_filter.addItems(filter_options)
+    
+    def _populate_family_filter(self, chemical_families):
+        """
+        Populate chemical family filter with organized options.
+        
+        Similar to Hey classification but for chemical families.
+        """
+        simple_families = set()
+        compound_families = set()
+        all_individual_families = set()
+        
+        for family in chemical_families:
+            if not family:
+                continue
+                
+            # Check if it's a compound family
+            is_compound = any(delimiter in family for delimiter in [',', ' or ', ' and ', ';', '/', '|', ' - '])
+            
+            if is_compound:
+                compound_families.add(family)
+                # Extract individual components
+                for delimiter in [',', ' or ', ' and ', ';', '/', '|', ' - ']:
+                    if delimiter in family:
+                        parts = [part.strip() for part in family.split(delimiter)]
+                        for part in parts:
+                            # Clean up the part
+                            clean_part = part.split(' with ')[0].split(' - ')[0].strip()
+                            if clean_part and len(clean_part) > 2:
+                                all_individual_families.add(clean_part)
+                        break
+            else:
+                simple_families.add(family)
+                all_individual_families.add(family)
+        
+        # Combine and sort options
+        filter_options = sorted(all_individual_families)
+        
+        # Add compound families at the end
+        for compound in sorted(compound_families):
+            if compound not in filter_options:
+                filter_options.append(f"[Compound] {compound}")
+        
+        self.family_filter.addItems(filter_options)
+    
+    def clear_search(self):
+        """Clear all search filters and show all spectra."""
+        self.search_entry.clear()
+        self.hey_filter.setCurrentText("")
+        self.family_filter.setCurrentText("")
+    
+    def select_all(self):
+        """Select all visible spectra."""
+        for row in range(self.spectra_table.rowCount()):
+            if not self.spectra_table.isRowHidden(row):
+                checkbox = self.spectra_table.cellWidget(row, 0)
+                if checkbox:
+                    checkbox.setChecked(True)
+    
+    def select_none(self):
+        """Deselect all spectra."""
+        for row in range(self.spectra_table.rowCount()):
+            checkbox = self.spectra_table.cellWidget(row, 0)
+            if checkbox:
+                checkbox.setChecked(False)
+    
+    def update_selection_count(self):
+        """Update the selection count label."""
+        count = 0
+        for row in range(self.spectra_table.rowCount()):
+            checkbox = self.spectra_table.cellWidget(row, 0)
+            if checkbox and checkbox.isChecked():
+                count += 1
+        
+        self.selection_label.setText(f"{count} spectra selected")
+    
+    def accept_selection(self):
+        """Accept the current selection and close the dialog."""
+        self.selected_spectra = {}
+        
+        for row in range(self.spectra_table.rowCount()):
+            checkbox = self.spectra_table.cellWidget(row, 0)
+            if checkbox and checkbox.isChecked():
+                name_item = self.spectra_table.item(row, 1)
+                if name_item:
+                    spectrum_name = name_item.text()
+                    spectrum_data = name_item.data(Qt.UserRole)
+                    if spectrum_data:
+                        self.selected_spectra[spectrum_name] = spectrum_data
+        
+        if not self.selected_spectra:
+            QMessageBox.warning(self, "No Selection", "Please select at least one spectrum to import.")
+            return
+        
+        self.accept()
+    
+    def get_selected_spectra(self):
+        """Return the selected spectra data."""
+        return self.selected_spectra
+
+
 class RamanClusterAnalysisQt6(QMainWindow):
     """Qt6 Window for Raman cluster analysis with hierarchical clustering."""
     
@@ -457,7 +958,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.heatmap_colormap = QComboBox()
         self.heatmap_colormap.addItems(['viridis', 'plasma', 'inferno', 'magma', 'coolwarm', 'RdBu_r', 'jet'])
         self.heatmap_colormap.setCurrentText('viridis')
-        self.heatmap_colormap.currentTextChanged.connect(self.update_heatmap)
+        self.heatmap_colormap.currentTextChanged.connect(self.delayed_heatmap_update)
         controls_layout.addWidget(self.heatmap_colormap)
         
         # Normalization method
@@ -465,16 +966,36 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.heatmap_norm = QComboBox()
         self.heatmap_norm.addItems(['linear', 'log', 'sqrt', 'row', 'column'])
         self.heatmap_norm.setCurrentText('linear')
-        self.heatmap_norm.currentTextChanged.connect(self.update_heatmap)
+        self.heatmap_norm.currentTextChanged.connect(self.delayed_heatmap_update)
         controls_layout.addWidget(self.heatmap_norm)
         
         # Contrast adjustment
         controls_layout.addWidget(QLabel("Contrast:"))
         self.heatmap_contrast = QSlider(Qt.Horizontal)
-        self.heatmap_contrast.setRange(1, 20)  # 0.1 to 2.0 scaled by 10
+        self.heatmap_contrast.setRange(1, 50)  # 0.1 to 5.0 scaled by 10
         self.heatmap_contrast.setValue(10)  # 1.0
-        self.heatmap_contrast.valueChanged.connect(self.update_heatmap)
+        self.heatmap_contrast.valueChanged.connect(self.delayed_heatmap_update)
+        self.heatmap_contrast.setToolTip("Adjust contrast (0.1x to 5.0x)")
         controls_layout.addWidget(self.heatmap_contrast)
+        
+        # Add contrast value label
+        self.heatmap_contrast_label = QLabel("1.0x")
+        self.heatmap_contrast_label.setMinimumWidth(40)
+        self.heatmap_contrast.valueChanged.connect(lambda v: self.heatmap_contrast_label.setText(f"{v/10.0:.1f}x"))
+        controls_layout.addWidget(self.heatmap_contrast_label)
+        
+        # Add refresh button
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(self.force_heatmap_refresh)
+        refresh_btn.setToolTip("Force heatmap refresh (use if display issues occur)")
+        controls_layout.addWidget(refresh_btn)
+        
+        # Add nuclear reset button
+        # nuclear_btn = QPushButton("Nuclear Reset")
+        # nuclear_btn.clicked.connect(self.nuclear_heatmap_reset)
+        # nuclear_btn.setToolTip("Complete heatmap rebuild (last resort for display issues)")
+        # nuclear_btn.setStyleSheet("QPushButton { background-color: #ff6b6b; color: white; font-weight: bold; }")
+        # controls_layout.addWidget(nuclear_btn)
         
         controls_layout.addStretch()
         layout.addWidget(controls_frame)
@@ -2607,17 +3128,26 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 QMessageBox.warning(self, "Import Failed", "No spectra could be successfully imported from database.")
                 return
             
-            # Find common wavenumber range
-            min_len = min(len(wn) for wn in all_wavenumbers)
-            common_wavenumbers = all_wavenumbers[0][:min_len]
+            # Find the maximum common wavenumber range that covers all spectra
+            # Get the overall min and max wavenumbers across all spectra
+            all_min_wn = min(wn[0] for wn in all_wavenumbers if len(wn) > 0)
+            all_max_wn = max(wn[-1] for wn in all_wavenumbers if len(wn) > 0)
             
-            # Interpolate all spectra to common wavenumber grid
+            print(f"Full wavenumber range found: {all_min_wn:.1f} - {all_max_wn:.1f} cm⁻¹")
+            
+            # Create a common wavenumber grid that spans the full range
+            # Use the densest sampling available
+            max_points = max(len(wn) for wn in all_wavenumbers)
+            common_wavenumbers = np.linspace(all_min_wn, all_max_wn, max_points)
+            
+            print(f"Created common grid: {len(common_wavenumbers)} points from {common_wavenumbers[0]:.1f} to {common_wavenumbers[-1]:.1f} cm⁻¹")
+            
+            # Interpolate all spectra to the common wavenumber grid
             processed_intensities = []
             for wavenumbers, intensities in zip(all_wavenumbers, all_intensities):
-                if len(intensities) != len(common_wavenumbers):
-                    processed_intensities.append(intensities[:min_len])
-                else:
-                    processed_intensities.append(intensities)
+                # Interpolate to common grid
+                interpolated_intensities = np.interp(common_wavenumbers, wavenumbers, intensities)
+                processed_intensities.append(interpolated_intensities)
             
             # Store data
             self.cluster_data['wavenumbers'] = common_wavenumbers
@@ -3175,74 +3705,353 @@ class RamanClusterAnalysisQt6(QMainWindow):
             print(f"Error updating dendrogram: {str(e)}")
 
     def update_heatmap(self):
-        """Update the heatmap visualization."""
-        if (self.cluster_data['features_scaled'] is None or 
-            self.cluster_data['labels'] is None):
+        """Update the heatmap visualization of Raman spectra sorted by cluster."""
+        if (self.cluster_data['intensities'] is None or 
+            self.cluster_data['labels'] is None or
+            self.cluster_data['wavenumbers'] is None):
             return
         
         try:
-            self.heatmap_ax.clear()
+            print("DEBUG: === STARTING AGGRESSIVE HEATMAP REBUILD ===")
+            
+            # STEP 1: Complete figure cleanup
+            self.heatmap_fig.clear()
+            print("DEBUG: Cleared entire figure")
+            
+            # STEP 2: Recreate axis
+            self.heatmap_ax = self.heatmap_fig.add_subplot(111)
+            print("DEBUG: Recreated axis")
+            
+            # STEP 3: Reset colorbar reference
+            self._heatmap_colorbar = None
+            print("DEBUG: Reset colorbar reference")
             
             # Get parameters
             colormap = self.heatmap_colormap.currentText()
             norm_method = self.heatmap_norm.currentText()
             contrast = self.heatmap_contrast.value() / 10.0  # Scale from slider
             
-            # Prepare data
-            features = self.cluster_data['features_scaled'].copy()
+            print(f"DEBUG: Using colormap={colormap}, norm={norm_method}, contrast={contrast}")
+            
+            # Use original Raman spectra intensities instead of processed features
+            intensities = self.cluster_data['intensities'].copy()
+            wavenumbers = self.cluster_data['wavenumbers']
             labels = self.cluster_data['labels']
             
-            # Sort by cluster labels
+            # Sort spectra by cluster labels
             sort_indices = np.argsort(labels)
-            sorted_features = features[sort_indices]
+            sorted_intensities = intensities[sort_indices]
             sorted_labels = labels[sort_indices]
             
-            # Apply normalization
+            # Apply normalization to the spectra
             if norm_method == 'row':
-                sorted_features = (sorted_features.T / np.max(np.abs(sorted_features), axis=1)).T
+                # Normalize each spectrum to its maximum
+                max_vals = np.max(sorted_intensities, axis=1, keepdims=True)
+                max_vals[max_vals == 0] = 1  # Avoid division by zero
+                sorted_intensities = sorted_intensities / max_vals
             elif norm_method == 'column':
-                sorted_features = sorted_features / np.max(np.abs(sorted_features), axis=0)
+                # Normalize each wavenumber across all spectra
+                max_vals = np.max(sorted_intensities, axis=0, keepdims=True)
+                max_vals[max_vals == 0] = 1  # Avoid division by zero
+                sorted_intensities = sorted_intensities / max_vals
             elif norm_method == 'log':
-                sorted_features = np.log1p(np.abs(sorted_features)) * np.sign(sorted_features)
+                # Log normalization with better handling of zeros and negatives
+                sorted_intensities = np.log1p(np.abs(sorted_intensities))
             elif norm_method == 'sqrt':
-                sorted_features = np.sqrt(np.abs(sorted_features)) * np.sign(sorted_features)
+                # Square root normalization with better handling of negatives
+                sorted_intensities = np.sqrt(np.abs(sorted_intensities))
+            elif norm_method == 'linear':
+                # Simple min-max normalization across all data
+                min_val = np.min(sorted_intensities)
+                max_val = np.max(sorted_intensities)
+                if max_val > min_val:
+                    sorted_intensities = (sorted_intensities - min_val) / (max_val - min_val)
             
-            # Apply contrast
-            sorted_features = sorted_features * contrast
+            # Apply contrast adjustment with better scaling
+            if contrast != 1.0:
+                # Center the data around 0.5 for better contrast adjustment
+                if norm_method == 'linear':
+                    sorted_intensities = 0.5 + (sorted_intensities - 0.5) * contrast
+                else:
+                    # For other normalizations, apply contrast directly
+                    mean_val = np.mean(sorted_intensities)
+                    sorted_intensities = mean_val + (sorted_intensities - mean_val) * contrast
             
-            # Create heatmap
+            # Ensure we're displaying the correct wavenumber range
+            n_spectra, n_wavenumbers = sorted_intensities.shape
+            wn_min, wn_max = wavenumbers[0], wavenumbers[-1]
+            
+            # Create heatmap with proper extent to show actual wavenumber range
+            extent = [wn_min, wn_max, 0, n_spectra]
+            
+            print(f"DEBUG: Creating imshow with colormap={colormap}")
+            print(f"DEBUG: Data range: {np.min(sorted_intensities):.3f} to {np.max(sorted_intensities):.3f}")
+            print(f"DEBUG: Extent: {extent}")
+            
             im = self.heatmap_ax.imshow(
-                sorted_features,
-                                      cmap=colormap, 
+                sorted_intensities,
+                cmap=colormap, 
                 aspect='auto',
-                interpolation='nearest'
+                interpolation='nearest',
+                origin='lower',
+                extent=extent
             )
             
-            # Add colorbar
-            if hasattr(self, '_heatmap_colorbar'):
-                self._heatmap_colorbar.remove()
-            self._heatmap_colorbar = self.heatmap_fig.colorbar(im, ax=self.heatmap_ax)
+            print(f"DEBUG: imshow created, colormap applied: {im.get_cmap().name}")
+            print(f"DEBUG: Image data shape: {im.get_array().shape}")
             
-            # Add cluster boundaries
+            # STEP 4: Add colorbar (no need to remove since we cleared the figure)
+            self._heatmap_colorbar = self.heatmap_fig.colorbar(im, ax=self.heatmap_ax, 
+                                                             label='Normalized Intensity')
+            print(f"DEBUG: Added colorbar with colormap: {colormap}")
+            
+            # Add cluster boundaries as horizontal lines
             cluster_boundaries = []
             current_cluster = sorted_labels[0]
             for i, cluster in enumerate(sorted_labels):
                 if cluster != current_cluster:
-                    cluster_boundaries.append(i - 0.5)
+                    cluster_boundaries.append(i)
                     current_cluster = cluster
             
             for boundary in cluster_boundaries:
-                self.heatmap_ax.axhline(y=boundary, color='white', linewidth=2)
+                self.heatmap_ax.axhline(y=boundary, color='white', linewidth=2, alpha=0.8)
             
-            self.heatmap_ax.set_title('Cluster Feature Heatmap')
-            self.heatmap_ax.set_xlabel('Features')
-            self.heatmap_ax.set_ylabel('Spectra (sorted by cluster)')
+            # Set up proper axis labels and ticks for wavenumber axis
+            # X-axis: Show wavenumber values across actual range
+            if n_wavenumbers > 15:
+                # Create approximately 8-10 evenly spaced ticks across the wavenumber range
+                n_ticks = min(10, n_wavenumbers)
+                tick_values = np.linspace(wn_min, wn_max, n_ticks)
+                self.heatmap_ax.set_xticks(tick_values)
+                self.heatmap_ax.set_xticklabels([f"{wn:.0f}" for wn in tick_values], 
+                                               rotation=45, ha='right')
+            else:
+                # For smaller datasets, show all wavenumbers
+                self.heatmap_ax.set_xticks(wavenumbers[::max(1, len(wavenumbers)//10)])
+                self.heatmap_ax.set_xticklabels([f"{wn:.0f}" for wn in wavenumbers[::max(1, len(wavenumbers)//10)]], 
+                                               rotation=45, ha='right')
             
+            # Y-axis: Add cluster labels at cluster centers
+            unique_labels = np.unique(sorted_labels)
+            cluster_positions = []
+            cluster_names = []
+            
+            for cluster_id in unique_labels:
+                cluster_mask = sorted_labels == cluster_id
+                cluster_indices = np.where(cluster_mask)[0]
+                cluster_center = (cluster_indices[0] + cluster_indices[-1]) / 2
+                cluster_positions.append(cluster_center)
+                cluster_names.append(f"Cluster {cluster_id}\n({len(cluster_indices)} spectra)")
+            
+            # Set y-axis ticks at cluster centers
+            self.heatmap_ax.set_yticks(cluster_positions)
+            self.heatmap_ax.set_yticklabels(cluster_names, fontsize=9)
+            
+            # Set proper axis limits
+            self.heatmap_ax.set_xlim(wn_min, wn_max)
+            self.heatmap_ax.set_ylim(0, n_spectra)
+            
+            # Labels and title
+            range_info = f" ({wn_min:.0f}-{wn_max:.0f} cm⁻¹)"
+            self.heatmap_ax.set_title(f'Raman Spectra Heatmap (Sorted by Cluster){range_info}', fontsize=12, pad=20)
+            self.heatmap_ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=10)
+            self.heatmap_ax.set_ylabel('Spectra by Cluster', fontsize=10)
+            
+            # Add text showing current settings and data info
+            settings_text = (f"Colormap: {colormap} | Norm: {norm_method} | Contrast: {contrast:.1f}\n"
+                           f"Range: {wn_min:.0f}-{wn_max:.0f} cm⁻¹ | {n_spectra} spectra, {len(unique_labels)} clusters")
+            self.heatmap_ax.text(0.02, 0.98, settings_text, transform=self.heatmap_ax.transAxes,
+                                verticalalignment='top', bbox=dict(boxstyle='round', 
+                                facecolor='white', alpha=0.8), fontsize=8)
+            
+            # Debug info - print wavenumber range to console
+            print(f"DEBUG: Heatmap Update:")
+            print(f"  Wavenumber range: {wn_min:.1f} - {wn_max:.1f} cm⁻¹")
+            print(f"  Data shape: {sorted_intensities.shape}")
+            print(f"  Colormap: {colormap}, Normalization: {norm_method}, Contrast: {contrast:.1f}")
+            print(f"  Canvas widget: {type(self.heatmap_canvas)}")
+            print(f"  Figure: {type(self.heatmap_fig)}")
+            
+            # STEP 5: Apply layout and force complete redraw
+            print("DEBUG: Applying tight_layout")
             self.heatmap_fig.tight_layout()
+            
+            # STEP 6: Aggressive canvas refresh sequence
+            print("DEBUG: Starting aggressive canvas refresh...")
+            from PySide6.QtWidgets import QApplication
+            import matplotlib.pyplot as plt
+            
+            # Force matplotlib to flush any cached rendering
+            try:
+                plt.draw()
+                print("DEBUG: Called plt.draw() - global flush")
+            except:
+                print("DEBUG: plt.draw() not available")
+            
+            # Force immediate draw
             self.heatmap_canvas.draw()
+            print("DEBUG: Called canvas.draw() - immediate")
+            
+            # Process all pending Qt events
+            QApplication.processEvents()
+            print("DEBUG: Processed Qt events")
+            
+            # Force widget repaint
+            self.heatmap_canvas.repaint()
+            print("DEBUG: Called canvas.repaint()")
+            
+            # Force figure rendering
+            try:
+                self.heatmap_fig.canvas.flush_events()
+                print("DEBUG: Called figure.canvas.flush_events()")
+            except:
+                print("DEBUG: figure.canvas.flush_events() not available")
+            
+            # Another round of event processing
+            QApplication.processEvents()
+            print("DEBUG: Final Qt event processing")
+            
+            # Final check - verify colormap is applied
+            if hasattr(self, 'heatmap_ax') and len(self.heatmap_ax.images) > 0:
+                current_cmap = self.heatmap_ax.images[0].get_cmap().name
+                print(f"DEBUG: Final verification - active colormap: {current_cmap}")
+                if current_cmap != colormap:
+                    print(f"DEBUG: WARNING - Colormap mismatch! Expected: {colormap}, Got: {current_cmap}")
+            else:
+                print("DEBUG: No images found on axis")
+            
+            print("DEBUG: === AGGRESSIVE HEATMAP REBUILD COMPLETE ===")
             
         except Exception as e:
-            print(f"Error updating heatmap: {str(e)}")
+            print(f"ERROR: Exception in update_heatmap: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def force_heatmap_refresh(self):
+        """Force a complete heatmap refresh with enhanced debugging."""
+        print("DEBUG: === FORCE HEATMAP REFRESH INITIATED ===")
+        
+        # Step 1: Clear everything
+        print("DEBUG: Step 1 - Clearing heatmap axis")
+        self.heatmap_ax.clear()
+        
+        # Step 2: Force canvas draw to clear
+        print("DEBUG: Step 2 - Drawing cleared canvas")
+        self.heatmap_canvas.draw()
+        
+        # Step 3: Remove colorbar completely
+        if hasattr(self, '_heatmap_colorbar') and self._heatmap_colorbar is not None:
+            print("DEBUG: Step 3 - Removing colorbar")
+            try:
+                self._heatmap_colorbar.remove()
+                self._heatmap_colorbar = None
+                print("DEBUG: Colorbar removed successfully")
+            except Exception as e:
+                print(f"DEBUG: Error removing colorbar: {e}")
+                self._heatmap_colorbar = None
+        
+        # Step 4: Process Qt events
+        print("DEBUG: Step 4 - Processing Qt events")
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
+        
+        # Step 5: Call update_heatmap
+        print("DEBUG: Step 5 - Calling update_heatmap")
+        self.update_heatmap()
+        
+        # Step 6: Final forced refresh
+        print("DEBUG: Step 6 - Final canvas refresh")
+        self.heatmap_canvas.draw()
+        self.heatmap_canvas.draw_idle()
+        QApplication.processEvents()
+        
+        print("DEBUG: === FORCE HEATMAP REFRESH COMPLETED ===")
+
+    def nuclear_heatmap_reset(self):
+        """Nuclear option: completely recreate the heatmap canvas and figure."""
+        print("DEBUG: === NUCLEAR HEATMAP RESET INITIATED ===")
+        
+        try:
+            # Find the heatmap tab
+            heatmap_tab_index = -1
+            for i in range(self.viz_tab_widget.count()):
+                if self.viz_tab_widget.tabText(i) == "Heatmap":
+                    heatmap_tab_index = i
+                    break
+            
+            if heatmap_tab_index == -1:
+                print("DEBUG: Could not find heatmap tab")
+                return
+            
+            # Get the current tab widget
+            current_widget = self.viz_tab_widget.widget(heatmap_tab_index)
+            layout = current_widget.layout()
+            
+            # Remove old canvas and toolbar
+            if hasattr(self, 'heatmap_canvas'):
+                layout.removeWidget(self.heatmap_canvas)
+                self.heatmap_canvas.setParent(None)
+                self.heatmap_canvas.deleteLater()
+                print("DEBUG: Removed old canvas")
+                
+            if hasattr(self, 'heatmap_toolbar'):
+                layout.removeWidget(self.heatmap_toolbar)
+                self.heatmap_toolbar.setParent(None)
+                self.heatmap_toolbar.deleteLater()
+                print("DEBUG: Removed old toolbar")
+            
+            # Create new figure and canvas
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+            
+            self.heatmap_fig = Figure(figsize=(10, 6))
+            self.heatmap_ax = self.heatmap_fig.add_subplot(111)
+            self.heatmap_canvas = FigureCanvas(self.heatmap_fig)
+            self.heatmap_toolbar = NavigationToolbar(self.heatmap_canvas, current_widget)
+            
+            # Add new widgets to layout
+            layout.addWidget(self.heatmap_canvas)
+            layout.addWidget(self.heatmap_toolbar)
+            
+            print("DEBUG: Created new canvas and toolbar")
+            
+            # Reset colorbar reference
+            self._heatmap_colorbar = None
+            
+            # Force widget update
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # Now update the heatmap
+            self.update_heatmap()
+            
+            print("DEBUG: === NUCLEAR HEATMAP RESET COMPLETED ===")
+            
+        except Exception as e:
+            print(f"DEBUG: Nuclear reset failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def delayed_heatmap_update(self):
+        """Handle delayed heatmap updates to prevent rapid successive calls."""
+        print("DEBUG: Delayed heatmap update triggered")
+        
+        # Cancel any existing timer
+        if hasattr(self, '_heatmap_update_timer'):
+            try:
+                self._heatmap_update_timer.stop()
+                print("DEBUG: Stopped existing timer")
+            except:
+                pass
+        
+        # Create new timer for delayed update
+        from PySide6.QtCore import QTimer
+        self._heatmap_update_timer = QTimer()
+        self._heatmap_update_timer.setSingleShot(True)
+        self._heatmap_update_timer.timeout.connect(self.update_heatmap)
+        self._heatmap_update_timer.start(100)  # 100ms delay
+        print("DEBUG: Started delayed update timer (100ms)")
 
     def update_pca_components_plot(self):
         """Update the PCA components visualization."""
@@ -6800,11 +7609,7 @@ Cluster Sizes:
         self.stats_results.setText(full_text)
 
     # Database Import Dialog placeholder class
-    def open_database_import_dialog(self):
-        """Open database import dialog - simplified version for now."""
-        QMessageBox.information(self, "Database Import", 
-                              "Database import dialog functionality will be enhanced.\n\n"
-                              "For now, please use the folder import or main app import options.")
+    # Method removed - using the functional version at line 2526
 
     def export_results(self):
         """Export all analysis results to files."""

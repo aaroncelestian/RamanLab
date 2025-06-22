@@ -195,6 +195,10 @@ class SpectralDeconvolutionQt6(QDialog):
         self.individual_peak_lines = []
         self.filter_preview_line = None
         
+        # Background auto-preview data
+        self.background_options = []  # List of (background_data, description, params) tuples
+        self.background_option_lines = []  # List of plot line references
+        
         # Fourier analysis data storage
         self.fft_data = None
         self.fft_frequencies = None
@@ -285,7 +289,7 @@ class SpectralDeconvolutionQt6(QDialog):
         bg_method_layout = QHBoxLayout()
         bg_method_layout.addWidget(QLabel("Method:"))
         self.bg_method_combo = QComboBox()
-        self.bg_method_combo.addItems(["ALS (Asymmetric Least Squares)", "Linear", "Polynomial", "Moving Average"])
+        self.bg_method_combo.addItems(["ALS (Asymmetric Least Squares)", "Linear", "Polynomial", "Moving Average", "Spline"])
         self.bg_method_combo.currentTextChanged.connect(self.on_bg_method_changed)
         self.bg_method_combo.currentTextChanged.connect(self._trigger_background_update)
         bg_method_layout.addWidget(self.bg_method_combo)
@@ -384,7 +388,7 @@ class SpectralDeconvolutionQt6(QDialog):
         poly_order_layout = QHBoxLayout()
         poly_order_layout.addWidget(QLabel("Polynomial Order:"))
         self.poly_order_slider = QSlider(Qt.Horizontal)
-        self.poly_order_slider.setRange(1, 6)
+        self.poly_order_slider.setRange(1, 6)  # Extended to 6 orders
         self.poly_order_slider.setValue(2)  # Default order 2
         poly_order_layout.addWidget(self.poly_order_slider)
         self.poly_order_label = QLabel("2")
@@ -437,10 +441,60 @@ class SpectralDeconvolutionQt6(QDialog):
         
         bg_layout.addWidget(self.moving_avg_params_widget)
         
+        # Spline parameters
+        self.spline_params_widget = QWidget()
+        spline_params_layout = QVBoxLayout(self.spline_params_widget)
+        spline_params_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Number of knots
+        knots_layout = QHBoxLayout()
+        knots_layout.addWidget(QLabel("Number of Knots:"))
+        self.knots_slider = QSlider(Qt.Horizontal)
+        self.knots_slider.setRange(5, 50)  # 5 to 50 knots
+        self.knots_slider.setValue(20)  # Default 20 knots
+        knots_layout.addWidget(self.knots_slider)
+        self.knots_label = QLabel("20")
+        knots_layout.addWidget(self.knots_label)
+        spline_params_layout.addLayout(knots_layout)
+        
+        # Smoothing factor
+        smoothing_layout = QHBoxLayout()
+        smoothing_layout.addWidget(QLabel("Smoothing Factor:"))
+        self.smoothing_slider = QSlider(Qt.Horizontal)
+        self.smoothing_slider.setRange(1, 50)  # Log scale: 10^1 to 10^5
+        self.smoothing_slider.setValue(30)  # Default 10^3
+        smoothing_layout.addWidget(self.smoothing_slider)
+        self.smoothing_label = QLabel("1000")
+        smoothing_layout.addWidget(self.smoothing_label)
+        spline_params_layout.addLayout(smoothing_layout)
+        
+        # Spline degree
+        degree_layout = QHBoxLayout()
+        degree_layout.addWidget(QLabel("Spline Degree:"))
+        self.spline_degree_slider = QSlider(Qt.Horizontal)
+        self.spline_degree_slider.setRange(1, 5)  # 1st to 5th order
+        self.spline_degree_slider.setValue(3)  # Default cubic (3rd order)
+        degree_layout.addWidget(self.spline_degree_slider)
+        self.spline_degree_label = QLabel("3 (Cubic)")
+        degree_layout.addWidget(self.spline_degree_label)
+        spline_params_layout.addLayout(degree_layout)
+        
+        # Connect sliders to update labels and live preview
+        self.knots_slider.valueChanged.connect(self.update_knots_label)
+        self.smoothing_slider.valueChanged.connect(self.update_smoothing_label)
+        self.spline_degree_slider.valueChanged.connect(self.update_spline_degree_label)
+        
+        self.knots_slider.valueChanged.connect(self._trigger_background_update)
+        self.smoothing_slider.valueChanged.connect(self._trigger_background_update)
+        self.spline_degree_slider.valueChanged.connect(self._trigger_background_update)
+        
+        bg_layout.addWidget(self.spline_params_widget)
+        
         # Initially hide all parameter widgets except ALS (default)
         self.linear_params_widget.setVisible(False)
         self.poly_params_widget.setVisible(False)
         self.moving_avg_params_widget.setVisible(False)
+        self.spline_params_widget.setVisible(False)
         
         # Background subtraction buttons
         button_layout = QHBoxLayout()
@@ -460,6 +514,87 @@ class SpectralDeconvolutionQt6(QDialog):
         bg_layout.addWidget(reset_btn)
         
         layout.addWidget(bg_group)
+        
+        # Auto Background Preview group
+        auto_bg_group = QGroupBox("Automatic Background Preview")
+        auto_bg_layout = QVBoxLayout(auto_bg_group)
+        
+        # Auto preview button
+        auto_preview_btn = QPushButton("🔍 Generate Background Options")
+        auto_preview_btn.clicked.connect(self.generate_background_previews)
+        auto_preview_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45A049;
+            }
+        """)
+        auto_bg_layout.addWidget(auto_preview_btn)
+        
+        # Background options selection
+        selection_layout = QHBoxLayout()
+        selection_layout.addWidget(QLabel("Select Option:"))
+        self.bg_options_combo = QComboBox()
+        self.bg_options_combo.addItem("None - Generate options first")
+        self.bg_options_combo.currentTextChanged.connect(self.on_bg_option_selected)
+        selection_layout.addWidget(self.bg_options_combo)
+        auto_bg_layout.addLayout(selection_layout)
+        
+        # Auto preview controls
+        auto_controls_layout = QHBoxLayout()
+        
+        apply_selected_btn = QPushButton("Apply Selected")
+        apply_selected_btn.clicked.connect(self.apply_selected_background_option)
+        apply_selected_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 6px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        
+        clear_options_btn = QPushButton("Clear Options")
+        clear_options_btn.clicked.connect(self.clear_background_options)
+        clear_options_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF5722;
+                color: white;
+                border: none;
+                padding: 6px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #E64A19;
+            }
+        """)
+        
+        auto_controls_layout.addWidget(apply_selected_btn)
+        auto_controls_layout.addWidget(clear_options_btn)
+        auto_bg_layout.addLayout(auto_controls_layout)
+        
+        # Instructions
+        instructions = QLabel(
+            "Generate multiple background options with different parameters.\n"
+            "Preview them on the plot and select the best one to apply."
+        )
+        instructions.setWordWrap(True)
+        instructions.setStyleSheet("color: #555; font-size: 10px; margin: 5px;")
+        auto_bg_layout.addWidget(instructions)
+        
+        layout.addWidget(auto_bg_group)
         layout.addStretch()
         
         return tab
@@ -966,79 +1101,37 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.background = self.baseline_als(self.original_intensities, lambda_value, p_value, niter_value)
                 
             elif method == "Linear":
-                # Linear background subtraction with weighted endpoints
+                # Linear background fitting to baseline regions
                 start_weight = self.start_weight_slider.value() / 10.0
                 end_weight = self.end_weight_slider.value() / 10.0
                 
-                # Create weighted linear background
-                start_val = self.original_intensities[0] * start_weight
-                end_val = self.original_intensities[-1] * end_weight
-                background = np.linspace(start_val, end_val, len(self.original_intensities))
-                self.background = background
+                # Calculate linear baseline using minimum filtering approach
+                self.background = self._calculate_linear_background(start_weight, end_weight)
                 
             elif method == "Polynomial":
-                # Polynomial background fitting with adjustable order and method
-                x = np.arange(len(self.original_intensities))
+                # Polynomial background fitting to baseline regions
                 poly_order = self.poly_order_slider.value()
                 poly_method = self.poly_method_combo.currentText()
                 
-                if poly_method == "Robust":
-                    # Use robust polynomial fitting (less sensitive to outliers)
-                    try:
-                        from numpy.polynomial import polynomial as P
-                        # Robust fitting using iterative reweighting
-                        coeffs = np.polyfit(x, self.original_intensities, poly_order)
-                        background = np.polyval(coeffs, x)
-                        
-                        # Apply robust reweighting
-                        for _ in range(3):  # 3 iterations of robust fitting
-                            residuals = np.abs(self.original_intensities - background)
-                            weights = 1.0 / (1.0 + residuals / np.median(residuals))
-                            coeffs = np.polyfit(x, self.original_intensities, poly_order, w=weights)
-                            background = np.polyval(coeffs, x)
-                    except:
-                        # Fallback to regular fitting
-                        coeffs = np.polyfit(x, self.original_intensities, poly_order)
-                        background = np.polyval(coeffs, x)
-                else:
-                    # Regular least squares fitting
-                    coeffs = np.polyfit(x, self.original_intensities, poly_order)
-                    background = np.polyval(coeffs, x)
-                
-                self.background = background
+                # Calculate polynomial baseline using minimum filtering approach
+                self.background = self._calculate_polynomial_background(poly_order, poly_method)
                 
             elif method == "Moving Average":
-                # Moving average background with adjustable window and type
+                # Moving average background fitting to baseline regions
                 window_percent = self.window_size_slider.value()
                 window_type = self.window_type_combo.currentText()
                 
-                # Calculate window size as percentage of spectrum length
-                window_size = max(int(len(self.original_intensities) * window_percent / 100.0), 3)
+                # Calculate moving average baseline using minimum filtering approach
+                self.background = self._calculate_moving_average_background(window_percent, window_type)
                 
-                if window_type == "Uniform":
-                    # Simple uniform moving average
-                    from scipy import ndimage
-                    background = ndimage.uniform_filter1d(self.original_intensities, size=window_size)
-                elif window_type == "Gaussian":
-                    # Gaussian-weighted moving average
-                    from scipy import ndimage
-                    sigma = window_size / 4.0  # Standard deviation
-                    background = ndimage.gaussian_filter1d(self.original_intensities, sigma=sigma)
-                elif window_type in ["Hann", "Hamming"]:
-                    # Windowed moving average
-                    if window_type == "Hann":
-                        window = np.hanning(window_size)
-                    else:  # Hamming
-                        window = np.hamming(window_size)
-                    
-                    window = window / np.sum(window)  # Normalize
-                    background = np.convolve(self.original_intensities, window, mode='same')
-                else:
-                    # Fallback to uniform
-                    from scipy import ndimage
-                    background = ndimage.uniform_filter1d(self.original_intensities, size=window_size)
+            elif method == "Spline":
+                # Spline background fitting
+                n_knots = self.knots_slider.value()
+                smoothing_value = 10 ** (self.smoothing_slider.value() / 10.0)
+                degree = self.spline_degree_slider.value()
                 
-                self.background = background
+                # Calculate spline background
+                self.background = self._calculate_spline_background_for_subtraction(n_knots, smoothing_value, degree)
             
             # Set preview flag
             self.background_preview_active = True
@@ -1580,6 +1673,7 @@ class SpectralDeconvolutionQt6(QDialog):
         self.linear_params_widget.setVisible(method == "Linear")
         self.poly_params_widget.setVisible(method == "Polynomial")
         self.moving_avg_params_widget.setVisible(method == "Moving Average")
+        self.spline_params_widget.setVisible(method == "Spline")
         
         # Clear any active background preview when method changes
         if hasattr(self, 'background_preview_active') and self.background_preview_active:
@@ -1622,6 +1716,27 @@ class SpectralDeconvolutionQt6(QDialog):
         """Update the window size label based on the slider value."""
         value = self.window_size_slider.value()
         self.window_size_label.setText(f"{value}%")
+    
+    def update_knots_label(self):
+        """Update the knots label based on the slider value."""
+        value = self.knots_slider.value()
+        self.knots_label.setText(str(value))
+    
+    def update_smoothing_label(self):
+        """Update the smoothing label based on the slider value."""
+        value = self.smoothing_slider.value()
+        smoothing_value = 10 ** (value / 10.0)  # Convert to 10^1 to 10^5 range
+        if smoothing_value >= 1000:
+            self.smoothing_label.setText(f"{int(smoothing_value)}")
+        else:
+            self.smoothing_label.setText(f"{smoothing_value:.1f}")
+    
+    def update_spline_degree_label(self):
+        """Update the spline degree label based on the slider value."""
+        value = self.spline_degree_slider.value()
+        degree_names = {1: "1 (Linear)", 2: "2 (Quadratic)", 3: "3 (Cubic)", 
+                       4: "4 (Quartic)", 5: "5 (Quintic)"}
+        self.spline_degree_label.setText(degree_names.get(value, str(value)))
 
     def clear_background_preview(self):
         """Clear the background preview."""
@@ -1657,6 +1772,9 @@ class SpectralDeconvolutionQt6(QDialog):
         self.fit_result = None
         self.residuals = None  # Clear residuals
         self.components = []
+        
+        # Clear background options
+        self.clear_background_options()
         
         # Disable interactive mode
         if self.interactive_mode:
@@ -2678,6 +2796,649 @@ class SpectralDeconvolutionQt6(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Export failed: {str(e)}")
     
+    # Background Auto-Preview Methods
+    def generate_background_previews(self):
+        """Generate multiple background subtraction options with different parameters."""
+        try:
+            # Clear previous options
+            self.clear_background_options()
+            
+            # Define ALS parameter sets - top 6 most useful combinations
+            parameter_sets = [
+                ("ALS (Conservative)", "ALS", {"lambda": 1e6, "p": 0.001, "niter": 10}),
+                ("ALS (Moderate)", "ALS", {"lambda": 1e5, "p": 0.01, "niter": 10}),
+                ("ALS (Aggressive)", "ALS", {"lambda": 1e4, "p": 0.05, "niter": 15}),
+                ("ALS (Ultra Smooth)", "ALS", {"lambda": 1e7, "p": 0.002, "niter": 20}),
+                ("ALS (Balanced)", "ALS", {"lambda": 5e5, "p": 0.02, "niter": 12}),
+                ("ALS (Fast)", "ALS", {"lambda": 1e5, "p": 0.01, "niter": 5}),
+            ]
+            
+            # Generate backgrounds for each parameter set
+            colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
+                     '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+                     '#F1948A', '#73C6B6', '#AED6F1', '#A9DFBF', '#F9E79F']
+            
+            for i, (description, method, params) in enumerate(parameter_sets):
+                try:
+                    background = self._calculate_background_with_params(method, params)
+                    if background is not None:
+                        # Store background data
+                        self.background_options.append((background, description, method, params))
+                        
+                        # Plot preview line
+                        color = colors[i % len(colors)]
+                        line, = self.ax_main.plot(
+                            self.wavenumbers, background, 
+                            color=color, linewidth=1.5, alpha=0.7, 
+                            linestyle='--', label=description
+                        )
+                        self.background_option_lines.append(line)
+                        
+                except Exception as e:
+                    print(f"Failed to generate {description}: {str(e)}")
+                    continue
+            
+            # Update dropdown with options
+            self.update_background_options_dropdown()
+            
+            # Update legend and redraw
+            self.ax_main.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            self.canvas.draw()
+            
+            # Show info message
+            QMessageBox.information(self, "Options Generated", 
+                                  f"Generated {len(self.background_options)} background options.\n"
+                                  f"Select one from the dropdown and preview it by clicking on the option.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Generation Error", f"Failed to generate background options: {str(e)}")
+    
+    def _calculate_background_with_params(self, method, params):
+        """Calculate background using specified method and parameters."""
+        try:
+            if method == "ALS":
+                lambda_val = params.get("lambda", 1e5)
+                p_val = params.get("p", 0.01)
+                niter_val = params.get("niter", 10)
+                return self.baseline_als(self.original_intensities, lambda_val, p_val, niter_val)
+                
+            elif method == "Linear":
+                start_weight = params.get("start_weight", 1.0)
+                end_weight = params.get("end_weight", 1.0)
+                start_val = self.original_intensities[0] * start_weight
+                end_val = self.original_intensities[-1] * end_weight
+                return np.linspace(start_val, end_val, len(self.original_intensities))
+                
+            elif method == "Polynomial":
+                order = params.get("order", 2)
+                method_type = params.get("method", "Least Squares")
+                x = np.arange(len(self.original_intensities))
+                
+                if method_type == "Robust":
+                    # Robust fitting with iterative reweighting
+                    coeffs = np.polyfit(x, self.original_intensities, order)
+                    background = np.polyval(coeffs, x)
+                    
+                    # Apply robust reweighting
+                    for _ in range(3):
+                        residuals = np.abs(self.original_intensities - background)
+                        weights = 1.0 / (1.0 + residuals / np.median(residuals))
+                        coeffs = np.polyfit(x, self.original_intensities, order, w=weights)
+                        background = np.polyval(coeffs, x)
+                    
+                    return background
+                else:
+                    coeffs = np.polyfit(x, self.original_intensities, order)
+                    return np.polyval(coeffs, x)
+                    
+            elif method == "Moving Average":
+                window_percent = params.get("window_percent", 10)
+                window_type = params.get("window_type", "Gaussian")
+                
+                window_size = max(int(len(self.original_intensities) * window_percent / 100.0), 3)
+                
+                if window_type == "Gaussian":
+                    from scipy import ndimage
+                    sigma = window_size / 4.0
+                    return ndimage.gaussian_filter1d(self.original_intensities, sigma=sigma)
+                elif window_type == "Uniform":
+                    from scipy import ndimage
+                    return ndimage.uniform_filter1d(self.original_intensities, size=window_size)
+                else:
+                    # Default to Gaussian
+                    from scipy import ndimage
+                    sigma = window_size / 4.0
+                    return ndimage.gaussian_filter1d(self.original_intensities, sigma=sigma)
+                     
+            elif method == "Spline":
+                n_knots = params.get("n_knots", 20)
+                smoothing = params.get("smoothing", 500)
+                return self._calculate_spline_background(n_knots, smoothing)
+            
+            return None
+            
+        except Exception as e:
+            print(f"Background calculation error for {method}: {str(e)}")
+            return None
+    
+    def _calculate_spline_background_for_subtraction(self, n_knots, smoothing, degree):
+        """Calculate spline-based background that fits below the peaks for background subtraction."""
+        try:
+            from scipy.interpolate import UnivariateSpline
+            
+            # Create x values (indices or wavenumbers)
+            x = np.arange(len(self.original_intensities))
+            y = self.original_intensities
+            
+            # For proper background subtraction, we need to fit the baseline, not the peaks
+            # Method: Use minimum filtering and iterative approach to fit below the data
+            
+            # Step 1: Apply a minimum filter to identify baseline regions
+            from scipy import ndimage
+            window_size = max(len(y) // 20, 5)  # Adaptive window size
+            y_min_filtered = ndimage.minimum_filter1d(y, size=window_size)
+            
+            # Step 2: Create initial baseline estimate using the minimum filtered data
+            if n_knots <= 2:
+                n_knots = 3  # Minimum for spline
+            
+            # For background subtraction, use higher smoothing to avoid fitting peaks
+            background_smoothing = max(smoothing, len(y) / 10)  # Ensure minimum smoothing
+            
+            try:
+                # Fit spline to minimum filtered data for initial background estimate
+                spline = UnivariateSpline(x, y_min_filtered, s=background_smoothing, k=min(degree, 3))
+                initial_background = spline(x)
+                
+                # Step 3: Iterative refinement - only use points below or near the background
+                current_background = initial_background.copy()
+                
+                for iteration in range(3):  # Limited iterations
+                    # Identify points that are likely background (below or close to current estimate)
+                    threshold = np.percentile(y - current_background, 20)  # Use 20th percentile
+                    mask = (y - current_background) <= threshold
+                    
+                    if np.sum(mask) < n_knots:  # Need enough points
+                        break
+                    
+                    # Fit spline only to identified background points
+                    spline = UnivariateSpline(x[mask], y[mask], s=background_smoothing, k=min(degree, 3))
+                    current_background = spline(x)
+                    
+                    # Ensure background doesn't go above data unrealistically
+                    current_background = np.minimum(current_background, y)
+                
+                # Final constraint: background should be below the data
+                background = np.minimum(current_background, y)
+                
+                return background
+                
+            except Exception:
+                # Fallback: use simple percentile-based baseline
+                from scipy.signal import savgol_filter
+                
+                # Use Savitzky-Golay filter on minimum filtered data
+                window_length = min(len(y) // 5, 51)
+                if window_length % 2 == 0:
+                    window_length += 1  # Must be odd
+                
+                background = savgol_filter(y_min_filtered, window_length, polyorder=min(degree, 3))
+                return np.minimum(background, y)
+                
+        except ImportError:
+            # If scipy is not available, fallback to simple polynomial on minimum values
+            print("scipy not available, using polynomial fallback for spline background")
+            
+            # Simple approach: fit polynomial to lower envelope
+            window_size = max(len(y) // 10, 3)
+            y_smooth = np.array([np.min(y[max(0, i-window_size):min(len(y), i+window_size+1)]) 
+                               for i in range(len(y))])
+            
+            x = np.arange(len(y))
+            coeffs = np.polyfit(x, y_smooth, min(degree, 3))
+            background = np.polyval(coeffs, x)
+            
+            return np.minimum(background, y)
+            
+        except Exception as e:
+            print(f"Spline background calculation error: {str(e)}")
+            # Final fallback: simple linear baseline
+            background = np.linspace(y[0], y[-1], len(y))
+            return np.minimum(background, y)
+    
+    def _calculate_spline_background(self, n_knots, smoothing):
+        """Legacy method - calculate spline-based background using UnivariateSpline."""
+        # This method kept for compatibility with auto-preview (though spline removed from auto-preview)
+        return self._calculate_spline_background_for_subtraction(n_knots, smoothing, 3)
+    
+    def _calculate_linear_background(self, start_weight, end_weight):
+        """Calculate linear background that fits the baseline, not the data."""
+        try:
+            from scipy import ndimage
+            
+            y = self.original_intensities
+            
+            # Method 1: Use minimum filtering to identify baseline regions
+            window_size = max(len(y) // 15, 5)  # Adaptive window size for minimum filtering
+            y_min_filtered = ndimage.minimum_filter1d(y, size=window_size)
+            
+            # Method 2: Identify baseline points using percentile approach
+            # Take points in the lower percentile as likely baseline
+            percentile_threshold = 30  # Use bottom 30% as baseline candidates
+            threshold = np.percentile(y, percentile_threshold)
+            baseline_mask = y <= threshold
+            
+            # Combine minimum filtered data with baseline mask
+            baseline_indices = np.where(baseline_mask)[0]
+            
+            if len(baseline_indices) < 2:  # Need at least 2 points for linear fit
+                # Fallback: use endpoint-weighted linear fit to minimum filtered data
+                start_val = y_min_filtered[0] * start_weight
+                end_val = y_min_filtered[-1] * end_weight
+            else:
+                # Fit line to identified baseline points
+                baseline_y = y[baseline_indices]
+                
+                # Apply weights to endpoints
+                if len(baseline_indices) > 0:
+                    # Find closest baseline points to start and end
+                    start_idx = baseline_indices[0]
+                    end_idx = baseline_indices[-1]
+                    
+                    start_val = y[start_idx] * start_weight
+                    end_val = y[end_idx] * end_weight
+                else:
+                    start_val = y[0] * start_weight
+                    end_val = y[-1] * end_weight
+            
+            # Create linear background
+            background = np.linspace(start_val, end_val, len(y))
+            
+            # Ensure background doesn't exceed data unrealistically
+            background = np.minimum(background, y)
+            
+            return background
+            
+        except ImportError:
+            # Fallback without scipy
+            y = self.original_intensities
+            
+            # Simple approach: weight the endpoints and create linear baseline
+            start_val = y[0] * start_weight
+            end_val = y[-1] * end_weight
+            background = np.linspace(start_val, end_val, len(y))
+            
+            return np.minimum(background, y)
+        
+        except Exception as e:
+            print(f"Linear background calculation error: {str(e)}")
+            # Final fallback
+            y = self.original_intensities
+            background = np.linspace(y[0], y[-1], len(y))
+            return np.minimum(background, y)
+    
+    def _calculate_polynomial_background(self, poly_order, poly_method):
+        """Calculate polynomial background that fits the baseline, not the data."""
+        try:
+            from scipy import ndimage
+            
+            y = self.original_intensities
+            x = np.arange(len(y))
+            
+            # Step 1: Use minimum filtering to identify baseline regions
+            window_size = max(len(y) // 20, 5)
+            y_min_filtered = ndimage.minimum_filter1d(y, size=window_size)
+            
+            # Step 2: Iterative baseline fitting approach
+            current_background = y_min_filtered.copy()
+            
+            for iteration in range(3):  # Limited iterations
+                # Identify points likely to be baseline (below current estimate)
+                threshold = np.percentile(y - current_background, 25)  # Use 25th percentile
+                mask = (y - current_background) <= threshold
+                
+                if np.sum(mask) < poly_order + 2:  # Need enough points for polynomial
+                    break
+                
+                # Fit polynomial to identified baseline points
+                if poly_method == "Robust":
+                    # Robust polynomial fitting with iterative reweighting
+                    try:
+                        coeffs = np.polyfit(x[mask], y[mask], poly_order)
+                        poly_fit = np.polyval(coeffs, x)
+                        
+                        # Apply robust reweighting for 2 iterations
+                        for _ in range(2):
+                            residuals = np.abs(y[mask] - np.polyval(coeffs, x[mask]))
+                            weights = 1.0 / (1.0 + residuals / (np.median(residuals) + 1e-10))
+                            coeffs = np.polyfit(x[mask], y[mask], poly_order, w=weights)
+                        
+                        current_background = np.polyval(coeffs, x)
+                    except:
+                        # Fallback to regular fitting
+                        coeffs = np.polyfit(x[mask], y[mask], poly_order)
+                        current_background = np.polyval(coeffs, x)
+                else:
+                    # Regular least squares fitting to baseline points
+                    coeffs = np.polyfit(x[mask], y[mask], poly_order)
+                    current_background = np.polyval(coeffs, x)
+                
+                # Ensure background doesn't go above data
+                current_background = np.minimum(current_background, y)
+            
+            return current_background
+            
+        except ImportError:
+            # Fallback without scipy
+            y = self.original_intensities
+            x = np.arange(len(y))
+            
+            # Simple approach: use lower envelope points
+            window_size = max(len(y) // 10, 3)
+            y_envelope = np.array([np.min(y[max(0, i-window_size):min(len(y), i+window_size+1)]) 
+                                 for i in range(len(y))])
+            
+            # Fit polynomial to envelope
+            coeffs = np.polyfit(x, y_envelope, min(poly_order, len(y)-1))
+            background = np.polyval(coeffs, x)
+            
+            return np.minimum(background, y)
+            
+        except Exception as e:
+            print(f"Polynomial background calculation error: {str(e)}")
+            # Final fallback
+            y = self.original_intensities
+            x = np.arange(len(y))
+            coeffs = np.polyfit(x, y, min(2, len(y)-1))  # Simple quadratic fallback
+            background = np.polyval(coeffs, x)
+            return np.minimum(background, y)
+    
+    def _calculate_moving_average_background(self, window_percent, window_type):
+        """Calculate moving average background that fits the baseline, not the data."""
+        try:
+            from scipy import ndimage
+            
+            y = self.original_intensities
+            
+            # Calculate window size as percentage of spectrum length
+            window_size = max(int(len(y) * window_percent / 100.0), 3)
+            
+            # Step 1: Apply minimum filtering to get baseline candidate
+            min_window = max(window_size // 2, 3)
+            y_min_filtered = ndimage.minimum_filter1d(y, size=min_window)
+            
+            # Step 2: Apply the specified moving average filter to the minimum filtered data
+            if window_type == "Uniform":
+                background = ndimage.uniform_filter1d(y_min_filtered, size=window_size)
+            elif window_type == "Gaussian":
+                sigma = window_size / 4.0  # Standard deviation
+                background = ndimage.gaussian_filter1d(y_min_filtered, sigma=sigma)
+            elif window_type in ["Hann", "Hamming"]:
+                # Apply windowed convolution to minimum filtered data
+                if window_type == "Hann":
+                    window = np.hanning(window_size)
+                else:  # Hamming
+                    window = np.hamming(window_size)
+                
+                window = window / np.sum(window)  # Normalize
+                background = np.convolve(y_min_filtered, window, mode='same')
+            else:
+                # Default to Gaussian
+                sigma = window_size / 4.0
+                background = ndimage.gaussian_filter1d(y_min_filtered, sigma=sigma)
+            
+            # Step 3: Additional constraint - ensure it stays below original data
+            background = np.minimum(background, y)
+            
+            # Step 4: Optional second pass for better baseline fitting
+            # Create mask for points close to the current background estimate
+            tolerance = np.std(y - background) * 0.5
+            baseline_mask = (y - background) <= tolerance
+            
+            if np.sum(baseline_mask) > window_size:
+                # Apply the filter again, but only to baseline regions
+                baseline_points = y.copy()
+                baseline_points[~baseline_mask] = background[~baseline_mask]  # Replace peaks with current estimate
+                
+                if window_type == "Uniform":
+                    refined_background = ndimage.uniform_filter1d(baseline_points, size=window_size)
+                elif window_type == "Gaussian":
+                    sigma = window_size / 4.0
+                    refined_background = ndimage.gaussian_filter1d(baseline_points, sigma=sigma)
+                else:
+                    refined_background = background  # Keep original if windowed
+                
+                background = np.minimum(refined_background, y)
+            
+            return background
+            
+        except ImportError:
+            # Fallback without scipy
+            y = self.original_intensities
+            window_size = max(int(len(y) * window_percent / 100.0), 3)
+            
+            # Simple moving minimum approach
+            background = np.array([np.min(y[max(0, i-window_size//2):min(len(y), i+window_size//2+1)]) 
+                                 for i in range(len(y))])
+            
+            # Simple smoothing
+            for _ in range(2):  # 2 passes of smoothing
+                smoothed = background.copy()
+                for i in range(1, len(background)-1):
+                    smoothed[i] = (background[i-1] + background[i] + background[i+1]) / 3
+                background = smoothed
+            
+            return np.minimum(background, y)
+            
+        except Exception as e:
+            print(f"Moving average background calculation error: {str(e)}")
+            # Final fallback
+            y = self.original_intensities
+            return np.full_like(y, np.min(y))
+
+    def update_background_options_dropdown(self):
+        """Update the background options dropdown."""
+        self.bg_options_combo.clear()
+        self.bg_options_combo.addItem("None - Select an option")
+        
+        for i, (_, description, _, _) in enumerate(self.background_options):
+            self.bg_options_combo.addItem(f"{i+1}. {description}")
+    
+    def on_bg_option_selected(self):
+        """Handle selection of a background option."""
+        selected_text = self.bg_options_combo.currentText()
+        
+        if selected_text.startswith("None") or not self.background_options:
+            return
+        
+        try:
+            # Extract option index
+            option_index = int(selected_text.split('.')[0]) - 1
+            
+            if 0 <= option_index < len(self.background_options):
+                # Highlight the selected option
+                self._highlight_selected_background_option(option_index)
+                
+        except (ValueError, IndexError):
+            pass
+    
+    def _highlight_selected_background_option(self, option_index):
+        """Highlight the selected background option on the plot."""
+        # Reset all line styles to normal
+        for line in self.background_option_lines:
+            try:
+                line.set_linewidth(1.5)
+                line.set_alpha(0.7)
+            except:
+                pass
+        
+        # Highlight selected option
+        if 0 <= option_index < len(self.background_option_lines):
+            try:
+                selected_line = self.background_option_lines[option_index]
+                selected_line.set_linewidth(3.0)
+                selected_line.set_alpha(1.0)
+                
+                # Update canvas
+                self.canvas.draw_idle()
+                
+                # Show option details
+                _, description, method, params = self.background_options[option_index]
+                param_str = ", ".join([f"{k}={v}" for k, v in params.items()])
+                
+                self.results_text.setPlainText(
+                    f"Selected Background Option:\n"
+                    f"Description: {description}\n"
+                    f"Method: {method}\n"
+                    f"Parameters: {param_str}\n\n"
+                    f"Click 'Apply Selected' to use this background subtraction."
+                )
+                
+            except Exception as e:
+                print(f"Error highlighting option: {str(e)}")
+    
+    def apply_selected_background_option(self):
+        """Apply the selected background option."""
+        selected_text = self.bg_options_combo.currentText()
+        
+        if selected_text.startswith("None") or not self.background_options:
+            QMessageBox.warning(self, "No Selection", "Please select a background option first.")
+            return
+        
+        try:
+            # Extract option index
+            option_index = int(selected_text.split('.')[0]) - 1
+            
+            if 0 <= option_index < len(self.background_options):
+                background_data, description, method, params = self.background_options[option_index]
+                
+                # Apply the background subtraction
+                self.background = background_data.copy()
+                self.processed_intensities = self.original_intensities - self.background
+                self.background_preview_active = False
+                
+                # Update the manual parameter controls to match this selection
+                self._update_manual_controls_from_params(method, params)
+                
+                # Clear the options and update plot
+                self.clear_background_options()
+                self.update_plot()
+                
+                # Show confirmation
+                QMessageBox.information(self, "Background Applied", 
+                                      f"Applied background subtraction:\n{description}\n\n"
+                                      f"Method: {method}\n"
+                                      f"Manual controls have been updated to match.")
+                
+        except (ValueError, IndexError) as e:
+            QMessageBox.warning(self, "Selection Error", f"Invalid selection: {str(e)}")
+    
+    def _update_manual_controls_from_params(self, method, params):
+        """Update manual parameter controls to match the selected option."""
+        try:
+            # Update method combo box
+            method_mapping = {
+                "ALS": "ALS (Asymmetric Least Squares)",
+                "Linear": "Linear",
+                "Polynomial": "Polynomial",
+                "Moving Average": "Moving Average",
+                "Spline": "Spline"
+            }
+            
+            if method in method_mapping:
+                combo_text = method_mapping[method]
+                index = self.bg_method_combo.findText(combo_text)
+                if index >= 0:
+                    self.bg_method_combo.setCurrentIndex(index)
+                    self.on_bg_method_changed()  # Update visibility of parameter widgets
+            
+            # Update method-specific parameters
+            if method == "ALS":
+                if "lambda" in params:
+                    lambda_val = params["lambda"]
+                    log_val = int(np.log10(lambda_val))
+                    self.lambda_slider.setValue(max(3, min(7, log_val)))
+                    self.update_lambda_label()
+                
+                if "p" in params:
+                    p_val = params["p"]
+                    slider_val = int(p_val * 1000)
+                    self.p_slider.setValue(max(1, min(50, slider_val)))
+                    self.update_p_label()
+                
+                if "niter" in params:
+                    niter_val = params["niter"]
+                    self.niter_slider.setValue(max(5, min(30, niter_val)))
+                    self.update_niter_label()
+                    
+            elif method == "Linear":
+                if "start_weight" in params:
+                    start_val = int(params["start_weight"] * 10)
+                    self.start_weight_slider.setValue(max(1, min(20, start_val)))
+                    self.update_start_weight_label()
+                
+                if "end_weight" in params:
+                    end_val = int(params["end_weight"] * 10)
+                    self.end_weight_slider.setValue(max(1, min(20, end_val)))
+                    self.update_end_weight_label()
+                    
+            elif method == "Polynomial":
+                if "order" in params:
+                    order_val = params["order"]
+                    self.poly_order_slider.setValue(max(1, min(6, order_val)))
+                    self.update_poly_order_label()
+                
+                if "method" in params:
+                    method_type = params["method"]
+                    index = self.poly_method_combo.findText(method_type)
+                    if index >= 0:
+                        self.poly_method_combo.setCurrentIndex(index)
+                        
+            elif method == "Moving Average":
+                if "window_percent" in params:
+                    window_val = params["window_percent"]
+                    self.window_size_slider.setValue(max(1, min(50, window_val)))
+                    self.update_window_size_label()
+                
+                if "window_type" in params:
+                    window_type = params["window_type"]
+                    index = self.window_type_combo.findText(window_type)
+                    if index >= 0:
+                        self.window_type_combo.setCurrentIndex(index)
+            
+        except Exception as e:
+            print(f"Error updating manual controls: {str(e)}")
+    
+    def clear_background_options(self):
+        """Clear all background options and their preview lines."""
+        try:
+            # Clear plot lines
+            for line in self.background_option_lines:
+                try:
+                    line.remove()
+                except:
+                    pass
+            
+            # Clear data
+            self.background_options.clear()
+            self.background_option_lines.clear()
+            
+            # Reset dropdown
+            self.bg_options_combo.clear()
+            self.bg_options_combo.addItem("None - Generate options first")
+            
+            # Clear results text if it was showing option info
+            if hasattr(self, 'results_text') and "Selected Background Option:" in self.results_text.toPlainText():
+                self.results_text.clear()
+            
+            # Update plot
+            if hasattr(self, 'ax_main'):
+                self.ax_main.legend()
+                self.canvas.draw_idle()
+                
+        except Exception as e:
+            print(f"Error clearing background options: {str(e)}")
+
     def export_to_file(self, file_path):
         """Export results to specified file with enhanced peak data."""
         data = {

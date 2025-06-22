@@ -41,6 +41,13 @@ tqdm>=4.60.0                # Progress bars for long-running operations
 psutil>=5.8.0               # System and process monitoring utilities
 
 # ============================================================================
+# UPDATE CHECKER & VERSION MANAGEMENT (Required)
+# ============================================================================
+requests>=2.25.0            # HTTP library for GitHub API communication
+packaging>=20.0             # Version comparison and parsing utilities
+pyperclip>=1.8.0            # Clipboard operations for git commands
+
+# ============================================================================
 # MACHINE LEARNING & ADVANCED ANALYSIS (Required)
 # ============================================================================
 scikit-learn>=1.0.0         # Machine learning algorithms and preprocessing
@@ -101,10 +108,10 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # ============================================================================
 #
 # QUICK INSTALL (All Required + Recommended):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil scikit-learn dask pymatgen reportlab pyinstaller
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn dask pymatgen reportlab pyinstaller
 #
 # MINIMAL INSTALL (Core Features Only):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil scikit-learn dask
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn dask
 #
 # DEVELOPMENT INSTALL (All Features):
 # pip install -r requirements_qt6.txt

@@ -5,8 +5,8 @@ Version information for RamanLab Qt6
 
 __version__ = "1.0.1"
 __version_info__ = (1, 0, 1)
-__author__ = "RamanLab Development Team"
-__copyright__ = "Copyright 2025, RamanLab Qt6"
+__author__ = "Aaron J. Celestian, Ph.D."
+__copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information

@@ -20,6 +20,14 @@ from version import __version__, __author__, __copyright__
 # Import the Qt6 version of the main app
 from raman_analysis_app_qt6 import RamanAnalysisAppQt6
 
+# Import update checker for optional startup checking
+# TEMPORARILY DISABLED to isolate threading issues
+# try:
+#     from core.update_checker import check_for_updates, UPDATE_CHECKER_AVAILABLE
+#     UPDATE_CHECKER_AVAILABLE = UPDATE_CHECKER_AVAILABLE
+# except ImportError:
+UPDATE_CHECKER_AVAILABLE = False
+
 
 def setup_application():
     """Set up the Qt application with proper configuration."""
@@ -79,6 +87,15 @@ def main():
         
         # Center the window on screen
         main_window.center_on_screen()
+        
+        # Optional: Check for updates silently on startup (non-blocking)
+        # DISABLED: Automatic startup check causes threading issues
+        # Users can still check manually via Help → Check for Updates
+        # if UPDATE_CHECKER_AVAILABLE:
+        #     from PySide6.QtCore import QTimer
+        #     def delayed_update_check():
+        #         check_for_updates(parent=main_window, show_no_update=False)
+        #     QTimer.singleShot(3000, delayed_update_check)
         
         # Start the event loop
         return app.exec()
