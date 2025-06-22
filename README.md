@@ -477,7 +477,7 @@ MIT License - see LICENSE file for details
 Curator of Mineral Sciences  
 Natural History Museum of Los Angeles County  
 
-Dr. Celestian specializes in mineral physics and crystallography with extensive experience in vibrational spectroscopy applications. His research focuses on the relationship between crystal structure and physical properties, making him uniquely qualified to develop the revolutionary Hey-Celestian classification system that bridges traditional mineralogy with modern spectroscopic analysis.
+Dr. Celestian specializes in mineral physics and crystallography with extensive experience in vibrational spectroscopy applications. His research focuses on the relationship between crystal structure and physical properties, making him uniquely qualified to develop the Hey-Celestian classification system that bridges traditional mineralogy with modern spectroscopic analysis. 
 
 ---
 
