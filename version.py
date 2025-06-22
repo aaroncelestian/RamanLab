@@ -3,19 +3,30 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.0.0"
-__version_info__ = (1, 0, 0)
+__version__ = "1.0.1"
+__version_info__ = (1, 0, 1)
 __author__ = "RamanLab Development Team"
 __copyright__ = "Copyright 2025, RamanLab Qt6"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
 __release_date__ = "2025-01-26"
-__release_name__ = "Debut"
+__release_name__ = "First Update"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.0.1": {
+        "date": "2025-01-26",
+        "name": "First Update",
+        "description": "Minor updates and improvements to RamanLab Qt6",
+        "major_features": [],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Version bump to 1.0.1",
+            "Ongoing development and refinements"
+        ]
+    },
     "1.0.0": {
         "date": "2025-01-26",
         "name": "Debut Release",

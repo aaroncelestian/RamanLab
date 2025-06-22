@@ -1,9 +1,14 @@
-RamanLab Version 1.0.0 - "Debut"
+RamanLab Version 1.0.1 - "First Update"
 Release Date: January 26, 2025
 
-🎉 **Inaugural Release of RamanLab Qt6**
+🔄 **Version 1.0.1 Update**
 
-This is the debut stable release of RamanLab Qt6, marking a complete 
+This is a minor update to RamanLab Qt6 following the inaugural release,
+containing ongoing improvements and refinements.
+
+🎉 **Previous Release - Version 1.0.0 "Debut"**
+
+This was the debut stable release of RamanLab Qt6, marking a complete 
 transformation from legacy tkinter to modern Qt6 framework.
 
 🚀 **Major Features:**
