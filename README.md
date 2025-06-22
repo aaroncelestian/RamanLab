@@ -1,11 +1,18 @@
-# RamanLab - Advanced Raman Spectrum Analysis Tool
+# RamanLab - Advanced Raman Spectrum Analysis Suite
 
-RamanLab is a comprehensive cross-platform desktop application for analyzing and identifying Raman spectra. Built with Qt6, it provides a modern, user-friendly interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities.
+**Author:** Aaron J. Celestian, Ph.D.  
+**Curator of Mineral Sciences**  
+**Natural History Museum of Los Angeles County**
 
-**Current Version:** 1.0.0  
+RamanLab is a comprehensive, cross-platform desktop application for analyzing and identifying Raman spectra. Built with Qt6, it provides a modern, professional interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities and specialized analysis tools.
+
+**Current Version:** 1.0.1  
 **Release Date:** 2025-01-26  
-**Framework:** Qt6 (PySide6/PyQt6)  
-**Platform Support:** Windows, macOS, Linux
+**Framework:** Qt6 (PySide6)  
+**Platform Support:** Windows, macOS, Linux  
+**Python Requirements:** 3.8+ (3.9+ recommended)
+
+---
 
 ## 🚀 Quick Start
 
@@ -33,70 +40,103 @@ python launch_ramanlab.py
 python install_desktop_icon.py
 ```
 
-**# 6. Download the database and metadata correlation file that I made from:**
-- Find the pre-compiled Raman datases here: 10.6084/m9.figshare.28928345
-- https://figshare.com/s/220f7de3c17172dbaae6 (Compiled RRUFF and SLOPP/SLOPP-E)
-- https://figshare.com/s/b55e31e89743d246895b (Compiled database of Raman calculated mdoes from WURM.info)
+**Download Essential Databases:**
+- **Pre-compiled Raman Databases:** [10.6084/m9.figshare.28928345](https://figshare.com/s/220f7de3c17172dbaae6)
+- **RRUFF + SLOPP/SLOPP-E:** [Compiled Database](https://figshare.com/s/220f7de3c17172dbaae6)
+- **WURM Calculated Modes:** [DFT Database](https://figshare.com/s/b55e31e89743d246895b)
 - Place these files in the RamanLab directory.
 
 *Note: Always use `python` (not `python3`) when in the conda environment.*
 
 ---
 
-## ✨ Features
+## ✨ Core Features
 
-### 🔬 Core Spectrum Analysis
-- **Import and Visualize:** Support for CSV, TXT, and other common Raman data formats
-- **Background Subtraction:** Manual and automated background modeling with interactive refinement
-- **Peak Detection:** Algorithmic peak identification with user override capabilities
-- **Interactive Plotting:** Advanced zooming, panning, and spectral comparison tools
-- **Publication Quality:** Export high-resolution plots and comprehensive analysis reports
+### 🔬 **Comprehensive Spectrum Analysis**
+- **Multi-Format Import:** CSV, TXT, DAT, and other common Raman data formats
+- **Advanced Background Subtraction:** Manual and automated modeling with interactive refinement
+- **Smart Peak Detection:** Algorithmic identification with user override capabilities
+- **Interactive Visualization:** Advanced zooming, panning, and spectral comparison tools
+- **Publication Quality Exports:** High-resolution plots and comprehensive analysis reports
 
-### 🗄️ Advanced Database Management
+### 🗄️ **Advanced Database Management**
 - **Comprehensive Storage:** Organize Raman spectra with rich metadata and classifications
 - **Batch Operations:** Import multiple spectra with automated processing
-- **Advanced Search:** Multi-criteria filtering with Hey classification and element limiting
-- **Database Browser:** Dedicated interface (`launch_raman_database_browser.py`) with:
+- **Advanced Search:** Multi-criteria filtering with Hey-Celestian classification and element limiting
+- **Dedicated Database Browser:** (`launch_raman_database_browser.py`) featuring:
   - Interactive spectrum visualization with peak analysis
   - Comprehensive metadata viewing and editing
   - Export capabilities for individual spectra
   - Database statistics and classification summaries
 
-### 🎯 Intelligent Matching & Identification
+### 🎯 **Intelligent Matching & Identification**
 - **Multiple Algorithms:**
   - Correlation-based matching
   - Peak-based matching (position and intensity)
   - Hybrid correlation + peak analysis
   - Machine learning-based matching with dynamic time warping
-- **Advanced Filtering:** Peak regions, Hey index classification, elemental composition
+- **Advanced Filtering:** Peak regions, Hey-Celestian classification, elemental composition
 - **Confidence Scoring:** Statistical assessment of match quality
 - **Mixed Mineral Analysis:** Unique capability to identify multiple minerals in complex spectra
 - **Molecular Vibrational Groups:** Experimental heatmap analysis with chemical scoring
 
-### 🔧 Professional Peak Fitting
-- **Advanced Background Models:**
-  - Manual interactive modeling
-  - AI-suggested models with user selection
-  - Real-time background refinement
-- **Peak Detection:** Smart algorithmic identification with manual override
-- **Peak Models:**
-  - Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt
-  - No region definition required
-  - Optional spectral smoothing
-- **Professional Reports:** Publication-quality graphics and comprehensive fitting statistics
-- **Database Integration:** Export fitted peaks directly to mineral Raman modes database
+---
 
-### ⚡ Batch Processing & Analysis
-- **High-Volume Processing:** Handle unlimited spectra (system memory dependent)
-- **Automated Background:** Intelligent background refinement across datasets
-- **Selective Region Fitting:** User-defined regions for optimized processing speed
+## 🏆 **Revolutionary Hey-Celestian Classification System**
+
+### **World's First Vibrational Mode-Based Mineral Classification**
+
+*Developed by Aaron J. Celestian & RamanLab Development Team*
+
+The **Hey-Celestian Classification System** represents a groundbreaking advancement in mineral classification specifically designed for Raman spectroscopy. Unlike traditional systems that organize minerals by chemical composition, this system organizes them by their **dominant vibrational signatures**.
+
+#### **15 Vibrational Groups:**
+1. **Framework Modes - Tetrahedral Networks** (Quartz, Feldspar, Zeolites)
+2. **Framework Modes - Octahedral Networks** (Rutile, Anatase, Spinel)
+3. **Characteristic Vibrational Mode - Carbonate Groups** (Calcite, Aragonite)
+4. **Characteristic Vibrational Mode - Sulfate Groups** (Gypsum, Anhydrite, Barite)
+5. **Characteristic Vibrational Mode - Phosphate Groups** (Apatite, Vivianite)
+6. **Chain Modes - Single Chain Silicates** (Pyroxenes, Wollastonite)
+7. **Chain Modes - Double Chain Silicates** (Amphiboles, Actinolite)
+8. **Ring Modes - Cyclosilicates** (Tourmaline, Beryl, Cordierite)
+9. **Layer Modes - Sheet Silicates** (Micas, Clays, Talc, Serpentine)
+10. **Layer Modes - Non-Silicate Layers** (Graphite, Molybdenite, Brucite)
+11. **Simple Oxides** (Hematite, Magnetite, Corundum)
+12. **Complex Oxides** (Spinels, Chromites, Garnets, Perovskites)
+13. **Hydroxides** (Goethite, Lepidocrocite, Diaspore)
+14. **Organic Groups** (Abelsonite, Organic minerals)
+15. **Mixed Modes** (Epidote, Vesuvianite, Complex structures)
+
+#### **Advantages:**
+- **Predictive Analysis:** Expected peak positions and vibrational characteristics
+- **Enhanced Database Searching:** Filter by vibrational mode families
+- **Educational Value:** Connect structural features to spectral signatures
+- **Analysis Strategy Guidance:** Optimal regions and expected interferences
+
+---
+
+## 🔧 **Professional Peak Fitting & Batch Processing**
+
+### **Advanced Peak Fitting:**
+- **Smart Background Models:** AI-suggested models with user selection
+- **Multiple Peak Models:** Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt
+- **No Region Definition Required:** Automatic peak detection across full spectrum
+- **Professional Reports:** Publication-quality graphics with comprehensive fitting statistics
+
+### **High-Volume Batch Processing:**
+- **Unlimited Spectra:** Handle large datasets (system memory dependent)
+- **Automated Background Refinement:** Intelligent background modeling across datasets
 - **Statistical Analysis:** 95% confidence intervals (superior to traditional error bars)
-- **Comprehensive Reporting:** Batch analysis summaries with statistical visualizations
+- **Selective Region Fitting:** User-defined regions for optimized processing speed
 
-### 🗺️ 2D Raman Map Analysis
-- **Map Import:** Directory-based import for 2D Raman mapping datasets
-- **Heatmap Generation:** 
-  - Integrated intensity maps
+---
+
+## 🗺️ **Advanced 2D Raman Map Analysis**
+
+### **Comprehensive Mapping Capabilities:**
+- **Directory-Based Import:** Seamless 2D Raman mapping dataset handling
+- **Multiple Visualization Methods:**
+  - Integrated intensity heatmaps
   - Template coefficient visualization
   - Component distribution analysis
 - **Template Analysis:**
@@ -104,16 +144,35 @@ python install_desktop_icon.py
   - Percentage contribution calculations
   - Interactive template visibility controls
   - Export template analysis results
-- **Data Quality:** Automated cosmic ray filtering
-- **Machine Learning:** PCA, NMF, and Random Forest classification
-- **Publication Export:** High-quality visualizations and analysis summaries
+- **Data Quality Control:** Automated cosmic ray filtering
+- **Machine Learning Integration:** PCA, NMF, and Random Forest classification
 
-### 📊 Advanced Group Analysis
-- **Hierarchical Clustering:** Sophisticated grouping of Raman spectra collections
-- **Flexible Import:**
-  - Folder-based import
-  - Database import with advanced filtering
-- **Visualization Methods:**
+---
+
+## ⚡ **Advanced Battery & Materials Analysis**
+
+### **LiMn2O4 Battery Strain Analysis System:**
+*Specialized module for battery materials research*
+
+- **Chemical Strain Analysis:** Track H/Li exchange effects in battery materials
+- **Jahn-Teller Distortion Monitoring:** Quantify Mn³⁺ formation and structural distortions
+- **Time Series Processing:** Handle time-resolved Raman spectroscopy data
+- **Phase Transition Detection:** Identify structural phase changes during cycling
+- **Comprehensive Visualization:** 3D strain tensor plots and evolution tracking
+
+#### **Spinel-Specific Features:**
+- **Mode Definitions:** A1g, Eg, T2g breathing and framework modes
+- **Composition Tracking:** Li content and chemical disorder analysis
+- **Electrochemical Synchronization:** Correlate with battery state-of-charge
+- **Degradation Analysis:** Monitor cycling-induced structural changes
+
+---
+
+## 📊 **Advanced Group & Cluster Analysis**
+
+### **Hierarchical Clustering:**
+- **Flexible Import:** Folder-based or database import with advanced filtering
+- **Multiple Visualization Methods:**
   - PCA (Principal Component Analysis)
   - t-SNE (t-Distributed Stochastic Neighbor Embedding)
   - UMAP (Uniform Manifold Approximation and Projection)
@@ -121,253 +180,184 @@ python install_desktop_icon.py
   - Dendrogram visualization
   - Heatmap analysis
   - Scatter plots with cluster highlighting
-  - Individual cluster examination
-- **Cluster Refinement:**
-  - K-means and Spectral Clustering splitting
-  - Interactive cluster merging
-  - Undo functionality for cluster editing
-- **Professional Export:** Statistics, representative spectra, and publication graphics
+- **Cluster Refinement:** K-means and Spectral Clustering with undo functionality
 
-### 🔍 Raman Polarization Analysis
-- **Polarized Spectra:** Import and analyze orientation-dependent Raman data
-- **Interactive Peak Fitting:** Specialized tools for polarized spectral analysis
-- **Crystal Orientation Analysis:**
-  - Calculate orientation-dependent intensities
-  - Optimize crystal orientation to match experimental data
-  - Support for all crystal symmetries and Raman tensor characters
+---
+
+## 🔍 **Comprehensive Raman Polarization Analysis**
+
+### **Crystal Orientation & Tensor Analysis:**
+- **Polarized Spectra Analysis:** Import and analyze orientation-dependent data
+- **Crystal Orientation Optimization:** Calculate and optimize orientation to match experimental data
+- **All Crystal Symmetries:** Support for complete range of crystal systems
 - **CIF Integration:**
   - Parse crystallographic information files
   - Extract symmetry and atomic positions
   - Calculate Raman tensors from crystal structure
-  - Optional pymatgen integration for advanced analysis
-- **3D Tensor Visualization:**
-  - Interactive 3D tensor ellipsoids
-  - Principal axes exploration
-  - Crystal shape visualization by point group
-  - Customizable display settings
-  - Publication-quality 3D exports
+  - Optional pymatgen integration
 
-### 🧠 Machine Learning & AI
-- **Classification Models:** Random Forest and other ML algorithms for automated identification
+### **3D Tensor Visualization:**
+- **Interactive 3D Ellipsoids:** Real-time tensor visualization
+- **Principal Axes Exploration:** Understand tensor orientation
+- **Crystal Shape Visualization:** Point group-specific shapes
+- **Publication-Quality 3D Exports:** Professional graphics for publications
+
+---
+
+## 🧠 **Machine Learning & AI Integration**
+
+### **Classification & Analysis:**
+- **Random Forest Algorithms:** Automated mineral identification
 - **Dimensionality Reduction:** PCA, NMF, t-SNE, UMAP for data exploration
 - **Template Matching:** AI-enhanced template fitting with confidence scoring
 - **Class Flip Detection:** Intelligent detection of misclassified spectra
 - **Model Management:** Save, load, and retrain classification models
 
-### 🏗️ Advanced Architecture
-- **Modern Qt6 Framework:** Cross-platform compatibility with native performance
-- **Modular Design:** Extensible architecture for custom analysis modules
-- **Multi-Threading:** Background processing for responsive user interface
-- **Memory Management:** Efficient handling of large datasets
-- **Session Management:** Save and restore complete analysis sessions
-- **Crash Recovery:** Automatic session backup and recovery
+### **Advanced Features:**
+- **Dynamic Time Warping:** Handle spectral shifting and distortions
+- **Ensemble Methods:** Combine multiple algorithms for robust identification
+- **Uncertainty Quantification:** Statistical confidence in ML predictions
 
 ---
 
-## 🛠️ Installation
+## 🏗️ **Modern Architecture & Session Management**
 
-### Recommended: Anaconda + Modern IDE
+### **Comprehensive State Management:**
+*Revolutionary session save/restore system*
 
-For the best experience, we recommend using [Anaconda](https://www.anaconda.com/products/distribution) with a modern Python IDE:
+- **Complete Session Recovery:** Save and restore entire application state
+- **Window Layout Preservation:** Remember panel positions, zoom levels, and preferences
+- **Data State Management:** Loaded spectra, analysis results, template libraries
+- **Auto-Save & Crash Recovery:** Automatic session backup with crash recovery
+- **Session Sharing:** Export and share complete analysis sessions
 
-**Steps:**
+### **Technical Excellence:**
+- **Modern Qt6 Framework:** Cross-platform native performance
+- **Modular Architecture:** Extensible design for custom analysis modules
+- **Multi-Threading:** Background processing for responsive interface
+- **Efficient Memory Management:** Handle large datasets without performance loss
+- **Professional Updates:** Built-in update checker with version management
 
-1. **Install Anaconda:**
-   - Download from [https://www.anaconda.com/products/distribution](https://www.anaconda.com/products/distribution)
+---
 
-2. **Create Environment:**
-   ```bash
-   conda create -n ramanlab python=3.9
-   conda activate ramanlab
-   ```
+## 📦 **Installation & Setup**
 
-3. **Clone Repository:**
-   ```bash
-   git clone https://github.com/aaroncelestian/RamanLab.git
-   cd RamanLab
-   ```
+### **Recommended: Anaconda Setup**
 
-4. **Install Dependencies:**
-   ```bash
-   pip install -r requirements_qt6.txt
-   ```
-
-5. **Verify Installation:**
-   ```bash
-   python check_dependencies.py
-   ```
-
-6. **Download Database Files:**
-   - Main Database: [10.6084/m9.figshare.28928345](https://figshare.com/s/220f7de3c17172dbaae6)
-   - Calculated Modes: [WURM Database](https://figshare.com/s/b55e31e89743d246895b)
-   - Place files in the RamanLab directory
-
-7. **Launch Application:**
-   ```bash
-   python launch_ramanlab.py
-   ```
-
-### Alternative Installation Methods
-
-#### Quick Setup (pip)
 ```bash
+# 1. Install Anaconda from https://www.anaconda.com/products/distribution
+
+# 2. Create Environment
+conda create -n ramanlab python=3.9
+conda activate ramanlab
+
+# 3. Clone Repository
 git clone https://github.com/aaroncelestian/RamanLab.git
 cd RamanLab
+
+# 4. Install Dependencies
 pip install -r requirements_qt6.txt
+
+# 5. Verify Installation
+python check_dependencies.py
+
+# 6. Launch Application
 python launch_ramanlab.py
 ```
 
-#### Development Setup
-```bash
-# Clone and setup virtual environment
-git clone https://github.com/aaroncelestian/RamanLab.git
-cd RamanLab
-python -m venv ramanlab_env
-source ramanlab_env/bin/activate  # Windows: ramanlab_env\Scripts\activate
-pip install -r requirements_qt6.txt
-python check_dependencies.py
-```
-
----
-
-## 🖥️ Desktop Integration
-
-### Automatic Desktop Icon Installation
+### **Desktop Integration**
 
 ```bash
+# Install desktop shortcuts and application integration
 python install_desktop_icon.py
-```
 
-Creates platform-specific shortcuts:
-- **Windows:** Desktop shortcut with custom icon
-- **macOS:** Application bundle in ~/Applications  
-- **Linux:** Desktop entry and applications menu integration
-
-### Uninstall Desktop Integration
-```bash
-python install_desktop_icon.py --uninstall
+# Creates platform-specific integration:
+# Windows: Desktop shortcut with custom icon
+# macOS: Application bundle in ~/Applications
+# Linux: Desktop entry and applications menu integration
 ```
 
 ---
 
-## 📋 System Requirements
+## 🖥️ **Application Suite**
 
-### Minimum Requirements
+### **Core Applications:**
+
+```bash
+# Main RamanLab Application
+python launch_ramanlab.py
+
+# Database Browser & Management
+python launch_raman_database_browser.py
+
+# 2D Map Analysis (Standalone)
+python map_analysis_2d/main.py
+
+# Polarization Analyzer
+python launch_orientation_optimizer.py
+
+# Cluster Analysis
+python raman_cluster_analysis_qt6.py
+
+# Peak Fitting (Standalone)
+python peak_fitting_qt6.py
+
+# Batch Peak Fitting
+python batch_peak_fitting_qt6.py
+
+# Line Scan Analysis
+python launch_line_scan_splitter.py
+```
+
+---
+
+## 📋 **System Requirements**
+
+### **Minimum Requirements:**
 - **Python:** 3.8+ (3.9+ recommended)
 - **RAM:** 4GB (8GB+ for large datasets)
-- **Storage:** 2GB free space
+- **Storage:** 2GB free space (5GB+ including databases)
 - **OS:** Windows 10+, macOS 10.14+, Linux (modern distributions)
 
-### Recommended Configuration
+### **Recommended Configuration:**
 - **Python:** 3.9 or 3.10
-- **RAM:** 8GB+ for complex analyses
-- **Storage:** 5GB+ (including databases)
+- **RAM:** 16GB+ for complex analyses and large maps
+- **Storage:** 10GB+ (including databases and results)
 - **GPU:** Optional, beneficial for machine learning tasks
 
 ---
 
-## 📦 Dependencies
-
-### Core Requirements (Always Required)
-```
-PySide6>=6.5.0              # Modern Qt6 GUI framework
-numpy>=1.21.0               # Numerical computations
-matplotlib>=3.5.0           # Plotting and visualization
-scipy>=1.7.0                # Scientific computing
-pandas>=1.3.0               # Data manipulation
-```
-
-### Analysis & Visualization
-```
-seaborn>=0.11.0             # Statistical visualization
-scikit-learn>=1.0.0         # Machine learning
-fastdtw>=0.3.4              # Dynamic time warping
-tqdm>=4.60.0                # Progress indicators
-```
-
-### Data Processing & Export
-```
-openpyxl>=3.0.0             # Excel file support
-pillow>=8.0.0               # Image processing
-dask>=2021.0.0              # Parallel computing
-psutil>=5.8.0               # System utilities
-```
-
-### Optional Advanced Features
-```
-pymatgen>=2022.0.0          # Advanced crystallography
-reportlab>=3.5.0            # PDF report generation
-tensorflow>=2.12.0          # Deep learning (optional)
-umap-learn                  # UMAP visualization
-pyinstaller>=5.0.0          # Standalone executables
-```
-
----
-
-## 🚀 Usage Guide
-
-### Basic Workflow
-
-1. **Import Spectra:** Use File menu or drag-and-drop
-2. **Process Data:** Apply background subtraction and peak detection
-3. **Database Search:** Match against reference database
-4. **Analysis:** Perform peak fitting or advanced analysis
-5. **Export:** Save results as reports, images, or data files
-
-### Advanced Features
-
-#### 2D Map Analysis
-```bash
-# Launch standalone map analyzer
-python map_analysis_2d/main.py
-```
-
-#### Polarization Analysis
-```bash
-# Launch polarization analyzer
-python launch_polarization_analyzer.py
-```
-
-#### Group Analysis
-```bash
-# Launch cluster analysis
-python raman_cluster_analysis_qt6.py
-```
-
-#### Database Management
-```bash
-# Browse mineral database
-python launch_raman_database_browser.py
-```
-
----
-
-## 📁 Project Structure
+## 📁 **Project Structure**
 
 ```
 RamanLab/
-├── core/                    # Core analysis modules
-│   ├── database.py         # Database management
-│   ├── spectrum.py         # Spectrum processing
-│   ├── peak_fitting.py     # Peak fitting algorithms
-│   └── state_management/   # Session management
-├── map_analysis_2d/        # 2D mapping analysis
-├── polarization_ui/        # Polarization analysis
-├── ml_raman_map/          # Machine learning modules
-├── battery_strain_analysis/ # Specialized strain tools
-├── docs/                   # Comprehensive documentation
-├── main_qt6.py            # Main application entry
-├── launch_ramanlab.py     # Application launcher
-├── check_dependencies.py  # Dependency checker
-├── requirements_qt6.txt   # Dependencies list
-└── version.py             # Version information
+├── main_qt6.py                    # Main application entry point
+├── launch_ramanlab.py             # Primary application launcher
+├── core/                          # Core analysis modules
+│   ├── database.py               # Database management
+│   ├── spectrum.py               # Spectrum processing
+│   ├── peak_fitting.py           # Peak fitting algorithms
+│   └── state_management/         # Session management system
+├── map_analysis_2d/              # 2D mapping analysis suite
+├── polarization_ui/              # Polarization analysis tools
+├── battery_strain_analysis/      # Battery materials analysis
+├── Hey_class/                    # Hey-Celestian classification system
+├── ml_raman_map/                 # Machine learning modules
+├── database_browser_qt6.py       # Database browser application
+├── peak_fitting_qt6.py           # Standalone peak fitting
+├── batch_peak_fitting_qt6.py     # Batch processing tools
+├── raman_cluster_analysis_qt6.py # Cluster analysis application
+├── docs/                         # Comprehensive documentation
+├── requirements_qt6.txt          # Dependencies list
+├── check_dependencies.py         # Dependency verification
+└── version.py                    # Version information
 ```
 
 ---
 
-## 🔧 Troubleshooting
+## 🔧 **Troubleshooting**
 
-### Common Issues
+### **Common Issues & Solutions:**
 
 1. **Qt6 Import Errors:**
    ```bash
@@ -380,56 +370,117 @@ RamanLab/
    pip install -r requirements_qt6.txt
    ```
 
-3. **Database File Missing:**
-   - Download from provided links
+3. **Database Files Missing:**
+   - Download from provided figshare links
    - Place in main RamanLab directory
+   - Verify with database browser application
 
-4. **Memory Issues with Large Datasets:**
-   - Increase system memory
-   - Use batch processing for large analyses
+4. **Memory Issues:**
+   - Increase system memory for large datasets
+   - Use batch processing for extensive analyses
    - Enable data streaming for map analysis
 
-### Getting Help
-
-- Check `docs/` directory for detailed guides
-- Run `python check_dependencies.py` for diagnostics
-- Review error logs in application console
+5. **Platform-Specific Issues:**
+   - Check `docs/` directory for platform guides
+   - Review cross-platform utilities in `cross_platform_utils.py`
 
 ---
 
-## 🤝 Contributing
+## 🚀 **Usage Examples**
 
-We welcome contributions! Please see our development documentation in the `docs/` directory for guidelines on:
-- Code style and standards
-- Testing procedures
-- Documentation requirements
-- Feature request process
+### **Basic Workflow:**
+1. **Import Spectra:** File menu or drag-and-drop
+2. **Process Data:** Background subtraction and peak detection
+3. **Database Search:** Match against reference database using Hey-Celestian classification
+4. **Advanced Analysis:** Peak fitting, strain analysis, or polarization analysis
+5. **Export Results:** Save as reports, images, or complete sessions
+
+### **Advanced Workflows:**
+
+#### **Material Identification Pipeline:**
+```bash
+# 1. Launch main application
+python launch_ramanlab.py
+
+# 2. Import spectrum and apply Hey-Celestian classification
+# 3. Use predicted vibrational modes for targeted analysis
+# 4. Validate with database matching
+# 5. Export comprehensive identification report
+```
+
+#### **Battery Research Workflow:**
+```bash
+# 1. Time-series strain analysis
+cd battery_strain_analysis
+python demo_limn2o4_analysis.py
+
+# 2. Results include:
+#    - Strain tensor evolution
+#    - Composition tracking
+#    - Phase transition detection
+#    - 3D visualization
+```
 
 ---
 
-## 📜 License
+## 🤝 **Contributing**
+
+RamanLab welcomes contributions from the scientific community. Areas of particular interest:
+
+- **New Classification Systems:** Extend Hey-Celestian or develop specialized systems
+- **Analysis Algorithms:** Novel peak fitting, background subtraction, or identification methods
+- **Database Expansion:** Additional reference spectra and metadata
+- **Specialized Modules:** Industry or research-specific analysis tools
+- **Documentation:** User guides, tutorials, and scientific validation
+
+---
+
+## 📚 **Documentation**
+
+Comprehensive documentation available in the `docs/` directory:
+
+- **User Manual:** Complete application guide
+- **API Documentation:** Developer reference
+- **Scientific Methods:** Algorithmic descriptions and validation
+- **Installation Guides:** Platform-specific setup instructions
+- **Tutorial Collection:** Step-by-step analysis examples
+
+---
+
+## 📜 **License**
 
 MIT License - see LICENSE file for details
 
 ---
 
-## 👨‍🔬 Author
+## 🙏 **Acknowledgments**
 
-**Aaron Celestian, Ph.D.**  
+### **Scientific Databases:**
+- **RRUFF Database** (www.rruff.info) - Comprehensive mineral reference spectra
+- **SLOPP/SLOPP-E** - Plastic and polymer spectral libraries
+- **WURM Database** - DFT calculations and theoretical Raman spectra
+
+### **Development Framework:**
+- **Qt Project** - Modern cross-platform GUI framework (PySide6)
+- **Python Scientific Stack** - NumPy, SciPy, Matplotlib, scikit-learn, and pandas
+- **Scientific Community** - Raman spectroscopy research and methodology development
+
+### **Research Collaborations:**
+- **Natural History Museum of Los Angeles County** - Institutional support and mineral expertise
+- **International Raman Community** - Feedback, validation, and collaborative development
+
+---
+
+## 👨‍🔬 **About the Author**
+
+**Aaron J. Celestian, Ph.D.**  
 Curator of Mineral Sciences  
-Natural History Museum of Los Angeles County
+Natural History Museum of Los Angeles County  
+
+Dr. Celestian specializes in mineral physics and crystallography with extensive experience in vibrational spectroscopy applications. His research focuses on the relationship between crystal structure and physical properties, making him uniquely qualified to develop the revolutionary Hey-Celestian classification system that bridges traditional mineralogy with modern spectroscopic analysis.
 
 ---
 
-## 🙏 Acknowledgments
+*For the latest updates, detailed documentation, and scientific publications related to RamanLab, visit our [documentation directory](./docs/) or check the individual module README files.*
 
-- **RRUFF Database** (www.rruff.info) - Reference mineral spectra
-- **SLOPP/SLOPP-E** - Plastic spectral libraries
-- **WURM Database** - DFT calculations and theoretical Raman spectra  
-- **Scientific Community** - Raman spectroscopy research and development
-- **Qt Project** - Modern cross-platform GUI framework
-- **Python Scientific Stack** - NumPy, SciPy, Matplotlib, and scikit-learn communities
-
----
-
-*For the latest updates and detailed documentation, visit our [documentation directory](./docs/) or check the individual module README files.*
+**RamanLab - Advancing Raman Spectroscopy Through Innovation**
