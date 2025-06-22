@@ -4,10 +4,10 @@
 **Curator of Mineral Sciences**  
 **Natural History Museum of Los Angeles County**
 
-RamanLab is a comprehensive, cross-platform desktop application for analyzing and identifying Raman spectra. Built with Qt6, it provides a modern, professional interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities and specialized analysis tools.
+RamanLab is a comprehensive, cross-platform desktop application for analyzing and identifying Raman spectra. Built with PySide6, it provides a modern, professional interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities and specialized analysis tools.
 
 **Current Version:** 1.0.1  
-**Release Date:** 2025-01-26  
+**Release Date:** 2025-06-22  
 **Framework:** Qt6 (PySide6)  
 **Platform Support:** Windows, macOS, Linux  
 **Python Requirements:** 3.8+ (3.9+ recommended)
@@ -466,7 +466,7 @@ MIT License - see LICENSE file for details
 - **Scientific Community** - Raman spectroscopy research and methodology development
 
 ### **Research Collaborations:**
-- **Natural History Museum of Los Angeles County** - Institutional support and mineral expertise
+- **Natural History Museum of Los Angeles County** - Institutional support
 - **International Raman Community** - Feedback, validation, and collaborative development
 
 ---
@@ -477,7 +477,7 @@ MIT License - see LICENSE file for details
 Curator of Mineral Sciences  
 Natural History Museum of Los Angeles County  
 
-Dr. Celestian specializes in mineral physics and crystallography with extensive experience in vibrational spectroscopy applications. His research focuses on the relationship between crystal structure and physical properties, making him uniquely qualified to develop the Hey-Celestian classification system that bridges traditional mineralogy with modern spectroscopic analysis. 
+Dr. Celestian specializes in mineral physics and crystallography with extensive experience in vibrational spectroscopy applications. His research focuses on the relationship between crystal structure and physical properties, making him uniquely qualified to develop the Hey-Celestian system that bridges traditional mineralogy with modern spectroscopic analysis. 
 
 ---
 
