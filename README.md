@@ -82,15 +82,15 @@ python install_desktop_icon.py
 
 ---
 
-## 🏆 **Revolutionary Hey-Celestian Classification System**
+## 🏆 **New Hey-Celestian Classification System**
 
-### **World's First Vibrational Mode-Based Mineral Classification**
+### **Vibrational Mode-Based Mineral Classification**
 
-*Developed by Aaron J. Celestian & RamanLab Development Team*
+*In development by Aaron J. Celestian & RamanLab Development Team*
 
-The **Hey-Celestian Classification System** represents a groundbreaking advancement in mineral classification specifically designed for Raman spectroscopy. Unlike traditional systems that organize minerals by chemical composition, this system organizes them by their **dominant vibrational signatures**.
+The **Hey-Celestian Classification System** is a spectroscopy based classification system for mineral specifically designed for Raman spectroscopy. Unlike traditional systems that organize minerals by chemical composition, this system organizes them by their **dominant vibrational signatures**.
 
-#### **15 Vibrational Groups:**
+#### **15 Main Vibrational Groups:**
 1. **Framework Modes - Tetrahedral Networks** (Quartz, Feldspar, Zeolites)
 2. **Framework Modes - Octahedral Networks** (Rutile, Anatase, Spinel)
 3. **Characteristic Vibrational Mode - Carbonate Groups** (Calcite, Aragonite)
@@ -106,6 +106,14 @@ The **Hey-Celestian Classification System** represents a groundbreaking advancem
 13. **Hydroxides** (Goethite, Lepidocrocite, Diaspore)
 14. **Organic Groups** (Abelsonite, Organic minerals)
 15. **Mixed Modes** (Epidote, Vesuvianite, Complex structures)
+
+#### Branching subgroups of a hierarchical, multi-dimensional classification scheme that maintains the elegant simplicity of vibrational mode organization while incorporating the chemical, structural, and environmental complexity that characterizes real mineral systems. This will involve a tree-like structure where the 15 primary vibrational groups serve as main branches, with increasingly specific sub-classifications based on composition, structure, and environmental factors.
+1. Works with solid solutions
+2. Polytipic variations
+3. Polymorph catagories
+4. Crystal orientation effects
+
+You will notice that a lot of ground work is already implemented in RamanLab to build out this new classifation system.  Once the system is implemented, new quantitaive enhancements could be realized, such as, mixing ratios, crystallinity indices, stress/strain, weathering/alteration pathways, hydration, phase diagram integration, metastability, and aid in additive learning system for machine learning and AI.
 
 #### **Advantages:**
 - **Predictive Analysis:** Expected peak positions and vibrational characteristics
