@@ -41,9 +41,9 @@ python install_desktop_icon.py
 ```
 
 **Download Essential Databases:**
-- **Pre-compiled Raman Databases:** [10.6084/m9.figshare.28928345](https://figshare.com/s/220f7de3c17172dbaae6)
-- **RRUFF + SLOPP/SLOPP-E:** [Compiled Database](https://figshare.com/s/220f7de3c17172dbaae6)
-- **WURM Calculated Modes:** [DFT Database](https://figshare.com/s/b55e31e89743d246895b)
+- **Pre-compiled Raman Databases**
+ [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15717961.svg)](https://doi.org/10.5281/zenodo.15717961)
+
 - Place these files in the RamanLab directory.
 
 *Note: Always use `python` (not `python3`) when in the conda environment.*
