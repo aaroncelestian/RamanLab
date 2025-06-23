@@ -82,13 +82,13 @@ python install_desktop_icon.py
 
 ---
 
-## 🏆 **Revolutionary Hey-Celestian Classification System**
+## 🏆 **New Hey-Celestian Classification System**
 
-### **World's First Vibrational Mode-Based Mineral Classification**
+### **Vibrational Mode-Based Mineral Classification**
 
 *Developed by Aaron J. Celestian & RamanLab Development Team*
 
-The **Hey-Celestian Classification System** represents a groundbreaking advancement in mineral classification specifically designed for Raman spectroscopy. Unlike traditional systems that organize minerals by chemical composition, this system organizes them by their **dominant vibrational signatures**.
+The **Hey-Celestian Classification System** represents a spectroscopy based classification system for mineral specifically designed for Raman spectroscopy. Unlike traditional systems that organize minerals by chemical composition, this system organizes them by their **dominant vibrational signatures**.
 
 #### **15 Vibrational Groups:**
 1. **Framework Modes - Tetrahedral Networks** (Quartz, Feldspar, Zeolites)
