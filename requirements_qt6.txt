@@ -12,13 +12,13 @@
 # - Minimum 4GB RAM (8GB+ recommended for complex analyses)
 
 # ============================================================================
-# CORE GUI FRAMEWORK (Required)
+# CORE GUI FRAMEWORK (REQUIRED - Essential for RamanLab to run)
 # ============================================================================
 PySide6>=6.5.0              # Official Qt6 Python bindings (LGPL license)
                             # Primary GUI framework for cross-platform interface
 
 # ============================================================================
-# SCIENTIFIC COMPUTING STACK (Required)
+# SCIENTIFIC COMPUTING STACK (REQUIRED - Core functionality)
 # ============================================================================
 numpy>=1.21.0               # Core numerical computations and array operations
 scipy>=1.7.0                # Scientific computing algorithms and optimization
@@ -26,14 +26,14 @@ matplotlib>=3.5.0           # Plotting, visualization, and publication graphics
 pandas>=1.3.0               # Data manipulation, analysis, and I/O operations
 
 # ============================================================================
-# VISUALIZATION & USER INTERFACE (Required)
+# VISUALIZATION & USER INTERFACE (REQUIRED - Core functionality)
 # ============================================================================
 seaborn>=0.11.0             # Statistical data visualization and styling
 pillow>=8.0.0               # Image processing and manipulation
                             # Required for icon display and image export
 
 # ============================================================================
-# DATA PROCESSING & FILE I/O (Required)
+# DATA PROCESSING & FILE I/O (REQUIRED - Core functionality)
 # ============================================================================
 openpyxl>=3.0.0             # Excel file reading and writing support
 fastdtw>=0.3.4              # Fast Dynamic Time Warping for spectral matching
@@ -41,61 +41,67 @@ tqdm>=4.60.0                # Progress bars for long-running operations
 psutil>=5.8.0               # System and process monitoring utilities
 
 # ============================================================================
-# UPDATE CHECKER & VERSION MANAGEMENT (Required)
+# UPDATE CHECKER & VERSION MANAGEMENT (REQUIRED - Core functionality)
 # ============================================================================
 requests>=2.25.0            # HTTP library for GitHub API communication
 packaging>=20.0             # Version comparison and parsing utilities
 pyperclip>=1.8.0            # Clipboard operations for git commands
 
 # ============================================================================
-# MACHINE LEARNING & ADVANCED ANALYSIS (Required)
+# MACHINE LEARNING & ADVANCED ANALYSIS (REQUIRED - Core functionality)
 # ============================================================================
 scikit-learn>=1.0.0         # Machine learning algorithms and preprocessing
                             # PCA, clustering, classification, regression
+joblib>=1.0.0               # ML model serialization and parallel processing
+                            # Required for saving/loading trained models
 
 # ============================================================================
-# PARALLEL COMPUTING & PERFORMANCE (Required)
+# PARALLEL COMPUTING & PERFORMANCE (REQUIRED - Core functionality)
 # ============================================================================
 dask>=2021.0.0              # Parallel computing and out-of-core processing
                             # Essential for large dataset handling
 
 # ============================================================================
-# ADVANCED CRYSTALLOGRAPHY (Optional but Recommended)
+# ADVANCED VISUALIZATION (OPTIONAL - Enhanced features, basic functionality works without)
+# ============================================================================
+umap-learn>=0.5.0           # UMAP dimensionality reduction for cluster analysis
+                            # OPTIONAL: Skip if installation fails - fallback to PCA available
+                            # Used in advanced cluster visualization features
+
+# ============================================================================
+# ADVANCED CRYSTALLOGRAPHY (OPTIONAL - Enhanced features, basic functionality works without)
 # ============================================================================
 pymatgen>=2022.0.0          # Materials analysis and crystal structure processing
-                            # Required for advanced polarization analysis
+                            # OPTIONAL: Skip if installation fails - only needed for advanced polarization analysis
                             # CIF file parsing and tensor calculations
 
 # ============================================================================
-# REPORT GENERATION & EXPORT (Optional but Recommended)
+# REPORT GENERATION & EXPORT (OPTIONAL - Enhanced features, basic functionality works without)
 # ============================================================================
 reportlab>=3.5.0            # PDF report generation and document creation
+                            # OPTIONAL: Skip if installation fails - basic export still available
                             # Professional analysis reports
 
 # ============================================================================
-# DEVELOPMENT & PACKAGING TOOLS (Optional)
+# DEVELOPMENT & PACKAGING TOOLS (OPTIONAL - Development only)
 # ============================================================================
 pyinstaller>=5.0.0          # Creating standalone executable distributions
+                            # OPTIONAL: Skip if installation fails - only needed for packaging
                             # For packaging RamanLab into standalone apps
 
 # ============================================================================
-# DEEP LEARNING & AI (Optional)
+# DEEP LEARNING & AI (OPTIONAL - Advanced features, basic functionality works without)
 # ============================================================================
 # tensorflow>=2.12.0        # Deep learning framework (uncomment if needed)
 # keras>=2.12.0             # High-level neural network API (uncomment if needed)
-                            # Note: Large downloads, only install if using ML features
+                            # OPTIONAL: Large downloads, only install if using advanced ML features
+                            # Basic ML functionality works with scikit-learn only
 
 # ============================================================================
-# ADVANCED VISUALIZATION (Optional)
-# ============================================================================
-# umap-learn>=0.5.0         # UMAP dimensionality reduction (uncomment if needed)
-                            # For advanced group analysis visualization
-
-# ============================================================================
-# MCMC SAMPLING (Optional)
+# MCMC SAMPLING (OPTIONAL - Advanced features, basic functionality works without)
 # ============================================================================
 # emcee>=3.0.0              # MCMC sampling for Bayesian analysis (uncomment if needed)
-                            # For advanced statistical analysis
+                            # OPTIONAL: Skip if installation fails - only for advanced statistical analysis
 
 # ============================================================================
 # ALTERNATIVE DEPENDENCIES (Not Recommended)
@@ -107,11 +113,16 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # INSTALLATION NOTES
 # ============================================================================
 #
-# QUICK INSTALL (All Required + Recommended):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn dask pymatgen reportlab pyinstaller
+# CORE REQUIRED DEPENDENCIES (Essential - RamanLab won't work without these):
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask
 #
-# MINIMAL INSTALL (Core Features Only):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn dask
+# FULL INSTALL (All Required + Recommended Optional):
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask umap-learn pymatgen reportlab pyinstaller
+#
+# MINIMAL INSTALL (If some packages fail):
+# 1. First try: pip install PySide6 numpy scipy matplotlib pandas scikit-learn joblib
+# 2. Then add: pip install seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip dask
+# 3. Optional extras: pip install umap-learn pymatgen reportlab pyinstaller
 #
 # DEVELOPMENT INSTALL (All Features):
 # pip install -r requirements_qt6.txt
@@ -130,6 +141,7 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # - For Windows users: Install Microsoft Visual C++ Build Tools if needed
 # - For macOS users: Install Xcode Command Line Tools if needed
 # - For Linux users: Install system packages for Qt6 development
+# - If optional packages fail, skip them - basic functionality will still work
 #
 # SYSTEM-SPECIFIC NOTES:
 # - Windows: All packages should install via pip
@@ -144,4 +156,13 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # LICENSE INFORMATION:
 # - PySide6: LGPL license (commercial use allowed)
 # - Most scientific packages: BSD/MIT licenses
-# - Check individual package licenses for specific requirements 
+# - Check individual package licenses for specific requirements
+
+# ============================================================================
+# FALLBACK BEHAVIOR FOR OPTIONAL DEPENDENCIES
+# ============================================================================
+# If optional packages fail to install, RamanLab will gracefully fall back:
+# - umap-learn: Falls back to PCA for dimensionality reduction
+# - pymatgen: Advanced crystallography features disabled
+# - reportlab: PDF reports unavailable, but other exports work
+# - pyinstaller: Can't create standalone executables, but app runs normally 
