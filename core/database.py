@@ -170,6 +170,86 @@ class MineralDatabase:
                     'a': 5.68, 'b': 15.18, 'c': 6.29,
                     'alpha': 90, 'beta': 118.43, 'gamma': 90
                 }
+            },
+            'HILAIRITE': {
+                'name': 'Hilairite',
+                'formula': 'Na2ZrSi3O9·3H2O',
+                'crystal_system': 'Triclinic',
+                'space_group': 'P-1',
+                'space_group_number': 2,
+                'point_group': '-1',
+                'raman_modes': [
+                    {'frequency': 295, 'character': 'Ag', 'intensity': 'strong', 'symmetry': 'Ag'},
+                    {'frequency': 415, 'character': 'Ag', 'intensity': 'medium', 'symmetry': 'Ag'},
+                    {'frequency': 520, 'character': 'Ag', 'intensity': 'very_strong', 'symmetry': 'Ag'},
+                    {'frequency': 580, 'character': 'Ag', 'intensity': 'medium', 'symmetry': 'Ag'},
+                    {'frequency': 740, 'character': 'Ag', 'intensity': 'weak', 'symmetry': 'Ag'},
+                    {'frequency': 924, 'character': 'Ag', 'intensity': 'strong', 'symmetry': 'Ag'},
+                    {'frequency': 1050, 'character': 'Ag', 'intensity': 'medium', 'symmetry': 'Ag'}
+                ],
+                'lattice_parameters': {
+                    'a': 10.37, 'b': 10.73, 'c': 8.99,
+                    'alpha': 90.2, 'beta': 95.3, 'gamma': 90.1
+                }
+            },
+            'CORUNDUM': {
+                'name': 'Corundum',
+                'formula': 'Al2O3',
+                'crystal_system': 'Hexagonal',
+                'space_group': 'R-3c',
+                'space_group_number': 167,
+                'point_group': '-3m',
+                'raman_modes': [
+                    {'frequency': 378, 'character': 'Eg', 'intensity': 'medium', 'symmetry': 'Eg'},
+                    {'frequency': 418, 'character': 'A1g', 'intensity': 'strong', 'symmetry': 'A1g'},
+                    {'frequency': 432, 'character': 'Eg', 'intensity': 'weak', 'symmetry': 'Eg'},
+                    {'frequency': 451, 'character': 'A1g', 'intensity': 'weak', 'symmetry': 'A1g'},
+                    {'frequency': 578, 'character': 'Eg', 'intensity': 'strong', 'symmetry': 'Eg'},
+                    {'frequency': 645, 'character': 'Eg', 'intensity': 'medium', 'symmetry': 'Eg'},
+                    {'frequency': 751, 'character': 'Eg', 'intensity': 'weak', 'symmetry': 'Eg'}
+                ],
+                'lattice_parameters': {
+                    'a': 4.759, 'b': 4.759, 'c': 12.991,
+                    'alpha': 90, 'beta': 90, 'gamma': 120
+                }
+            },
+            'RUTILE': {
+                'name': 'Rutile',
+                'formula': 'TiO2',
+                'crystal_system': 'Tetragonal',
+                'space_group': 'P42/mnm',
+                'space_group_number': 136,
+                'point_group': '4/mmm',
+                'raman_modes': [
+                    {'frequency': 143, 'character': 'B1g', 'intensity': 'medium', 'symmetry': 'B1g'},
+                    {'frequency': 235, 'character': 'Eg', 'intensity': 'weak', 'symmetry': 'Eg'},
+                    {'frequency': 447, 'character': 'Eg', 'intensity': 'medium', 'symmetry': 'Eg'},
+                    {'frequency': 612, 'character': 'A1g', 'intensity': 'very_strong', 'symmetry': 'A1g'}
+                ],
+                'lattice_parameters': {
+                    'a': 4.593, 'b': 4.593, 'c': 2.959,
+                    'alpha': 90, 'beta': 90, 'gamma': 90
+                }
+            },
+            'FELDSPAR': {
+                'name': 'Feldspar',
+                'formula': 'KAlSi3O8',
+                'crystal_system': 'Triclinic',
+                'space_group': 'C-1',
+                'space_group_number': 2,
+                'point_group': '-1',
+                'raman_modes': [
+                    {'frequency': 288, 'character': 'Ag', 'intensity': 'medium', 'symmetry': 'Ag'},
+                    {'frequency': 456, 'character': 'Ag', 'intensity': 'strong', 'symmetry': 'Ag'},
+                    {'frequency': 478, 'character': 'Ag', 'intensity': 'weak', 'symmetry': 'Ag'},
+                    {'frequency': 508, 'character': 'Ag', 'intensity': 'medium', 'symmetry': 'Ag'},
+                    {'frequency': 580, 'character': 'Ag', 'intensity': 'weak', 'symmetry': 'Ag'},
+                    {'frequency': 760, 'character': 'Ag', 'intensity': 'medium', 'symmetry': 'Ag'}
+                ],
+                'lattice_parameters': {
+                    'a': 8.584, 'b': 12.96, 'c': 7.22,
+                    'alpha': 90.3, 'beta': 115.9, 'gamma': 87.7
+                }
             }
         }
         self.loaded_from = "built-in minimal database"

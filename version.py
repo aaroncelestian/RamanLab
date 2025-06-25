@@ -3,19 +3,37 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.0.1"
-__version_info__ = (1, 0, 1)
+__version__ = "1.0.2"
+__version_info__ = (1, 0, 2)
 __author__ = "Aaron J. Celestian, Ph.D."
 __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
 __release_date__ = "2025-01-26"
-__release_name__ = "First Update"
+__release_name__ = "DTW Performance Enhancement"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.0.2": {
+        "date": "2025-01-26",
+        "name": "DTW Performance Enhancement",
+        "description": "Enhanced DTW algorithm performance and user experience",
+        "major_features": [
+            "DTW performance warning dialog with time estimates",
+            "Enhanced progress tracking for slow algorithms",
+            "Unified search architecture for better consistency"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Added DTW algorithm performance warning dialog",
+            "Real-time progress updates every 10% for DTW and Combined algorithms",
+            "Unified Basic and Advanced search to use optimized search_filtered_candidates()",
+            "Early termination optimization when sufficient matches found",
+            "Improved UI responsiveness during long searches with QApplication.processEvents()"
+        ]
+    },
     "1.0.1": {
         "date": "2025-01-26",
         "name": "First Update",

@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RamanLab Peak Fitting Web Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjs@11.5.0/lib/browser/math.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.8;
+            font-size: 1.1em;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            min-height: 70vh;
+        }
+        
+        .control-panel {
+            background: #f8f9fa;
+            padding: 30px;
+            border-right: 1px solid #e9ecef;
+        }
+        
+        .plot-area {
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .control-group {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .control-group h3 {
+            margin: 0 0 15px 0;
+            color: #2c3e50;
+            font-size: 1.1em;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+        
+        input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed #3498db;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+        
+        select, input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+        
+        .parameter-display {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .param-value {
+            background: #e3f2fd;
+            padding: 8px;
+            border-radius: 5px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 500px;
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .statistics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .stat-label {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+        
+        .algorithm-info {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+            border-left: 4px solid #27ae60;
+        }
+        
+        .algorithm-info h4 {
+            margin: 0 0 8px 0;
+            color: #27ae60;
+        }
+        
+        .algorithm-info p {
+            margin: 0;
+            font-size: 0.9em;
+            color: #2c3e50;
+        }
+        
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .control-panel {
+                border-right: none;
+                border-bottom: 1px solid #e9ecef;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔬 RamanLab Peak Fitting Web Demo</h1>
+            <p>Interactive demonstration of advanced peak fitting algorithms for Raman spectroscopy</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="control-panel">
+                <div class="control-group">
+                    <h3>📊 Data Input</h3>
+                    <div class="form-group">
+                        <label for="dataFile">Upload Spectrum File:</label>
+                        <input type="file" id="dataFile" accept=".txt,.csv,.dat" onchange="loadSpectrumFile(event)">
+                    </div>
+                    <div class="form-group">
+                        <button onclick="generateSampleData()">Generate Sample Spectrum</button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h3>🎯 Peak Shape Model</h3>
+                    <div class="form-group">
+                        <label for="peakShape">Peak Shape:</label>
+                        <select id="peakShape" onchange="updatePeakFit()">
+                            <option value="lorentzian">Lorentzian</option>
+                            <option value="gaussian">Gaussian</option>
+                            <option value="voigt">Voigt</option>
+                            <option value="pseudovoigt">Pseudo-Voigt</option>
+                        </select>
+                    </div>
+                    
+                    <div class="algorithm-info">
+                        <h4 id="algorithmTitle">Lorentzian Peak</h4>
+                        <p id="algorithmDescription">Natural line shape for homogeneous broadening in Raman spectroscopy. Formula: I = A·γ²/((ν-ν₀)²+γ²)</p>
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h3>⚙️ Fit Parameters</h3>
+                    <div class="form-group">
+                        <label for="amplitude">Amplitude: <span id="amplitudeValue">1000</span></label>
+                        <input type="range" id="amplitude" min="100" max="5000" value="1000" step="50" oninput="updateParameterDisplay(); updatePeakFit()">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="center">Center (cm⁻¹): <span id="centerValue">1000</span></label>
+                        <input type="range" id="center" min="200" max="1800" value="1000" step="10" oninput="updateParameterDisplay(); updatePeakFit()">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="width">Width: <span id="widthValue">20</span></label>
+                        <input type="range" id="width" min="5" max="100" value="20" step="2" oninput="updateParameterDisplay(); updatePeakFit()">
+                    </div>
+                    
+                    <div class="form-group" id="etaGroup" style="display: none;">
+                        <label for="eta">Mixing (η): <span id="etaValue">0.5</span></label>
+                        <input type="range" id="eta" min="0" max="1" value="0.5" step="0.05" oninput="updateParameterDisplay(); updatePeakFit()">
+                    </div>
+                    
+                    <div class="form-group" id="gammaGroup" style="display: none;">
+                        <label for="gamma">Lorentzian Width (γ): <span id="gammaValue">15</span></label>
+                        <input type="range" id="gamma" min="5" max="50" value="15" step="2" oninput="updateParameterDisplay(); updatePeakFit()">
+                    </div>
+                </div>
+                
+                <div class="control-group">
+                    <h3>🎛️ Auto Fit</h3>
+                    <div class="form-group">
+                        <button onclick="autoDetectPeaks()">Auto Detect Peaks</button>
+                    </div>
+                    <div class="form-group">
+                        <button onclick="autoFitPeak()">Auto Fit Selected Peak</button>
+                    </div>
+                    <div class="form-group">
+                        <button onclick="addPeak()">Add Another Peak</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="plot-area">
+                <div class="chart-container">
+                    <canvas id="spectrumChart"></canvas>
+                </div>
+                
+                <div class="statistics">
+                    <div class="stat-card">
+                        <div class="stat-value" id="rSquared">0.95</div>
+                        <div class="stat-label">R² Goodness of Fit</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="rmse">15.2</div>
+                        <div class="stat-label">RMSE</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="peakCount">1</div>
+                        <div class="stat-label">Fitted Peaks</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="fwhm">24.5</div>
+                        <div class="stat-label">FWHM (cm⁻¹)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let chart;
+        let spectrumData = [];
+        let fittedData = [];
+        let peaks = [];
+        let currentPeakIndex = 0;
+        
+        // Mathematical functions - adapted from RamanLab core/peak_fitting.py
+        function lorentzian(x, amplitude, center, width) {
+            const gamma = Math.abs(width) + 1e-10;
+            return amplitude * (gamma * gamma) / ((x - center) * (x - center) + gamma * gamma);
+        }
+        
+        function gaussian(x, amplitude, center, width) {
+            const sigma = Math.abs(width) + 1e-10;
+            return amplitude * Math.exp(-Math.pow((x - center) / sigma, 2));
+        }
+        
+        function voigt(x, amplitude, center, sigma, gamma) {
+            const sigmaAbs = Math.abs(sigma) + 1e-10;
+            const gammaAbs = Math.abs(gamma) + 1e-10;
+            
+            // Simplified Voigt approximation
+            const gaussianPart = Math.exp(-Math.pow((x - center) / sigmaAbs, 2));
+            const lorentzianPart = (gammaAbs * gammaAbs) / ((x - center) * (x - center) + gammaAbs * gammaAbs);
+            
+            return amplitude * (0.3989423 * gaussianPart + 0.6366198 * lorentzianPart);
+        }
+        
+        function pseudoVoigt(x, amplitude, center, width, eta) {
+            const etaClamp = Math.max(0, Math.min(1, eta));
+            const gaussianPart = gaussian(x, 1.0, center, width);
+            const lorentzianPart = lorentzian(x, 1.0, center, width);
+            
+            return amplitude * ((1 - etaClamp) * gaussianPart + etaClamp * lorentzianPart);
+        }
+        
+        // Initialize the application
+        function initApp() {
+            generateSampleData();
+            initChart();
+            updateParameterDisplay();
+            updateAlgorithmInfo();
+        }
+        
+        // Generate sample Raman spectrum with noise
+        function generateSampleData() {
+            console.log('Generating sample data...');
+            const wavenumbers = [];
+            const intensities = [];
+            
+            // Generate wavenumber range (200-1800 cm⁻¹)
+            for (let i = 200; i <= 1800; i += 2) {
+                wavenumbers.push(i);
+            }
+            
+            // Generate spectrum with multiple peaks + noise
+            for (let i = 0; i < wavenumbers.length; i++) {
+                const x = wavenumbers[i];
+                let intensity = 50; // baseline
+                
+                // Add several peaks (simulating a real Raman spectrum)
+                intensity += lorentzian(x, 800, 520, 15);  // Strong peak
+                intensity += lorentzian(x, 400, 700, 20);  // Medium peak
+                intensity += lorentzian(x, 1200, 1000, 25); // Main peak
+                intensity += lorentzian(x, 300, 1300, 18); // Weak peak
+                intensity += gaussian(x, 600, 1500, 30);   // Broad peak
+                
+                // Add realistic noise
+                intensity += (Math.random() - 0.5) * 40;
+                
+                intensities.push(Math.max(0, intensity));
+            }
+            
+            spectrumData = wavenumbers.map((x, i) => ({x, y: intensities[i]}));
+            
+            // Initialize with first peak
+            peaks = [{
+                amplitude: 1200,
+                center: 1000,
+                width: 25,
+                shape: 'lorentzian'
+            }];
+            
+            console.log('Sample data generated, updating chart...');
+            if (chart) {
+                updatePeakFit();
+            } else {
+                console.log('Chart not initialized yet, will update later');
+            }
+        }
+        
+        // Load spectrum from file
+        function loadSpectrumFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const text = e.target.result;
+                parseSpectrumData(text);
+            };
+            reader.readAsText(file);
+        }
+        
+        // Parse spectrum data from text
+        function parseSpectrumData(text) {
+            const lines = text.split('\n');
+            const data = [];
+            
+            for (let line of lines) {
+                line = line.trim();
+                if (line && !line.startsWith('#')) {
+                    const parts = line.split(/[\s,\t]+/);
+                    if (parts.length >= 2) {
+                        const x = parseFloat(parts[0]);
+                        const y = parseFloat(parts[1]);
+                        if (!isNaN(x) && !isNaN(y)) {
+                            data.push({x, y});
+                        }
+                    }
+                }
+            }
+            
+            if (data.length > 0) {
+                spectrumData = data;
+                updatePeakFit();
+                alert(`Loaded ${data.length} data points from file`);
+            } else {
+                alert('Could not parse spectrum data. Please check file format.');
+            }
+        }
+        
+        // Initialize Chart.js
+        function initChart() {
+            const ctx = document.getElementById('spectrumChart').getContext('2d');
+            
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Experimental Spectrum',
+                        data: spectrumData,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                        borderWidth: 2,
+                        fill: false,
+                        pointRadius: 0,
+                        pointHoverRadius: 3
+                    }, {
+                        label: 'Fitted Curve',
+                        data: fittedData,
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        borderWidth: 3,
+                        fill: false,
+                        pointRadius: 0,
+                        borderDash: [5, 5]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Raman Spectrum Peak Fitting',
+                            font: {
+                                size: 16
+                            }
+                        },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            position: 'bottom',
+                            title: {
+                                display: true,
+                                text: 'Wavenumber (cm⁻¹)',
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Intensity (counts)',
+                                font: {
+                                    size: 14
+                                }
+                            }
+                        }
+                    },
+                    onClick: function(event, elements) {
+                        if (elements.length > 0) {
+                            const point = elements[0];
+                            const datasetIndex = point.datasetIndex;
+                            const index = point.index;
+                            
+                            if (datasetIndex === 0) { // Clicked on experimental data
+                                const clickedPoint = spectrumData[index];
+                                document.getElementById('center').value = clickedPoint.x;
+                                updateParameterDisplay();
+                                updatePeakFit();
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Update peak fitting
+        function updatePeakFit() {
+            if (spectrumData.length === 0) return;
+            if (!chart) return; // Make sure chart is initialized
+            
+            const shape = document.getElementById('peakShape').value;
+            const amplitude = parseFloat(document.getElementById('amplitude').value);
+            const center = parseFloat(document.getElementById('center').value);
+            const width = parseFloat(document.getElementById('width').value);
+            const eta = parseFloat(document.getElementById('eta').value);
+            const gamma = parseFloat(document.getElementById('gamma').value);
+            
+            // Update current peak parameters
+            if (peaks.length > currentPeakIndex) {
+                peaks[currentPeakIndex] = {
+                    amplitude, center, width, shape, eta, gamma
+                };
+            }
+            
+            // Generate fitted curve
+            fittedData = [];
+            const xMin = Math.min(...spectrumData.map(d => d.x));
+            const xMax = Math.max(...spectrumData.map(d => d.x));
+            
+            for (let x = xMin; x <= xMax; x += 1) {
+                let y = 50; // baseline
+                
+                // Sum all peaks
+                for (let peak of peaks) {
+                    switch (peak.shape) {
+                        case 'lorentzian':
+                            y += lorentzian(x, peak.amplitude, peak.center, peak.width);
+                            break;
+                        case 'gaussian':
+                            y += gaussian(x, peak.amplitude, peak.center, peak.width);
+                            break;
+                        case 'voigt':
+                            y += voigt(x, peak.amplitude, peak.center, peak.width, peak.gamma || 15);
+                            break;
+                        case 'pseudovoigt':
+                            y += pseudoVoigt(x, peak.amplitude, peak.center, peak.width, peak.eta || 0.5);
+                            break;
+                    }
+                }
+                
+                fittedData.push({x, y});
+            }
+            
+            // Update chart
+            if (chart) {
+                chart.data.datasets[0].data = spectrumData;
+                chart.data.datasets[1].data = fittedData;
+                chart.update('none');
+            }
+            
+            // Calculate statistics
+            calculateFitStatistics();
+            updateAlgorithmInfo();
+        }
+        
+        // Calculate fit statistics
+        function calculateFitStatistics() {
+            if (fittedData.length === 0 || spectrumData.length === 0) return;
+            
+            // Interpolate fitted data to match experimental points
+            const experimental = spectrumData.map(d => d.y);
+            const fitted = spectrumData.map(d => {
+                // Find closest fitted point
+                let closest = fittedData[0];
+                let minDist = Math.abs(d.x - closest.x);
+                
+                for (let fit of fittedData) {
+                    const dist = Math.abs(d.x - fit.x);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closest = fit;
+                    }
+                }
+                return closest.y;
+            });
+            
+            // Calculate R²
+            const expMean = experimental.reduce((a, b) => a + b, 0) / experimental.length;
+            const ssTot = experimental.reduce((sum, val) => sum + Math.pow(val - expMean, 2), 0);
+            const ssRes = experimental.reduce((sum, val, i) => sum + Math.pow(val - fitted[i], 2), 0);
+            const rSquared = 1 - (ssRes / ssTot);
+            
+            // Calculate RMSE
+            const rmse = Math.sqrt(ssRes / experimental.length);
+            
+            // Calculate FWHM for current peak
+            const currentPeak = peaks[currentPeakIndex] || peaks[0];
+            let fwhm = 0;
+            if (currentPeak) {
+                switch (currentPeak.shape) {
+                    case 'lorentzian':
+                        fwhm = 2 * currentPeak.width;
+                        break;
+                    case 'gaussian':
+                        fwhm = 2.355 * currentPeak.width;
+                        break;
+                    default:
+                        fwhm = 2.2 * currentPeak.width;
+                }
+            }
+            
+            // Update display
+            document.getElementById('rSquared').textContent = rSquared.toFixed(3);
+            document.getElementById('rmse').textContent = rmse.toFixed(1);
+            document.getElementById('peakCount').textContent = peaks.length;
+            document.getElementById('fwhm').textContent = fwhm.toFixed(1);
+        }
+        
+        // Update parameter display
+        function updateParameterDisplay() {
+            document.getElementById('amplitudeValue').textContent = document.getElementById('amplitude').value;
+            document.getElementById('centerValue').textContent = document.getElementById('center').value;
+            document.getElementById('widthValue').textContent = document.getElementById('width').value;
+            document.getElementById('etaValue').textContent = document.getElementById('eta').value;
+            document.getElementById('gammaValue').textContent = document.getElementById('gamma').value;
+            
+            // Show/hide relevant parameters
+            const shape = document.getElementById('peakShape').value;
+            document.getElementById('etaGroup').style.display = shape === 'pseudovoigt' ? 'block' : 'none';
+            document.getElementById('gammaGroup').style.display = shape === 'voigt' ? 'block' : 'none';
+        }
+        
+        // Update algorithm information
+        function updateAlgorithmInfo() {
+            const shape = document.getElementById('peakShape').value;
+            const titleElement = document.getElementById('algorithmTitle');
+            const descElement = document.getElementById('algorithmDescription');
+            
+            const info = {
+                lorentzian: {
+                    title: 'Lorentzian Peak',
+                    desc: 'Natural line shape for homogeneous broadening in Raman spectroscopy. Formula: I = A·γ²/((ν-ν₀)²+γ²)'
+                },
+                gaussian: {
+                    title: 'Gaussian Peak',
+                    desc: 'Describes inhomogeneous broadening due to sample variations. Formula: I = A·exp(-((ν-ν₀)/σ)²)'
+                },
+                voigt: {
+                    title: 'Voigt Profile',
+                    desc: 'Convolution of Gaussian and Lorentzian, accounts for both broadening mechanisms simultaneously.'
+                },
+                pseudovoigt: {
+                    title: 'Pseudo-Voigt Profile',
+                    desc: 'Linear combination of Gaussian and Lorentzian profiles with mixing parameter η (0=pure Gaussian, 1=pure Lorentzian).'
+                }
+            };
+            
+            titleElement.textContent = info[shape].title;
+            descElement.textContent = info[shape].desc;
+        }
+        
+        // Auto detect peaks
+        function autoDetectPeaks() {
+            if (spectrumData.length === 0) return;
+            
+            const intensities = spectrumData.map(d => d.y);
+            const wavenumbers = spectrumData.map(d => d.x);
+            
+            // Simple peak detection algorithm
+            const detectedPeaks = [];
+            const threshold = Math.max(...intensities) * 0.3; // 30% of max intensity
+            
+            for (let i = 5; i < intensities.length - 5; i++) {
+                const current = intensities[i];
+                if (current > threshold) {
+                    // Check if it's a local maximum
+                    let isMax = true;
+                    for (let j = i - 5; j <= i + 5; j++) {
+                        if (j !== i && intensities[j] >= current) {
+                            isMax = false;
+                            break;
+                        }
+                    }
+                    
+                    if (isMax) {
+                        detectedPeaks.push({
+                            amplitude: current - 50, // subtract baseline
+                            center: wavenumbers[i],
+                            width: 20,
+                            shape: 'lorentzian'
+                        });
+                    }
+                }
+            }
+            
+            if (detectedPeaks.length > 0) {
+                peaks = detectedPeaks.slice(0, 5); // Limit to 5 peaks
+                currentPeakIndex = 0;
+                
+                // Update controls to first detected peak
+                const firstPeak = peaks[0];
+                document.getElementById('amplitude').value = firstPeak.amplitude;
+                document.getElementById('center').value = firstPeak.center;
+                document.getElementById('width').value = firstPeak.width;
+                
+                updateParameterDisplay();
+                updatePeakFit();
+                
+                alert(`Detected ${peaks.length} peaks automatically!`);
+            } else {
+                alert('No prominent peaks detected. Try adjusting the data or use manual fitting.');
+            }
+        }
+        
+        // Auto fit current peak using simple optimization
+        function autoFitPeak() {
+            if (spectrumData.length === 0) return;
+            
+            const center = parseFloat(document.getElementById('center').value);
+            const shape = document.getElementById('peakShape').value;
+            
+            // Extract data around the peak center (±100 cm⁻¹)
+            const windowData = spectrumData.filter(d => Math.abs(d.x - center) <= 100);
+            
+            if (windowData.length < 10) {
+                alert('Not enough data points around the selected center for fitting.');
+                return;
+            }
+            
+            // Simple optimization - find best amplitude and width
+            let bestFit = { amplitude: 1000, width: 20, error: Infinity };
+            
+            // Grid search for optimization
+            for (let amp = 100; amp <= 3000; amp += 100) {
+                for (let w = 5; w <= 50; w += 2) {
+                    let error = 0;
+                    
+                    for (let point of windowData) {
+                        let fitted;
+                        switch (shape) {
+                            case 'lorentzian':
+                                fitted = lorentzian(point.x, amp, center, w) + 50;
+                                break;
+                            case 'gaussian':
+                                fitted = gaussian(point.x, amp, center, w) + 50;
+                                break;
+                            default:
+                                fitted = lorentzian(point.x, amp, center, w) + 50;
+                        }
+                        error += Math.pow(point.y - fitted, 2);
+                    }
+                    
+                    if (error < bestFit.error) {
+                        bestFit = { amplitude: amp, width: w, error };
+                    }
+                }
+            }
+            
+            // Update controls with best fit
+            document.getElementById('amplitude').value = bestFit.amplitude;
+            document.getElementById('width').value = bestFit.width;
+            
+            updateParameterDisplay();
+            updatePeakFit();
+            
+            alert(`Auto-fit completed! RMSE: ${Math.sqrt(bestFit.error / windowData.length).toFixed(1)}`);
+        }
+        
+        // Add another peak
+        function addPeak() {
+            const newPeak = {
+                amplitude: 500,
+                center: 800,
+                width: 15,
+                shape: 'lorentzian'
+            };
+            
+            peaks.push(newPeak);
+            currentPeakIndex = peaks.length - 1;
+            
+            // Update controls
+            document.getElementById('amplitude').value = newPeak.amplitude;
+            document.getElementById('center').value = newPeak.center;
+            document.getElementById('width').value = newPeak.width;
+            document.getElementById('peakShape').value = newPeak.shape;
+            
+            updateParameterDisplay();
+            updatePeakFit();
+            
+            alert(`Added peak ${peaks.length}. Click on the spectrum to position it.`);
+        }
+        
+        // Initialize the application when page loads
+        window.addEventListener('load', initApp);
+    </script>
+</body>
+</html>

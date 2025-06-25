@@ -132,7 +132,7 @@ __all__ = [
 ]
 
 # Version information
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 __author__ = "RamanLab Development Team"
 
 # Module registry for dynamic loading

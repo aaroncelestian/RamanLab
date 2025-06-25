@@ -6,7 +6,7 @@
 
 RamanLab is a comprehensive, cross-platform desktop application for analyzing and identifying Raman spectra. Built with PySide6, it provides a modern, professional interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities and specialized analysis tools.
 
-**Current Version:** 1.0.1  
+**Current Version:** 1.0.2  
 **Release Date:** 2025-06-22  
 **Framework:** Qt6 (PySide6)  
 **Platform Support:** Windows, macOS, Linux  
@@ -107,13 +107,13 @@ The **Hey-Celestian Classification System** is a spectroscopy based classificati
 14. **Organic Groups** (Abelsonite, Organic minerals)
 15. **Mixed Modes** (Epidote, Vesuvianite, Complex structures)
 
-#### Branching subgroups of a hierarchical, multi-dimensional classification scheme that maintains the elegant simplicity of vibrational mode organization while incorporating the chemical, structural, and environmental complexity that characterizes real mineral systems. This will involve a tree-like structure where the 15 primary vibrational groups serve as main branches, with increasingly specific sub-classifications based on composition, structure, and environmental factors.
+These 15 groups will have branching subgroups of a hierarchical, multi-dimensional classification scheme that maintains the elegant simplicity of vibrational mode organization while incorporating the chemical, structural, and environmental complexity that characterizes real mineral systems. This will involve a tree-like structure where the 15 primary vibrational groups serve as main branches, with increasingly specific sub-classifications based on composition, structure, and environmental factors.
 1. Works with solid solutions
 2. Polytipic variations
 3. Polymorph catagories
 4. Crystal orientation effects
 
-You will notice that a lot of ground work is already implemented in RamanLab to build out this new classifation system.  Once the system is implemented, new quantitaive enhancements could be realized, such as, mixing ratios, crystallinity indices, stress/strain, weathering/alteration pathways, hydration, phase diagram integration, metastability, and aid in additive learning system for machine learning and AI.
+You will notice that a lot of groundwork is already implemented in RamanLab to build out this new classifation system.  Once the system is implemented, new quantitaive enhancements could be realized, such as, mixing ratios, crystallinity indices, stress/strain, weathering/alteration pathways, hydration effects, phase diagram integration, metastability, and aid in additive learning systems for future AI predictive modeling.
 
 #### **Advantages:**
 - **Predictive Analysis:** Expected peak positions and vibrational characteristics
@@ -123,13 +123,13 @@ You will notice that a lot of ground work is already implemented in RamanLab to 
 
 ---
 
-## 🔧 **Professional Peak Fitting & Batch Processing**
+## 🔧 **Peak Fitting & Batch Processing**
 
 ### **Advanced Peak Fitting:**
 - **Smart Background Models:** AI-suggested models with user selection
 - **Multiple Peak Models:** Gaussian, Lorentzian, Pseudo-Voigt, Asymmetric Voigt
 - **No Region Definition Required:** Automatic peak detection across full spectrum
-- **Professional Reports:** Publication-quality graphics with comprehensive fitting statistics
+- **Reports:** Publication-quality graphics with comprehensive fitting statistics
 
 ### **High-Volume Batch Processing:**
 - **Unlimited Spectra:** Handle large datasets (system memory dependent)
@@ -139,7 +139,7 @@ You will notice that a lot of ground work is already implemented in RamanLab to 
 
 ---
 
-## 🗺️ **Advanced 2D Raman Map Analysis**
+## 🗺️ **2D Raman Map Analysis**
 
 ### **Comprehensive Mapping Capabilities:**
 - **Directory-Based Import:** Seamless 2D Raman mapping dataset handling
@@ -157,7 +157,7 @@ You will notice that a lot of ground work is already implemented in RamanLab to 
 
 ---
 
-## ⚡ **Advanced Battery & Materials Analysis**
+## ⚡ **Battery & Materials Analysis**
 
 ### **LiMn2O4 Battery Strain Analysis System:**
 *Specialized module for battery materials research*
@@ -174,6 +174,7 @@ You will notice that a lot of ground work is already implemented in RamanLab to 
 - **Electrochemical Synchronization:** Correlate with battery state-of-charge
 - **Degradation Analysis:** Monitor cycling-induced structural changes
 
+#### More specialized modules to come
 ---
 
 ## 📊 **Advanced Group & Cluster Analysis**
@@ -182,7 +183,6 @@ You will notice that a lot of ground work is already implemented in RamanLab to 
 - **Flexible Import:** Folder-based or database import with advanced filtering
 - **Multiple Visualization Methods:**
   - PCA (Principal Component Analysis)
-  - t-SNE (t-Distributed Stochastic Neighbor Embedding)
   - UMAP (Uniform Manifold Approximation and Projection)
 - **Interactive Exploration:**
   - Dendrogram visualization
@@ -231,7 +231,7 @@ You will notice that a lot of ground work is already implemented in RamanLab to 
 ## 🏗️ **Modern Architecture & Session Management**
 
 ### **Comprehensive State Management:**
-*Revolutionary session save/restore system*
+*session save/restore system in the near future*
 
 - **Complete Session Recovery:** Save and restore entire application state
 - **Window Layout Preservation:** Remember panel positions, zoom levels, and preferences

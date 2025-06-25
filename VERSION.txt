@@ -1,10 +1,24 @@
-RamanLab Version 1.0.1 - "First Update"
+RamanLab Version 1.0.2 - "DTW Performance Enhancement"
 Release Date: January 26, 2025
 
-🔄 **Version 1.0.1 Update**
+🔄 **Version 1.0.2 Update**
 
-This is a minor update to RamanLab Qt6 following the inaugural release,
-containing ongoing improvements and refinements.
+This update focuses on enhancing the DTW (Dynamic Time Warping) algorithm 
+performance and overall search user experience with better progress tracking
+and informed decision making.
+
+🚀 **Key Improvements:**
+• Added DTW performance warning dialog with time estimates
+• Enhanced progress tracking for slow algorithms (DTW, Combined)
+• Unified Basic and Advanced search architecture
+• Real-time progress updates every 10% for better UX
+• Early termination optimization when sufficient matches found
+• Improved UI responsiveness during long searches
+
+🔄 **Previous Release - Version 1.0.1 "First Update"**
+
+Minor update following the inaugural release with ongoing improvements
+and refinements.
 
 🎉 **Previous Release - Version 1.0.0 "Debut"**
 

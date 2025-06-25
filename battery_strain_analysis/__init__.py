@@ -12,7 +12,7 @@ Modules:
 - strain_visualization: Plotting and visualization tools
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.2"
 __author__ = "RamanLab"
 
 from .limn2o4_analyzer import LiMn2O4StrainAnalyzer

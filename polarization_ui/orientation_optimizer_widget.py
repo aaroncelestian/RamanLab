@@ -811,7 +811,7 @@ def main():
     
     # Set application properties
     app.setApplicationName("Crystal Orientation Optimizer")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationVersion("1.0.2")
     app.setOrganizationName("RamanLab")
     
     # Create and show widget

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dependency Checker for RamanLab Qt6 Version 1.0.0
+Dependency Checker for RamanLab Qt6 Version 1.0.2
 ==================================================
 This script checks if your Python environment has all required dependencies
 for RamanLab Qt6, reports their versions, and provides installation instructions if needed.
@@ -14,7 +14,7 @@ Features:
 - Professional Reporting and Export
 
 Updated: 2025-01-26
-Release: Debut (v1.0.0)
+Release: DTW Performance Enhancement (v1.0.2)
 """
 
 import importlib
@@ -57,7 +57,7 @@ def check_python_version():
     # Minimum Python 3.8 for Qt6 compatibility
     if current_version < (3, 8):
         print("❌ Python 3.8+ is required for Qt6 compatibility")
-        print("  Current version is too old for RamanLab v1.0.0")
+        print("  Current version is too old for RamanLab v1.0.2")
         print("  To update Python:")
         print("  - Windows: Download from python.org or use Microsoft Store")
         print("  - macOS: Use 'brew install python' or download from python.org")
@@ -460,7 +460,7 @@ def main():
     
     # System compatibility
     if not python_ok:
-        print("❌ INCOMPATIBLE: Python version too old for RamanLab v1.0.0")
+        print("❌ INCOMPATIBLE: Python version too old for RamanLab v1.0.2")
         print("   Please update Python to 3.8+ (3.9+ recommended)")
         return
     
@@ -496,7 +496,7 @@ def main():
         suggest_installation_commands(all_missing, missing_optional, all_outdated)
     else:
         print("\n🎉 CONGRATULATIONS!")
-        print("Your environment is fully configured for RamanLab v1.0.0!")
+        print("Your environment is fully configured for RamanLab v1.0.2!")
         print("Ready to launch: python launch_ramanlab.py")
     
     print("\n" + "="*70)
