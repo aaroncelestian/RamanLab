@@ -106,6 +106,9 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         # Processing state
         self.detected_peaks = None
+        self.manual_peaks = []  # Store manual peak positions as wavenumber values
+        self.peak_selection_mode = False
+        self.peak_selection_tolerance = 20  # Tolerance for clicking on peaks (in wavenumber units)
         self.background_preview_active = False
         self.smoothing_preview_active = False
         self.preview_background = None
@@ -176,6 +179,9 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.ax.set_ylabel("Intensity (a.u.)")
         self.ax.set_title("Raman Spectrum")
         self.ax.grid(True, alpha=0.3)
+        
+        # Connect mouse click event for manual peak selection
+        self.canvas.mpl_connect('button_press_event', self.on_canvas_click)
         
         # Add to layout
         viz_layout.addWidget(self.toolbar)
@@ -583,8 +589,36 @@ class RamanAnalysisAppQt6(QMainWindow):
         detect_btn.clicked.connect(self.find_peaks)
         peak_layout.addWidget(detect_btn)
         
+        # Manual peak selection mode toggle
+        self.peak_selection_btn = QPushButton("🎯 Enter Peak Selection Mode")
+        self.peak_selection_btn.clicked.connect(self.toggle_peak_selection_mode)
+        self.peak_selection_btn.setCheckable(True)
+        self.peak_selection_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:checked {
+                background-color: #4CAF50;
+                color: white;
+            }
+        """)
+        peak_layout.addWidget(self.peak_selection_btn)
+        
+        # Clear manual peaks button
+        clear_manual_btn = QPushButton("Clear Manual Peaks")
+        clear_manual_btn.clicked.connect(self.clear_manual_peaks)
+        peak_layout.addWidget(clear_manual_btn)
+        
         # Peak count display
-        self.peak_count_label = QLabel("Peaks found: 0")
+        self.peak_count_label = QLabel("Auto peaks: 0 | Manual peaks: 0")
         peak_layout.addWidget(self.peak_count_label)
         
         layout.addWidget(peak_group)
@@ -712,6 +746,55 @@ class RamanAnalysisAppQt6(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
+        # Algorithm selection at the top - applies to both search types
+        algorithm_group = QGroupBox("Search Algorithm")
+        algorithm_layout = QVBoxLayout(algorithm_group)
+        
+        self.algorithm_combo = QComboBox()
+        self.algorithm_combo.addItems([
+            "correlation", "peak", "combined", "DTW"
+        ])
+        self.algorithm_combo.setCurrentText("correlation")
+        algorithm_layout.addWidget(self.algorithm_combo)
+        
+        # Algorithm descriptions
+        desc_text = QTextEdit()
+        desc_text.setMaximumHeight(70)
+        desc_text.setPlainText(
+            "Correlation: Compare spectral shapes • Peak: Match peak positions/intensities • "
+            "Combined: Hybrid correlation + DTW + peaks • DTW: Dynamic Time Warping alignment"
+        )
+        desc_text.setReadOnly(True)
+        desc_text.setStyleSheet("font-size: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6;")
+        algorithm_layout.addWidget(desc_text)
+        
+        layout.addWidget(algorithm_group)
+        
+        # Common search parameters - applies to both search types  
+        params_group = QGroupBox("Search Parameters")
+        params_layout = QHBoxLayout(params_group)
+        
+        # Number of matches
+        params_layout.addWidget(QLabel("Max results:"))
+        self.n_matches_spin = QSpinBox()
+        self.n_matches_spin.setRange(1, 50)
+        self.n_matches_spin.setValue(10)
+        self.n_matches_spin.setMaximumWidth(80)
+        params_layout.addWidget(self.n_matches_spin)
+        
+        # Threshold (applies to both search types)
+        params_layout.addWidget(QLabel("Threshold:"))
+        self.threshold_spin = QDoubleSpinBox()
+        self.threshold_spin.setRange(0.0, 1.0)
+        self.threshold_spin.setSingleStep(0.1)
+        self.threshold_spin.setValue(0.7)
+        self.threshold_spin.setMaximumWidth(80)
+        params_layout.addWidget(self.threshold_spin)
+        
+        params_layout.addStretch()
+        
+        layout.addWidget(params_group)
+        
         # Create search subtabs
         search_tab_widget = QTabWidget()
         
@@ -763,51 +846,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         """Create the basic search subtab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        
-        # Algorithm selection
-        algorithm_group = QGroupBox("Search Algorithm")
-        algorithm_layout = QVBoxLayout(algorithm_group)
-        
-        self.algorithm_combo = QComboBox()
-        self.algorithm_combo.addItems([
-            "correlation", "peak", "combined", "DTW"
-        ])
-        self.algorithm_combo.setCurrentText("correlation")
-        # Remove the redundant "Algorithm:" label since groupbox already says "Search Algorithm"
-        algorithm_layout.addWidget(self.algorithm_combo)
-        
-        # Algorithm descriptions
-        desc_text = QTextEdit()
-        desc_text.setMaximumHeight(80)
-        desc_text.setPlainText(
-            "Correlation: Compare spectral shapes using cross-correlation\n"
-            "Peak: Match based on peak positions and intensities\n"
-            "Combined: Hybrid approach using both correlation and DTW\n"
-            "DTW: Dynamic Time Warping for optimal spectral alignment"
-        )
-        desc_text.setReadOnly(True)
-        algorithm_layout.addWidget(desc_text)
-        
-        layout.addWidget(algorithm_group)
-        
-        # Search parameters
-        params_group = QGroupBox("Search Parameters")
-        params_layout = QFormLayout(params_group)
-        
-        # Number of matches
-        self.n_matches_spin = QSpinBox()
-        self.n_matches_spin.setRange(1, 50)
-        self.n_matches_spin.setValue(10)
-        params_layout.addRow("Number of matches:", self.n_matches_spin)
-        
-        # Correlation threshold
-        self.threshold_spin = QDoubleSpinBox()
-        self.threshold_spin.setRange(0.0, 1.0)
-        self.threshold_spin.setSingleStep(0.1)
-        self.threshold_spin.setValue(0.7)  # More reasonable default threshold
-        params_layout.addRow("Similarity threshold:", self.threshold_spin)
-        
-        layout.addWidget(params_group)
+
         
         # Search button
         search_btn = QPushButton("Search Database")
@@ -847,24 +886,6 @@ class RamanAnalysisAppQt6(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Show which algorithm will be used (from basic search tab)
-        algorithm_info_group = QGroupBox("Search Algorithm")
-        algorithm_info_layout = QVBoxLayout(algorithm_info_group)
-        
-        algorithm_note = QLabel("Uses algorithm selected in Basic Search tab")
-        algorithm_note.setStyleSheet("font-style: italic; color: #666; font-size: 10px;")
-        algorithm_info_layout.addWidget(algorithm_note)
-        
-        # Add current algorithm display
-        self.current_algorithm_label = QLabel("Current: correlation")
-        self.current_algorithm_label.setStyleSheet("font-weight: bold; color: #333; font-size: 11px;")
-        algorithm_info_layout.addWidget(self.current_algorithm_label)
-        
-        # Connect to update when algorithm changes
-        self.algorithm_combo.currentTextChanged.connect(self.update_advanced_algorithm_display)
-        
-        layout.addWidget(algorithm_info_group)
-        
         # Create scrollable area for all the controls - make it more compact
         scroll_area = QScrollArea()
         scroll_widget = QWidget()
@@ -879,15 +900,9 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.peak_positions_edit.setPlaceholderText("e.g., 1050, 1350, 1580")
         peak_layout.addWidget(self.peak_positions_edit)
         
-        hint_label = QLabel("Comma-separated wavenumber values. Results must contain ALL peaks.")
+        hint_label = QLabel("Comma-separated wavenumber values (e.g., 1050, 1350, 1580)")
         hint_label.setStyleSheet("font-size: 9px; color: gray;")
         peak_layout.addWidget(hint_label)
-        
-        # Add important note about peak detection
-        note_label = QLabel("⚠️ Note: Database spectra must have detected peaks for this filter to work.")
-        note_label.setStyleSheet("font-size: 9px; color: #FF6B00; font-weight: bold;")
-        note_label.setWordWrap(True)
-        peak_layout.addWidget(note_label)
         
         # Make tolerance layout more compact
         tolerance_layout = QHBoxLayout()
@@ -900,11 +915,11 @@ class RamanAnalysisAppQt6(QMainWindow):
         tolerance_layout.addStretch()
         peak_layout.addLayout(tolerance_layout)
         
-        # Add peak-only search mode explanation
-        peak_only_note = QLabel("✨ Peak-Only Search: When peak positions are specified above, all spectra with matching peaks will be returned, regardless of overall spectral similarity.")
-        peak_only_note.setStyleSheet("font-size: 9px; color: #0066CC; font-weight: bold; background-color: #E6F3FF; padding: 5px; border-radius: 3px;")
-        peak_only_note.setWordWrap(True)
-        peak_layout.addWidget(peak_only_note)
+        # Add helpful note about peak usage
+        peak_note = QLabel("💡 Tip: Peak positions enhance scoring when using 'peak' or 'combined' algorithms")
+        peak_note.setStyleSheet("font-size: 9px; color: #0066CC; background-color: #E6F3FF; padding: 4px; border-radius: 3px;")
+        peak_note.setWordWrap(True)
+        peak_layout.addWidget(peak_note)
         
         scroll_layout.addWidget(peak_group)
         
@@ -946,21 +961,6 @@ class RamanAnalysisAppQt6(QMainWindow):
         elements_layout.addRow("Exclude elements:", self.exclude_elements_edit)
         
         scroll_layout.addWidget(elements_group)
-        
-        # Similarity threshold for advanced search - compact
-        threshold_layout = QHBoxLayout()
-        threshold_layout.addWidget(QLabel("Similarity Threshold:"))
-        self.adv_threshold_spin = QDoubleSpinBox()
-        self.adv_threshold_spin.setRange(0.0, 1.0)
-        self.adv_threshold_spin.setSingleStep(0.1)
-        self.adv_threshold_spin.setValue(0.3)
-        self.adv_threshold_spin.setMaximumWidth(80)
-        threshold_layout.addWidget(self.adv_threshold_spin)
-        threshold_hint = QLabel("(Applied after filtering)")
-        threshold_hint.setStyleSheet("font-size: 9px; color: gray;")
-        threshold_layout.addWidget(threshold_hint)
-        threshold_layout.addStretch()
-        scroll_layout.addLayout(threshold_layout)
         
         # Advanced search button
         adv_search_btn = QPushButton("Advanced Search")
@@ -1151,12 +1151,14 @@ class RamanAnalysisAppQt6(QMainWindow):
             # Store metadata from file
             self.current_spectrum_metadata = metadata
             
-            # Clear any active previews
+            # Clear any active previews and manual peaks
             self.background_preview_active = False
             self.smoothing_preview_active = False
             self.preview_background = None
             self.preview_corrected = None
             self.preview_smoothed = None
+            self.manual_peaks.clear()
+            self.detected_peaks = None
             
             self.update_plot()
             self.update_info_display(file_path)
@@ -1348,20 +1350,75 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self.ax.plot(self.current_wavenumbers, self.preview_smoothed, 'm-', linewidth=1.5, 
                             label='Smoothed (Preview)', alpha=0.8)
             
-            # Plot peaks if detected
-            if self.detected_peaks is not None:
+            # Plot automatically detected peaks
+            if self.detected_peaks is not None and len(self.detected_peaks) > 0:
                 peak_positions = self.current_wavenumbers[self.detected_peaks]
                 peak_intensities = self.processed_intensities[self.detected_peaks]
                 self.ax.plot(peak_positions, peak_intensities, 'ro', markersize=6, 
-                            label='Detected Peaks')
+                            label=f'Auto Peaks ({len(self.detected_peaks)})')
+                
+                # Add peak position labels for auto peaks
+                for i, (pos, intensity) in enumerate(zip(peak_positions, peak_intensities)):
+                    # Offset the label slightly above the peak
+                    label_y = intensity + 0.08 * (np.max(self.processed_intensities) - np.min(self.processed_intensities))
+                    self.ax.annotate(f'{pos:.1f} cm⁻¹', 
+                                   xy=(pos, intensity), 
+                                   xytext=(pos, label_y),
+                                   ha='center', va='bottom',
+                                   fontsize=9, 
+                                   color='darkred',
+                                   fontweight='bold',
+                                   rotation=45,
+                                   bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow', alpha=0.9, edgecolor='red', linewidth=1.2),
+                                   arrowprops=dict(arrowstyle='->', color='red', lw=1.0, alpha=0.8))
+            
+            # Plot manual peaks
+            if self.manual_peaks and len(self.manual_peaks) > 0:
+                manual_positions = []
+                manual_intensities = []
+                
+                # Find the intensity at each manual peak position
+                for peak_pos in self.manual_peaks:
+                    # Find the closest data point to the manual peak position
+                    closest_idx = np.argmin(np.abs(self.current_wavenumbers - peak_pos))
+                    manual_positions.append(peak_pos)
+                    manual_intensities.append(self.processed_intensities[closest_idx])
+                
+                self.ax.plot(manual_positions, manual_intensities, 's', 
+                            color='blue', markersize=8, markerfacecolor='lightblue', 
+                            markeredgecolor='blue', markeredgewidth=2,
+                            label=f'Manual Peaks ({len(self.manual_peaks)})')
+                
+                # Add peak position labels for manual peaks
+                for i, (pos, intensity) in enumerate(zip(manual_positions, manual_intensities)):
+                    # Offset the label slightly above the peak
+                    label_y = intensity + 0.12 * (np.max(self.processed_intensities) - np.min(self.processed_intensities))
+                    self.ax.annotate(f'{pos:.1f} cm⁻¹', 
+                                   xy=(pos, intensity), 
+                                   xytext=(pos, label_y),
+                                   ha='center', va='bottom',
+                                   fontsize=9, 
+                                   color='darkblue',
+                                   fontweight='bold',
+                                   rotation=45,
+                                   bbox=dict(boxstyle='round,pad=0.3', facecolor='lightcyan', alpha=0.9, edgecolor='blue', linewidth=1.2),
+                                   arrowprops=dict(arrowstyle='->', color='blue', lw=1.0, alpha=0.8))
             
             self.ax.set_xlabel("Wavenumber (cm⁻¹)")
             self.ax.set_ylabel("Intensity (a.u.)")
-            self.ax.set_title("Raman Spectrum")
+            
+            # Add visual indicator when in peak selection mode
+            if self.peak_selection_mode:
+                self.ax.set_title("Raman Spectrum - 🎯 Peak Selection Mode Active", 
+                                 color='darkgreen', fontweight='bold')
+            else:
+                self.ax.set_title("Raman Spectrum")
+                
             self.ax.grid(True, alpha=0.3)
             
-            # Add legend if there are previews
-            if self.background_preview_active or self.smoothing_preview_active or self.detected_peaks is not None:
+            # Add legend if there are previews or peaks
+            if (self.background_preview_active or self.smoothing_preview_active or 
+                self.detected_peaks is not None or self.manual_peaks):
                 self.ax.legend(loc='upper right', fontsize=9)
         
         self.canvas.draw()
@@ -1925,9 +1982,71 @@ class RamanAnalysisAppQt6(QMainWindow):
         """Manual peak detection using current slider values."""
         if self.processed_intensities is not None:
             self.update_peak_detection()  # Use the real-time method
-            self.status_bar.showMessage(f"Found {len(self.detected_peaks)} peaks")
+            auto_count = len(self.detected_peaks) if self.detected_peaks is not None else 0
+            self.status_bar.showMessage(f"Found {auto_count} automatic peaks")
         else:
             QMessageBox.warning(self, "No Data", "No spectrum loaded for peak detection.")
+    
+    def toggle_peak_selection_mode(self):
+        """Toggle manual peak selection mode."""
+        self.peak_selection_mode = not self.peak_selection_mode
+        
+        if self.peak_selection_mode:
+            self.peak_selection_btn.setText("🎯 Exit Peak Selection Mode")
+            self.peak_selection_btn.setChecked(True)
+            self.status_bar.showMessage("Peak Selection Mode: Click on spectrum to add peaks, click on existing peaks to remove them")
+        else:
+            self.peak_selection_btn.setText("🎯 Enter Peak Selection Mode")
+            self.peak_selection_btn.setChecked(False)
+            self.status_bar.showMessage("Peak selection mode disabled")
+    
+    def on_canvas_click(self, event):
+        """Handle mouse clicks on the canvas for manual peak selection."""
+        if not self.peak_selection_mode or event.inaxes != self.ax:
+            return
+        
+        if self.current_wavenumbers is None or self.processed_intensities is None:
+            return
+        
+        # Get the clicked position
+        clicked_wavenumber = event.xdata
+        
+        if clicked_wavenumber is None:
+            return
+        
+        # Check if we clicked near an existing manual peak (to remove it)
+        peak_to_remove = None
+        for i, peak_pos in enumerate(self.manual_peaks):
+            if abs(peak_pos - clicked_wavenumber) <= self.peak_selection_tolerance:
+                peak_to_remove = i
+                break
+        
+        if peak_to_remove is not None:
+            # Remove the peak
+            removed_peak = self.manual_peaks.pop(peak_to_remove)
+            self.status_bar.showMessage(f"Removed manual peak at {removed_peak:.1f} cm⁻¹")
+        else:
+            # Add a new peak at the clicked position
+            self.manual_peaks.append(clicked_wavenumber)
+            self.manual_peaks.sort()  # Keep peaks sorted
+            self.status_bar.showMessage(f"Added manual peak at {clicked_wavenumber:.1f} cm⁻¹")
+        
+        # Update the plot and peak count
+        self.update_plot()
+        self.update_peak_count_display()
+    
+    def clear_manual_peaks(self):
+        """Clear all manual peaks."""
+        self.manual_peaks.clear()
+        self.update_plot()
+        self.update_peak_count_display()
+        self.status_bar.showMessage("Cleared all manual peaks")
+    
+    def update_peak_count_display(self):
+        """Update the peak count display to show both auto and manual peaks."""
+        auto_count = len(self.detected_peaks) if self.detected_peaks is not None else 0
+        manual_count = len(self.manual_peaks)
+        self.peak_count_label.setText(f"Auto peaks: {auto_count} | Manual peaks: {manual_count}")
 
     def show_about(self):
         """Show about dialog."""
@@ -2189,8 +2308,8 @@ class RamanAnalysisAppQt6(QMainWindow):
                 prominence=prominence_threshold
             )
             
-            # Update peak count
-            self.peak_count_label.setText(f"Peaks found: {len(self.detected_peaks)}")
+            # Update peak count display
+            self.update_peak_count_display()
             
             # Debug: Print detected peak positions to console
             if len(self.detected_peaks) > 0:
@@ -2579,65 +2698,46 @@ class RamanAnalysisAppQt6(QMainWindow):
             QMessageBox.information(self, "Empty Database", "No spectra in database to search.\nAdd some spectra first!")
             return
         
-        # Show progress indication
-        self.search_results_text.setPlainText("Searching database, please wait...")
-        QApplication.processEvents()  # Update UI
-        
         try:
             # Get search parameters
             algorithm = self.algorithm_combo.currentText()
             n_matches = self.n_matches_spin.value()
             threshold = self.threshold_spin.value()
             
-            # Update status
-            algorithm_name = "DTW (Dynamic Time Warping)" if algorithm == "DTW" else algorithm.title()
-            self.status_bar.showMessage(f"Searching {len(self.raman_db.database)} spectra with {algorithm_name} algorithm...")
+            # Show warning for DTW algorithm
+            if algorithm == "DTW":
+                warning_result = QMessageBox.question(
+                    self, 
+                    "DTW Algorithm Warning", 
+                    f"<b>DTW (Dynamic Time Warping) Algorithm Selected</b><br><br>"
+                    f"<b>Performance Notice:</b><br>"
+                    f"• DTW must analyze every spectrum individually (no early termination)<br>"
+                    f"• Database size: <b>{len(self.raman_db.database)} spectra</b><br>"
+                    f"• Estimated time: <b>{len(self.raman_db.database) * 0.1:.1f}-{len(self.raman_db.database) * 0.3:.1f} seconds</b><br><br>"
+                    f"<b>Why DTW is slower than Combined:</b><br>"
+                    f"• Combined algorithm uses correlation pre-screening (skips poor matches)<br>"
+                    f"• DTW alone must run expensive calculations on every spectrum<br><br>"
+                    f"<b>Recommendation:</b> Try 'Combined' algorithm for better speed with similar accuracy.<br><br>"
+                    f"Continue with DTW search?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if warning_result == QMessageBox.No:
+                    self.status_bar.showMessage("DTW search cancelled by user")
+                    return
             
-            # Perform search based on algorithm
-            matches = []
-            for name, data in self.raman_db.database.items():
-                try:
-                    # Get spectrum data
-                    wavenumbers = data.get('wavenumbers', [])
-                    intensities = data.get('intensities', [])
-                    
-                    # Ensure we have data - check length instead of boolean
-                    if len(wavenumbers) == 0 or len(intensities) == 0:
-                        continue
-                    
-                    # Calculate similarity score based on algorithm
-                    if algorithm == "correlation":
-                        score = self.calculate_correlation_score(wavenumbers, intensities)
-                    elif algorithm == "peak":
-                        score = self.calculate_peak_score(wavenumbers, intensities)
-                    elif algorithm == "combined":
-                        score = self.calculate_combined_score(wavenumbers, intensities)
-                    elif algorithm == "DTW":
-                        # DTW algorithm uses Dynamic Time Warping
-                        score = self.calculate_dtw_score(wavenumbers, intensities)
-                    else:
-                        # Fallback to correlation
-                        score = self.calculate_correlation_score(wavenumbers, intensities)
-                    
-                    if score >= threshold:
-                        matches.append({
-                            'name': name,
-                            'score': score,
-                            'metadata': data.get('metadata', {}),
-                            'peaks': data.get('peaks', []),
-                            'timestamp': data.get('timestamp', '')
-                        })
-                        
-                except Exception as e:
-                    print(f"Error processing spectrum {name}: {e}")
-                    continue
+            # Show progress indication
+            self.search_results_text.setPlainText("Searching database, please wait...")
+            QApplication.processEvents()  # Update UI
             
-            # Sort by score and limit results
-            matches.sort(key=lambda x: x['score'], reverse=True)
-            matches = matches[:n_matches]
+            # Use optimized search method with progress tracking
+            candidates = [(name, data) for name, data in self.raman_db.database.items()]
+            matches = self.search_filtered_candidates(candidates, algorithm, n_matches, threshold)
             
             # Display results
-            self.display_search_results(matches, f"Basic Search ({algorithm.title()})")
+            algorithm_name = "DTW (Dynamic Time Warping)" if algorithm == "DTW" else algorithm.title()
+            self.display_search_results(matches, f"Basic Search ({algorithm_name})")
             
             # Update status
             self.status_bar.showMessage(f"Search completed - found {len(matches)} matches")
@@ -2657,124 +2757,134 @@ class RamanAnalysisAppQt6(QMainWindow):
             QMessageBox.information(self, "Empty Database", "No spectra in database to search.\nAdd some spectra first!")
             return
         
-        # Show progress indication
-        self.search_results_text.setPlainText("Applying filters and searching database, please wait...")
-        QApplication.processEvents()  # Update UI
-        
         try:
-            # Get basic search parameters
+            # Get search parameters
             algorithm = self.algorithm_combo.currentText()
             n_matches = self.n_matches_spin.value()
-            threshold = self.adv_threshold_spin.value()
+            threshold = self.threshold_spin.value()
+            
+            # Show warning for DTW algorithm (same as basic search)
+            if algorithm == "DTW":
+                warning_result = QMessageBox.question(
+                    self, 
+                    "DTW Algorithm Warning", 
+                    f"<b>DTW (Dynamic Time Warping) Algorithm Selected</b><br><br>"
+                    f"<b>Performance Notice:</b><br>"
+                    f"• DTW must analyze every spectrum individually (no early termination)<br>"
+                    f"• Database size: <b>{len(self.raman_db.database)} spectra</b><br>"
+                    f"• Estimated time: <b>{len(self.raman_db.database) * 0.1:.1f}-{len(self.raman_db.database) * 0.3:.1f} seconds</b><br><br>"
+                    f"<b>Why DTW is slower than Combined:</b><br>"
+                    f"• Combined algorithm uses correlation pre-screening (skips poor matches)<br>"
+                    f"• DTW alone must run expensive calculations on every spectrum<br><br>"
+                    f"<b>Recommendation:</b> Try 'Combined' algorithm for better speed with similar accuracy.<br><br>"
+                    f"Continue with DTW search?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                
+                if warning_result == QMessageBox.No:
+                    self.status_bar.showMessage("DTW search cancelled by user")
+                    return
+            
+            # Show progress indication
+            self.search_results_text.setPlainText("Applying filters and searching database, please wait...")
+            QApplication.processEvents()  # Update UI
             
             # Parse filter criteria
             filters = self.parse_advanced_filters()
             
-            # Check if this is a peak-only search
-            is_peak_only_search = 'peak_positions' in filters and len(filters['peak_positions']) > 0
+            # Check if peak positions are specified
+            has_peak_filter = 'peak_positions' in filters and len(filters['peak_positions']) > 0
             
-            # Show filter information for peak-based searches
-            if 'peak_positions' in filters:
-                peak_info = f"Peak Filter: Looking for peaks at {filters['peak_positions']} cm⁻¹ (±{filters.get('peak_tolerance', 10)} cm⁻¹)"
+            # Show filter information
+            if has_peak_filter:
+                peak_info = f"Peak positions specified: {filters['peak_positions']} cm⁻¹ (±{filters.get('peak_tolerance', 10)} cm⁻¹)"
                 print(f"Debug: {peak_info}")
-                if is_peak_only_search:
-                    self.status_bar.showMessage(f"Peak-Only Search: {peak_info}")
-                else:
-                    self.status_bar.showMessage(peak_info)
+                self.status_bar.showMessage(peak_info)
                 QApplication.processEvents()
             
-            # Update status
-            if not is_peak_only_search:
+            # Apply metadata filters (excluding peak positions - they're handled by scoring algorithms)
+            metadata_filters = {k: v for k, v in filters.items() if k not in ['peak_positions', 'peak_tolerance']}
+            
+            if metadata_filters:
                 self.status_bar.showMessage("Applying metadata filters...")
                 QApplication.processEvents()
-            
-            # Apply filters to database first
-            filtered_candidates = self.apply_metadata_filters(filters)
-            
-            if not filtered_candidates:
-                # Provide specific feedback for peak filters
-                if 'peak_positions' in filters:
-                    no_results_msg = (
-                        f"No spectra found with peaks at {filters['peak_positions']} cm⁻¹.\n\n"
-                        f"Tolerance: ±{filters.get('peak_tolerance', 10)} cm⁻¹\n\n"
-                        "Tips:\n"
-                        "• Try increasing the tolerance\n"
-                        "• Check that peak positions are reasonable (e.g., 100-4000 cm⁻¹)\n"
-                        "• Ensure database spectra have detected peaks"
-                    )
-                else:
-                    no_results_msg = "No spectra match the specified filters."
+                filtered_candidates = self.apply_metadata_filters(metadata_filters)
                 
-                QMessageBox.information(self, "No Results", no_results_msg)
-                self.search_results_text.setPlainText(no_results_msg)
-                self.status_bar.showMessage("No matches found after filtering")
-                return
+                if not filtered_candidates:
+                    no_results_msg = f"No spectra match the specified metadata filters: {self.create_filter_summary(metadata_filters)}"
+                    QMessageBox.information(self, "No Results", no_results_msg)
+                    self.search_results_text.setPlainText(no_results_msg)
+                    self.status_bar.showMessage("No matches found after filtering")
+                    return
+            else:
+                # No metadata filters - use entire database
+                filtered_candidates = [(name, data) for name, data in self.raman_db.database.items()]
             
             # Update status
-            peak_filter_info = ""
-            if 'peak_positions' in filters:
-                peak_filter_info = f" (peak filter: {len(filtered_candidates)} candidates found)"
+            self.status_bar.showMessage(f"Searching {len(filtered_candidates)} candidates...")
+            QApplication.processEvents()
             
-            if is_peak_only_search:
-                # Peak-only search: return all candidates that passed the peak filter
-                self.status_bar.showMessage(f"Peak-Only Search: Found {len(filtered_candidates)} spectra with matching peaks{peak_filter_info}")
-                QApplication.processEvents()
-                
-                # Convert candidates directly to matches without similarity scoring
-                matches = []
-                for name, data in filtered_candidates:
-                    matches.append({
-                        'name': name,
-                        'score': 1.0,  # Set score to 1.0 for peak-only matches
-                        'metadata': data.get('metadata', {}),
-                        'peaks': data.get('peaks', []),
-                        'timestamp': data.get('timestamp', '')
-                    })
-                
-                # Sort by name for consistent ordering
-                matches.sort(key=lambda x: x['name'])
-                
-                # Limit results to n_matches
-                matches = matches[:n_matches] if n_matches < len(matches) else matches
-                
-            else:
-                # Regular advanced search with similarity scoring
-                self.status_bar.showMessage(f"Searching {len(filtered_candidates)} filtered candidates{peak_filter_info}...")
-                QApplication.processEvents()
-                
-                # Perform search on filtered candidates
-                matches = self.search_filtered_candidates(filtered_candidates, algorithm, n_matches, threshold)
+            # Prepare peak information for algorithms that can use it
+            user_peak_info = None
+            if has_peak_filter:
+                user_peak_info = {
+                    'peak_positions': filters['peak_positions'],
+                    'peak_tolerance': filters.get('peak_tolerance', 10)
+                }
+            
+            # Perform search using the existing method but with peak information
+            matches = self.search_filtered_candidates(
+                filtered_candidates, 
+                algorithm, 
+                n_matches, 
+                threshold, 
+                user_peak_info
+            )
             
             # Display results
-            filter_summary = self.create_filter_summary(filters)
-            if is_peak_only_search:
-                algorithm_name = "Peak-Only Search"
-                additional_info = f"Peak-Only Search Mode: Returned all spectra with matching peaks.\nApplied filters: {filter_summary}\nFiltered database from {len(self.raman_db.database)} to {len(filtered_candidates)} candidates."
-            else:
-                algorithm_name = "DTW (Dynamic Time Warping)" if algorithm == "DTW" else algorithm.title()
-                additional_info = f"Applied filters: {filter_summary}\nFiltered database from {len(self.raman_db.database)} to {len(filtered_candidates)} candidates."
+            algorithm_name = "DTW (Dynamic Time Warping)" if algorithm == "DTW" else algorithm.title()
             
-            if 'peak_positions' in filters:
-                additional_info += f"\n\nPeak Filter Details:\n• Required peaks: {filters['peak_positions']} cm⁻¹\n• Tolerance: ±{filters.get('peak_tolerance', 10)} cm⁻¹"
-                if is_peak_only_search:
-                    additional_info += f"\n• Peak-Only Mode: Similarity scoring bypassed"
+            additional_info = f"Search Details:\n"
+            additional_info += f"• Algorithm: {algorithm_name}\n"
+            additional_info += f"• Threshold: {threshold:.2f}\n"
+            additional_info += f"• Database size: {len(self.raman_db.database)} spectra\n"
+            
+            if metadata_filters:
+                additional_info += f"• Metadata filters: {self.create_filter_summary(metadata_filters)}\n"
+                additional_info += f"• After filtering: {len(filtered_candidates)} candidates\n"
+            else:
+                additional_info += f"• No metadata filters applied\n"
+            
+            if has_peak_filter:
+                additional_info += f"\nPeak Information:\n"
+                additional_info += f"• Target peaks: {filters['peak_positions']} cm⁻¹\n"
+                additional_info += f"• Peak tolerance: ±{filters.get('peak_tolerance', 10)} cm⁻¹\n"
+                
+                if algorithm == "peak":
+                    additional_info += f"• Peak Algorithm: Enhanced with your specified peak positions\n"
+                elif algorithm == "combined":
+                    additional_info += f"• Combined Algorithm: Uses your peak positions for enhanced scoring\n"
+                else:
+                    additional_info += f"• {algorithm} Algorithm: Peak positions noted but algorithm uses spectral shape\n"
+            
+            search_type_name = f"Advanced Search ({algorithm_name})"
             
             self.display_search_results(
                 matches, 
-                f"Advanced Search ({algorithm_name})",
+                search_type_name,
                 additional_info=additional_info
             )
             
             # Update status
-            if is_peak_only_search:
-                self.status_bar.showMessage(f"Peak-Only search completed - found {len(matches)} spectra with matching peaks")
-            else:
-                self.status_bar.showMessage(f"Advanced search completed - found {len(matches)} matches")
+            self.status_bar.showMessage(f"Advanced search completed - found {len(matches)} matches")
             
         except Exception as e:
             QMessageBox.critical(self, "Advanced Search Error", f"Advanced search failed:\n{str(e)}")
             self.status_bar.showMessage("Advanced search failed")
             self.search_results_text.setPlainText("Advanced search failed. Please check your filters and try again.")
+
+
 
     def parse_advanced_filters(self):
         """Parse the advanced search filter criteria."""
@@ -2823,67 +2933,12 @@ class RamanAnalysisAppQt6(QMainWindow):
         return candidates
 
     def spectrum_passes_filters(self, name, data, filters):
-        """Check if a spectrum passes all the specified filters."""
+        """Check if a spectrum passes all the specified filters.""" 
         metadata = data.get('metadata', {})
         
-        # Peak position filter - match original app behavior exactly
-        if 'peak_positions' in filters:
-            spectrum_peaks_data = data.get('peaks', [])
-            required_peaks = filters['peak_positions']
-            tolerance = filters.get('peak_tolerance', 10)
-            
-            # Original app format: {"peaks": {"wavenumbers": numpy_array}}
-            if isinstance(spectrum_peaks_data, dict) and spectrum_peaks_data.get("wavenumbers") is not None:
-                # This matches the original app format
-                db_peaks = spectrum_peaks_data["wavenumbers"]
-                
-                # Check if it's a numpy array with data
-                if hasattr(db_peaks, 'size') and db_peaks.size > 0:
-                    valid_spectrum_peaks = db_peaks.tolist() if hasattr(db_peaks, 'tolist') else list(db_peaks)
-                else:
-                    return False
-                    
-            elif isinstance(spectrum_peaks_data, (list, tuple)) and len(spectrum_peaks_data) > 0:
-                # Fallback: handle other formats
-                spectrum_wavenumbers = data.get('wavenumbers', [])
-                
-                # If we have wavenumbers and peak values look like indices (small integers)
-                if (len(spectrum_wavenumbers) > 0 and 
-                    all(isinstance(p, (int, float)) and 0 <= p < len(spectrum_wavenumbers) for p in spectrum_peaks_data if p is not None)):
-                    # Legacy format: indices that need to be converted to wavenumbers
-                    try:
-                        spectrum_wavenumbers = np.array(spectrum_wavenumbers)
-                        valid_spectrum_peaks = []
-                        for peak_idx in spectrum_peaks_data:
-                            if peak_idx is not None and 0 <= int(peak_idx) < len(spectrum_wavenumbers):
-                                peak_wavenumber = float(spectrum_wavenumbers[int(peak_idx)])
-                                valid_spectrum_peaks.append(peak_wavenumber)
-                    except (ValueError, TypeError, IndexError):
-                        return False
-                else:
-                    # Direct wavenumber values
-                    valid_spectrum_peaks = []
-                    for peak in spectrum_peaks_data:
-                        try:
-                            peak_value = float(peak)
-                            # Sanity check: wavenumber values should be reasonable (> 50 cm⁻¹)
-                            if peak_value > 50:
-                                valid_spectrum_peaks.append(peak_value)
-                        except (ValueError, TypeError):
-                            continue
-            else:
-                # No valid peak data found
-                return False
-            
-            # Check if all required peaks are found within tolerance
-            for required_peak in required_peaks:
-                found = False
-                for peak in valid_spectrum_peaks:
-                    if abs(peak - required_peak) <= tolerance:
-                        found = True
-                        break
-                if not found:
-                    return False
+        # Note: Peak positions are NOT filtered here - they are handled by scoring algorithms
+        # This allows spectra to be scored based on how well they match peak positions
+        # rather than being eliminated entirely
         
         # Chemical family filter
         if 'chemical_family' in filters:
@@ -2942,9 +2997,29 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         return True
 
-    def search_filtered_candidates(self, candidates, algorithm, n_matches, threshold):
-        """Perform search algorithm on filtered candidate set."""
+    def search_filtered_candidates(self, candidates, algorithm, n_matches, threshold, user_peak_filters=None):
+        """Perform optimized search algorithm on filtered candidate set with progress reporting."""
         matches = []
+        
+        # Extract user-specified peaks if available
+        user_specified_peaks = None
+        peak_tolerance = 10
+        if user_peak_filters:
+            user_specified_peaks = user_peak_filters.get('peak_positions')
+            peak_tolerance = user_peak_filters.get('peak_tolerance', 10)
+        
+        # OPTIMIZATION: Track progress for slow algorithms
+        is_slow_algorithm = algorithm in ["DTW", "combined"]
+        total_candidates = len(candidates)
+        processed = 0
+        
+        # OPTIMIZATION: Pre-calculate query spectrum normalization for DTW/combined to avoid repetition
+        if is_slow_algorithm:
+            # Cache normalized query spectrum for DTW calculations
+            if hasattr(self, 'processed_intensities') and self.processed_intensities is not None:
+                self._cached_query_norm = (self.processed_intensities - self.processed_intensities.min()) / (self.processed_intensities.max() - self.processed_intensities.min())
+            else:
+                self._cached_query_norm = None
         
         for name, data in candidates:
             try:
@@ -2956,21 +3031,17 @@ class RamanAnalysisAppQt6(QMainWindow):
                     continue
                 
                 # Calculate similarity score based on algorithm
-                if algorithm == "correlation" and len(wavenumbers) > 0 and len(intensities) > 0:
+                if algorithm == "correlation":
                     score = self.calculate_correlation_score(wavenumbers, intensities)
-                elif algorithm == "peak" and len(wavenumbers) > 0 and len(intensities) > 0:
-                    score = self.calculate_peak_score(wavenumbers, intensities)
-                elif algorithm == "combined" and len(wavenumbers) > 0 and len(intensities) > 0:
-                    score = self.calculate_combined_score(wavenumbers, intensities)
-                elif algorithm == "DTW" and len(wavenumbers) > 0 and len(intensities) > 0:
-                    # DTW algorithm uses Dynamic Time Warping
+                elif algorithm == "peak":
+                    score = self.calculate_peak_score(wavenumbers, intensities, user_specified_peaks, peak_tolerance)
+                elif algorithm == "combined":
+                    score = self.calculate_combined_score(wavenumbers, intensities, user_specified_peaks, peak_tolerance)
+                elif algorithm == "DTW":
                     score = self.calculate_dtw_score(wavenumbers, intensities)
                 else:
                     # Fallback to correlation
-                    if len(wavenumbers) > 0 and len(intensities) > 0:
-                        score = self.calculate_correlation_score(wavenumbers, intensities)
-                    else:
-                        score = 0.0
+                    score = self.calculate_correlation_score(wavenumbers, intensities)
                 
                 if score >= threshold:
                     matches.append({
@@ -2980,9 +3051,24 @@ class RamanAnalysisAppQt6(QMainWindow):
                         'peaks': data.get('peaks', []),
                         'timestamp': data.get('timestamp', '')
                     })
+                
+                processed += 1
+                
+                # OPTIMIZATION: Early termination for slow algorithms
+                # If we have enough good matches, we can stop early for expensive algorithms
+                if (is_slow_algorithm and len(matches) >= n_matches * 3 and 
+                    processed > total_candidates * 0.3):  # Processed at least 30%
+                    print(f"Early termination: Found {len(matches)} matches after processing {processed}/{total_candidates} spectra")
+                    break
+                
+                # OPTIMIZATION: Progress updates for slow algorithms
+                if is_slow_algorithm and processed % max(1, total_candidates // 10) == 0:
+                    progress_pct = int((processed / total_candidates) * 100)
+                    self.status_bar.showMessage(f"Searching... {progress_pct}% complete ({len(matches)} matches found)")
+                    QApplication.processEvents()  # Keep UI responsive
                     
             except Exception as e:
-                # Log error but continue processing other candidates
+                print(f"Error processing spectrum {name}: {e}")
                 continue
         
         # Sort by score
@@ -3035,7 +3121,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             return 0.0
 
     def calculate_dtw_score(self, db_wavenumbers, db_intensities):
-        """Calculate DTW (Dynamic Time Warping) similarity score between current spectrum and database spectrum."""
+        """Calculate optimized DTW similarity score between current spectrum and database spectrum."""
         try:
             # Import fastdtw
             from fastdtw import fastdtw
@@ -3052,7 +3138,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             overlap_start = max(self.current_wavenumbers.min(), db_wavenumbers.min())
             overlap_end = min(self.current_wavenumbers.max(), db_wavenumbers.max())
             
-            # Check for sufficient overlap (at least 50% of either spectrum)
+            # Check for sufficient overlap (at least 30% of either spectrum)
             query_range = self.current_wavenumbers.max() - self.current_wavenumbers.min()
             db_range = db_wavenumbers.max() - db_wavenumbers.min()
             overlap_range = overlap_end - overlap_start
@@ -3060,9 +3146,9 @@ class RamanAnalysisAppQt6(QMainWindow):
             if overlap_range < 0.3 * min(query_range, db_range):
                 return 0.0  # Insufficient overlap
             
-            # Create common wavenumber grid with reasonable density
-            # Use fewer points for DTW to reduce computation time
-            n_points = min(200, len(self.current_wavenumbers), len(db_wavenumbers))
+            # OPTIMIZATION 1: Use much fewer points for DTW (50-100 instead of 200)
+            # DTW is O(n*m) complexity, so reducing points gives huge speedup
+            n_points = min(75, len(self.current_wavenumbers), len(db_wavenumbers))
             common_wavenumbers = np.linspace(overlap_start, overlap_end, n_points)
             
             # Interpolate both spectra to common grid
@@ -3073,42 +3159,20 @@ class RamanAnalysisAppQt6(QMainWindow):
             if np.std(query_interp) == 0 or np.std(db_interp) == 0:
                 return 0.0
             
-            # Normalize both spectra to [0, 1] range
-            query_min, query_max = np.min(query_interp), np.max(query_interp)
-            db_min, db_max = np.min(db_interp), np.max(db_interp)
+            # OPTIMIZATION 2: Simple min-max normalization (faster than detailed checks)
+            query_norm = (query_interp - query_interp.min()) / (query_interp.max() - query_interp.min())
+            db_norm = (db_interp - db_interp.min()) / (db_interp.max() - db_interp.min())
             
-            if query_max > query_min:
-                query_norm = (query_interp - query_min) / (query_max - query_min)
-            else:
-                query_norm = query_interp
-                
-            if db_max > db_min:
-                db_norm = (db_interp - db_min) / (db_max - db_min)
-            else:
-                db_norm = db_interp
+            # OPTIMIZATION 3: Use fastdtw with radius constraint for even more speed
+            # Radius limits the search space significantly
+            distance, path = fastdtw(query_norm, db_norm, radius=min(10, n_points//5))
             
-            # Convert to lists for fastdtw (it expects sequences, not numpy arrays)
-            query_list = query_norm.tolist()
-            db_list = db_norm.tolist()
-            
-            # Define scalar distance function for spectral intensities
-            def spectral_distance(a, b):
-                return abs(float(a) - float(b))
-            
-            # Apply DTW with scalar distance
-            distance, path = fastdtw(query_list, db_list, dist=spectral_distance)
-            
-            # Convert distance to similarity score
-            # Normalize distance by path length to account for different spectrum lengths
+            # Convert distance to similarity score (simplified calculation)
             if len(path) > 0:
                 normalized_distance = distance / len(path)
-                
-                # Convert to similarity using exponential decay
-                # Scale the distance to get reasonable similarity values
-                scaled_distance = normalized_distance * 2.0  # Adjust scaling factor
-                similarity = np.exp(-scaled_distance)
-                
-                return max(0, min(1, similarity))  # Ensure [0, 1] range
+                # Simplified similarity calculation
+                similarity = 1.0 / (1.0 + normalized_distance * 3.0)
+                return max(0, min(1, similarity))
             else:
                 return 0.0
             
@@ -3119,17 +3183,17 @@ class RamanAnalysisAppQt6(QMainWindow):
             print(f"Error in DTW score calculation: {e}")
             return 0.0
 
-    def calculate_peak_score(self, db_wavenumbers, db_intensities):
-        """Calculate peak-based similarity score between current spectrum and database spectrum."""
+    def calculate_peak_score(self, db_wavenumbers, db_intensities, user_specified_peaks=None, peak_tolerance=10):
+        """Calculate peak-based similarity score between current spectrum and database spectrum.
+        
+        Args:
+            db_wavenumbers: Database spectrum wavenumbers
+            db_intensities: Database spectrum intensities  
+            user_specified_peaks: List of peak positions specified by user (optional)
+            peak_tolerance: Tolerance for peak matching in cm⁻¹
+        """
         try:
-            # Get peaks from current spectrum
-            if self.detected_peaks is None or len(self.detected_peaks) == 0:
-                return 0.0
-            
-            current_peak_positions = self.current_wavenumbers[self.detected_peaks]
-            current_peak_intensities = self.processed_intensities[self.detected_peaks]
-            
-            # Find peaks in database spectrum with explicit float conversion
+            # Convert to numpy arrays with explicit float conversion
             db_wavenumbers = np.array(db_wavenumbers, dtype=float)
             db_intensities = np.array(db_intensities, dtype=float)
             
@@ -3137,6 +3201,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             if len(db_wavenumbers) == 0 or len(db_intensities) == 0:
                 return 0.0
             
+            # Find peaks in database spectrum
             db_peaks, _ = find_peaks(db_intensities, height=np.max(db_intensities) * 0.1)
             
             if len(db_peaks) == 0:
@@ -3145,50 +3210,120 @@ class RamanAnalysisAppQt6(QMainWindow):
             db_peak_positions = db_wavenumbers[db_peaks]
             db_peak_intensities = db_intensities[db_peaks]
             
+            # Determine which peaks to use for comparison
+            if user_specified_peaks and len(user_specified_peaks) > 0:
+                # Use user-specified peaks as the reference
+                query_peak_positions = np.array(user_specified_peaks)
+                # For intensity comparison, interpolate the current spectrum at specified positions
+                if self.current_wavenumbers is not None and self.processed_intensities is not None:
+                    query_peak_intensities = np.interp(query_peak_positions, self.current_wavenumbers, self.processed_intensities)
+                else:
+                    # If no current spectrum, use equal weights
+                    query_peak_intensities = np.ones_like(query_peak_positions)
+                
+                score_type = "user_specified"
+            else:
+                # Use detected peaks from current spectrum (original behavior)
+                if self.detected_peaks is None or len(self.detected_peaks) == 0:
+                    return 0.0
+                
+                query_peak_positions = self.current_wavenumbers[self.detected_peaks]
+                query_peak_intensities = self.processed_intensities[self.detected_peaks]
+                score_type = "detected_peaks"
+            
             # Calculate peak matching score
-            tolerance = 20  # cm⁻¹ tolerance for peak matching
             matched_peaks = 0
             total_intensity_diff = 0
+            peak_matches = []  # Track which peaks matched for debugging
             
-            for curr_pos, curr_int in zip(current_peak_positions, current_peak_intensities):
+            for i, (query_pos, query_int) in enumerate(zip(query_peak_positions, query_peak_intensities)):
                 # Find closest peak in database spectrum
-                distances = np.abs(db_peak_positions - curr_pos)
+                distances = np.abs(db_peak_positions - query_pos)
                 min_dist_idx = np.argmin(distances)
                 min_distance = distances[min_dist_idx]
                 
-                if min_distance <= tolerance:
+                if min_distance <= peak_tolerance:
                     matched_peaks += 1
+                    peak_matches.append({
+                        'query_pos': query_pos,
+                        'db_pos': db_peak_positions[min_dist_idx],
+                        'distance': min_distance
+                    })
+                    
                     # Calculate intensity similarity (normalized)
                     db_int = db_peak_intensities[min_dist_idx]
-                    curr_norm = curr_int / np.max(current_peak_intensities)
-                    db_norm = db_int / np.max(db_peak_intensities)
-                    intensity_diff = abs(curr_norm - db_norm)
+                    
+                    if score_type == "user_specified":
+                        # For user-specified peaks, give less weight to intensity differences
+                        # since the user cares primarily about peak positions
+                        query_norm = query_int / np.max(query_peak_intensities) if np.max(query_peak_intensities) > 0 else 1
+                        db_norm = db_int / np.max(db_peak_intensities) if np.max(db_peak_intensities) > 0 else 1
+                        intensity_diff = abs(query_norm - db_norm) * 0.3  # Reduced weight for intensity
+                    else:
+                        # For detected peaks, use full intensity comparison
+                        query_norm = query_int / np.max(query_peak_intensities)
+                        db_norm = db_int / np.max(db_peak_intensities)
+                        intensity_diff = abs(query_norm - db_norm)
+                    
                     total_intensity_diff += intensity_diff
             
             if matched_peaks == 0:
                 return 0.0
             
             # Calculate score based on percentage of matched peaks and intensity similarity
-            peak_match_ratio = matched_peaks / len(current_peak_positions)
+            peak_match_ratio = matched_peaks / len(query_peak_positions)
             avg_intensity_similarity = 1 - (total_intensity_diff / matched_peaks)
             
-            # Combined score (weighted average)
-            score = 0.7 * peak_match_ratio + 0.3 * avg_intensity_similarity
+            # Adjust scoring weights based on whether we're using user-specified peaks
+            if score_type == "user_specified":
+                # For user-specified peaks, emphasize peak position matching over intensity
+                score = 0.8 * peak_match_ratio + 0.2 * avg_intensity_similarity
+                
+                # Bonus for high match ratio when using user-specified peaks
+                if peak_match_ratio >= 0.8:
+                    score = min(1.0, score * 1.1)  # 10% bonus for high match ratio
+                    
+            else:
+                # Original scoring for detected peaks
+                score = 0.7 * peak_match_ratio + 0.3 * avg_intensity_similarity
+            
             return max(0, min(1, score))
             
-        except Exception:
+        except Exception as e:
+            print(f"Error in peak score calculation: {e}")
             return 0.0
 
-    def calculate_combined_score(self, db_wavenumbers, db_intensities):
-        """Calculate combined similarity score using both correlation and DTW."""
+    def calculate_combined_score(self, db_wavenumbers, db_intensities, user_specified_peaks=None, peak_tolerance=10):
+        """Calculate optimized combined similarity score using correlation, DTW, and optionally peak matching."""
         try:
-            # Get individual scores
+            # OPTIMIZATION 1: Start with fast correlation score
             correlation_score = self.calculate_correlation_score(db_wavenumbers, db_intensities)
-            dtw_score = self.calculate_dtw_score(db_wavenumbers, db_intensities)
             
-            # Combined score (weighted average)
-            # Give more weight to DTW as it's more sophisticated for spectral matching
-            combined_score = 0.3 * correlation_score + 0.7 * dtw_score
+            # OPTIMIZATION 2: Early termination for obviously poor matches
+            # If correlation is very low, don't waste time on expensive DTW
+            if correlation_score < 0.2:  # Very poor correlation
+                return correlation_score * 0.5  # Return reduced score without DTW
+            
+            # OPTIMIZATION 3: For moderate correlations, run DTW but weight less
+            if correlation_score < 0.5:  # Moderate correlation
+                dtw_score = self.calculate_dtw_score(db_wavenumbers, db_intensities)
+                # Weight correlation more heavily for moderate matches to save time
+                if user_specified_peaks and len(user_specified_peaks) > 0:
+                    peak_score = self.calculate_peak_score(db_wavenumbers, db_intensities, user_specified_peaks, peak_tolerance)
+                    combined_score = 0.4 * correlation_score + 0.3 * dtw_score + 0.3 * peak_score
+                else:
+                    combined_score = 0.6 * correlation_score + 0.4 * dtw_score
+            else:
+                # OPTIMIZATION 4: For good correlations, run full analysis
+                dtw_score = self.calculate_dtw_score(db_wavenumbers, db_intensities)
+                
+                if user_specified_peaks and len(user_specified_peaks) > 0:
+                    peak_score = self.calculate_peak_score(db_wavenumbers, db_intensities, user_specified_peaks, peak_tolerance)
+                    # Standard three-way weighted average with emphasis on user-specified peaks
+                    combined_score = 0.2 * correlation_score + 0.3 * dtw_score + 0.5 * peak_score
+                else:
+                    # Standard two-way combination
+                    combined_score = 0.3 * correlation_score + 0.7 * dtw_score
             
             return max(0, min(1, combined_score))
             
@@ -3307,14 +3442,10 @@ class RamanAnalysisAppQt6(QMainWindow):
             self.hey_classification_combo.addItem("")  # Empty option
             self.hey_classification_combo.addItems(sorted(hey_classifications))
 
-    def update_advanced_algorithm_display(self):
-        """Update the algorithm display in the advanced search tab."""
-        if hasattr(self, 'current_algorithm_label'):
-            current_algo = self.algorithm_combo.currentText()
-            self.current_algorithm_label.setText(f"Current: {current_algo}")
+
 
     def analyze_mixed_minerals(self):
-        """Launch the mixed mineral analysis window."""
+        """Launch the advanced mixed mineral analysis window."""
         if self.current_wavenumbers is None or self.current_intensities is None:
             QMessageBox.warning(
                 self, 
@@ -3324,59 +3455,53 @@ class RamanAnalysisAppQt6(QMainWindow):
             return
         
         try:
-            # Try to import and launch the Qt6 version of mixed mineral analysis
-            from mixed_mineral_enhancement import EnhancedMixedMineralAnalysis
-            
-            # Create a wrapper object that mimics the expected interface
-            class Qt6AppWrapper:
-                def __init__(self, qt6_app):
-                    self.qt6_app = qt6_app
-                    self.root = None  # Will be set by mixed mineral analysis
-                    
-                    # Create a wrapper for the raman database to match expected interface
-                    class RamanWrapper:
-                        def __init__(self, raman_db, qt6_app):
-                            self.database = raman_db.database
-                            self.current_wavenumbers = qt6_app.current_wavenumbers
-                            self.current_spectra = qt6_app.current_intensities
-                            self.processed_spectra = qt6_app.processed_intensities
-                    
-                    # Set the raman attribute directly (not as a property)
-                    self.raman = RamanWrapper(self.qt6_app.raman_db, self.qt6_app)
-            
-            # Create wrapper and launch analysis
-            wrapper = Qt6AppWrapper(self)
-            analysis = EnhancedMixedMineralAnalysis(wrapper)
+            # Import and launch the new Qt6 mixed mineral analysis
+            from mixed_mineral_qt6_interface import launch_mixed_mineral_analysis
             
             # Show info dialog first
             QMessageBox.information(
                 self,
-                "Mixed Mineral Analysis",
-                "Launching Enhanced Mixed Mineral Analysis...\n\n"
-                "This will open a new window for interactive mineral component analysis.\n"
-                "For best results, it's recommended to:\n\n"
-                "1. Load and process your spectrum\n"
-                "2. Perform background subtraction\n"
-                "3. Apply any necessary smoothing\n"
-                "4. Then run Mixed Mineral Analysis"
+                "Advanced Mixed Mineral Analysis",
+                "Launching Advanced Mixed Mineral Analysis...\n\n"
+                "This sophisticated analysis tool will:\n\n"
+                "1. Detect the major phase using peak intensity analysis\n"
+                "2. Fit the major phase with physicochemical constraints\n"
+                "3. Analyze residual with weighted overlap correction\n"
+                "4. Detect minor phases in the corrected residual\n"
+                "5. Perform global optimization of all phases\n"
+                "6. Provide quantitative phase analysis with uncertainties\n\n"
+                "This approach minimizes artifacts from overlapping peaks!"
             )
             
-            # Launch the analysis
-            analysis.launch_analysis()
+            # Use processed intensities if available, otherwise use current intensities
+            intensities_to_use = (self.processed_intensities 
+                                if self.processed_intensities is not None 
+                                else self.current_intensities)
             
-        except ImportError:
+            # Launch the analysis
+            launch_mixed_mineral_analysis(
+                self,
+                self.current_wavenumbers,
+                intensities_to_use
+            )
+            
+        except ImportError as e:
             QMessageBox.warning(
                 self,
                 "Mixed Mineral Analysis",
-                "Mixed mineral analysis module not available.\n\n"
-                "This feature requires the enhanced mixed mineral analysis module."
+                f"Advanced mixed mineral analysis module not available.\n\n"
+                f"Error: {str(e)}\n\n"
+                "Please ensure all required dependencies are installed:\n"
+                "- scipy\n"
+                "- scikit-learn (optional, for advanced features)\n"
+                "- matplotlib"
             )
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Error",
                 f"Error launching mixed mineral analysis:\n{str(e)}\n\n"
-                "Please ensure all required dependencies are installed."
+                "Please check the console for detailed error information."
             )
 
     def create_advanced_tab(self):
