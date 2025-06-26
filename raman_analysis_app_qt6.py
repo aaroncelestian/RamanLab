@@ -5,7 +5,10 @@ RamanLab PySide6 Version - Main Application Window
 
 import os
 import sys
+import time
+import warnings
 from pathlib import Path
+import webbrowser  # Add this import for opening URLs
 import numpy as np
 
 # Fix matplotlib backend for PySide6
@@ -1044,33 +1047,6 @@ class RamanAnalysisAppQt6(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # Database menu
-        database_menu = menubar.addMenu("Database")
-        
-        view_db_action = QAction("View Database", self)
-        view_db_action.triggered.connect(self.view_database)
-        database_menu.addAction(view_db_action)
-        
-        database_menu.addSeparator()
-        
-        migrate_action = QAction("Migrate Legacy Database", self)
-        migrate_action.triggered.connect(self.migrate_legacy_database)
-        database_menu.addAction(migrate_action)
-        
-        browse_pkl_action = QAction("Browse for PKL File", self)
-        browse_pkl_action.triggered.connect(self.browse_pkl_file)
-        database_menu.addAction(browse_pkl_action)
-        
-        database_menu.addSeparator()
-        
-        export_db_action = QAction("Export Database", self)
-        export_db_action.triggered.connect(self.export_database_file)
-        database_menu.addAction(export_db_action)
-        
-        import_db_action = QAction("Import Database", self)
-        import_db_action.triggered.connect(self.import_database_file)
-        database_menu.addAction(import_db_action)
-        
         # Help menu
         help_menu = menubar.addMenu("Help")
         
@@ -1078,6 +1054,28 @@ class RamanAnalysisAppQt6(QMainWindow):
         check_updates_action = QAction("Check for Updates", self)
         check_updates_action.triggered.connect(self.check_for_updates)
         help_menu.addAction(check_updates_action)
+        help_menu.addSeparator()
+        
+        # Add User Forum link
+        user_forum_action = QAction("User Forum", self)
+        user_forum_action.triggered.connect(self.open_user_forum)
+        help_menu.addAction(user_forum_action)
+        
+        # Add Database Downloads link
+        database_downloads_action = QAction("Database Downloads", self)
+        database_downloads_action.triggered.connect(self.open_database_downloads)
+        help_menu.addAction(database_downloads_action)
+        
+        # Add README link
+        readme_action = QAction("README", self) 
+        readme_action.triggered.connect(self.open_readme)
+        help_menu.addAction(readme_action)
+        
+        # Add Database Manager link
+        database_manager_action = QAction("Database Manager", self)
+        database_manager_action.triggered.connect(self.launch_database_manager)
+        help_menu.addAction(database_manager_action)
+        
         help_menu.addSeparator()
         
         # About option is always available
@@ -4793,6 +4791,35 @@ This data is now ready for:
             import traceback
             traceback.print_exc()
             return None
+
+    def open_user_forum(self):
+        """Open the user forum URL in the default web browser."""
+        webbrowser.open("https://ramanlab.freeforums.net")
+
+    def open_database_downloads(self):
+        """Open the database downloads URL in the default web browser."""
+        webbrowser.open("https://doi.org/10.5281/zenodo.15717960")
+
+    def open_readme(self):
+        """Open the README file in the default web browser."""
+        webbrowser.open("https://github.com/aaroncelestian/RamanLab/blob/main/README.md")
+
+    def launch_database_manager(self):
+        """Launch the database manager GUI."""
+        try:
+            from database_manager_gui import main as database_manager_main
+            # Launch the database manager in a separate process to avoid conflicts
+            import subprocess
+            import sys
+            subprocess.Popen([sys.executable, "database_manager_gui.py"])
+            self.status_bar.showMessage("Database Manager launched successfully")
+        except ImportError as e:
+            QMessageBox.warning(self, "Import Error", 
+                              f"Could not import database manager:\n{str(e)}\n\n"
+                              f"Make sure database_manager_gui.py is available.")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", 
+                               f"Failed to launch database manager:\n{str(e)}")
 
 
 class SearchResultsWindow(QDialog):

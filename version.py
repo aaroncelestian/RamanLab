@@ -3,19 +3,36 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.0.2"
-__version_info__ = (1, 0, 2)
-__author__ = "Aaron J. Celestian, Ph.D."
+__version__ = "1.0.3"
+__version_info__ = (1, 0, 3)
+__author__ = "Aaron J. Celestian Ph.D."
 __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
 __release_date__ = "2025-01-26"
-__release_name__ = "DTW Performance Enhancement"
+__release_name__ = "Database Manager & Debug Improvements"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.0.3": {
+        "date": "2025-01-26",
+        "name": "Database Manager & Debug Improvements",
+        "description": "Added database manager functionality and various debugging improvements",
+        "major_features": [
+            "Integrated database manager for better data management",
+            "Removed database pulldown menu for cleaner interface",
+            "Various debugging improvements and fixes"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Removed Database menu from menu bar for cleaner UI",
+            "Database functionality still accessible through Database tab",
+            "Enhanced debugging and error handling throughout application",
+            "Improved code organization and maintenance"
+        ]
+    },
     "1.0.2": {
         "date": "2025-01-26",
         "name": "DTW Performance Enhancement",

@@ -12,8 +12,8 @@ Modules:
 - strain_visualization: Plotting and visualization tools
 """
 
-__version__ = "1.0.2"
-__author__ = "RamanLab"
+__version__ = "1.0.3"
+__author__ = "Aaron J. Celestian Ph.D."
 
 from .limn2o4_analyzer import LiMn2O4StrainAnalyzer
 from .time_series_processor import TimeSeriesProcessor

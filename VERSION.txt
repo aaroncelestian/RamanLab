@@ -1,9 +1,22 @@
-RamanLab Version 1.0.2 - "DTW Performance Enhancement"
+RamanLab Version 1.0.3 - "Database Manager & Debug Improvements"
 Release Date: January 26, 2025
 
-🔄 **Version 1.0.2 Update**
+🔄 **Version 1.0.3 Update**
 
-This update focuses on enhancing the DTW (Dynamic Time Warping) algorithm 
+This update introduces database manager functionality and various debugging
+improvements to enhance the overall user experience and application stability.
+
+🚀 **Key Improvements:**
+• Integrated database manager for better data management
+• Removed database pulldown menu for cleaner interface
+• Database functionality still accessible through Database tab
+• Enhanced debugging and error handling throughout application
+• Improved code organization and maintenance
+• Various bug fixes and stability improvements
+
+🔄 **Previous Release - Version 1.0.2 "DTW Performance Enhancement"**
+
+This update focused on enhancing the DTW (Dynamic Time Warping) algorithm 
 performance and overall search user experience with better progress tracking
 and informed decision making.
 

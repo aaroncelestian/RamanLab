@@ -132,8 +132,8 @@ __all__ = [
 ]
 
 # Version information
-__version__ = "1.0.2"
-__author__ = "RamanLab Development Team"
+__version__ = "1.0.3"
+__author__ = "Aaron J. Celestian Ph.D."
 
 # Module registry for dynamic loading
 AVAILABLE_MODULES = {

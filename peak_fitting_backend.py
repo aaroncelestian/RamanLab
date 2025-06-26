@@ -42,7 +42,7 @@ except ImportError:
 app = FastAPI(
     title="RamanLab Peak Fitting API",
     description="Advanced peak fitting and spectral analysis APIs for Raman spectroscopy",
-    version="1.0.2"
+    version="1.0.3"
 )
 
 # Enable CORS for web frontend
@@ -255,7 +255,7 @@ async def root():
     """Root endpoint with API information."""
     return {
         "message": "RamanLab Peak Fitting API",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "documentation": "/docs",
         "ramanlab_core_available": RAMANLAB_AVAILABLE
     }
