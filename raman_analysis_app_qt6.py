@@ -1111,6 +1111,25 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.ax.set_xlim(0, 1)
         self.ax.set_ylim(0, 1)
         self.canvas.draw()
+        
+        # Optional: Check for updates on startup (delayed, non-intrusive)
+        # This will only run if dependencies are available
+        QTimer.singleShot(3000, self.check_for_updates_startup)  # 3 second delay
+
+    def check_for_updates_startup(self):
+        """Check for updates on startup (non-intrusive, silent if no updates)."""
+        try:
+            # Use the simple update checker that doesn't use background threads
+            from core.simple_update_checker import simple_check_for_updates
+            # Only show dialog if update is available, suppress "no update" message
+            simple_check_for_updates(parent=self, show_no_update=False)
+        except ImportError:
+            # Dependencies not available - silently skip startup check
+            # User can still manually check via Help menu
+            pass
+        except Exception as e:
+            # Any other error - silently skip, don't bother user on startup
+            pass
 
     # Cross-platform file operations (replacing your platform-specific code!)
     def import_spectrum(self):
