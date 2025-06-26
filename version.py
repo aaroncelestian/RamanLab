@@ -3,19 +3,45 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.0.3"
-__version_info__ = (1, 0, 3)
+__version__ = "1.0.4"
+__version_info__ = (1, 0, 4)
 __author__ = "Aaron J. Celestian Ph.D."
 __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
-__release_date__ = "2025-01-26"
-__release_name__ = "Database Manager & Debug Improvements"
+__release_date__ = "2025-01-27"
+__release_name__ = "Windows Database Connection Fix"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.0.4": {
+        "date": "2025-01-27",
+        "name": "Windows Database Connection Fix",
+        "description": "Fixed critical Windows database connection issue preventing Search/Match functionality",
+        "major_features": [
+            "Fixed Windows database path mismatch causing 'Empty Database' errors",
+            "Enhanced database path detection with intelligent fallback logic",
+            "Improved cross-platform database compatibility",
+            "Added comprehensive database loading debug information"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "RamanSpectraQt6 now checks both Documents/RamanLab_Qt6/ and script directory for databases",
+            "Priority order: Documents folder (primary) → Script directory (fallback) → Create new",
+            "Enhanced load_database() method with detailed console debugging output",
+            "Maintains backward compatibility with existing installations",
+            "All dependent modules (Multi-Spectrum Manager, Cluster Analysis) benefit automatically",
+            "Polarization Analyzer already used correct script directory path"
+        ],
+        "bug_fixes": [
+            "Windows users can now access Search/Match functionality without 'Empty Database' errors",
+            "Database Manager and Search functionality now use consistent database sources",
+            "Resolved path separator issues on Windows systems",
+            "Fixed Qt6 QStandardPaths inconsistencies across platforms"
+        ]
+    },
     "1.0.3": {
         "date": "2025-01-26",
         "name": "Database Manager & Debug Improvements",

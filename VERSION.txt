@@ -1,9 +1,36 @@
-RamanLab Version 1.0.3 - "Database Manager & Debug Improvements"
-Release Date: January 26, 2025
+RamanLab Version 1.0.4 - "Windows Database Connection Fix"
+Release Date: January 27, 2025
 
-🔄 **Version 1.0.3 Update**
+🔄 **Version 1.0.4 Update**
 
-This update introduces database manager functionality and various debugging
+This critical update resolves a Windows-specific database connection issue that
+prevented users from accessing the Search/Match functionality, addressing the
+"Empty Database" error that occurred despite having valid database files.
+
+🚀 **Key Fixes:**
+• Fixed Windows database path mismatch causing 'Empty Database' errors in Search/Match
+• Enhanced database path detection with intelligent fallback logic
+• Improved cross-platform database compatibility and reliability
+• Added comprehensive database loading debug information for troubleshooting
+• All dependent modules benefit automatically from the improved database connection
+
+🔧 **Technical Details:**
+• RamanSpectraQt6 now checks both Documents/RamanLab_Qt6/ and script directory
+• Priority order: Documents folder (primary) → Script directory (fallback) → Create new
+• Enhanced load_database() method with detailed console debugging output
+• Maintains full backward compatibility with existing installations
+• Multi-Spectrum Manager and Cluster Analysis benefit automatically via dependency injection
+• Polarization Analyzer already used correct script directory path
+
+🐛 **Bug Fixes:**
+• Windows users can now access Search/Match functionality without errors
+• Database Manager and Search functionality use consistent database sources
+• Resolved path separator issues on Windows systems
+• Fixed Qt6 QStandardPaths inconsistencies across platforms
+
+🔄 **Previous Release - Version 1.0.3 "Database Manager & Debug Improvements"**
+
+This update introduced database manager functionality and various debugging
 improvements to enhance the overall user experience and application stability.
 
 🚀 **Key Improvements:**

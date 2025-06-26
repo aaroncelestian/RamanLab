@@ -50,48 +50,30 @@ class RamanSpectraQt6:
         self.load_database()
     
     def _setup_database_path(self):
-        """Set up database path with fallback logic for auto-finding."""
-        # Primary path: user documents folder (cross-platform)
+        """Setup the database path with fallback to script directory for compatibility."""
+        # Primary path: Documents/RamanLab_Qt6 directory (for user data)
         docs_path = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
         self.db_directory = Path(docs_path) / "RamanLab_Qt6"
-        primary_db_path = self.db_directory / "raman_database.pkl"
+        primary_db_path = self.db_directory / "RamanLab_Database_20250602.pkl"
         
-        # Fallback paths to check
-        current_dir = Path.cwd()
-        fallback_paths = [
-            current_dir / "raman_database.pkl",  # Current directory
-            Path.home() / "raman_database.pkl",  # Home directory
-            current_dir.parent / "raman_database.pkl",  # Parent directory
-        ]
+        # Fallback path: Script directory (for compatibility with Database Manager)
+        script_dir = Path(__file__).parent
+        fallback_db_path = script_dir / "RamanLab_Database_20250602.pkl"
         
-        # Check if database exists in Documents folder
-        if primary_db_path.exists():
-            self.db_path = primary_db_path
-            return
-        
-        # Check fallback locations
-        for fallback_path in fallback_paths:
-            if fallback_path.exists():
-                # Found database in fallback location
-                # Copy it to the Documents folder for future use
-                self.db_directory.mkdir(exist_ok=True)
-                try:
-                    import shutil
-                    shutil.copy2(fallback_path, primary_db_path)
-                    print(f"Database auto-found and copied from: {fallback_path}")
-                    print(f"Future database location: {primary_db_path}")
-                except Exception as e:
-                    print(f"Warning: Could not copy database - {e}")
-                    # Use the fallback path directly if copy fails
-                    self.db_path = fallback_path
-                    return
-                
-                self.db_path = primary_db_path
-                return
-        
-        # No existing database found, use primary path for new database
+        # Create Documents directory if it doesn't exist
         self.db_directory.mkdir(exist_ok=True)
-        self.db_path = primary_db_path
+        
+        # Check which database exists and use that path
+        if os.path.exists(primary_db_path):
+            self.db_path = primary_db_path
+            print(f"Using database from Documents folder: {primary_db_path}")
+        elif os.path.exists(fallback_db_path):
+            self.db_path = fallback_db_path
+            print(f"Using database from script directory: {fallback_db_path}")
+        else:
+            # Default to primary path for new databases
+            self.db_path = primary_db_path
+            print(f"No existing database found, will create at: {primary_db_path}")
     
     def add_to_database(self, name, wavenumbers, intensities, metadata=None, peaks=None):
         """
@@ -185,13 +167,21 @@ class RamanSpectraQt6:
             if os.path.exists(self.db_path):
                 with open(self.db_path, 'rb') as f:
                     self.database = pickle.load(f)
+                print(f"✓ Database loaded successfully from: {self.db_path}")
+                print(f"  Database contains {len(self.database)} entries")
+                if len(self.database) > 0:
+                    sample_keys = list(self.database.keys())[:3]
+                    print(f"  Sample entries: {sample_keys}")
                 return True
             else:
                 # Create empty database
+                print(f"⚠ Database file not found at: {self.db_path}")
+                print("  Creating empty database")
                 self.database = {}
                 return True
                 
         except Exception as e:
+            print(f"❌ Error loading database from {self.db_path}: {e}")
             if self.parent:
                 QMessageBox.critical(
                     self.parent,
