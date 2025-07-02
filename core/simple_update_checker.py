@@ -5,6 +5,7 @@ No background threads to avoid Qt threading issues.
 """
 
 import webbrowser
+import platform
 from packaging import version as packaging_version
 
 try:
@@ -14,8 +15,8 @@ try:
 except ImportError:
     SIMPLE_UPDATE_CHECKER_AVAILABLE = False
 
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QMessageBox
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QMessageBox, QProgressDialog
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 
 from version import __version__
@@ -107,6 +108,7 @@ def simple_check_for_updates(parent=None, show_no_update=True):
     """
     Simple, synchronous update check without background threads.
     This runs in the main thread to avoid Qt threading issues.
+    Windows-compatible version with proper exception handling.
     """
     if not SIMPLE_UPDATE_CHECKER_AVAILABLE:
         QMessageBox.information(
@@ -119,14 +121,32 @@ def simple_check_for_updates(parent=None, show_no_update=True):
         )
         return
     
+    # Windows-specific: Use QProgressDialog instead of QMessageBox for better control
+    is_windows = platform.system().lower() == "windows"
+    checking_dialog = None
+    
     try:
-        # Show a simple message that we're checking
-        checking_msg = QMessageBox(parent)
-        checking_msg.setWindowTitle("Checking for Updates")
-        checking_msg.setText("Checking for updates...")
-        checking_msg.setStandardButtons(QMessageBox.NoButton)
-        checking_msg.show()
-        checking_msg.repaint()  # Force immediate display
+        if is_windows:
+            # Windows: Use QProgressDialog with cancel button for better UX
+            checking_dialog = QProgressDialog("Checking for updates...", "Cancel", 0, 0, parent)
+            checking_dialog.setWindowTitle("Update Check")
+            checking_dialog.setWindowModality(Qt.WindowModal)
+            checking_dialog.setMinimumDuration(500)  # Show after 500ms
+            checking_dialog.setValue(0)
+            checking_dialog.show()
+            checking_dialog.repaint()
+            
+            # Check if user cancelled
+            if checking_dialog.wasCanceled():
+                return
+        else:
+            # Non-Windows: Use simpler approach
+            checking_dialog = QMessageBox(parent)
+            checking_dialog.setWindowTitle("Checking for Updates")
+            checking_dialog.setText("Checking for updates...")
+            checking_dialog.setStandardButtons(QMessageBox.Cancel)
+            checking_dialog.show()
+            checking_dialog.repaint()
         
         # Make the network request in main thread (blocking but safer)
         github_api_url = "https://api.github.com/repos/aaroncelestian/RamanLab"
@@ -135,8 +155,12 @@ def simple_check_for_updates(parent=None, show_no_update=True):
         # First check if the repository exists
         try:
             repo_response = requests.get(github_api_url, timeout=10)
+            if is_windows and checking_dialog and checking_dialog.wasCanceled():
+                return
+                
             if repo_response.status_code == 404:
-                checking_msg.close()
+                if checking_dialog:
+                    checking_dialog.close()
                 QMessageBox.information(
                     parent,
                     "Repository Not Found",
@@ -146,11 +170,19 @@ def simple_check_for_updates(parent=None, show_no_update=True):
                     "Please check the correct repository URL or contact the developer."
                 )
                 return
-        except:
+        except Exception:
             pass  # Continue with release check anyway
         
+        # Check for cancellation again (Windows)
+        if is_windows and checking_dialog and checking_dialog.wasCanceled():
+            return
+            
         response = requests.get(releases_url, timeout=10)
-        checking_msg.close()  # Close the checking message
+        
+        # Always close the checking dialog before proceeding
+        if checking_dialog:
+            checking_dialog.close()
+            checking_dialog = None
         
         if response.status_code == 200:
             release_data = response.json()
@@ -219,7 +251,9 @@ def simple_check_for_updates(parent=None, show_no_update=True):
             )
             
     except requests.RequestException as e:
-        checking_msg.close()
+        if checking_dialog:
+            checking_dialog.close()
+            checking_dialog = None
         QMessageBox.warning(
             parent,
             "Network Error",
@@ -228,11 +262,20 @@ def simple_check_for_updates(parent=None, show_no_update=True):
             "https://github.com/aaroncelestian/RamanLab"
         )
     except Exception as e:
-        checking_msg.close()
+        if checking_dialog:
+            checking_dialog.close()
+            checking_dialog = None
         QMessageBox.warning(
             parent,
             "Update Check Error",
             f"Unexpected error:\n{str(e)}\n\n"
             "Check manually at:\n"
             "https://github.com/aaroncelestian/RamanLab"
-        ) 
+        )
+    finally:
+        # Ensure dialog is always closed (Windows safety)
+        if checking_dialog:
+            try:
+                checking_dialog.close()
+            except:
+                pass 
