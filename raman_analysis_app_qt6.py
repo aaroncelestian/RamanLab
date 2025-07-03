@@ -47,12 +47,13 @@ from PySide6.QtGui import QAction, QDesktopServices, QPixmap, QFont
 # Version info
 from version import __version__, __author__, __copyright__
 
-# Import batch peak fitting module
+# Import batch peak fitting module (modular version)
 try:
-    from batch_peak_fitting_qt6 import launch_batch_peak_fitting
+    from batch_peak_fitting.main import launch_batch_peak_fitting
     BATCH_AVAILABLE = True
 except ImportError:
     BATCH_AVAILABLE = False
+    print("Warning: Batch peak fitting module not available")
 
 # Import update checker
 # TEMPORARILY DISABLED to isolate threading issues
@@ -80,6 +81,16 @@ class RamanAnalysisAppQt6(QMainWindow):
     def __init__(self):
         """Initialize the PySide6 application."""
         super().__init__()
+        
+        # Initialize configuration management
+        try:
+            from core.config_manager import get_config_manager
+            self.config = get_config_manager()
+            print(f"✅ Configuration loaded from: {self.config.config_file}")
+            print(f"📁 Projects folder: {self.config.get_projects_folder()}")
+        except Exception as e:
+            print(f"Warning: Could not initialize configuration: {e}")
+            self.config = None
         
         # Apply compact UI configuration for consistent toolbar sizing
         apply_theme('compact')
@@ -471,12 +482,6 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         bg_layout.addWidget(self.spline_params_widget)
         
-        # Initially hide all parameter widgets except ALS (default)
-        self.linear_params_widget.setVisible(False)
-        self.poly_params_widget.setVisible(False)
-        self.moving_avg_params_widget.setVisible(False)
-        self.spline_params_widget.setVisible(False)
-        
         # Background subtraction buttons
         button_layout = QHBoxLayout()
         
@@ -664,6 +669,9 @@ class RamanAnalysisAppQt6(QMainWindow):
         layout.addWidget(smooth_group)
         layout.addStretch()
         
+        # Set initial visibility state for background controls
+        self.on_bg_method_changed()
+        
         return tab
 
     def create_database_tab(self):
@@ -755,17 +763,18 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         self.algorithm_combo = QComboBox()
         self.algorithm_combo.addItems([
-            "correlation", "peak", "combined", "DTW"
+            "correlation", "multi-window", "mineral-vibration", "peak", "combined", "DTW"
         ])
-        self.algorithm_combo.setCurrentText("correlation")
+        self.algorithm_combo.setCurrentText("multi-window")
         algorithm_layout.addWidget(self.algorithm_combo)
         
         # Algorithm descriptions
         desc_text = QTextEdit()
-        desc_text.setMaximumHeight(70)
+        desc_text.setMaximumHeight(80)
         desc_text.setPlainText(
-            "Correlation: Compare spectral shapes • Peak: Match peak positions/intensities • "
-            "Combined: Hybrid correlation + DTW + peaks • DTW: Dynamic Time Warping alignment"
+            "Correlation: Full spectral shape comparison • Multi-Window: Weighted frequency regions • "
+            "Mineral-Vibration: Chemistry-based vibrational modes • Peak: Peak positions/intensities • "
+            "Combined: Hybrid approach • DTW: Dynamic alignment"
         )
         desc_text.setReadOnly(True)
         desc_text.setStyleSheet("font-size: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6;")
@@ -850,6 +859,11 @@ class RamanAnalysisAppQt6(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
+        # Algorithm guidance
+        algorithm_guidance = QLabel("💡 Tip: The 'multi-window' algorithm provides the best balance of accuracy and chemical intelligence for mineral identification!")
+        algorithm_guidance.setStyleSheet("font-size: 10px; color: #0066CC; background-color: #E6F3FF; padding: 8px; border-radius: 4px; margin: 4px;")
+        algorithm_guidance.setWordWrap(True)
+        layout.addWidget(algorithm_guidance)
         
         # Search button
         search_btn = QPushButton("Search Database")
@@ -1047,6 +1061,13 @@ class RamanAnalysisAppQt6(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
+        # Settings menu
+        settings_menu = menubar.addMenu("Settings")
+        
+        preferences_action = QAction("Preferences...", self)
+        preferences_action.triggered.connect(self.open_settings)
+        settings_menu.addAction(preferences_action)
+        
         # Help menu
         help_menu = menubar.addMenu("Help")
         
@@ -1114,7 +1135,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         # Optional: Check for updates on startup (delayed, non-intrusive)
         # This will only run if dependencies are available
-        QTimer.singleShot(3000, self.check_for_updates_startup)  # 3 second delay
+        # QTimer.singleShot(3000, self.check_for_updates_startup)  # 3 second delay - DISABLED
 
     def check_for_updates_startup(self):
         """Check for updates on startup (non-intrusive, silent if no updates)."""
@@ -2721,6 +2742,22 @@ class RamanAnalysisAppQt6(QMainWindow):
             n_matches = self.n_matches_spin.value()
             threshold = self.threshold_spin.value()
             
+            # Check if manual peaks are available and algorithm can use them
+            user_peak_info = None
+            if (algorithm in ["peak", "combined"] and 
+                hasattr(self, 'manual_peaks') and 
+                len(self.manual_peaks) > 0):
+                
+                user_peak_info = {
+                    'peak_positions': self.manual_peaks.copy(),
+                    'peak_tolerance': 10.0  # Default tolerance for basic search
+                }
+                
+                # Inform user that manual peaks are being used
+                peak_info_msg = f"Using {len(self.manual_peaks)} manually selected peaks: {[f'{p:.1f}' for p in self.manual_peaks]} cm⁻¹"
+                self.status_bar.showMessage(peak_info_msg)
+                QApplication.processEvents()
+            
             # Show warning for DTW algorithm
             if algorithm == "DTW":
                 warning_result = QMessageBox.question(
@@ -2745,19 +2782,39 @@ class RamanAnalysisAppQt6(QMainWindow):
                     return
             
             # Show progress indication
-            self.search_results_text.setPlainText("Searching database, please wait...")
+            search_progress_msg = "Searching database, please wait..."
+            if user_peak_info:
+                search_progress_msg += f" (Using {len(user_peak_info['peak_positions'])} manual peaks)"
+            self.search_results_text.setPlainText(search_progress_msg)
             QApplication.processEvents()  # Update UI
             
-            # Use optimized search method with progress tracking
+            # Use optimized search method with progress tracking and peak information
             candidates = [(name, data) for name, data in self.raman_db.database.items()]
-            matches = self.search_filtered_candidates(candidates, algorithm, n_matches, threshold)
+            matches = self.search_filtered_candidates(candidates, algorithm, n_matches, threshold, user_peak_info)
             
-            # Display results
+            # Display results with additional info about peak usage
             algorithm_name = "DTW (Dynamic Time Warping)" if algorithm == "DTW" else algorithm.title()
-            self.display_search_results(matches, f"Basic Search ({algorithm_name})")
+            
+            additional_info = ""
+            if user_peak_info:
+                additional_info = f"Search Details:\n"
+                additional_info += f"• Algorithm: {algorithm_name}\n"
+                additional_info += f"• Manual peaks used: {user_peak_info['peak_positions']} cm⁻¹\n"
+                additional_info += f"• Peak tolerance: ±{user_peak_info['peak_tolerance']} cm⁻¹\n"
+                additional_info += f"• Threshold: {threshold:.2f}\n"
+                
+                if algorithm == "peak":
+                    additional_info += f"• Peak Algorithm: Enhanced with your manually selected peaks\n"
+                elif algorithm == "combined":
+                    additional_info += f"• Combined Algorithm: Uses your manual peaks for enhanced scoring\n"
+            
+            self.display_search_results(matches, f"Basic Search ({algorithm_name})", additional_info)
             
             # Update status
-            self.status_bar.showMessage(f"Search completed - found {len(matches)} matches")
+            status_msg = f"Search completed - found {len(matches)} matches"
+            if user_peak_info:
+                status_msg += f" (used {len(user_peak_info['peak_positions'])} manual peaks)"
+            self.status_bar.showMessage(status_msg)
             
         except Exception as e:
             QMessageBox.critical(self, "Search Error", f"Search failed:\n{str(e)}")
@@ -3050,6 +3107,10 @@ class RamanAnalysisAppQt6(QMainWindow):
                 # Calculate similarity score based on algorithm
                 if algorithm == "correlation":
                     score = self.calculate_correlation_score(wavenumbers, intensities)
+                elif algorithm == "multi-window":
+                    score = self.calculate_multi_window_score(wavenumbers, intensities)
+                elif algorithm == "mineral-vibration":
+                    score = self.calculate_mineral_vibration_score(wavenumbers, intensities)
                 elif algorithm == "peak":
                     score = self.calculate_peak_score(wavenumbers, intensities, user_specified_peaks, peak_tolerance)
                 elif algorithm == "combined":
@@ -3135,6 +3196,180 @@ class RamanAnalysisAppQt6(QMainWindow):
             
         except Exception as e:
             print(f"Error in correlation score calculation: {e}")
+            return 0.0
+
+    def calculate_multi_window_score(self, db_wavenumbers, db_intensities):
+        """Calculate correlation score using multiple diagnostic frequency windows."""
+        try:
+            # Convert to numpy arrays with explicit float conversion
+            db_wavenumbers = np.array(db_wavenumbers, dtype=float)
+            db_intensities = np.array(db_intensities, dtype=float)
+            
+            # Check for empty or invalid data
+            if len(db_wavenumbers) == 0 or len(db_intensities) == 0:
+                return 0.0
+            
+            # Define diagnostic frequency windows with weights based on importance
+            windows = [
+                {"name": "Lattice", "range": (50, 400), "weight": 0.2},      # Lattice modes, heavy atoms
+                {"name": "Bending", "range": (400, 800), "weight": 0.3},     # Bending modes, ring deformations  
+                {"name": "Stretching", "range": (800, 1200), "weight": 0.4}, # Stretching modes, most diagnostic
+                {"name": "High", "range": (1200, 1800), "weight": 0.1}       # High frequency modes
+            ]
+            
+            total_weighted_score = 0.0
+            total_weight = 0.0
+            
+            for window in windows:
+                # Find overlapping region between query and database in this window
+                window_start, window_end = window["range"]
+                
+                # Check if there's any overlap in this window
+                query_mask = (self.current_wavenumbers >= window_start) & (self.current_wavenumbers <= window_end)
+                db_mask = (db_wavenumbers >= window_start) & (db_wavenumbers <= window_end)
+                
+                if not np.any(query_mask) or not np.any(db_mask):
+                    continue  # Skip this window if no data
+                
+                # Get the overlapping range
+                overlap_start = max(window_start, 
+                                  max(self.current_wavenumbers[query_mask].min(), db_wavenumbers[db_mask].min()))
+                overlap_end = min(window_end,
+                                min(self.current_wavenumbers[query_mask].max(), db_wavenumbers[db_mask].max()))
+                
+                if overlap_end <= overlap_start:
+                    continue  # No meaningful overlap
+                
+                # Create common wavenumber grid for this window
+                n_points = min(50, np.sum(query_mask), np.sum(db_mask))  # Adaptive resolution
+                if n_points < 5:
+                    continue  # Too few points for reliable correlation
+                
+                common_wavenumbers = np.linspace(overlap_start, overlap_end, n_points)
+                
+                # Interpolate both spectra to common grid
+                query_interp = np.interp(common_wavenumbers, self.current_wavenumbers, self.processed_intensities)
+                db_interp = np.interp(common_wavenumbers, db_wavenumbers, db_intensities)
+                
+                # Check for zero variance
+                query_std = np.std(query_interp)
+                db_std = np.std(db_interp)
+                
+                if query_std == 0 or db_std == 0:
+                    continue  # Skip windows with no variation
+                
+                # Normalize to zero mean, unit variance
+                query_norm = (query_interp - np.mean(query_interp)) / query_std
+                db_norm = (db_interp - np.mean(db_interp)) / db_std
+                
+                # Calculate correlation for this window
+                correlation = np.corrcoef(query_norm, db_norm)[0, 1]
+                window_similarity = abs(correlation)  # Use absolute correlation
+                
+                # Add to weighted sum
+                total_weighted_score += window_similarity * window["weight"]
+                total_weight += window["weight"]
+            
+            if total_weight == 0:
+                return 0.0  # No valid windows
+            
+            # Return weighted average
+            final_score = total_weighted_score / total_weight
+            return max(0, min(1, final_score))
+            
+        except Exception as e:
+            print(f"Error in multi-window score calculation: {e}")
+            return 0.0
+
+    def calculate_mineral_vibration_score(self, db_wavenumbers, db_intensities):
+        """Calculate correlation score weighted by mineral vibrational mode significance."""
+        try:
+            # Convert to numpy arrays with explicit float conversion
+            db_wavenumbers = np.array(db_wavenumbers, dtype=float)
+            db_intensities = np.array(db_intensities, dtype=float)
+            
+            # Check for empty or invalid data
+            if len(db_wavenumbers) == 0 or len(db_intensities) == 0:
+                return 0.0
+            
+            # Define vibrational mode regions based on mineral chemistry
+            vibrational_modes = [
+                {"name": "Metal-O lattice", "range": (50, 300), "weight": 0.15},     # Lattice vibrations
+                {"name": "M-O bending", "range": (300, 500), "weight": 0.20},       # Metal-oxygen bending
+                {"name": "Ring/chain bending", "range": (500, 700), "weight": 0.25}, # Structural bending
+                {"name": "Si-O stretching", "range": (700, 1000), "weight": 0.30},   # Silicate stretching (most diagnostic)
+                {"name": "CO3/SO4 modes", "range": (1000, 1200), "weight": 0.10}    # Carbonate/sulfate modes
+            ]
+            
+            total_weighted_score = 0.0
+            total_weight = 0.0
+            
+            for mode in vibrational_modes:
+                # Find overlapping region in this vibrational mode range
+                mode_start, mode_end = mode["range"]
+                
+                # Check for overlap
+                query_mask = (self.current_wavenumbers >= mode_start) & (self.current_wavenumbers <= mode_end)
+                db_mask = (db_wavenumbers >= mode_start) & (db_wavenumbers <= mode_end)
+                
+                if not np.any(query_mask) or not np.any(db_mask):
+                    continue  # Skip if no data in this mode region
+                
+                # Get the overlapping range
+                overlap_start = max(mode_start,
+                                  max(self.current_wavenumbers[query_mask].min(), db_wavenumbers[db_mask].min()))
+                overlap_end = min(mode_end,
+                                min(self.current_wavenumbers[query_mask].max(), db_wavenumbers[db_mask].max()))
+                
+                if overlap_end <= overlap_start:
+                    continue
+                
+                # Adaptive resolution based on data density and mode importance
+                base_points = 30 if mode["weight"] >= 0.25 else 20  # More points for important modes
+                n_points = min(base_points, np.sum(query_mask), np.sum(db_mask))
+                
+                if n_points < 3:
+                    continue
+                
+                common_wavenumbers = np.linspace(overlap_start, overlap_end, n_points)
+                
+                # Interpolate both spectra
+                query_interp = np.interp(common_wavenumbers, self.current_wavenumbers, self.processed_intensities)
+                db_interp = np.interp(common_wavenumbers, db_wavenumbers, db_intensities)
+                
+                # Enhanced weighting: boost correlation in regions with strong peaks
+                # This emphasizes chemically meaningful vibrational features
+                peak_intensity_weight = np.mean(query_interp) / np.max(self.processed_intensities) if np.max(self.processed_intensities) > 0 else 0.1
+                effective_weight = mode["weight"] * (1 + peak_intensity_weight)
+                
+                # Check for zero variance
+                query_std = np.std(query_interp)
+                db_std = np.std(db_interp)
+                
+                if query_std == 0 or db_std == 0:
+                    continue
+                
+                # Normalize
+                query_norm = (query_interp - np.mean(query_interp)) / query_std
+                db_norm = (db_interp - np.mean(db_interp)) / db_std
+                
+                # Calculate correlation for this vibrational mode
+                correlation = np.corrcoef(query_norm, db_norm)[0, 1]
+                mode_similarity = abs(correlation)
+                
+                # Add to weighted sum with enhanced weighting
+                total_weighted_score += mode_similarity * effective_weight
+                total_weight += effective_weight
+            
+            if total_weight == 0:
+                return 0.0
+            
+            # Return weighted average
+            final_score = total_weighted_score / total_weight
+            return max(0, min(1, final_score))
+            
+        except Exception as e:
+            print(f"Error in mineral vibration score calculation: {e}")
             return 0.0
 
     def calculate_dtw_score(self, db_wavenumbers, db_intensities):
@@ -3767,16 +4002,18 @@ class RamanAnalysisAppQt6(QMainWindow):
 
     def launch_data_conversion_tools(self):
         """Launch advanced data conversion tools."""
-        QMessageBox.information(
-            self,
-            "Data Conversion Tools",
-            "Advanced data conversion tools will be implemented.\n\n"
-            "This will provide:\n"
-            "• Format conversion (CSV, TXT, SPC, etc.)\n"
-            "• Unit conversion (wavenumber, wavelength)\n"
-            "• Data interpolation and resampling\n"
-            "• Batch file format conversion"
-        )
+        try:
+            # Create data conversion dialog
+            dialog = DataConversionDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # User confirmed the conversion
+                pass
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Data Conversion Error", 
+                f"Failed to launch data conversion tools:\n{str(e)}"
+            )
 
     def launch_deconvolution(self):
         """Launch spectral deconvolution tool."""
@@ -3840,7 +4077,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         )
 
     def launch_batch_peak_fitting(self):
-        """Launch batch peak fitting processing."""
+        """Launch the modular batch peak fitting application."""
         if not BATCH_AVAILABLE:
             QMessageBox.warning(self, "Not Available", 
                               "Batch processing module is not available.")
@@ -4839,6 +5076,32 @@ This data is now ready for:
         except Exception as e:
             QMessageBox.critical(self, "Launch Error", 
                                f"Failed to launch database manager:\n{str(e)}")
+    
+    def open_settings(self):
+        """Open the settings dialog."""
+        try:
+            from core.settings_dialog import SettingsDialog
+            settings_dialog = SettingsDialog(self)
+            settings_dialog.settings_changed.connect(self.on_settings_changed)
+            settings_dialog.exec()
+        except ImportError as e:
+            QMessageBox.warning(self, "Import Error", f"Settings dialog not available: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open settings: {str(e)}")
+    
+    def on_settings_changed(self):
+        """Handle settings changes."""
+        try:
+            from core.config_manager import get_config_manager
+            config = get_config_manager()
+            
+            # Update any UI elements that depend on settings
+            self.status_bar.showMessage("Settings updated successfully", 2000)
+            
+            # You could refresh plot settings, update database paths, etc. here
+            
+        except Exception as e:
+            print(f"Error handling settings change: {e}")
 
 
 class SearchResultsWindow(QDialog):
@@ -5758,3 +6021,378 @@ class RamanMapImportWorker(QThread):
             
         except Exception as e:
             raise Exception(f"Error parsing Raman spectral map: {str(e)}")
+
+
+class DataConversionDialog(QDialog):
+    """Dialog for advanced data conversion tools, specifically for Horiba format files."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_app = parent
+        self.input_file_path = None
+        self.output_directory = None
+        self.file_data = None
+        self.raman_shifts = None
+        self.spectra_data = []
+        self.sequence_numbers = []
+        
+        self.setWindowTitle("Advanced Data Conversion - Horiba Format")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Set up the user interface."""
+        layout = QVBoxLayout(self)
+        
+        # Title and description
+        title_label = QLabel("Advanced Data Conversion - Horiba Format")
+        title_label.setFont(QFont("", 14, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+        
+        description = QLabel(
+            "This tool processes Horiba format Raman linescan files where:\n"
+            "• Row 1 contains Raman shift values (cm⁻¹)\n"
+            "• Column 1 contains data sequence numbers\n"
+            "• All other cells contain intensity values\n\n"
+            "The tool will split the data into individual spectrum files."
+        )
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        
+        # File selection section
+        file_group = QGroupBox("File Selection")
+        file_layout = QVBoxLayout(file_group)
+        
+        # Input file selection
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel("Input File:"))
+        self.input_file_label = QLabel("No file selected")
+        self.input_file_label.setStyleSheet("color: gray; font-style: italic;")
+        input_layout.addWidget(self.input_file_label)
+        input_layout.addStretch()
+        
+        self.browse_input_btn = QPushButton("Browse...")
+        self.browse_input_btn.clicked.connect(self.browse_input_file)
+        input_layout.addWidget(self.browse_input_btn)
+        
+        file_layout.addLayout(input_layout)
+        
+        # Output directory selection
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("Output Directory:"))
+        self.output_dir_label = QLabel("Same as input file")
+        self.output_dir_label.setStyleSheet("color: gray; font-style: italic;")
+        output_layout.addWidget(self.output_dir_label)
+        output_layout.addStretch()
+        
+        self.browse_output_btn = QPushButton("Browse...")
+        self.browse_output_btn.clicked.connect(self.browse_output_directory)
+        output_layout.addWidget(self.browse_output_btn)
+        
+        file_layout.addLayout(output_layout)
+        
+        layout.addWidget(file_group)
+        
+        # Preview section
+        preview_group = QGroupBox("File Preview")
+        preview_layout = QVBoxLayout(preview_group)
+        
+        self.preview_text = QTextEdit()
+        self.preview_text.setMaximumHeight(200)
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setPlainText("Load a file to see preview...")
+        preview_layout.addWidget(self.preview_text)
+        
+        layout.addWidget(preview_group)
+        
+        # Conversion options
+        options_group = QGroupBox("Conversion Options")
+        options_layout = QFormLayout(options_group)
+        
+        self.file_format_combo = QComboBox()
+        self.file_format_combo.addItems(["Tab-separated (.txt)", "Comma-separated (.csv)"])
+        options_layout.addRow("Output Format:", self.file_format_combo)
+        
+        self.include_sequence_check = QCheckBox("Include sequence number in filename")
+        self.include_sequence_check.setChecked(True)
+        options_layout.addRow("", self.include_sequence_check)
+        
+        layout.addWidget(options_group)
+        
+        # Progress section
+        self.progress_group = QGroupBox("Conversion Progress")
+        progress_layout = QVBoxLayout(self.progress_group)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        progress_layout.addWidget(self.progress_bar)
+        
+        self.status_label = QLabel("")
+        self.status_label.setVisible(False)
+        progress_layout.addWidget(self.status_label)
+        
+        layout.addWidget(self.progress_group)
+        self.progress_group.setVisible(False)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        self.convert_btn = QPushButton("Convert")
+        self.convert_btn.clicked.connect(self.perform_conversion)
+        self.convert_btn.setEnabled(False)
+        button_layout.addWidget(self.convert_btn)
+        
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.close_btn)
+        
+        layout.addLayout(button_layout)
+        
+    def browse_input_file(self):
+        """Browse for input file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Horiba Format File",
+            "",
+            "Text files (*.txt);;All files (*.*)"
+        )
+        
+        if file_path:
+            self.input_file_path = file_path
+            self.input_file_label.setText(os.path.basename(file_path))
+            self.input_file_label.setStyleSheet("color: black;")
+            
+            # Try to load and preview the file
+            self.load_file_preview()
+            
+    def browse_output_directory(self):
+        """Browse for output directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Select Output Directory",
+            os.path.dirname(self.input_file_path) if self.input_file_path else ""
+        )
+        
+        if directory:
+            self.output_directory = directory
+            self.output_dir_label.setText(directory)
+            self.output_dir_label.setStyleSheet("color: black;")
+            
+    def load_file_preview(self):
+        """Load and preview the selected file."""
+        if not self.input_file_path:
+            return
+            
+        try:
+            # Parse the Horiba format file
+            self.parse_horiba_file()
+            
+            # Create preview text
+            preview_lines = []
+            preview_lines.append(f"File: {os.path.basename(self.input_file_path)}")
+            preview_lines.append(f"Total lines: {len(self.file_data)}")
+            
+            if self.raman_shifts is not None:
+                preview_lines.append(f"Raman shifts: {len(self.raman_shifts)} values from {self.raman_shifts[0]:.1f} to {self.raman_shifts[-1]:.1f} cm⁻¹")
+            
+            if self.sequence_numbers:
+                preview_lines.append(f"Sequence numbers: {len(self.sequence_numbers)} spectra from {min(self.sequence_numbers)} to {max(self.sequence_numbers)}")
+            
+            preview_lines.append("\nFile structure preview:")
+            
+            # Show first few lines of the file
+            for i, line in enumerate(self.file_data[:5]):
+                if i == 0:
+                    # Header line
+                    parts = line.strip().split('\t')
+                    if len(parts) > 10:
+                        preview_line = f"Line {i+1}: [Header] {parts[0]}\t{parts[1]}\t{parts[2]}\t...\t{parts[-1]} ({len(parts)} columns)"
+                    else:
+                        preview_line = f"Line {i+1}: [Header] {line.strip()}"
+                else:
+                    # Data line
+                    parts = line.strip().split('\t')
+                    if len(parts) > 10:
+                        preview_line = f"Line {i+1}: [Seq {parts[0]}] {parts[1]}\t{parts[2]}\t...\t{parts[-1]} ({len(parts)} values)"
+                    else:
+                        preview_line = f"Line {i+1}: [Seq {parts[0]}] {' '.join(parts[1:])}"
+                
+                preview_lines.append(preview_line)
+            
+            if len(self.file_data) > 5:
+                preview_lines.append("...")
+            
+            self.preview_text.setPlainText('\n'.join(preview_lines))
+            
+            # Enable convert button if file loaded successfully
+            self.convert_btn.setEnabled(True)
+            
+        except Exception as e:
+            self.preview_text.setPlainText(f"Error loading file:\n{str(e)}")
+            self.convert_btn.setEnabled(False)
+            QMessageBox.warning(self, "File Error", f"Could not load file:\n{str(e)}")
+            
+    def parse_horiba_file(self):
+        """Parse the Horiba format file."""
+        if not self.input_file_path:
+            raise ValueError("No input file selected")
+            
+        with open(self.input_file_path, 'r', encoding='utf-8') as f:
+            self.file_data = f.readlines()
+            
+        if len(self.file_data) < 2:
+            raise ValueError("File must have at least 2 lines (header + data)")
+            
+        # Parse header line (Raman shifts)
+        header_line = self.file_data[0].strip()
+        header_parts = header_line.split('\t')
+        
+        # Skip first element if it's empty (common in Horiba files)
+        if header_parts[0] == '' and len(header_parts) > 1:
+            self.raman_shifts = np.array([float(x) for x in header_parts[1:]])
+        else:
+            self.raman_shifts = np.array([float(x) for x in header_parts])
+            
+        # Parse data lines
+        self.sequence_numbers = []
+        self.spectra_data = []
+        
+        for i, line in enumerate(self.file_data[1:], 1):
+            line = line.strip()
+            if not line:
+                continue
+                
+            parts = line.split('\t')
+            if len(parts) < 2:
+                continue
+                
+            try:
+                # First column is sequence number
+                seq_num = int(float(parts[0]))  # Convert via float to handle decimal notation
+                self.sequence_numbers.append(seq_num)
+                
+                # Remaining columns are intensity values
+                intensities = np.array([float(x) for x in parts[1:]])
+                
+                # Ensure we have the right number of intensities
+                if len(intensities) != len(self.raman_shifts):
+                    # Pad or truncate as needed
+                    if len(intensities) < len(self.raman_shifts):
+                        padded = np.zeros(len(self.raman_shifts))
+                        padded[:len(intensities)] = intensities
+                        intensities = padded
+                    else:
+                        intensities = intensities[:len(self.raman_shifts)]
+                        
+                self.spectra_data.append(intensities)
+                
+            except (ValueError, IndexError) as e:
+                print(f"Skipping line {i+1}: {e}")
+                continue
+                
+        if not self.sequence_numbers:
+            raise ValueError("No valid data rows found in file")
+            
+    def perform_conversion(self):
+        """Perform the data conversion."""
+        if not self.input_file_path or not self.file_data:
+            QMessageBox.warning(self, "No Data", "Please select and load a file first.")
+            return
+            
+        try:
+            # Show progress
+            self.progress_group.setVisible(True)
+            self.progress_bar.setVisible(True)
+            self.status_label.setVisible(True)
+            self.progress_bar.setRange(0, len(self.sequence_numbers))
+            self.progress_bar.setValue(0)
+            
+            # Determine output directory
+            if self.output_directory:
+                output_dir = self.output_directory
+            else:
+                output_dir = os.path.dirname(self.input_file_path)
+                
+            # Create subfolder
+            base_filename = os.path.splitext(os.path.basename(self.input_file_path))[0]
+            subfolder_name = f"split_{base_filename}"
+            subfolder_path = os.path.join(output_dir, subfolder_name)
+            
+            os.makedirs(subfolder_path, exist_ok=True)
+            
+            # Determine file extension
+            if self.file_format_combo.currentText().startswith("Comma"):
+                extension = ".csv"
+                delimiter = ","
+            else:
+                extension = ".txt"
+                delimiter = "\t"
+                
+            # Convert each spectrum
+            self.status_label.setText("Converting spectra...")
+            QApplication.processEvents()
+            
+            for i, (seq_num, intensities) in enumerate(zip(self.sequence_numbers, self.spectra_data)):
+                # Create filename
+                if self.include_sequence_check.isChecked():
+                    filename = f"{base_filename}_seq_{seq_num:+d}{extension}"
+                else:
+                    filename = f"{base_filename}_{i+1:03d}{extension}"
+                    
+                filepath = os.path.join(subfolder_path, filename)
+                
+                # Write spectrum file
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    # Write header
+                    f.write(f"Wavenumber (cm-1){delimiter}Intensity (a.u.)\n")
+                    
+                    # Write data
+                    for wavenumber, intensity in zip(self.raman_shifts, intensities):
+                        f.write(f"{wavenumber:.3f}{delimiter}{intensity:.6f}\n")
+                        
+                # Update progress
+                self.progress_bar.setValue(i + 1)
+                self.status_label.setText(f"Converted {i+1}/{len(self.sequence_numbers)} spectra...")
+                QApplication.processEvents()
+                
+            # Show completion message
+            self.status_label.setText("Conversion complete!")
+            QMessageBox.information(
+                self,
+                "Conversion Complete",
+                f"Successfully converted {len(self.sequence_numbers)} spectra.\n\n"
+                f"Output folder: {subfolder_path}\n"
+                f"Files: {self.sequence_numbers[0]} to {self.sequence_numbers[-1]}"
+            )
+            
+            # Ask if user wants to close dialog
+            if QMessageBox.question(self, "Complete", "Conversion finished. Close dialog?") == QMessageBox.StandardButton.Yes:
+                self.accept()
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Conversion Error", f"Error during conversion:\n{str(e)}")
+            
+        finally:
+            # Hide progress
+            self.progress_group.setVisible(False)
+
+
+# Main entry point (if running as standalone)
+if __name__ == "__main__":
+    import sys
+    
+    app = QApplication(sys.argv)
+    
+    # Apply the application theme
+    configure_compact_ui()
+    apply_theme('compact')
+    
+    # Create main window
+    window = RamanAnalysisAppQt6()
+    window.show()
+    
+    # Run the application
+    sys.exit(app.exec())
