@@ -42,12 +42,12 @@ try:
     try:
         from pymatgen.core import Structure
         PYMATGEN_AVAILABLE = True
+        print("✓ pymatgen available for crystal structure visualization")
     except ImportError:
         PYMATGEN_AVAILABLE = False
-        print("Pymatgen not available, using simplified CIF parsing")
+        print("ℹ️  Pymatgen not available - using simplified CIF parsing")
 except ImportError:
-    print("Warning: Some core modules not available")
-    PYMATGEN_AVAILABLE = False
+    print("ℹ️  Enhanced crystal structure modules not available - using basic functionality")
 
 
 class MineralSelectionDialog(QDialog):

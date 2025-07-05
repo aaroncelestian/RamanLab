@@ -80,7 +80,7 @@ __all__ = [
 ]
 
 # Package metadata
-__version__ = "3.1.0"  # Updated to reflect centralized peak fitting integration
+__version__ = "1.1.0"  # Updated to reflect enhanced module availability and robustness
 __author__ = "RamanLab Development Team"
 __description__ = "Modular Batch Peak Fitting System - Phase 3 Complete Architecture with Centralized Peak Fitting"
 

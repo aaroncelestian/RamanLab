@@ -14,6 +14,119 @@ from PySide6.QtGui import QColor
 
 from ..base_tab import BaseTab
 
+# Unified button styles for consistent UI
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #f8f9fa;
+        color: #495057;
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #e9ecef;
+        border: 1px solid #adb5bd;
+        color: #212529;
+    }
+    QPushButton:pressed {
+        background-color: #dee2e6;
+        border: 1px solid #6c757d;
+    }
+    QPushButton:disabled {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        color: #6c757d;
+        opacity: 0.6;
+    }
+"""
+
+PRIMARY_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #0d6efd;
+        color: white;
+        border: 1px solid #0a58ca;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #0b5ed7;
+        border: 1px solid #09408e;
+    }
+    QPushButton:pressed {
+        background-color: #0a58ca;
+        border: 1px solid #08356d;
+    }
+"""
+
+SUCCESS_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #198754;
+        color: white;
+        border: 1px solid #146c43;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #157347;
+        border: 1px solid #0f5132;
+    }
+    QPushButton:pressed {
+        background-color: #146c43;
+        border: 1px solid #0c3a22;
+    }
+"""
+
+WARNING_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #fd7e14;
+        color: white;
+        border: 1px solid #e76500;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #e76500;
+        border: 1px solid #bf5700;
+    }
+    QPushButton:pressed {
+        background-color: #d65d00;
+        border: 1px solid #a04800;
+    }
+"""
+
+PURPLE_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #6f42c1;
+        color: white;
+        border: 1px solid #59359a;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #59359a;
+        border: 1px solid #4c2d83;
+    }
+    QPushButton:pressed {
+        background-color: #4c2d83;
+        border: 1px solid #3e246c;
+    }
+"""
+
 
 class ResultsTab(BaseTab):
     """
@@ -67,9 +180,10 @@ class ResultsTab(BaseTab):
         label_style = """
             QLabel {
                 font-size: 12px;
-                font-weight: bold;
+                font-weight: 500;
                 padding: 3px;
                 margin: 2px;
+                color: #495057;
             }
         """
         
@@ -77,8 +191,8 @@ class ResultsTab(BaseTab):
                      self.files_successful_label, self.files_failed_label]:
             label.setStyleSheet(label_style)
         
-        self.files_successful_label.setStyleSheet(label_style + "color: #2E7D32;")
-        self.files_failed_label.setStyleSheet(label_style + "color: #D32F2F;")
+        self.files_successful_label.setStyleSheet(label_style + "color: #198754;")
+        self.files_failed_label.setStyleSheet(label_style + "color: #dc3545;")
         
         summary_layout.addWidget(self.files_total_label)
         summary_layout.addWidget(self.files_processed_label)
@@ -89,52 +203,16 @@ class ResultsTab(BaseTab):
         actions_group = QGroupBox("Quick Actions")
         actions_layout = QHBoxLayout(actions_group)
         
-        view_all_btn = QPushButton("View All Results")
-        view_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976D2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-        """)
+        view_all_btn = QPushButton("View All")
+        view_all_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         actions_layout.addWidget(view_all_btn)
         
-        export_summary_btn = QPushButton("Export Summary")
-        export_summary_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #388E3C;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2E7D32;
-            }
-        """)
+        export_summary_btn = QPushButton("Export")
+        export_summary_btn.setStyleSheet(SUCCESS_BUTTON_STYLE)
         actions_layout.addWidget(export_summary_btn)
         
-        clear_results_btn = QPushButton("Clear Results")
-        clear_results_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F57C00;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #EF6C00;
-            }
-        """)
+        clear_results_btn = QPushButton("Clear")
+        clear_results_btn.setStyleSheet(WARNING_BUTTON_STYLE)
         actions_layout.addWidget(clear_results_btn)
         
         # Recent results summary
@@ -146,11 +224,12 @@ class ResultsTab(BaseTab):
         self.summary_text.setReadOnly(True)
         self.summary_text.setStyleSheet("""
             QTextEdit {
-                background-color: #FAFAFA;
-                border: 1px solid #E0E0E0;
-                border-radius: 3px;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
                 font-family: monospace;
                 font-size: 10px;
+                color: #495057;
             }
         """)
         recent_layout.addWidget(self.summary_text)
@@ -204,28 +283,18 @@ class ResultsTab(BaseTab):
         # Table controls
         table_controls_layout = QHBoxLayout()
         
-        select_all_btn = QPushButton("Select All")
+        select_all_btn = QPushButton("All")
         select_all_btn.clicked.connect(self.results_table.selectAll)
+        select_all_btn.setStyleSheet(BUTTON_STYLE)
         table_controls_layout.addWidget(select_all_btn)
         
-        clear_selection_btn = QPushButton("Clear Selection")
+        clear_selection_btn = QPushButton("None")
         clear_selection_btn.clicked.connect(self.results_table.clearSelection)
+        clear_selection_btn.setStyleSheet(BUTTON_STYLE)
         table_controls_layout.addWidget(clear_selection_btn)
         
-        export_selected_btn = QPushButton("Export Selected")
-        export_selected_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #7B1FA2;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #6A1B9A;
-            }
-        """)
+        export_selected_btn = QPushButton("Export")
+        export_selected_btn.setStyleSheet(PURPLE_BUTTON_STYLE)
         table_controls_layout.addWidget(export_selected_btn)
         
         table_layout.addLayout(table_controls_layout)
@@ -254,11 +323,12 @@ class ResultsTab(BaseTab):
         self.stats_display.setReadOnly(True)
         self.stats_display.setStyleSheet("""
             QTextEdit {
-                background-color: #F5F5F5;
-                border: 1px solid #E0E0E0;
-                border-radius: 3px;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
                 font-family: monospace;
                 font-size: 11px;
+                color: #495057;
             }
         """)
         stats_layout.addWidget(self.stats_display)
@@ -266,36 +336,12 @@ class ResultsTab(BaseTab):
         # Statistics controls
         stats_controls_layout = QHBoxLayout()
         
-        refresh_stats_btn = QPushButton("Refresh Statistics")
-        refresh_stats_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976D2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-        """)
+        refresh_stats_btn = QPushButton("Refresh")
+        refresh_stats_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         stats_controls_layout.addWidget(refresh_stats_btn)
         
-        export_stats_btn = QPushButton("Export Statistics")
-        export_stats_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #388E3C;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2E7D32;
-            }
-        """)
+        export_stats_btn = QPushButton("Export")
+        export_stats_btn.setStyleSheet(SUCCESS_BUTTON_STYLE)
         stats_controls_layout.addWidget(export_stats_btn)
         
         stats_layout.addLayout(stats_controls_layout)
@@ -424,9 +470,9 @@ class ResultsTab(BaseTab):
         
         status_item = QTableWidgetItem(status)
         if status == "Success":
-            status_item.setBackground(QColor(144, 238, 144))  # Light green
+            status_item.setBackground(QColor(209, 237, 255))  # Light blue
         else:
-            status_item.setBackground(QColor(255, 182, 193))  # Light pink
+            status_item.setBackground(QColor(248, 215, 218))  # Light red
         self.results_table.setItem(row, 1, status_item)
         
         self.results_table.setItem(row, 2, QTableWidgetItem(str(peaks_count)))
@@ -438,68 +484,40 @@ class ResultsTab(BaseTab):
         self._update_summary_from_table()
     
     def _update_summary_from_table(self):
-        """Update summary labels from table data"""
-        total = self.results_table.rowCount()
+        """Update summary statistics from table data"""
+        total_rows = self.results_table.rowCount()
         successful = 0
         failed = 0
         
-        for row in range(total):
+        for row in range(total_rows):
             status_item = self.results_table.item(row, 1)
             if status_item and status_item.text() == "Success":
                 successful += 1
             else:
                 failed += 1
         
-        self._update_summary_labels(total, total, successful, failed)
+        self._update_summary_labels(total_rows, total_rows, successful, failed)
     
     def _update_summary_labels(self, total, processed, successful, failed):
-        """Update summary labels"""
+        """Update summary labels with current counts"""
         self.files_total_label.setText(f"Total files: {total}")
         self.files_processed_label.setText(f"Processed: {processed}")
         self.files_successful_label.setText(f"Successful: {successful}")
         self.files_failed_label.setText(f"Failed: {failed}")
     
     def _initialize_stats_display(self):
-        """Initialize statistics display"""
+        """Initialize statistics display with default content"""
         self.stats_display.clear()
-        self.stats_display.append("=== Analysis Statistics ===")
+        self.stats_display.append("Statistical Analysis")
+        self.stats_display.append("=" * 40)
         self.stats_display.append("")
-        self.stats_display.append("No analysis results available")
-        self.stats_display.append("Run batch processing to generate statistics")
-    
-    def _update_statistics(self, stats_data):
-        """Update statistics display with new data"""
-        self.stats_display.clear()
-        self.stats_display.append("=== Analysis Statistics ===")
+        self.stats_display.append("No data available for analysis")
         self.stats_display.append("")
-        
-        if not stats_data:
-            self.stats_display.append("No statistics available")
-            return
-        
-        # Display various statistics
-        self.stats_display.append(f"Total analyses: {stats_data.get('total_analyses', 0)}")
-        self.stats_display.append(f"Average R²: {stats_data.get('avg_r_squared', 0.0):.4f}")
-        self.stats_display.append(f"Average peaks per spectrum: {stats_data.get('avg_peaks', 0.0):.1f}")
-        self.stats_display.append(f"Average processing time: {stats_data.get('avg_time', 0.0):.2f}s")
-        self.stats_display.append("")
-        
-        # Peak statistics
-        peak_stats = stats_data.get('peak_statistics', {})
-        if peak_stats:
-            self.stats_display.append("Peak Statistics:")
-            self.stats_display.append(f"  Min peaks: {peak_stats.get('min_peaks', 0)}")
-            self.stats_display.append(f"  Max peaks: {peak_stats.get('max_peaks', 0)}")
-            self.stats_display.append(f"  Median peaks: {peak_stats.get('median_peaks', 0)}")
-        
-        # Quality statistics
-        quality_stats = stats_data.get('quality_statistics', {})
-        if quality_stats:
-            self.stats_display.append("")
-            self.stats_display.append("Fitting Quality:")
-            self.stats_display.append(f"  High quality (R² > 0.9): {quality_stats.get('high_quality', 0)}")
-            self.stats_display.append(f"  Medium quality (R² > 0.7): {quality_stats.get('medium_quality', 0)}")
-            self.stats_display.append(f"  Low quality (R² < 0.7): {quality_stats.get('low_quality', 0)}")
+        self.stats_display.append("Process some spectra to see:")
+        self.stats_display.append("• Peak count distribution")
+        self.stats_display.append("• Fitting quality metrics")
+        self.stats_display.append("• Processing time statistics")
+        self.stats_display.append("• Success rate analysis")
     
     def update_from_data_processor(self, data=None):
         """Update results when data processor state changes"""

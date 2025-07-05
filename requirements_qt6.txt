@@ -1,4 +1,4 @@
-# RamanLab v1.0.2 - Qt6 Requirements
+# RamanLab v1.0.0 - Qt6 Requirements
 # ===================================
 # Complete dependency list for RamanLab Qt6 cross-platform Raman analysis tool
 # Updated: 2025-01-26

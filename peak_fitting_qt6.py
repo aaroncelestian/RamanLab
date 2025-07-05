@@ -6,6 +6,7 @@ Includes:
 • Overlapping peak resolution  
 • Principal component analysis
 • Non-negative matrix factorization
+• Direct file loading capability
 """
 
 import numpy as np
@@ -18,10 +19,11 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QTextEdit, QSlider, QCheckBox, QComboBox,
     QGroupBox, QSplitter, QMessageBox, QProgressBar, QSpinBox, 
     QDoubleSpinBox, QFormLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QScrollArea, QFrame, QGridLayout, QListWidget, QListWidgetItem
+    QHeaderView, QScrollArea, QFrame, QGridLayout, QListWidget, QListWidgetItem,
+    QMenuBar, QMenu, QFileDialog, QStatusBar
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QAction
 
 # Import matplotlib for Qt6
 import matplotlib
@@ -36,7 +38,25 @@ from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
+from scipy.sparse import csc_matrix
 import pandas as pd
+
+# File loading utilities
+try:
+    from utils.file_loaders import SpectrumLoader, load_spectrum_file
+    FILE_LOADING_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: File loading utilities not available: {e}")
+    FILE_LOADING_AVAILABLE = False
+
+# Centralized peak fitting imports
+try:
+    from core.peak_fitting import PeakFitter, PeakData, auto_find_peaks, baseline_correct_spectrum
+    from core.peak_fitting_ui import BackgroundControlsWidget, PeakFittingControlsWidget
+    CENTRALIZED_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Centralized peak fitting not available: {e}")
+    CENTRALIZED_AVAILABLE = False
 
 # Machine learning imports for advanced features
 try:
@@ -46,6 +66,82 @@ try:
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
+
+
+# Enhanced PeakFitter with baseline_als support
+class EnhancedPeakFitter(PeakFitter if CENTRALIZED_AVAILABLE else object):
+    """Enhanced peak fitter with baseline correction capabilities."""
+    
+    def __init__(self):
+        if CENTRALIZED_AVAILABLE:
+            super().__init__()
+    
+    @staticmethod
+    def baseline_als(y, lam=1e5, p=0.01, niter=10):
+        """
+        Asymmetric Least Squares Smoothing for baseline correction.
+        
+        Parameters:
+        -----------
+        y : array-like
+            Input spectrum.
+        lam : float
+            Smoothness parameter (default: 1e5).
+        p : float
+            Asymmetry parameter (default: 0.01).
+        niter : int
+            Number of iterations (default: 10).
+            
+        Returns:
+        --------
+        array-like
+            Estimated baseline.
+        """
+        L = len(y)
+        D = csc_matrix(np.diff(np.eye(L), 2))
+        w = np.ones(L)
+        
+        for i in range(niter):
+            W = csc_matrix((w, (np.arange(L), np.arange(L))))
+            Z = W + lam * D.dot(D.transpose())
+            z = spsolve(Z, w * y)
+            w = p * (y > z) + (1 - p) * (y <= z)
+        
+        return z
+    
+    # Ensure backward compatibility for standalone operation
+    @staticmethod
+    def gaussian(x, amp, cen, wid):
+        """Gaussian peak function."""
+        if CENTRALIZED_AVAILABLE:
+            return PeakFitter.gaussian(x, amp, cen, wid)
+        else:
+            # Fallback implementation
+            width = abs(wid) + 1e-10
+            return amp * np.exp(-((x - cen) / width) ** 2)
+    
+    @staticmethod
+    def lorentzian(x, amp, cen, wid):
+        """Lorentzian peak function."""
+        if CENTRALIZED_AVAILABLE:
+            return PeakFitter.lorentzian(x, amp, cen, wid)
+        else:
+            # Fallback implementation
+            width = abs(wid) + 1e-10
+            return amp * (width**2) / ((x - cen)**2 + width**2)
+    
+    @staticmethod
+    def pseudo_voigt(x, amp, cen, wid, eta=0.5):
+        """Pseudo-Voigt peak function."""
+        if CENTRALIZED_AVAILABLE:
+            return PeakFitter.pseudo_voigt(x, amp, cen, wid, eta)
+        else:
+            # Fallback implementation
+            eta = np.clip(eta, 0, 1)
+            gaussian_part = EnhancedPeakFitter.gaussian(x, 1.0, cen, wid)
+            lorentzian_part = EnhancedPeakFitter.lorentzian(x, 1.0, cen, wid)
+            return amp * ((1 - eta) * gaussian_part + eta * lorentzian_part)
+
 
 class StackedTabWidget(QWidget):
     """Custom tab widget with stacked tab buttons."""
@@ -142,16 +238,32 @@ class StackedTabWidget(QWidget):
 class SpectralDeconvolutionQt6(QDialog):
     """Enhanced spectral deconvolution window with advanced analysis capabilities."""
     
-    def __init__(self, parent, wavenumbers, intensities):
+    def __init__(self, parent, wavenumbers=None, intensities=None):
         super().__init__(parent)
         
         # Apply compact UI configuration for consistent toolbar sizing
         apply_theme('compact')
         
         self.parent = parent
-        self.wavenumbers = np.array(wavenumbers)
-        self.original_intensities = np.array(intensities)
+        
+        # Initialize spectrum data - can be empty if loading from file
+        if wavenumbers is not None and intensities is not None:
+            self.wavenumbers = np.array(wavenumbers)
+            self.original_intensities = np.array(intensities)
+            self.current_file = None
+        else:
+            # Empty spectrum - will be loaded from file
+            self.wavenumbers = np.array([])
+            self.original_intensities = np.array([])
+            self.current_file = None
+        
         self.processed_intensities = self.original_intensities.copy()
+        
+        # File loading utilities
+        if FILE_LOADING_AVAILABLE:
+            self.spectrum_loader = SpectrumLoader()
+        else:
+            self.spectrum_loader = None
         
         # Analysis data
         self.peaks = np.array([])  # Initialize as empty numpy array
@@ -210,16 +322,28 @@ class SpectralDeconvolutionQt6(QDialog):
         
     def setup_ui(self):
         """Set up the user interface."""
-        self.setWindowTitle("Spectral Deconvolution & Advanced Analysis")
+        self.update_window_title()
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
         # Main layout
-        main_layout = QHBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        
+        # Create menu bar
+        self.setup_menu_bar()
+        main_layout.addWidget(self.menu_bar)
+        
+        # Create status bar
+        self.status_bar = QStatusBar()
+        self.update_status_bar()
+        
+        # Content layout (horizontal splitter)
+        content_layout = QHBoxLayout()
+        main_layout.addLayout(content_layout)
         
         # Left panel - controls (splitter for resizing)
         splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(splitter)
+        content_layout.addWidget(splitter)
         
         # Control panel
         control_panel = self.create_control_panel()
@@ -231,6 +355,232 @@ class SpectralDeconvolutionQt6(QDialog):
         
         # Set splitter proportions (30% controls, 70% visualization)
         splitter.setSizes([400, 1200])
+        
+        # Add status bar at the bottom
+        main_layout.addWidget(self.status_bar)
+    
+    def setup_menu_bar(self):
+        """Create the menu bar with file operations."""
+        self.menu_bar = QMenuBar()
+        
+        # File menu
+        file_menu = self.menu_bar.addMenu("File")
+        
+        # Open file action
+        open_action = QAction("Open Spectrum File...", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.open_file)
+        if not FILE_LOADING_AVAILABLE:
+            open_action.setEnabled(False)
+            open_action.setToolTip("File loading not available - install required dependencies")
+        file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        # Recent files submenu (placeholder for future enhancement)
+        self.recent_files_menu = file_menu.addMenu("Recent Files")
+        self.recent_files_menu.addAction("No recent files").setEnabled(False)
+        
+        file_menu.addSeparator()
+        
+        # Save/Export actions
+        save_action = QAction("Export Results...", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.export_results)
+        file_menu.addAction(save_action)
+        
+        file_menu.addSeparator()
+        
+        # Close action
+        close_action = QAction("Close", self)
+        close_action.setShortcut("Ctrl+W")
+        close_action.triggered.connect(self.close)
+        file_menu.addAction(close_action)
+        
+        # Analysis menu
+        analysis_menu = self.menu_bar.addMenu("Analysis")
+        
+        # Quick actions
+        reset_action = QAction("Reset Analysis", self)
+        reset_action.triggered.connect(self.reset_spectrum)
+        analysis_menu.addAction(reset_action)
+        
+        clear_peaks_action = QAction("Clear All Peaks", self)
+        clear_peaks_action.triggered.connect(self.clear_peaks)
+        analysis_menu.addAction(clear_peaks_action)
+        
+        analysis_menu.addSeparator()
+        
+        # Background subtraction
+        apply_bg_action = QAction("Apply Background Subtraction", self)
+        apply_bg_action.triggered.connect(self.apply_background)
+        analysis_menu.addAction(apply_bg_action)
+        
+        # Peak fitting
+        fit_peaks_action = QAction("Fit Peaks", self)
+        fit_peaks_action.setShortcut("Ctrl+F")
+        fit_peaks_action.triggered.connect(self.fit_peaks)
+        analysis_menu.addAction(fit_peaks_action)
+    
+    def update_window_title(self):
+        """Update the window title with current file information."""
+        base_title = "Spectral Deconvolution & Advanced Analysis"
+        if self.current_file:
+            file_name = Path(self.current_file).name
+            self.setWindowTitle(f"{base_title} - {file_name}")
+        else:
+            if len(self.wavenumbers) > 0:
+                self.setWindowTitle(f"{base_title} - {len(self.wavenumbers)} data points")
+            else:
+                self.setWindowTitle(f"{base_title} - No data loaded")
+    
+    def update_status_bar(self):
+        """Update the status bar with current spectrum information."""
+        if len(self.wavenumbers) > 0:
+            wn_range = f"{self.wavenumbers[0]:.1f} - {self.wavenumbers[-1]:.1f} cm⁻¹"
+            intensity_range = f"{np.min(self.processed_intensities):.1f} - {np.max(self.processed_intensities):.1f}"
+            n_peaks = len(self.get_all_peaks_for_fitting())
+            
+            status_text = f"Data points: {len(self.wavenumbers)} | Range: {wn_range} | Intensity: {intensity_range} | Peaks: {n_peaks}"
+            
+            if self.current_file:
+                file_size = Path(self.current_file).stat().st_size / 1024  # KB
+                status_text += f" | File: {file_size:.1f} KB"
+            
+            self.status_bar.showMessage(status_text)
+        else:
+            self.status_bar.showMessage("No spectrum data loaded - use File → Open to load a spectrum file")
+    
+    def open_file(self):
+        """Open a spectrum file and load the data."""
+        if not FILE_LOADING_AVAILABLE:
+            QMessageBox.warning(self, "Feature Unavailable", 
+                              "File loading is not available. Please install required dependencies.")
+            return
+        
+        # Get supported file types for the dialog
+        extensions = self.spectrum_loader.get_supported_extensions()
+        file_filter = "Spectrum files ({});;All files (*.*)".format(
+            " ".join([f"*{ext}" for ext in extensions])
+        )
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Spectrum File",
+            "",
+            file_filter
+        )
+        
+        if file_path:
+            self.load_spectrum_file(file_path)
+    
+    def load_spectrum_file(self, file_path):
+        """Load spectrum data from the specified file."""
+        if not FILE_LOADING_AVAILABLE:
+            QMessageBox.critical(self, "Error", "File loading utilities not available.")
+            return
+        
+        try:
+            # Show loading status
+            self.status_bar.showMessage("Loading spectrum file...")
+            
+            # Load the spectrum data
+            wavenumbers, intensities, metadata = self.spectrum_loader.load_spectrum(file_path)
+            
+            if wavenumbers is None or intensities is None:
+                error_msg = metadata.get("error", "Unknown error occurred")
+                QMessageBox.critical(self, "Loading Error", 
+                                   f"Failed to load spectrum file:\n{error_msg}")
+                self.status_bar.showMessage("Ready")
+                return
+            
+            # Update spectrum data
+            self.wavenumbers = wavenumbers
+            self.original_intensities = intensities
+            self.processed_intensities = self.original_intensities.copy()
+            self.current_file = file_path
+            
+            # Reset analysis state
+            self.reset_analysis_state()
+            
+            # Update UI
+            self.update_window_title()
+            self.update_status_bar()
+            self.update_plot()
+            
+            # Show success message
+            n_points = len(wavenumbers)
+            wn_range = f"{wavenumbers[0]:.1f} - {wavenumbers[-1]:.1f} cm⁻¹"
+            
+            QMessageBox.information(self, "File Loaded Successfully", 
+                                  f"Loaded spectrum from:\n{Path(file_path).name}\n\n"
+                                  f"Data points: {n_points}\n"
+                                  f"Wavenumber range: {wn_range}\n"
+                                  f"File size: {Path(file_path).stat().st_size / 1024:.1f} KB")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Loading Error", 
+                               f"An error occurred while loading the file:\n{str(e)}")
+            self.status_bar.showMessage("Ready")
+    
+    def reset_analysis_state(self):
+        """Reset all analysis state when loading new data."""
+        # Clear peaks
+        self.peaks = np.array([])
+        self.manual_peaks = np.array([])
+        
+        # Clear fitting results
+        self.fit_params = []
+        self.fit_result = None
+        self.residuals = None
+        
+        # Clear background
+        self.background = None
+        self.background_preview_active = False
+        
+        # Clear components and analysis results
+        self.components = []
+        self.pca_result = None
+        self.nmf_result = None
+        
+        # Clear background options
+        self.clear_background_options()
+        
+        # Disable interactive mode
+        if self.interactive_mode:
+            self.interactive_mode = False
+            if hasattr(self, 'interactive_btn'):
+                self.interactive_btn.setChecked(False)
+                self.interactive_btn.setText("🖱️ Enable Interactive Selection")
+            if hasattr(self, 'interactive_status_label'):
+                self.interactive_status_label.setText("Interactive mode: OFF")
+                self.interactive_status_label.setStyleSheet("color: #666; font-size: 10px;")
+            
+            # Disconnect mouse click event
+            if self.click_connection is not None:
+                self.canvas.mpl_disconnect(self.click_connection)
+                self.click_connection = None
+        
+        # Update peak displays
+        if hasattr(self, 'peak_count_label'):
+            self.update_peak_count_display()
+        if hasattr(self, 'peak_list_widget'):
+            self.update_peak_list()
+        
+        # Clear results
+        if hasattr(self, 'results_text'):
+            self.results_text.clear()
+        if hasattr(self, 'results_table'):
+            self.results_table.setRowCount(0)
+        
+        # Clear Fourier analysis data
+        self.fft_data = None
+        self.fft_frequencies = None
+        self.fft_magnitude = None
+        self.fft_phase = None
+        
+        # Reset plot line references
+        self._reset_line_references()
         
     def create_control_panel(self):
         """Create the control panel with tabs."""
@@ -277,389 +627,156 @@ class SpectralDeconvolutionQt6(QDialog):
         return panel
         
     def create_background_tab(self):
-        """Create background subtraction tab with Process tab styling."""
+        """Create background subtraction tab using unified components."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Background subtraction group
-        bg_group = QGroupBox("Background Subtraction")
-        bg_layout = QVBoxLayout(bg_group)
+        if CENTRALIZED_AVAILABLE:
+            # Use unified background controls
+            try:
+                self.background_controls = BackgroundControlsWidget()
+                self.background_controls.parameters_changed.connect(self._trigger_background_update)
+                self.background_controls.background_method_changed.connect(self.on_bg_method_changed)
+                layout.addWidget(self.background_controls)
+            except Exception as e:
+                print(f"Warning: Could not create BackgroundControlsWidget: {e}")
+                self._create_fallback_background_controls(layout)
+        else:
+            # Fallback to basic controls
+            self._create_fallback_background_controls(layout)
         
-        # Background method selection
-        bg_method_layout = QHBoxLayout()
-        bg_method_layout.addWidget(QLabel("Method:"))
-        self.bg_method_combo = QComboBox()
-        self.bg_method_combo.addItems(["ALS (Asymmetric Least Squares)", "Linear", "Polynomial", "Moving Average", "Spline"])
-        self.bg_method_combo.currentTextChanged.connect(self.on_bg_method_changed)
-        self.bg_method_combo.currentTextChanged.connect(self._trigger_background_update)
-        bg_method_layout.addWidget(self.bg_method_combo)
-        bg_layout.addLayout(bg_method_layout)
-        
-        # ALS parameters (visible by default)
-        self.als_params_widget = QWidget()
-        als_params_layout = QVBoxLayout(self.als_params_widget)
-        als_params_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Lambda parameter
-        lambda_layout = QHBoxLayout()
-        lambda_layout.addWidget(QLabel("λ (Smoothness):"))
-        self.lambda_slider = QSlider(Qt.Horizontal)
-        self.lambda_slider.setRange(3, 7)  # 10^3 to 10^7
-        self.lambda_slider.setValue(5)  # 10^5 (default)
-        lambda_layout.addWidget(self.lambda_slider)
-        self.lambda_label = QLabel("1e5")
-        lambda_layout.addWidget(self.lambda_label)
-        als_params_layout.addLayout(lambda_layout)
-        
-        # p parameter
-        p_layout = QHBoxLayout()
-        p_layout.addWidget(QLabel("p (Asymmetry):"))
-        self.p_slider = QSlider(Qt.Horizontal)
-        self.p_slider.setRange(1, 50)  # 0.001 to 0.05
-        self.p_slider.setValue(10)  # 0.01 (default)
-        p_layout.addWidget(self.p_slider)
-        self.p_label = QLabel("0.01")
-        p_layout.addWidget(self.p_label)
-        als_params_layout.addLayout(p_layout)
-        
-        # Iterations parameter
-        niter_layout = QHBoxLayout()
-        niter_layout.addWidget(QLabel("Iterations:"))
-        self.niter_slider = QSlider(Qt.Horizontal)
-        self.niter_slider.setRange(5, 30)
-        self.niter_slider.setValue(10)
-        niter_layout.addWidget(self.niter_slider)
-        self.niter_label = QLabel("10")
-        niter_layout.addWidget(self.niter_label)
-        als_params_layout.addLayout(niter_layout)
-        
-        # Connect sliders to update labels and live preview with debouncing
-        self.lambda_slider.valueChanged.connect(self.update_lambda_label)
-        self.p_slider.valueChanged.connect(self.update_p_label)
-        self.niter_slider.valueChanged.connect(self.update_niter_label)
-        
-        # Connect sliders to debounced live preview
-        self.lambda_slider.valueChanged.connect(self._trigger_background_update)
-        self.p_slider.valueChanged.connect(self._trigger_background_update)
-        self.niter_slider.valueChanged.connect(self._trigger_background_update)
-        
-        bg_layout.addWidget(self.als_params_widget)
-        
-        # Linear parameters
-        self.linear_params_widget = QWidget()
-        linear_params_layout = QVBoxLayout(self.linear_params_widget)
-        linear_params_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Start and end point weighting
-        start_weight_layout = QHBoxLayout()
-        start_weight_layout.addWidget(QLabel("Start Point Weight:"))
-        self.start_weight_slider = QSlider(Qt.Horizontal)
-        self.start_weight_slider.setRange(1, 20)  # 0.1 to 2.0
-        self.start_weight_slider.setValue(10)  # 1.0 (default)
-        start_weight_layout.addWidget(self.start_weight_slider)
-        self.start_weight_label = QLabel("1.0")
-        start_weight_layout.addWidget(self.start_weight_label)
-        linear_params_layout.addLayout(start_weight_layout)
-        
-        end_weight_layout = QHBoxLayout()
-        end_weight_layout.addWidget(QLabel("End Point Weight:"))
-        self.end_weight_slider = QSlider(Qt.Horizontal)
-        self.end_weight_slider.setRange(1, 20)  # 0.1 to 2.0
-        self.end_weight_slider.setValue(10)  # 1.0 (default)
-        end_weight_layout.addWidget(self.end_weight_slider)
-        self.end_weight_label = QLabel("1.0")
-        end_weight_layout.addWidget(self.end_weight_label)
-        linear_params_layout.addLayout(end_weight_layout)
-        
-        # Connect sliders to update labels and live preview
-        self.start_weight_slider.valueChanged.connect(self.update_start_weight_label)
-        self.end_weight_slider.valueChanged.connect(self.update_end_weight_label)
-        self.start_weight_slider.valueChanged.connect(self._trigger_background_update)
-        self.end_weight_slider.valueChanged.connect(self._trigger_background_update)
-        
-        bg_layout.addWidget(self.linear_params_widget)
-        
-        # Polynomial parameters
-        self.poly_params_widget = QWidget()
-        poly_params_layout = QVBoxLayout(self.poly_params_widget)
-        poly_params_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Polynomial order
-        poly_order_layout = QHBoxLayout()
-        poly_order_layout.addWidget(QLabel("Polynomial Order:"))
-        self.poly_order_slider = QSlider(Qt.Horizontal)
-        self.poly_order_slider.setRange(1, 6)  # Extended to 6 orders
-        self.poly_order_slider.setValue(2)  # Default order 2
-        poly_order_layout.addWidget(self.poly_order_slider)
-        self.poly_order_label = QLabel("2")
-        poly_order_layout.addWidget(self.poly_order_label)
-        poly_params_layout.addLayout(poly_order_layout)
-        
-        # Fitting method
-        poly_method_layout = QHBoxLayout()
-        poly_method_layout.addWidget(QLabel("Fitting Method:"))
-        self.poly_method_combo = QComboBox()
-        self.poly_method_combo.addItems(["Least Squares", "Robust"])
-        poly_method_layout.addWidget(self.poly_method_combo)
-        poly_params_layout.addLayout(poly_method_layout)
-        
-        # Connect controls to live preview
-        self.poly_order_slider.valueChanged.connect(self.update_poly_order_label)
-        self.poly_order_slider.valueChanged.connect(self._trigger_background_update)
-        self.poly_method_combo.currentTextChanged.connect(self._trigger_background_update)
-        
-        bg_layout.addWidget(self.poly_params_widget)
-        
-        # Moving Average parameters
-        self.moving_avg_params_widget = QWidget()
-        moving_avg_params_layout = QVBoxLayout(self.moving_avg_params_widget)
-        moving_avg_params_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Window size
-        window_size_layout = QHBoxLayout()
-        window_size_layout.addWidget(QLabel("Window Size (%):"))
-        self.window_size_slider = QSlider(Qt.Horizontal)
-        self.window_size_slider.setRange(1, 50)  # 1% to 50% of spectrum length
-        self.window_size_slider.setValue(10)  # 10% default
-        window_size_layout.addWidget(self.window_size_slider)
-        self.window_size_label = QLabel("10%")
-        window_size_layout.addWidget(self.window_size_label)
-        moving_avg_params_layout.addLayout(window_size_layout)
-        
-        # Window type
-        window_type_layout = QHBoxLayout()
-        window_type_layout.addWidget(QLabel("Window Type:"))
-        self.window_type_combo = QComboBox()
-        self.window_type_combo.addItems(["Uniform", "Gaussian", "Hann", "Hamming"])
-        window_type_layout.addWidget(self.window_type_combo)
-        moving_avg_params_layout.addLayout(window_type_layout)
-        
-        # Connect controls to live preview
-        self.window_size_slider.valueChanged.connect(self.update_window_size_label)
-        self.window_size_slider.valueChanged.connect(self._trigger_background_update)
-        self.window_type_combo.currentTextChanged.connect(self._trigger_background_update)
-        
-        bg_layout.addWidget(self.moving_avg_params_widget)
-        
-        # Spline parameters
-        self.spline_params_widget = QWidget()
-        spline_params_layout = QVBoxLayout(self.spline_params_widget)
-        spline_params_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Number of knots
-        knots_layout = QHBoxLayout()
-        knots_layout.addWidget(QLabel("Number of Knots:"))
-        self.knots_slider = QSlider(Qt.Horizontal)
-        self.knots_slider.setRange(5, 50)  # 5 to 50 knots
-        self.knots_slider.setValue(20)  # Default 20 knots
-        knots_layout.addWidget(self.knots_slider)
-        self.knots_label = QLabel("20")
-        knots_layout.addWidget(self.knots_label)
-        spline_params_layout.addLayout(knots_layout)
-        
-        # Smoothing factor
-        smoothing_layout = QHBoxLayout()
-        smoothing_layout.addWidget(QLabel("Smoothing Factor:"))
-        self.smoothing_slider = QSlider(Qt.Horizontal)
-        self.smoothing_slider.setRange(1, 50)  # Log scale: 10^1 to 10^5
-        self.smoothing_slider.setValue(30)  # Default 10^3
-        smoothing_layout.addWidget(self.smoothing_slider)
-        self.smoothing_label = QLabel("1000")
-        smoothing_layout.addWidget(self.smoothing_label)
-        spline_params_layout.addLayout(smoothing_layout)
-        
-        # Spline degree
-        degree_layout = QHBoxLayout()
-        degree_layout.addWidget(QLabel("Spline Degree:"))
-        self.spline_degree_slider = QSlider(Qt.Horizontal)
-        self.spline_degree_slider.setRange(1, 5)  # 1st to 5th order
-        self.spline_degree_slider.setValue(3)  # Default cubic (3rd order)
-        degree_layout.addWidget(self.spline_degree_slider)
-        self.spline_degree_label = QLabel("3 (Cubic)")
-        degree_layout.addWidget(self.spline_degree_label)
-        spline_params_layout.addLayout(degree_layout)
-        
-        # Connect sliders to update labels and live preview
-        self.knots_slider.valueChanged.connect(self.update_knots_label)
-        self.smoothing_slider.valueChanged.connect(self.update_smoothing_label)
-        self.spline_degree_slider.valueChanged.connect(self.update_spline_degree_label)
-        
-        self.knots_slider.valueChanged.connect(self._trigger_background_update)
-        self.smoothing_slider.valueChanged.connect(self._trigger_background_update)
-        self.spline_degree_slider.valueChanged.connect(self._trigger_background_update)
-        
-        bg_layout.addWidget(self.spline_params_widget)
-        
-        # Initially hide all parameter widgets except ALS (default)
-        self.linear_params_widget.setVisible(False)
-        self.poly_params_widget.setVisible(False)
-        self.moving_avg_params_widget.setVisible(False)
-        self.spline_params_widget.setVisible(False)
-        
-        # Background subtraction buttons
+        # Action buttons (tool-specific functionality)
         button_layout = QHBoxLayout()
         
-        apply_btn = QPushButton("Apply Background Subtraction")
+        apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self.apply_background)
         button_layout.addWidget(apply_btn)
         
-        clear_btn = QPushButton("Clear Preview")
+        clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self.clear_background_preview)
         button_layout.addWidget(clear_btn)
         
-        bg_layout.addLayout(button_layout)
-        
-        reset_btn = QPushButton("Reset Spectrum")
+        reset_btn = QPushButton("Reset")
         reset_btn.clicked.connect(self.reset_spectrum)
-        bg_layout.addWidget(reset_btn)
+        button_layout.addWidget(reset_btn)
         
-        layout.addWidget(bg_group)
-        
-        # Auto Background Preview group
-        auto_bg_group = QGroupBox("Automatic Background Preview")
-        auto_bg_layout = QVBoxLayout(auto_bg_group)
-        
-        # Auto preview button
-        auto_preview_btn = QPushButton("🔍 Generate Background Options")
-        auto_preview_btn.clicked.connect(self.generate_background_previews)
-        auto_preview_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45A049;
-            }
-        """)
-        auto_bg_layout.addWidget(auto_preview_btn)
-        
-        # Background options selection
-        selection_layout = QHBoxLayout()
-        selection_layout.addWidget(QLabel("Select Option:"))
-        self.bg_options_combo = QComboBox()
-        self.bg_options_combo.addItem("None - Generate options first")
-        self.bg_options_combo.currentTextChanged.connect(self.on_bg_option_selected)
-        selection_layout.addWidget(self.bg_options_combo)
-        auto_bg_layout.addLayout(selection_layout)
-        
-        # Auto preview controls
-        auto_controls_layout = QHBoxLayout()
-        
-        apply_selected_btn = QPushButton("Apply Selected")
-        apply_selected_btn.clicked.connect(self.apply_selected_background_option)
-        apply_selected_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 6px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
-        
-        clear_options_btn = QPushButton("Clear Options")
-        clear_options_btn.clicked.connect(self.clear_background_options)
-        clear_options_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF5722;
-                color: white;
-                border: none;
-                padding: 6px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #E64A19;
-            }
-        """)
-        
-        auto_controls_layout.addWidget(apply_selected_btn)
-        auto_controls_layout.addWidget(clear_options_btn)
-        auto_bg_layout.addLayout(auto_controls_layout)
-        
-        # Instructions
-        instructions = QLabel(
-            "Generate multiple background options with different parameters.\n"
-            "Preview them on the plot and select the best one to apply."
-        )
-        instructions.setWordWrap(True)
-        instructions.setStyleSheet("color: #555; font-size: 10px; margin: 5px;")
-        auto_bg_layout.addWidget(instructions)
-        
-        layout.addWidget(auto_bg_group)
+        layout.addLayout(button_layout)
         layout.addStretch()
         
         return tab
+    
+    def _create_fallback_background_controls(self, layout):
+        """Create fallback background controls when centralized UI is not available."""
+        method_group = QGroupBox("Background Method")
+        method_layout = QVBoxLayout(method_group)
         
+        self.bg_method_combo = QComboBox()
+        self.bg_method_combo.addItems(["ALS", "Linear", "Polynomial"])
+        method_layout.addWidget(self.bg_method_combo)
+        
+        layout.addWidget(method_group)
+        
+        # Basic ALS parameters
+        als_group = QGroupBox("ALS Parameters")
+        als_layout = QFormLayout(als_group)
+        
+        self.lambda_input = QLineEdit("100000")
+        als_layout.addRow("Lambda:", self.lambda_input)
+        
+        self.p_input = QLineEdit("0.01")
+        als_layout.addRow("P:", self.p_input)
+        
+        self.niter_input = QLineEdit("10")
+        als_layout.addRow("Iterations:", self.niter_input)
+        
+        layout.addWidget(als_group)
+    
+    def get_fallback_background_parameters(self):
+        """Get background parameters from fallback controls."""
+        try:
+            method = self.bg_method_combo.currentText() if hasattr(self, 'bg_method_combo') else "ALS"
+            
+            if method == "ALS":
+                return {
+                    'method': 'ALS',
+                    'lambda': float(self.lambda_input.text()) if hasattr(self, 'lambda_input') else 1e5,
+                    'p': float(self.p_input.text()) if hasattr(self, 'p_input') else 0.01,
+                    'niter': int(self.niter_input.text()) if hasattr(self, 'niter_input') else 10
+                }
+            else:
+                return {
+                    'method': method,
+                    'order': 2,
+                    'start_weight': 1.0,
+                    'end_weight': 1.0
+                }
+        except Exception:
+            # Ultimate fallback
+            return {'method': 'ALS', 'lambda': 1e5, 'p': 0.01, 'niter': 10}
+    
+    def get_fallback_peak_parameters(self):
+        """Get peak parameters from fallback controls."""
+        try:
+            if hasattr(self, 'height_slider') and hasattr(self, 'distance_slider') and hasattr(self, 'prominence_slider'):
+                return {
+                    'model': self.current_model,
+                    'height': self.height_slider.value() / 100.0,
+                    'distance': self.distance_slider.value(),
+                    'prominence': self.prominence_slider.value() / 100.0
+                }
+            else:
+                # Ultimate fallback
+                return {
+                    'model': 'Gaussian',
+                    'height': 0.1,
+                    'distance': 10,
+                    'prominence': 0.05
+                }
+        except Exception:
+            # Ultimate fallback
+            return {
+                'model': 'Gaussian',
+                'height': 0.1,
+                'distance': 10,
+                'prominence': 0.05
+                         }
+    
+    def get_peak_parameters(self):
+        """Get peak parameters from centralized or fallback controls."""
+        if CENTRALIZED_AVAILABLE and hasattr(self, 'peak_controls'):
+            return self.peak_controls.get_peak_parameters()
+        else:
+            return self.get_fallback_peak_parameters()
+         
     def create_peak_detection_tab(self):
-        """Create peak detection tab with interactive selection."""
+        """Create peak detection tab with interactive selection using centralized controls."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Peak detection group
-        peak_group = QGroupBox("Automatic Peak Detection")
-        peak_layout = QVBoxLayout(peak_group)
-        
-        # Parameters
-        params_layout = QFormLayout()
-        
-        self.height_slider = QSlider(Qt.Horizontal)
-        self.height_slider.setRange(1, 100)
-        self.height_slider.setValue(10)
-        self.height_label = QLabel("10%")
-        height_layout = QHBoxLayout()
-        height_layout.addWidget(self.height_slider)
-        height_layout.addWidget(self.height_label)
-        params_layout.addRow("Min Height:", height_layout)
-        
-        self.distance_slider = QSlider(Qt.Horizontal)
-        self.distance_slider.setRange(1, 50)
-        self.distance_slider.setValue(10)
-        self.distance_label = QLabel("10")
-        distance_layout = QHBoxLayout()
-        distance_layout.addWidget(self.distance_slider)
-        distance_layout.addWidget(self.distance_label)
-        params_layout.addRow("Min Distance:", distance_layout)
-        
-        self.prominence_slider = QSlider(Qt.Horizontal)
-        self.prominence_slider.setRange(1, 50)
-        self.prominence_slider.setValue(5)
-        self.prominence_label = QLabel("5%")
-        prominence_layout = QHBoxLayout()
-        prominence_layout.addWidget(self.prominence_slider)
-        prominence_layout.addWidget(self.prominence_label)
-        params_layout.addRow("Prominence:", prominence_layout)
-        
-        peak_layout.addLayout(params_layout)
-        
-        # Connect sliders to update labels
-        self.height_slider.valueChanged.connect(self.update_height_label)
-        self.distance_slider.valueChanged.connect(self.update_distance_label)
-        self.prominence_slider.valueChanged.connect(self.update_prominence_label)
-        
-        # Connect sliders to live peak detection with debouncing
-        self.height_slider.valueChanged.connect(self._trigger_peak_update)
-        self.distance_slider.valueChanged.connect(self._trigger_peak_update)
-        self.prominence_slider.valueChanged.connect(self._trigger_peak_update)
-        
-        # Automatic detection buttons
-        auto_button_layout = QHBoxLayout()
-        
-        clear_btn = QPushButton("Clear All Peaks")
-        clear_btn.clicked.connect(self.clear_peaks)
-        auto_button_layout.addWidget(clear_btn)
-        
-        peak_layout.addLayout(auto_button_layout)
-        
-        layout.addWidget(peak_group)
+        # Use centralized peak fitting controls if available
+        if CENTRALIZED_AVAILABLE:
+            try:
+                # Use centralized peak fitting controls
+                self.peak_controls = PeakFittingControlsWidget()
+                self.peak_controls.parameters_changed.connect(self._trigger_peak_update)
+                self.peak_controls.model_changed.connect(self.on_centralized_model_changed)
+                layout.addWidget(self.peak_controls)
+                
+                # Action buttons for centralized controls
+                centralized_buttons_layout = QHBoxLayout()
+                
+                clear_btn = QPushButton("Clear All Peaks")
+                clear_btn.clicked.connect(self.clear_peaks)
+                centralized_buttons_layout.addWidget(clear_btn)
+                
+                layout.addLayout(centralized_buttons_layout)
+                
+            except Exception as e:
+                print(f"Warning: Could not create PeakFittingControlsWidget: {e}")
+                self._create_fallback_peak_controls(layout)
+        else:
+            # Fallback to manual controls
+            self._create_fallback_peak_controls(layout)
         
         # Individual Peak Management group
         peak_management_group = QGroupBox("Individual Peak Management")
@@ -834,22 +951,29 @@ class SpectralDeconvolutionQt6(QDialog):
         return tab
         
     def create_fitting_tab(self):
-        """Create peak fitting tab."""
+        """Create peak fitting tab with centralized model selection."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Model selection
-        model_group = QGroupBox("Peak Model")
-        model_layout = QVBoxLayout(model_group)
-        
-        self.model_combo = QComboBox()
-        self.model_combo.addItems([
-            "Gaussian", "Lorentzian", "Pseudo-Voigt", "Asymmetric Voigt"
-        ])
-        self.model_combo.currentTextChanged.connect(self.on_model_changed)
-        model_layout.addWidget(self.model_combo)
-        
-        layout.addWidget(model_group)
+        # Model selection - use centralized controls if available for consistency
+        if CENTRALIZED_AVAILABLE and hasattr(self, 'peak_controls'):
+            # Model selection is already handled by centralized controls
+            model_info = QLabel("Peak model selection is managed in the Peak Detection tab.")
+            model_info.setStyleSheet("color: #666; font-style: italic; margin: 10px;")
+            layout.addWidget(model_info)
+        else:
+            # Fallback model selection for when centralized controls aren't available
+            model_group = QGroupBox("Peak Model")
+            model_layout = QVBoxLayout(model_group)
+            
+            self.model_combo = QComboBox()
+            self.model_combo.addItems([
+                "Gaussian", "Lorentzian", "Pseudo-Voigt", "Asymmetric Voigt"
+            ])
+            self.model_combo.currentTextChanged.connect(self.on_model_changed)
+            model_layout.addWidget(self.model_combo)
+            
+            layout.addWidget(model_group)
         
         # Display options
         display_group = QGroupBox("Display Options")
@@ -907,6 +1031,65 @@ class SpectralDeconvolutionQt6(QDialog):
         layout.addStretch()
         
         return tab
+    
+    def _create_fallback_peak_controls(self, layout):
+        """Create fallback peak detection controls when centralized widget is not available."""
+        # Peak detection group
+        peak_group = QGroupBox("Automatic Peak Detection")
+        peak_layout = QVBoxLayout(peak_group)
+        
+        # Parameters
+        params_layout = QFormLayout()
+        
+        self.height_slider = QSlider(Qt.Horizontal)
+        self.height_slider.setRange(1, 100)
+        self.height_slider.setValue(10)
+        self.height_label = QLabel("10%")
+        height_layout = QHBoxLayout()
+        height_layout.addWidget(self.height_slider)
+        height_layout.addWidget(self.height_label)
+        params_layout.addRow("Min Height:", height_layout)
+        
+        self.distance_slider = QSlider(Qt.Horizontal)
+        self.distance_slider.setRange(1, 50)
+        self.distance_slider.setValue(10)
+        self.distance_label = QLabel("10")
+        distance_layout = QHBoxLayout()
+        distance_layout.addWidget(self.distance_slider)
+        distance_layout.addWidget(self.distance_label)
+        params_layout.addRow("Min Distance:", distance_layout)
+        
+        self.prominence_slider = QSlider(Qt.Horizontal)
+        self.prominence_slider.setRange(1, 50)
+        self.prominence_slider.setValue(5)
+        self.prominence_label = QLabel("5%")
+        prominence_layout = QHBoxLayout()
+        prominence_layout.addWidget(self.prominence_slider)
+        prominence_layout.addWidget(self.prominence_label)
+        params_layout.addRow("Prominence:", prominence_layout)
+        
+        peak_layout.addLayout(params_layout)
+        
+        # Connect sliders to update labels
+        self.height_slider.valueChanged.connect(self.update_height_label)
+        self.distance_slider.valueChanged.connect(self.update_distance_label)
+        self.prominence_slider.valueChanged.connect(self.update_prominence_label)
+        
+        # Connect sliders to live peak detection with debouncing
+        self.height_slider.valueChanged.connect(self._trigger_peak_update)
+        self.distance_slider.valueChanged.connect(self._trigger_peak_update)
+        self.prominence_slider.valueChanged.connect(self._trigger_peak_update)
+        
+        # Automatic detection buttons
+        auto_button_layout = QHBoxLayout()
+        
+        clear_btn = QPushButton("Clear All Peaks")
+        clear_btn.clicked.connect(self.clear_peaks)
+        auto_button_layout.addWidget(clear_btn)
+        
+        peak_layout.addLayout(auto_button_layout)
+        
+        layout.addWidget(peak_group)
         
     def create_deconvolution_tab(self):
         """Create spectral deconvolution tab with Fourier-based analysis."""
@@ -1073,7 +1256,42 @@ class SpectralDeconvolutionQt6(QDialog):
     # Implementation methods
     def initial_plot(self):
         """Create initial plot."""
-        self.update_plot()
+        if len(self.wavenumbers) > 0:
+            self.update_plot()
+        else:
+            # Show empty plot with instruction message
+            self.setup_empty_plot()
+    
+    def setup_empty_plot(self):
+        """Setup an empty plot with instruction message."""
+        # Clear axes
+        self.ax_main.clear()
+        self.ax_residual.clear()
+        
+        # Add instruction text
+        self.ax_main.text(0.5, 0.5, 
+                         'No spectrum data loaded\n\n'
+                         'Use File → Open Spectrum File (Ctrl+O)\n'
+                         'to load a spectrum file\n\n'
+                         'Supported formats: .txt, .csv, .dat, .asc, .spc',
+                         horizontalalignment='center',
+                         verticalalignment='center',
+                         transform=self.ax_main.transAxes,
+                         fontsize=12,
+                         bbox=dict(boxstyle='round,pad=1', facecolor='lightblue', alpha=0.8))
+        
+        self.ax_main.set_xlabel('Wavenumber (cm⁻¹)')
+        self.ax_main.set_ylabel('Intensity')
+        self.ax_main.set_title('Spectral Deconvolution & Advanced Analysis - No Data')
+        self.ax_main.grid(True, alpha=0.3)
+        
+        # Empty residuals plot
+        self.ax_residual.set_xlabel('Wavenumber (cm⁻¹)')
+        self.ax_residual.set_ylabel('Residuals')
+        self.ax_residual.set_title('Residuals - No Data')
+        self.ax_residual.grid(True, alpha=0.3)
+        
+        self.canvas.draw()
     
     # Debounced update methods for responsive live preview
     def _trigger_background_update(self):
@@ -1087,51 +1305,45 @@ class SpectralDeconvolutionQt6(QDialog):
         self.peak_update_timer.start(self.peak_update_delay)
     
     def _update_background_calculation(self):
-        """Perform background calculation and update plot efficiently."""
+        """Perform background calculation and update plot efficiently using unified widget."""
         try:
-            method = self.bg_method_combo.currentText()
-            
-            if method.startswith("ALS"):
-                # Get ALS parameters from sliders
-                lambda_value = 10 ** self.lambda_slider.value()
-                p_value = self.p_slider.value() / 1000.0
-                niter_value = self.niter_slider.value()
+            if CENTRALIZED_AVAILABLE and hasattr(self, 'background_controls'):
+                # Get parameters from unified background controls widget
+                try:
+                    params = self.background_controls.get_background_parameters()
+                    method = params['method']
+                except (AttributeError, Exception) as e:
+                    print(f"Warning: Could not get background parameters: {e}")
+                    # Fallback to default parameters
+                    params = {'method': 'ALS', 'lambda': 1e5, 'p': 0.01, 'niter': 10}
+                    method = 'ALS'
                 
-                # Calculate background using ALS
-                self.background = self.baseline_als(self.original_intensities, lambda_value, p_value, niter_value)
+                if method == "ALS":
+                    # Calculate background using ALS with unified parameters
+                    self.background = self._get_baseline_fitter().baseline_als(
+                        self.original_intensities, 
+                        params['lambda'], 
+                        params['p'], 
+                        params['niter']
+                    )
+                else:
+                    # Handle other methods
+                    self.background = self._calculate_background_with_method(method, params)
+            else:
+                # Fallback method selection
+                params = self.get_fallback_background_parameters()
+                method = params['method']
                 
-            elif method == "Linear":
-                # Linear background fitting to baseline regions
-                start_weight = self.start_weight_slider.value() / 10.0
-                end_weight = self.end_weight_slider.value() / 10.0
-                
-                # Calculate linear baseline using minimum filtering approach
-                self.background = self._calculate_linear_background(start_weight, end_weight)
-                
-            elif method == "Polynomial":
-                # Polynomial background fitting to baseline regions
-                poly_order = self.poly_order_slider.value()
-                poly_method = self.poly_method_combo.currentText()
-                
-                # Calculate polynomial baseline using minimum filtering approach
-                self.background = self._calculate_polynomial_background(poly_order, poly_method)
-                
-            elif method == "Moving Average":
-                # Moving average background fitting to baseline regions
-                window_percent = self.window_size_slider.value()
-                window_type = self.window_type_combo.currentText()
-                
-                # Calculate moving average baseline using minimum filtering approach
-                self.background = self._calculate_moving_average_background(window_percent, window_type)
-                
-            elif method == "Spline":
-                # Spline background fitting
-                n_knots = self.knots_slider.value()
-                smoothing_value = 10 ** (self.smoothing_slider.value() / 10.0)
-                degree = self.spline_degree_slider.value()
-                
-                # Calculate spline background
-                self.background = self._calculate_spline_background_for_subtraction(n_knots, smoothing_value, degree)
+                if method == "ALS":
+                    self.background = self._get_baseline_fitter().baseline_als(
+                        self.original_intensities, 
+                        params['lambda'], 
+                        params['p'], 
+                        params['niter']
+                    )
+                else:
+                    # Handle other methods
+                    self.background = self._calculate_background_with_method(method, params)
             
             # Set preview flag
             self.background_preview_active = True
@@ -1142,32 +1354,104 @@ class SpectralDeconvolutionQt6(QDialog):
         except Exception as e:
             print(f"Background preview error: {str(e)}")
     
-    def _update_peak_detection(self):
-        """Perform live peak detection with current slider values."""
+    def _calculate_background_with_method(self, method, params):
+        """Calculate background using specified method and parameters."""
+        if method == "Linear":
+            return self._calculate_linear_background(
+                params.get('start_weight', 1.0), 
+                params.get('end_weight', 1.0)
+            )
+        elif method == "Polynomial":
+            return self._calculate_polynomial_background(
+                params.get('order', 2), 
+                params.get('method', "Least Squares")
+            )
+        else:
+            # Default to ALS
+            return self._get_baseline_fitter().baseline_als(self.original_intensities)
+    
+    def _calculate_linear_background(self, start_weight, end_weight):
+        """Calculate linear background between weighted endpoints."""
         try:
-            # Get current slider values
-            height_percent = self.height_slider.value()
-            distance = self.distance_slider.value()
-            prominence_percent = self.prominence_slider.value()
+            y = self.original_intensities
+            start_val = y[0] * start_weight
+            end_val = y[-1] * end_weight
+            return np.linspace(start_val, end_val, len(y))
+        except Exception as e:
+            print(f"Linear background calculation error: {str(e)}")
+            return np.linspace(y[0], y[-1], len(y))
+    
+    def _calculate_polynomial_background(self, order, method):
+        """Calculate polynomial background fit."""
+        try:
+            y = self.original_intensities
+            x = np.arange(len(y))
             
-            # Calculate thresholds - ensure they are scalars
-            max_intensity = float(np.max(self.processed_intensities))
-            height_threshold = (height_percent / 100.0) * max_intensity if height_percent > 0 else None
-            prominence_threshold = (prominence_percent / 100.0) * max_intensity if prominence_percent > 0 else None
+            # Fit polynomial to the data
+            if method == "Robust":
+                # Simple robust fitting approach
+                coeffs = np.polyfit(x, y, min(order, len(y)-1))
+                background = np.polyval(coeffs, x)
+                
+                # Apply one round of robust reweighting
+                residuals = np.abs(y - background)
+                weights = 1.0 / (1.0 + residuals / (np.median(residuals) + 1e-10))
+                coeffs = np.polyfit(x, y, min(order, len(y)-1), w=weights)
+                background = np.polyval(coeffs, x)
+            else:
+                # Standard least squares
+                coeffs = np.polyfit(x, y, min(order, len(y)-1))
+                background = np.polyval(coeffs, x)
             
-            # Ensure distance is an integer
-            distance = int(distance) if distance > 0 else None
+            return background
             
-            # Find peaks with proper parameter handling
-            peak_kwargs = {}
-            if height_threshold is not None:
-                peak_kwargs['height'] = height_threshold
-            if distance is not None:
-                peak_kwargs['distance'] = distance
-            if prominence_threshold is not None:
-                peak_kwargs['prominence'] = prominence_threshold
-            
-            self.peaks, properties = find_peaks(self.processed_intensities, **peak_kwargs)
+        except Exception as e:
+            print(f"Polynomial background calculation error: {str(e)}")
+            # Fallback to linear
+            return np.linspace(y[0], y[-1], len(y))
+    
+    def _update_peak_detection(self):
+        """Perform live peak detection using centralized or fallback methods."""
+        try:
+            if CENTRALIZED_AVAILABLE and hasattr(self, 'peak_controls'):
+                # Use centralized peak detection
+                params = self.peak_controls.get_peak_parameters()
+                
+                # Use centralized auto_find_peaks function
+                self.peaks = auto_find_peaks(
+                    self.processed_intensities,
+                    height=params['height'],
+                    distance=params['distance'],
+                    prominence=params['prominence']
+                )
+                
+                # Update current model from centralized controls
+                self.current_model = params['model']
+                
+            else:
+                # Fallback to manual slider values
+                height_percent = self.height_slider.value()
+                distance = self.distance_slider.value()
+                prominence_percent = self.prominence_slider.value()
+                
+                # Calculate thresholds - ensure they are scalars
+                max_intensity = float(np.max(self.processed_intensities))
+                height_threshold = (height_percent / 100.0) * max_intensity if height_percent > 0 else None
+                prominence_threshold = (prominence_percent / 100.0) * max_intensity if prominence_percent > 0 else None
+                
+                # Ensure distance is an integer
+                distance = int(distance) if distance > 0 else None
+                
+                # Find peaks with proper parameter handling using scipy directly
+                peak_kwargs = {}
+                if height_threshold is not None:
+                    peak_kwargs['height'] = height_threshold
+                if distance is not None:
+                    peak_kwargs['distance'] = distance
+                if prominence_threshold is not None:
+                    peak_kwargs['prominence'] = prominence_threshold
+                
+                self.peaks, properties = find_peaks(self.processed_intensities, **peak_kwargs)
             
             self.update_peak_count_display()
             
@@ -1352,6 +1636,10 @@ class SpectralDeconvolutionQt6(QDialog):
         # Update peak list if it exists
         if hasattr(self, 'peak_list_widget'):
             self.update_peak_list()
+        
+        # Update status bar
+        if hasattr(self, 'status_bar'):
+            self.update_status_bar()
         
         self.canvas.draw()
     
@@ -1664,79 +1952,13 @@ class SpectralDeconvolutionQt6(QDialog):
         pass
 
     # Background subtraction methods
-    def on_bg_method_changed(self):
+    def on_bg_method_changed(self, method=None):
         """Handle change in background method."""
-        method = self.bg_method_combo.currentText()
-        
-        # Show/hide parameter widgets based on selected method
-        self.als_params_widget.setVisible(method.startswith("ALS"))
-        self.linear_params_widget.setVisible(method == "Linear")
-        self.poly_params_widget.setVisible(method == "Polynomial")
-        self.moving_avg_params_widget.setVisible(method == "Moving Average")
-        self.spline_params_widget.setVisible(method == "Spline")
-        
         # Clear any active background preview when method changes
         if hasattr(self, 'background_preview_active') and self.background_preview_active:
             self.clear_background_preview()
 
-    def update_lambda_label(self):
-        """Update the lambda label based on the slider value."""
-        value = self.lambda_slider.value()
-        self.lambda_label.setText(f"1e{value}")
-
-    def update_p_label(self):
-        """Update the p label based on the slider value."""
-        value = self.p_slider.value()
-        p_value = value / 1000.0  # Convert to 0.001-0.05 range
-        self.p_label.setText(f"{p_value:.3f}")
-    
-    def update_niter_label(self):
-        """Update the iterations label based on the slider value."""
-        value = self.niter_slider.value()
-        self.niter_label.setText(str(value))
-    
-    def update_start_weight_label(self):
-        """Update the start weight label based on the slider value."""
-        value = self.start_weight_slider.value()
-        weight_value = value / 10.0  # Convert to 0.1-2.0 range
-        self.start_weight_label.setText(f"{weight_value:.1f}")
-    
-    def update_end_weight_label(self):
-        """Update the end weight label based on the slider value."""
-        value = self.end_weight_slider.value()
-        weight_value = value / 10.0  # Convert to 0.1-2.0 range
-        self.end_weight_label.setText(f"{weight_value:.1f}")
-    
-    def update_poly_order_label(self):
-        """Update the polynomial order label based on the slider value."""
-        value = self.poly_order_slider.value()
-        self.poly_order_label.setText(str(value))
-    
-    def update_window_size_label(self):
-        """Update the window size label based on the slider value."""
-        value = self.window_size_slider.value()
-        self.window_size_label.setText(f"{value}%")
-    
-    def update_knots_label(self):
-        """Update the knots label based on the slider value."""
-        value = self.knots_slider.value()
-        self.knots_label.setText(str(value))
-    
-    def update_smoothing_label(self):
-        """Update the smoothing label based on the slider value."""
-        value = self.smoothing_slider.value()
-        smoothing_value = 10 ** (value / 10.0)  # Convert to 10^1 to 10^5 range
-        if smoothing_value >= 1000:
-            self.smoothing_label.setText(f"{int(smoothing_value)}")
-        else:
-            self.smoothing_label.setText(f"{smoothing_value:.1f}")
-    
-    def update_spline_degree_label(self):
-        """Update the spline degree label based on the slider value."""
-        value = self.spline_degree_slider.value()
-        degree_names = {1: "1 (Linear)", 2: "2 (Quadratic)", 3: "3 (Cubic)", 
-                       4: "4 (Quartic)", 5: "5 (Quintic)"}
-        self.spline_degree_label.setText(degree_names.get(value, str(value)))
+    # REFACTORED: Removed all background label update methods - handled by unified widget now!
 
     def clear_background_preview(self):
         """Clear the background preview."""
@@ -1794,34 +2016,27 @@ class SpectralDeconvolutionQt6(QDialog):
         self.update_plot()
     
     def baseline_als(self, y, lam=1e5, p=0.01, niter=10):
-        """Asymmetric Least Squares baseline correction."""
-        L = len(y)
-        D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
-        w = np.ones(L)
-        
-        for i in range(niter):
-            W = sparse.spdiags(w, 0, L, L)
-            Z = W + lam * D.dot(D.transpose())
-            z = spsolve(Z, w*y)
-            w = p * (y > z) + (1-p) * (y < z)
-        
-        return z
+        """Asymmetric Least Squares baseline correction using centralized implementation."""
+        return self._get_baseline_fitter().baseline_als(y, lam, p, niter)
     
-    # Peak detection methods
+    # Peak detection methods (fallback controls only)
     def update_height_label(self):
-        """Update height slider label."""
-        value = self.height_slider.value()
-        self.height_label.setText(f"{value}%")
+        """Update height slider label (fallback controls only)."""
+        if hasattr(self, 'height_slider') and hasattr(self, 'height_label'):
+            value = self.height_slider.value()
+            self.height_label.setText(f"{value}%")
     
     def update_distance_label(self):
-        """Update distance slider label."""
-        value = self.distance_slider.value()
-        self.distance_label.setText(str(value))
+        """Update distance slider label (fallback controls only)."""
+        if hasattr(self, 'distance_slider') and hasattr(self, 'distance_label'):
+            value = self.distance_slider.value()
+            self.distance_label.setText(str(value))
     
     def update_prominence_label(self):
-        """Update prominence slider label."""
-        value = self.prominence_slider.value()
-        self.prominence_label.setText(f"{value}%")
+        """Update prominence slider label (fallback controls only)."""
+        if hasattr(self, 'prominence_slider') and hasattr(self, 'prominence_label'):
+            value = self.prominence_slider.value()
+            self.prominence_label.setText(f"{value}%")
     
     def detect_peaks(self):
         """Detect peaks in the spectrum (legacy method - now calls debounced detection)."""
@@ -1998,8 +2213,15 @@ class SpectralDeconvolutionQt6(QDialog):
 
     # Peak fitting methods
     def on_model_changed(self):
-        """Handle model selection change."""
-        self.current_model = self.model_combo.currentText()
+        """Handle model selection change (fallback controls)."""
+        if hasattr(self, 'model_combo'):
+            self.current_model = self.model_combo.currentText()
+            if self.fit_result is not None:
+                self.update_plot()
+    
+    def on_centralized_model_changed(self, model_name):
+        """Handle model selection change from centralized controls."""
+        self.current_model = model_name
         if self.fit_result is not None:
             self.update_plot()
     
@@ -2009,19 +2231,24 @@ class SpectralDeconvolutionQt6(QDialog):
         self.show_components = self.show_components_check.isChecked()
         self.update_plot()
     
+    # REFACTORED: Use centralized peak fitting functions instead of duplicating them
     def gaussian(self, x, amp, cen, wid):
-        """Gaussian peak function."""
-        return amp * np.exp(-((x - cen) / wid)**2)
+        """Gaussian peak function using centralized implementation."""
+        return self._get_baseline_fitter().gaussian(x, amp, cen, wid)
     
     def lorentzian(self, x, amp, cen, wid):
-        """Lorentzian peak function."""
-        return amp / (1 + ((x - cen) / wid)**2)
+        """Lorentzian peak function using centralized implementation."""
+        return self._get_baseline_fitter().lorentzian(x, amp, cen, wid)
     
     def pseudo_voigt(self, x, amp, cen, wid, eta=0.5):
-        """Pseudo-Voigt peak function."""
-        gaussian = self.gaussian(x, amp, cen, wid)
-        lorentzian = self.lorentzian(x, amp, cen, wid)
-        return eta * lorentzian + (1 - eta) * gaussian
+        """Pseudo-Voigt peak function using centralized implementation."""
+        return self._get_baseline_fitter().pseudo_voigt(x, amp, cen, wid, eta)
+    
+    def _get_baseline_fitter(self):
+        """Get baseline correction fitter instance."""
+        if not hasattr(self, '_baseline_fitter'):
+            self._baseline_fitter = EnhancedPeakFitter()
+        return self._baseline_fitter
     
     def multi_peak_model(self, x, *params):
         """Multi-peak model function."""
@@ -2108,6 +2335,10 @@ class SpectralDeconvolutionQt6(QDialog):
             
             # Prepare bounds
             bounds = (bounds_lower, bounds_upper)
+            
+            # Get current model from centralized or fallback controls
+            current_params = self.get_peak_parameters()
+            self.current_model = current_params.get('model', self.current_model)
             
             # Define fitting strategies with different approaches
             strategies = [
@@ -3857,7 +4088,30 @@ class SpectralDeconvolutionQt6(QDialog):
 
 
 # Launch function for integration with main app
-def launch_spectral_deconvolution(parent, wavenumbers, intensities):
+def launch_spectral_deconvolution(parent, wavenumbers=None, intensities=None):
     """Launch the spectral deconvolution window."""
     dialog = SpectralDeconvolutionQt6(parent, wavenumbers, intensities)
-    dialog.exec() 
+    dialog.exec()
+
+# Standalone launch function
+def launch_standalone_spectral_deconvolution():
+    """Launch the spectral deconvolution window as a standalone application."""
+    import sys
+    from PySide6.QtWidgets import QApplication
+    
+    app = QApplication(sys.argv) if not QApplication.instance() else QApplication.instance()
+    
+    # Create a minimal parent widget
+    from PySide6.QtWidgets import QWidget
+    parent = QWidget()
+    parent.hide()
+    
+    dialog = SpectralDeconvolutionQt6(parent)
+    dialog.show()
+    
+    if app:
+        sys.exit(app.exec())
+
+# Allow running as standalone script
+if __name__ == "__main__":
+    launch_standalone_spectral_deconvolution() 

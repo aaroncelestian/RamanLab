@@ -18,7 +18,7 @@ The Raman Polarization Analyzer is a comprehensive Qt6-based application for ana
 - **Main App Integration**: Launches from the Advanced tab of `raman_analysis_app_qt6.py`
 - **Automatic Data Transfer**: Current spectrum from main app is automatically loaded
 - **Full Database Integration**: Access to comprehensive mineral modes database with 461+ calculated spectra
-- **Multiple Database Support**: Supports mineral_modes.pkl, raman_database.pkl, and other formats
+- **Multiple Database Support**: Supports mineral_modes.pkl, RamanLab_Database_20250602.pkl, and other formats
 - **Professional CIF Support**: Uses pymatgen for advanced crystallographic file parsing
 
 ## Usage

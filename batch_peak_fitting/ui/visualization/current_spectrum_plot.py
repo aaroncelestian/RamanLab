@@ -100,6 +100,9 @@ class CurrentSpectrumPlot(BasePlot):
             
         self.figure.clear()
         
+        # Get dynamic title with filename
+        plot_title = self.get_dynamic_title()
+        
         # Create subplot layout with residuals
         if self.settings['show_residuals']:
             # Create subplot with shared x-axis
@@ -108,7 +111,7 @@ class CurrentSpectrumPlot(BasePlot):
             
             # Setup main plot
             self.main_axes.set_ylabel('Intensity')
-            self.main_axes.set_title(self.title)
+            self.main_axes.set_title(plot_title)
             
             # Setup residuals plot  
             self.residuals_axes.set_xlabel('Wavenumber (cm⁻¹)')
@@ -120,7 +123,7 @@ class CurrentSpectrumPlot(BasePlot):
             self.main_axes = self.figure.add_subplot(111)
             self.main_axes.set_xlabel('Wavenumber (cm⁻¹)')
             self.main_axes.set_ylabel('Intensity')
-            self.main_axes.set_title(self.title)
+            self.main_axes.set_title(plot_title)
             self.residuals_axes = None
         
         if self.settings['show_grid']:
@@ -266,6 +269,26 @@ class CurrentSpectrumPlot(BasePlot):
         # Force canvas to redraw
         self.canvas.draw_idle()
     
+    def get_dynamic_title(self):
+        """Get dynamic title including current filename"""
+        base_title = "Current Spectrum"
+        
+        if not self.data_processor:
+            return base_title
+        
+        try:
+            # Get current filename
+            current_filename = self.data_processor.get_current_file_name()
+            if current_filename and current_filename != "None":
+                # Remove file extension for cleaner display
+                filename_without_ext = current_filename.rsplit('.', 1)[0] if '.' in current_filename else current_filename
+                return f"{base_title} - {filename_without_ext}"
+            else:
+                return base_title
+        except Exception as e:
+            print(f"Warning: Could not get filename for title: {e}")
+            return base_title
+    
     def update_data_cache(self):
         """Update cached data from core components"""
         if not self.data_processor:
@@ -369,6 +392,11 @@ class CurrentSpectrumPlot(BasePlot):
                 
         self.initialize_plot()
         self.plot_data_on_axes()
+        
+        # Update title in case filename changed
+        if self.main_axes:
+            self.main_axes.set_title(self.get_dynamic_title())
+        
         self.canvas.draw()
             
         self.plot_updated.emit(self.plot_type)

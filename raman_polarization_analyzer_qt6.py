@@ -1282,7 +1282,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             # Priority order for database loading
             db_sources = [
                 ('mineral_modes.pkl', 'mineral_modes'),
-                ('raman_database.pkl', 'raman_spectra'),
+                ('RamanLab_Database_20250602.pkl', 'raman_spectra'),
                 ('mineral_database.pkl', 'simple'),
                 ('mineral_database.py', 'python_module')
             ]

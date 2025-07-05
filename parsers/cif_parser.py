@@ -586,4 +586,13 @@ def parse_cif_file(file_path: str, use_pymatgen: bool = True,
         StructureData object or None if parsing fails
     """
     parser = CifStructureParser(use_pymatgen=use_pymatgen)
-    return parser.parse_cif_file(file_path, get_conventional=get_conventional) 
+    return parser.parse_cif_file(file_path, get_conventional=get_conventional)
+
+
+# Create aliases for backward compatibility with expected import names
+CIFParser = CifStructureParser
+CrystalStructure = StructureData
+
+# Export main classes and functions
+__all__ = ['CifStructureParser', 'CIFParser', 'StructureData', 'CrystalStructure', 
+           'AtomData', 'LatticeParameters', 'parse_cif_file'] 

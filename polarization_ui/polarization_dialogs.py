@@ -45,8 +45,9 @@ try:
     print("✓ Core polarization modules loaded successfully")
 except ImportError as e:
     CORE_MODULES_AVAILABLE = False
-    print(f"⚠ Core modules not available: {e}")
-    print("Using mock implementations for testing")
+    module_name = str(e).split("'")[-2] if "'" in str(e) else str(e).split()[-1]
+    print(f"ℹ️  Core polarization modules not available: {module_name}")
+    print("✓ Using mock implementations for testing")
 
 
 # Data class for polarization data

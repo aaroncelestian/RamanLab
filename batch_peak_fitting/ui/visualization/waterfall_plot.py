@@ -195,7 +195,7 @@ class WaterfallPlot(BasePlot):
         # Setup axes
         self.axes.set_xlabel('Wavenumber (cm⁻¹)')
         self.axes.set_ylabel('Intensity + Offset')
-        self.axes.set_title(self.title)
+        self.axes.set_title(self.get_dynamic_title())
         
         if self.settings['show_grid']:
             self.axes.grid(True, alpha=0.3)
@@ -343,6 +343,32 @@ class WaterfallPlot(BasePlot):
             return np.array(result.get('residuals', []))
         else:
             return np.array(result.get('intensities', []))
+    
+    def get_dynamic_title(self):
+        """Get dynamic title including number of spectra"""
+        base_title = "Waterfall Plot"
+        
+        if not self.data_processor:
+            return base_title
+        
+        try:
+            # Get number of loaded files or batch results
+            file_list = self.data_processor.get_file_list()
+            n_files = len(file_list)
+            
+            if n_files > 0:
+                data_type = self.settings['data_type'].replace('_', ' ').title()
+                skip = self.settings['skip_spectra']
+                if skip > 1:
+                    displayed = (n_files + skip - 1) // skip  # ceiling division
+                    return f"{base_title} - {data_type} ({displayed}/{n_files} spectra)"
+                else:
+                    return f"{base_title} - {data_type} ({n_files} spectra)"
+            else:
+                return base_title
+        except Exception as e:
+            print(f"Warning: Could not get dataset info for waterfall title: {e}")
+            return base_title
     
     def update_data_cache(self):
         """Update cached data from data processor"""

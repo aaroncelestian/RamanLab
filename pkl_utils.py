@@ -116,8 +116,8 @@ def load_map_data(file_path):
     return safe_pickle_load(file_path, ensure_path=False)
 
 # Convenience functions for common use cases
-def load_raman_database(db_path="raman_database.pkl"):
-    """Load the Raman database PKL file."""
+def load_raman_database(db_path="RamanLab_Database_20250602.pkl"):
+    """Load the RamanLab database PKL file."""
     return safe_pickle_load(db_path)
 
 def load_mineral_modes(modes_path="mineral_modes.pkl"):

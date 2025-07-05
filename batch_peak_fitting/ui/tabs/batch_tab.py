@@ -12,6 +12,155 @@ from PySide6.QtCore import Qt
 
 from ..base_tab import BaseTab
 
+# Unified button styles for consistent UI
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #f8f9fa;
+        color: #495057;
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #e9ecef;
+        border: 1px solid #adb5bd;
+        color: #212529;
+    }
+    QPushButton:pressed {
+        background-color: #dee2e6;
+        border: 1px solid #6c757d;
+    }
+    QPushButton:disabled {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        color: #6c757d;
+        opacity: 0.6;
+    }
+"""
+
+PRIMARY_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #0d6efd;
+        color: white;
+        border: 1px solid #0a58ca;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 12px;
+        min-width: 60px;
+    }
+    QPushButton:hover {
+        background-color: #0b5ed7;
+        border: 1px solid #09408e;
+    }
+    QPushButton:pressed {
+        background-color: #0a58ca;
+        border: 1px solid #08356d;
+    }
+    QPushButton:disabled {
+        background-color: #6c757d;
+        border: 1px solid #5c636a;
+        opacity: 0.6;
+    }
+"""
+
+SUCCESS_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #198754;
+        color: white;
+        border: 1px solid #146c43;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 12px;
+        min-width: 60px;
+    }
+    QPushButton:hover {
+        background-color: #157347;
+        border: 1px solid #0f5132;
+    }
+    QPushButton:pressed {
+        background-color: #146c43;
+        border: 1px solid #0c3a22;
+    }
+    QPushButton:disabled {
+        background-color: #6c757d;
+        border: 1px solid #5c636a;
+        opacity: 0.6;
+    }
+"""
+
+DANGER_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #dc3545;
+        color: white;
+        border: 1px solid #bb2d3b;
+        padding: 8px 16px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 12px;
+        min-width: 60px;
+    }
+    QPushButton:hover {
+        background-color: #c82333;
+        border: 1px solid #a02834;
+    }
+    QPushButton:pressed {
+        background-color: #bb2d3b;
+        border: 1px solid #8d2130;
+    }
+    QPushButton:disabled {
+        background-color: #6c757d;
+        border: 1px solid #5c636a;
+        opacity: 0.6;
+    }
+"""
+
+INFO_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #0dcaf0;
+        color: #055160;
+        border: 1px solid #0aa2c0;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #31d2f2;
+        border: 1px solid #0994a8;
+    }
+    QPushButton:pressed {
+        background-color: #0aa2c0;
+        border: 1px solid #087990;
+    }
+"""
+
+PURPLE_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #6f42c1;
+        color: white;
+        border: 1px solid #59359a;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #59359a;
+        border: 1px solid #4c2d83;
+    }
+    QPushButton:pressed {
+        background-color: #4c2d83;
+        border: 1px solid #3e246c;
+    }
+"""
+
 
 class BatchTab(BaseTab):
     """
@@ -58,53 +207,13 @@ class BatchTab(BaseTab):
         # Action buttons
         buttons_layout = QHBoxLayout()
         
-        self.batch_button = QPushButton("Start Batch Processing")
-        self.batch_button.setStyleSheet("""
-            QPushButton {
-                background-color: #388E3C;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #2E7D32;
-            }
-            QPushButton:pressed {
-                background-color: #1B5E20;
-            }
-            QPushButton:disabled {
-                background-color: #BDBDBD;
-                color: #757575;
-            }
-        """)
+        self.batch_button = QPushButton("Start")
+        self.batch_button.setStyleSheet(SUCCESS_BUTTON_STYLE)
         buttons_layout.addWidget(self.batch_button)
         
-        self.stop_button = QPushButton("Stop Processing")
+        self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
-        self.stop_button.setStyleSheet("""
-            QPushButton {
-                background-color: #D32F2F;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 5px;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #C62828;
-            }
-            QPushButton:pressed {
-                background-color: #B71C1C;
-            }
-            QPushButton:disabled {
-                background-color: #BDBDBD;
-                color: #757575;
-            }
-        """)
+        self.stop_button.setStyleSheet(DANGER_BUTTON_STYLE)
         buttons_layout.addWidget(self.stop_button)
         
         controls_layout.addLayout(buttons_layout)
@@ -119,14 +228,15 @@ class BatchTab(BaseTab):
         self.progress_bar.setValue(0)
         self.progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #BDBDBD;
-                border-radius: 5px;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
                 text-align: center;
                 height: 25px;
+                background-color: #f8f9fa;
             }
             QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 4px;
+                background-color: #198754;
+                border-radius: 3px;
             }
         """)
         progress_layout.addWidget(self.progress_bar)
@@ -135,8 +245,8 @@ class BatchTab(BaseTab):
         self.progress_label = QLabel("Ready to process")
         self.progress_label.setStyleSheet("""
             QLabel {
-                font-weight: bold;
-                color: #424242;
+                font-weight: 500;
+                color: #495057;
                 padding: 5px;
             }
         """)
@@ -152,11 +262,12 @@ class BatchTab(BaseTab):
         self.status_text.setReadOnly(True)
         self.status_text.setStyleSheet("""
             QTextEdit {
-                background-color: #FAFAFA;
-                border: 1px solid #E0E0E0;
-                border-radius: 3px;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
                 font-family: monospace;
                 font-size: 10px;
+                color: #495057;
             }
         """)
         status_layout.addWidget(self.status_text)
@@ -168,11 +279,11 @@ class BatchTab(BaseTab):
         results_layout.addWidget(self.files_processed_label)
         
         self.success_count_label = QLabel("Successful: 0")
-        self.success_count_label.setStyleSheet("color: #2E7D32; font-weight: bold;")
+        self.success_count_label.setStyleSheet("color: #198754; font-weight: 500;")
         results_layout.addWidget(self.success_count_label)
         
         self.failed_count_label = QLabel("Failed: 0")
-        self.failed_count_label.setStyleSheet("color: #D32F2F; font-weight: bold;")
+        self.failed_count_label.setStyleSheet("color: #dc3545; font-weight: 500;")
         results_layout.addWidget(self.failed_count_label)
         
         status_layout.addLayout(results_layout)
@@ -181,36 +292,12 @@ class BatchTab(BaseTab):
         export_group = QGroupBox("Export Results")
         export_layout = QHBoxLayout(export_group)
         
-        export_csv_btn = QPushButton("Export to CSV")
-        export_csv_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976D2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-        """)
+        export_csv_btn = QPushButton("CSV")
+        export_csv_btn.setStyleSheet(INFO_BUTTON_STYLE)
         export_layout.addWidget(export_csv_btn)
         
-        export_comprehensive_btn = QPushButton("Export Comprehensive")
-        export_comprehensive_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #7B1FA2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #6A1B9A;
-            }
-        """)
+        export_comprehensive_btn = QPushButton("Full")
+        export_comprehensive_btn.setStyleSheet(PURPLE_BUTTON_STYLE)
         export_layout.addWidget(export_comprehensive_btn)
         
         # Add to main layout
@@ -226,7 +313,7 @@ class BatchTab(BaseTab):
         
         # Initialize status
         self.status_text.append("Batch processing ready")
-        self.status_text.append("Configure settings and click 'Start Batch Processing'")
+        self.status_text.append("Configure settings and click 'Start'")
     
     def connect_signals(self):
         """Connect internal signals"""
@@ -249,42 +336,40 @@ class BatchTab(BaseTab):
             'save_results': self.save_results_checkbox.isChecked()
         }
         
-        # Validate that we have files to process
-        if self.data_processor:
-            file_list = self.data_processor.get_file_list()
-            if not file_list:
-                self.status_text.append("❌ No files loaded for processing")
-                return
-            
-            # Update UI state
-            self.batch_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            self.progress_bar.setValue(0)
-            self.progress_label.setText(f"Processing {len(file_list)} files...")
-            
-            # Clear status
-            self.status_text.clear()
-            self.status_text.append(f"🚀 Starting batch processing of {len(file_list)} files")
-            self.status_text.append(f"Options: BG={options['auto_background']}, Peaks={options['auto_peaks']}")
-            
-            # Emit action for main controller to handle
-            self.emit_action("start_batch_processing", options)
-            self.emit_status("Batch processing started")
-        else:
-            self.status_text.append("❌ No data processor available")
+        # Disable start button, enable stop button
+        self.batch_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        
+        # Clear previous status
+        self.status_text.clear()
+        self.status_text.append("Starting batch processing...")
+        
+        # Reset progress
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Processing...")
+        
+        # Reset counters
+        self._reset_counters()
+        
+        # Emit action to start processing
+        self.emit_action("start_batch_processing", options)
+        self.emit_status("Batch processing started")
     
     def _stop_batch_processing(self):
         """Stop batch processing"""
+        # Emit action to stop processing
+        self.emit_action("stop_batch_processing", {})
+        
+        # Update UI
         self.batch_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.progress_label.setText("Processing stopped")
         
-        self.status_text.append("⏹️ Batch processing stopped by user")
-        self.emit_action("stop_batch_processing", {})
+        self.status_text.append("Batch processing stopped by user")
         self.emit_status("Batch processing stopped")
     
     def _export_csv(self):
-        """Export results to CSV"""
+        """Export results to CSV format"""
         self.emit_action("export_results", {"format": "csv"})
         self.emit_status("CSV export initiated")
     
@@ -295,107 +380,135 @@ class BatchTab(BaseTab):
     
     def _update_file_count(self, file_list):
         """Update file count display"""
-        count = len(file_list)
-        self.progress_label.setText(f"Ready to process {count} files")
-        
-        # Enable/disable batch button based on file availability
-        self.batch_button.setEnabled(count > 0)
+        file_count = len(file_list)
+        self.emit_status(f"Loaded {file_count} files for batch processing")
     
-    def update_batch_progress(self, current, total, current_file=""):
-        """Update batch processing progress"""
+    def _update_progress(self, current, total):
+        """Update progress bar and label"""
         if total > 0:
             progress = int((current / total) * 100)
             self.progress_bar.setValue(progress)
-            self.progress_label.setText(f"Processing {current}/{total}: {current_file}")
-            
-            # Update status
-            if current_file:
-                self.status_text.append(f"📊 Processing file {current}/{total}: {current_file}")
+            self.progress_label.setText(f"Processing {current}/{total} files ({progress}%)")
     
-    def update_batch_result(self, file_index, file_name, success, message=""):
-        """Update results for a single file"""
-        if success:
-            self.status_text.append(f"✅ {file_index}: {file_name} - Success")
-            self._increment_success_count()
-        else:
-            self.status_text.append(f"❌ {file_index}: {file_name} - Failed: {message}")
-            self._increment_failed_count()
+    def _on_batch_completed(self, results):
+        """Handle batch processing completion"""
+        # Re-enable controls
+        self.batch_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
         
-        self._increment_processed_count()
+        # Update progress
+        self.progress_bar.setValue(100)
+        
+        # Update status
+        total = results.get('total', 0)
+        successful = results.get('successful', 0)
+        failed = results.get('failed', 0)
+        
+        self.progress_label.setText(f"Completed: {total} files processed")
+        self.status_text.append("")
+        self.status_text.append(f"Batch processing completed!")
+        self.status_text.append(f"Total files: {total}")
+        self.status_text.append(f"Successful: {successful}")
+        self.status_text.append(f"Failed: {failed}")
+        
+        # Update counters
+        self._update_counters(total, successful, failed)
+        
+        self.emit_status(f"Batch processing completed: {successful}/{total} files successful")
+    
+    def _on_file_processed(self, file_info):
+        """Handle individual file processing completion"""
+        filename = file_info.get('filename', 'Unknown')
+        success = file_info.get('success', False)
+        error = file_info.get('error', '')
+        
+        status_icon = "✓" if success else "✗"
+        
+        if success:
+            self.status_text.append(f"{status_icon} {filename}")
+        else:
+            self.status_text.append(f"{status_icon} {filename} - Error: {error}")
         
         # Auto-scroll to bottom
         self.status_text.verticalScrollBar().setValue(
             self.status_text.verticalScrollBar().maximum()
         )
     
-    def finish_batch_processing(self, total_processed, successful, failed):
-        """Complete batch processing"""
-        self.batch_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.progress_bar.setValue(100)
-        self.progress_label.setText(f"Processing complete: {successful} successful, {failed} failed")
-        
-        self.status_text.append("")
-        self.status_text.append("🎉 Batch processing completed!")
-        self.status_text.append(f"📈 Summary: {total_processed} processed, {successful} successful, {failed} failed")
-        
-        self.emit_status(f"Batch complete: {successful}/{total_processed} successful")
-    
-    def _increment_processed_count(self):
-        """Increment processed files count"""
-        current = self._extract_count(self.files_processed_label.text())
-        self.files_processed_label.setText(f"Files processed: {current + 1}")
-    
-    def _increment_success_count(self):
-        """Increment successful files count"""
-        current = self._extract_count(self.success_count_label.text())
-        self.success_count_label.setText(f"Successful: {current + 1}")
-    
-    def _increment_failed_count(self):
-        """Increment failed files count"""
-        current = self._extract_count(self.failed_count_label.text())
-        self.failed_count_label.setText(f"Failed: {current + 1}")
-    
-    def _extract_count(self, text):
-        """Extract count from label text"""
-        try:
-            return int(text.split(": ")[1])
-        except:
-            return 0
-    
-    def reset_batch_counters(self):
-        """Reset all batch counters"""
+    def _reset_counters(self):
+        """Reset processing counters"""
         self.files_processed_label.setText("Files processed: 0")
         self.success_count_label.setText("Successful: 0")
         self.failed_count_label.setText("Failed: 0")
-        self.progress_bar.setValue(0)
-        self.progress_label.setText("Ready to process")
-        self.status_text.clear()
-        self.status_text.append("Batch processing ready")
+    
+    def _update_counters(self, total, successful, failed):
+        """Update processing counter labels"""
+        self.files_processed_label.setText(f"Files processed: {total}")
+        self.success_count_label.setText(f"Successful: {successful}")
+        self.failed_count_label.setText(f"Failed: {failed}")
     
     def get_tab_data(self):
         """Get current tab state"""
         base_data = super().get_tab_data()
         
         base_data.update({
-            'auto_background': self.auto_bg_checkbox.isChecked() if self.auto_bg_checkbox else True,
-            'auto_peaks': self.auto_peaks_checkbox.isChecked() if self.auto_peaks_checkbox else True,
-            'save_results': self.save_results_checkbox.isChecked() if self.save_results_checkbox else True,
-            'processed_count': self._extract_count(self.files_processed_label.text()) if self.files_processed_label else 0,
-            'success_count': self._extract_count(self.success_count_label.text()) if self.success_count_label else 0,
-            'failed_count': self._extract_count(self.failed_count_label.text()) if self.failed_count_label else 0
+            'auto_background': self.auto_bg_checkbox.isChecked(),
+            'auto_peaks': self.auto_peaks_checkbox.isChecked(),
+            'save_results': self.save_results_checkbox.isChecked(),
+            'progress': self.progress_bar.value(),
+            'is_processing': not self.batch_button.isEnabled()
         })
         
         return base_data
     
     def reset_to_defaults(self):
         """Reset tab to default state"""
-        if self.auto_bg_checkbox:
-            self.auto_bg_checkbox.setChecked(True)
-        if self.auto_peaks_checkbox:
-            self.auto_peaks_checkbox.setChecked(True)
-        if self.save_results_checkbox:
-            self.save_results_checkbox.setChecked(True)
+        self.auto_bg_checkbox.setChecked(True)
+        self.auto_peaks_checkbox.setChecked(True)
+        self.save_results_checkbox.setChecked(True)
         
-        self.reset_batch_counters()
-        self.emit_status("Tab reset to defaults") 
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("Ready to process")
+        
+        self.status_text.clear()
+        self.status_text.append("Batch processing ready")
+        self.status_text.append("Configure settings and click 'Start'")
+        
+        self.batch_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        
+        self._reset_counters()
+        
+        self.emit_status("Tab reset to defaults")
+    
+    # Public methods called by main controller
+    def reset_batch_counters(self):
+        """Reset batch processing counters (public interface)"""
+        self._reset_counters()
+    
+    def update_batch_progress(self, current, total, current_file):
+        """Update batch progress (public interface)"""
+        self._update_progress(current, total)
+        self.status_text.append(f"Processing {current}/{total}: {current_file}")
+        
+        # Auto-scroll to bottom
+        self.status_text.verticalScrollBar().setValue(
+            self.status_text.verticalScrollBar().maximum()
+        )
+    
+    def update_batch_result(self, file_number, filename, success, message):
+        """Update batch result for individual file (public interface)"""
+        file_info = {
+            'filename': filename,
+            'success': success,
+            'error': message if not success else ''
+        }
+        self._on_file_processed(file_info)
+    
+    def finish_batch_processing(self, total, successful, failed):
+        """Finish batch processing (public interface)"""
+        results = {
+            'total': total,
+            'successful': successful,
+            'failed': failed
+        }
+        self._on_batch_completed(results) 

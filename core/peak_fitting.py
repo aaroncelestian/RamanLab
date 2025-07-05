@@ -24,6 +24,8 @@ class PeakData:
     original_position: float
     fit_quality: str
     gamma: Optional[float] = None  # For Voigt profiles
+    alpha: Optional[float] = None  # For asymmetric Voigt profiles
+    eta: Optional[float] = None  # For Pseudo-Voigt profiles
 
 
 class PeakFitter:
@@ -148,6 +150,64 @@ class PeakFitter:
         
         return amplitude * ((1 - eta) * gaussian_part + eta * lorentzian_part)
     
+    @staticmethod
+    def asymmetric_voigt(x: np.ndarray, amplitude: float, center: float, sigma: float, gamma: float, alpha: float) -> np.ndarray:
+        """
+        Asymmetric Voigt profile using exponential asymmetry modification.
+        
+        Parameters:
+        -----------
+        x : array_like
+            Independent variable (wavenumber)
+        amplitude : float
+            Peak amplitude
+        center : float
+            Peak center position
+        sigma : float
+            Gaussian width parameter
+        gamma : float
+            Lorentzian width parameter  
+        alpha : float
+            Asymmetry parameter (0 = symmetric, >0 = tail to higher x, <0 = tail to lower x)
+            
+        Returns:
+        --------
+        np.ndarray
+            Calculated intensities
+        """
+        # Calculate symmetric Voigt profile
+        symmetric_voigt = PeakFitter.voigt(x, amplitude, center, sigma, gamma)
+        
+        # Apply asymmetry modification
+        if abs(alpha) < 1e-6:  # Essentially symmetric
+            return symmetric_voigt
+        
+        # Asymmetry factor based on distance from center
+        dx = x - center
+        
+        # Use different asymmetry for left and right sides
+        asymmetry_factor = np.ones_like(x)
+        
+        # Right side (x > center): positive alpha creates longer tail
+        right_mask = dx > 0
+        asymmetry_factor[right_mask] = np.exp(-alpha * dx[right_mask] / (sigma + gamma))
+        
+        # Left side (x < center): negative alpha creates longer tail  
+        left_mask = dx < 0
+        asymmetry_factor[left_mask] = np.exp(alpha * np.abs(dx[left_mask]) / (sigma + gamma))
+        
+        # Apply asymmetry while preserving peak height
+        asymmetric_profile = symmetric_voigt * asymmetry_factor
+        
+        # Normalize to preserve amplitude
+        max_symmetric = np.max(symmetric_voigt)
+        max_asymmetric = np.max(asymmetric_profile)
+        
+        if max_asymmetric > 0:
+            asymmetric_profile *= (max_symmetric / max_asymmetric)
+        
+        return asymmetric_profile
+    
     def estimate_initial_parameters(self, x: np.ndarray, y: np.ndarray, 
                                   peak_position: float, shape: str) -> Tuple[List[float], List[Tuple[float, float]]]:
         """
@@ -203,6 +263,10 @@ class PeakFitter:
         elif shape == "Pseudo-Voigt":
             initial_params = [amplitude_corrected, peak_position, width, 0.5]
             bounds = ([0, x[0], 0.5, 0.0], [amplitude_corrected * 3, x[-1], 100.0, 1.0])
+        elif shape == "Asymmetric Voigt":
+            # amplitude, center, sigma, gamma, alpha
+            initial_params = [amplitude_corrected, peak_position, width, width/2, 0.0]
+            bounds = ([0, x[0], 0.5, 0.1, -2.0], [amplitude_corrected * 3, x[-1], 100.0, 100.0, 2.0])
         else:
             raise ValueError(f"Unknown peak shape: {shape}")
         
@@ -253,6 +317,8 @@ class PeakFitter:
                 fit_func = self.voigt
             elif shape == "Pseudo-Voigt":
                 fit_func = self.pseudo_voigt
+            elif shape == "Asymmetric Voigt":
+                fit_func = self.asymmetric_voigt
             else:
                 raise ValueError(f"Unknown peak shape: {shape}")
             
@@ -304,9 +370,14 @@ class PeakFitter:
                 fit_quality=fit_quality
             )
             
-            # Add gamma parameter for Voigt
+            # Add additional parameters for complex peak shapes
             if shape == "Voigt" and len(popt) > 3:
                 peak_data.gamma = popt[3]
+            elif shape == "Pseudo-Voigt" and len(popt) > 3:
+                peak_data.eta = popt[3]  # eta parameter for Pseudo-Voigt
+            elif shape == "Asymmetric Voigt" and len(popt) > 4:
+                peak_data.gamma = popt[3]  # gamma parameter
+                peak_data.alpha = popt[4]  # asymmetry parameter
             
             return peak_data
             
@@ -380,6 +451,23 @@ class PeakFitter:
             properties['fwhm'] = 0.5346 * fwhm_l + np.sqrt(0.2166 * fwhm_l**2 + fwhm_g**2)
             properties['area'] = np.pi * peak_data.amplitude * properties['fwhm'] / 2
             
+        elif peak_data.shape == "Asymmetric Voigt":
+            # For Asymmetric Voigt profile
+            sigma = peak_data.width
+            gamma = peak_data.gamma if peak_data.gamma else peak_data.width / 2
+            alpha = peak_data.alpha if peak_data.alpha else 0.0
+            
+            # Base FWHM calculation (same as symmetric Voigt)
+            fwhm_g = 2 * sigma * np.sqrt(2 * np.log(2))  # Gaussian component
+            fwhm_l = 2 * gamma  # Lorentzian component
+            base_fwhm = 0.5346 * fwhm_l + np.sqrt(0.2166 * fwhm_l**2 + fwhm_g**2)
+            
+            # Asymmetry affects effective width
+            asymmetry_correction = 1.0 + 0.1 * abs(alpha)  # Empirical correction
+            properties['fwhm'] = base_fwhm * asymmetry_correction
+            properties['area'] = np.pi * peak_data.amplitude * properties['fwhm'] / 2
+            properties['asymmetry'] = alpha
+            
         # Standard errors from covariance matrix
         if peak_data.covariance is not None:
             param_errors = np.sqrt(np.diag(peak_data.covariance))
@@ -388,6 +476,47 @@ class PeakFitter:
             properties['width_error'] = param_errors[2] if len(param_errors) > 2 else 0
         
         return properties
+    
+    @staticmethod
+    def baseline_als(y: np.ndarray, lam: float = 1e5, p: float = 0.01, niter: int = 10) -> np.ndarray:
+        """
+        Asymmetric Least Squares baseline correction.
+        
+        Parameters:
+        -----------
+        y : array_like
+            Input spectrum intensities
+        lam : float
+            Smoothness parameter (larger = smoother baseline)
+        p : float
+            Asymmetry parameter (0 < p < 1, smaller = more asymmetric)
+        niter : int
+            Number of iterations
+            
+        Returns:
+        --------
+        np.ndarray
+            Calculated baseline
+        """
+        try:
+            from scipy.sparse import csc_matrix, diags
+            from scipy.sparse.linalg import spsolve
+            
+            L = len(y)
+            D = diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+            w = np.ones(L)
+            
+            for i in range(niter):
+                W = diags(w, shape=(L, L))
+                Z = W + lam * D.dot(D.transpose())
+                z = spsolve(Z, w * y)
+                w = p * (y > z) + (1 - p) * (y <= z)
+            
+            return z
+        except ImportError:
+            # Fallback implementation without scipy.sparse
+            print("Warning: scipy.sparse not available, using simple baseline")
+            return np.linspace(y[0], y[-1], len(y))
 
 
 # Utility functions for peak analysis
@@ -470,6 +599,15 @@ def baseline_correct_spectrum(x: np.ndarray, y: np.ndarray,
     elif method == "linear":
         # Simple linear baseline
         baseline = np.linspace(y[0], y[-1], len(y))
+        return y - baseline
+    
+    elif method == "als" or method == "ALS":
+        # Use ALS baseline correction
+        lam = kwargs.get('lam', 1e5)
+        p = kwargs.get('p', 0.01)
+        niter = kwargs.get('niter', 10)
+        
+        baseline = PeakFitter.baseline_als(y, lam, p, niter)
         return y - baseline
     
     else:

@@ -83,7 +83,7 @@ class TrendsPlot(BasePlot):
         
         # Setup axes
         self.axes.set_xlabel('Spectrum Index')
-        self.axes.set_title(self.title)
+        self.axes.set_title(self.get_dynamic_title())
         
         # Y-axis label depends on parameter type
         parameter = self.settings['parameter_type']
@@ -193,6 +193,27 @@ class TrendsPlot(BasePlot):
         # Add legend if multiple peaks
         if len(self.trend_data) > 1:
             self.axes.legend(loc='best', fontsize=8)
+    
+    def get_dynamic_title(self):
+        """Get dynamic title including dataset information"""
+        base_title = "Trends Analysis"
+        
+        if not self.data_processor:
+            return base_title
+        
+        try:
+            # Get number of loaded files
+            file_list = self.data_processor.get_file_list()
+            n_files = len(file_list)
+            
+            if n_files > 0:
+                parameter = self.settings['parameter_type'].title()
+                return f"{base_title} - {parameter} ({n_files} spectra)"
+            else:
+                return base_title
+        except Exception as e:
+            print(f"Warning: Could not get dataset info for trends title: {e}")
+            return base_title
     
     def update_data_cache(self):
         """Update cached data from batch results"""

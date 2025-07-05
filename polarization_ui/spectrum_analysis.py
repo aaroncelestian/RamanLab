@@ -30,8 +30,9 @@ try:
     from core.polarization_analyzer import PolarizationAnalyzer
     from core.database_manager import DatabaseManager
     from utils.file_loaders import SpectrumLoader
+    print("✓ Enhanced polarization analysis modules loaded")
 except ImportError:
-    print("Warning: Some core modules not available")
+    print("ℹ️  Enhanced analysis modules not available - using basic functionality")
 
 
 class SpectrumAnalysisWidget(QWidget):

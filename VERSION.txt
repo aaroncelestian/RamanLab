@@ -1,7 +1,7 @@
-RamanLab Version 1.0.4 - "Windows Database Connection Fix"
+RamanLab Version 1.1.0 - "Batch Peak Fitting Module Enhancement"
 Release Date: January 27, 2025
 
-🔄 **Version 1.0.4 Update**
+🔄 **Version 1.1.0 Update**
 
 This critical update resolves a Windows-specific database connection issue that
 prevented users from accessing the Search/Match functionality, addressing the

@@ -45,7 +45,7 @@ def test_integration():
             
             # Check if database file exists
             db_files = [
-                'RamanLab_Database_20250602.sqlite',
+                'RamanLab_Database_20250602.pkl',
                 'RamanLab_Database.sqlite'
             ]
             

@@ -14,6 +14,182 @@ from PySide6.QtCore import Qt
 
 from ..base_tab import BaseTab
 
+# Unified button styles for consistent UI
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #f8f9fa;
+        color: #495057;
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #e9ecef;
+        border: 1px solid #adb5bd;
+        color: #212529;
+    }
+    QPushButton:pressed {
+        background-color: #dee2e6;
+        border: 1px solid #6c757d;
+    }
+    QPushButton:disabled {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        color: #6c757d;
+        opacity: 0.6;
+    }
+"""
+
+PRIMARY_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #0d6efd;
+        color: white;
+        border: 1px solid #0a58ca;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #0b5ed7;
+        border: 1px solid #09408e;
+    }
+    QPushButton:pressed {
+        background-color: #0a58ca;
+        border: 1px solid #08356d;
+    }
+"""
+
+SUCCESS_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #198754;
+        color: white;
+        border: 1px solid #146c43;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #157347;
+        border: 1px solid #0f5132;
+    }
+    QPushButton:pressed {
+        background-color: #146c43;
+        border: 1px solid #0c3a22;
+    }
+"""
+
+WARNING_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #fd7e14;
+        color: white;
+        border: 1px solid #e76500;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #e76500;
+        border: 1px solid #bf5700;
+    }
+    QPushButton:pressed {
+        background-color: #d65d00;
+        border: 1px solid #a04800;
+    }
+"""
+
+DANGER_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #dc3545;
+        color: white;
+        border: 1px solid #bb2d3b;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #c82333;
+        border: 1px solid #a02834;
+    }
+    QPushButton:pressed {
+        background-color: #bb2d3b;
+        border: 1px solid #8d2130;
+    }
+"""
+
+INFO_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #0dcaf0;
+        color: #055160;
+        border: 1px solid #0aa2c0;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #31d2f2;
+        border: 1px solid #0994a8;
+    }
+    QPushButton:pressed {
+        background-color: #0aa2c0;
+        border: 1px solid #087990;
+    }
+"""
+
+PURPLE_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #6f42c1;
+        color: white;
+        border: 1px solid #59359a;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #59359a;
+        border: 1px solid #4c2d83;
+    }
+    QPushButton:pressed {
+        background-color: #4c2d83;
+        border: 1px solid #3e246c;
+    }
+"""
+
+GRAY_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #6c757d;
+        color: white;
+        border: 1px solid #5c636a;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #5c636a;
+        border: 1px solid #495057;
+    }
+    QPushButton:pressed {
+        background-color: #495057;
+        border: 1px solid #343a40;
+    }
+"""
+
 
 class SessionTab(BaseTab):
     """
@@ -41,12 +217,13 @@ class SessionTab(BaseTab):
         self.current_session_label = QLabel("No active session")
         self.current_session_label.setStyleSheet("""
             QLabel {
-                background-color: #F5F5F5;
-                border: 1px solid #E0E0E0;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
                 padding: 8px;
                 border-radius: 4px;
                 font-family: monospace;
-                font-weight: bold;
+                font-weight: 500;
+                color: #495057;
             }
         """)
         current_layout.addWidget(self.current_session_label)
@@ -54,52 +231,16 @@ class SessionTab(BaseTab):
         # Current session controls
         current_controls_layout = QHBoxLayout()
         
-        save_btn = QPushButton("Save Session")
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2E7D32;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1B5E20;
-            }
-        """)
+        save_btn = QPushButton("Save")
+        save_btn.setStyleSheet(SUCCESS_BUTTON_STYLE)
         current_controls_layout.addWidget(save_btn)
         
-        save_as_btn = QPushButton("Save As...")
-        save_as_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #388E3C;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2E7D32;
-            }
-        """)
+        save_as_btn = QPushButton("Save As")
+        save_as_btn.setStyleSheet(SUCCESS_BUTTON_STYLE)
         current_controls_layout.addWidget(save_as_btn)
         
-        new_session_btn = QPushButton("New Session")
-        new_session_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976D2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-        """)
+        new_session_btn = QPushButton("New")
+        new_session_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         current_controls_layout.addWidget(new_session_btn)
         
         current_layout.addLayout(current_controls_layout)
@@ -116,52 +257,16 @@ class SessionTab(BaseTab):
         # Session controls
         session_controls_layout = QHBoxLayout()
         
-        load_btn = QPushButton("Load Selected")
-        load_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976D2;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-        """)
+        load_btn = QPushButton("Load")
+        load_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         session_controls_layout.addWidget(load_btn)
         
-        delete_btn = QPushButton("Delete Selected")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #D32F2F;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #C62828;
-            }
-        """)
+        delete_btn = QPushButton("Delete")
+        delete_btn.setStyleSheet(DANGER_BUTTON_STYLE)
         session_controls_layout.addWidget(delete_btn)
         
-        refresh_btn = QPushButton("Refresh List")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #616161;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #424242;
-            }
-        """)
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setStyleSheet(BUTTON_STYLE)
         session_controls_layout.addWidget(refresh_btn)
         
         saved_layout.addLayout(session_controls_layout)
@@ -175,11 +280,12 @@ class SessionTab(BaseTab):
         self.session_info.setReadOnly(True)
         self.session_info.setStyleSheet("""
             QTextEdit {
-                background-color: #FAFAFA;
-                border: 1px solid #E0E0E0;
-                border-radius: 3px;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
                 font-family: monospace;
                 font-size: 10px;
+                color: #495057;
             }
         """)
         info_layout.addWidget(self.session_info)
@@ -188,52 +294,16 @@ class SessionTab(BaseTab):
         quick_group = QGroupBox("Quick Actions")
         quick_layout = QHBoxLayout(quick_group)
         
-        export_settings_btn = QPushButton("Export Settings")
-        export_settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #7B1FA2;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #6A1B9A;
-            }
-        """)
+        export_settings_btn = QPushButton("Export")
+        export_settings_btn.setStyleSheet(PURPLE_BUTTON_STYLE)
         quick_layout.addWidget(export_settings_btn)
         
-        import_settings_btn = QPushButton("Import Settings")
-        import_settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F57C00;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #EF6C00;
-            }
-        """)
+        import_settings_btn = QPushButton("Import")
+        import_settings_btn.setStyleSheet(WARNING_BUTTON_STYLE)
         quick_layout.addWidget(import_settings_btn)
         
-        open_folder_btn = QPushButton("Open Session Folder")
-        open_folder_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #455A64;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #37474F;
-            }
-        """)
+        open_folder_btn = QPushButton("Open Folder")
+        open_folder_btn.setStyleSheet(INFO_BUTTON_STYLE)
         quick_layout.addWidget(open_folder_btn)
         
         # Add to main layout

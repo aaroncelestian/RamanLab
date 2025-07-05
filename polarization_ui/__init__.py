@@ -132,7 +132,7 @@ __all__ = [
 ]
 
 # Version information
-__version__ = "1.0.3"
+__version__ = "1.1.0"
 __author__ = "Aaron J. Celestian Ph.D."
 
 # Module registry for dynamic loading

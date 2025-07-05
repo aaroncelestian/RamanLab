@@ -916,69 +916,134 @@ class DatabaseBrowserQt6(QDialog):
         self.tab_widget.addTab(tab, "Add Spectrum")
     
     def create_batch_import_tab(self):
-        """Create the batch import tab."""
+        """Create the import/export tab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
         # Instructions
-        instructions = QLabel("Import multiple spectrum files from a directory or migrate existing database.")
+        instructions = QLabel("Import multiple spectrum files from a directory or export/import database files.")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
-        
-        # Database Migration Section
-        migration_group = QGroupBox("Database Migration")
-        migration_layout = QVBoxLayout(migration_group)
-        
-        migration_info = QLabel(
-            "If you have an existing raman_database.pkl file from the Tkinter version, "
-            "use this option to migrate it to the Qt6 format. The migration will "
-            "preserve all your spectra and metadata."
-        )
-        migration_info.setWordWrap(True)
-        migration_layout.addWidget(migration_info)
-        
-        migration_buttons = QHBoxLayout()
-        
-        migrate_btn = QPushButton("Migrate Legacy Database")
-        migrate_btn.clicked.connect(self.migrate_legacy_database)
-        migration_buttons.addWidget(migrate_btn)
-        
-        browse_pkl_btn = QPushButton("Browse for PKL File")
-        browse_pkl_btn.clicked.connect(self.browse_pkl_file)
-        migration_buttons.addWidget(browse_pkl_btn)
-        
-        migration_buttons.addStretch()
-        migration_layout.addLayout(migration_buttons)
-        
-        # Migration status
-        self.migration_status_label = QLabel("Ready to migrate database...")
-        migration_layout.addWidget(self.migration_status_label)
-        
-        layout.addWidget(migration_group)
         
         # Database Export/Import Section
         export_import_group = QGroupBox("Database Export/Import")
         export_import_layout = QVBoxLayout(export_import_group)
         
         export_import_info = QLabel(
-            "Export your migrated database for distribution, or import a pre-migrated "
-            "database to avoid manual migration on new installations."
+            "Export complete database or filtered subsets for distribution, or import databases from other users."
         )
         export_import_info.setWordWrap(True)
         export_import_layout.addWidget(export_import_info)
         
-        export_import_buttons = QHBoxLayout()
+        # Export options
+        export_section = QGroupBox("Export Options")
+        export_section_layout = QVBoxLayout(export_section)
         
-        export_db_btn = QPushButton("Export Database")
+        # Full database export
+        full_export_layout = QHBoxLayout()
+        export_db_btn = QPushButton("Export Full Database")
         export_db_btn.clicked.connect(self.export_database)
-        export_import_buttons.addWidget(export_db_btn)
+        full_export_layout.addWidget(export_db_btn)
+        full_export_layout.addStretch()
+        export_section_layout.addLayout(full_export_layout)
+        
+        # Filtered export - split into left controls and right preview
+        filtered_main_layout = QHBoxLayout()
+        
+        # Left side - Controls
+        controls_widget = QWidget()
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Filter configuration
+        filter_config_layout = QFormLayout()
+        
+        # Filter type selection
+        self.export_filter_type = QComboBox()
+        self.export_filter_type.addItems([
+            "Chemical Family",
+            "Mineral Name",
+            "Hey Classification",
+            "Celestian Group",
+            "Custom Metadata Field"
+        ])
+        self.export_filter_type.currentTextChanged.connect(self.update_export_filter_values)
+        self.export_filter_type.currentTextChanged.connect(self.toggle_custom_field_visibility)
+        filter_config_layout.addRow("Filter by:", self.export_filter_type)
+        
+        # Filter value selection
+        self.export_filter_value = QComboBox()
+        self.export_filter_value.setEditable(True)
+        filter_config_layout.addRow("Value:", self.export_filter_value)
+        
+        # Custom metadata field (for custom filter type)
+        self.export_custom_field = QLineEdit()
+        self.export_custom_field.setPlaceholderText("Enter metadata field name...")
+        self.export_custom_field.setVisible(False)
+        filter_config_layout.addRow("Field Name:", self.export_custom_field)
+        
+        controls_layout.addLayout(filter_config_layout)
+        
+        # Control buttons
+        filter_buttons_layout = QVBoxLayout()
+        
+        preview_filter_btn = QPushButton("Preview Filter")
+        preview_filter_btn.clicked.connect(self.preview_export_filter)
+        filter_buttons_layout.addWidget(preview_filter_btn)
+        
+        debug_metadata_btn = QPushButton("Debug Metadata")
+        debug_metadata_btn.clicked.connect(self.debug_metadata_keys)
+        filter_buttons_layout.addWidget(debug_metadata_btn)
+        
+        export_filtered_btn = QPushButton("Export Filtered")
+        export_filtered_btn.clicked.connect(self.export_filtered_database)
+        filter_buttons_layout.addWidget(export_filtered_btn)
+        
+        controls_layout.addLayout(filter_buttons_layout)
+        controls_layout.addStretch()
+        
+        # Right side - Preview panel
+        preview_widget = QWidget()
+        preview_layout = QVBoxLayout(preview_widget)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        
+        preview_label = QLabel("Filter Preview:")
+        preview_label.setStyleSheet("QLabel { font-weight: bold; }")
+        preview_layout.addWidget(preview_label)
+        
+        # Filter preview results with scroll area
+        preview_scroll = QScrollArea()
+        preview_scroll.setWidgetResizable(True)
+        preview_scroll.setMinimumHeight(200)
+        preview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        preview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        self.export_filter_preview = QLabel("Select filter criteria and click 'Preview Filter' to see matching spectra...")
+        self.export_filter_preview.setWordWrap(True)
+        self.export_filter_preview.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 8px; border: 1px solid #ccc; }")
+        self.export_filter_preview.setAlignment(Qt.AlignTop)
+        
+        preview_scroll.setWidget(self.export_filter_preview)
+        preview_layout.addWidget(preview_scroll)
+        
+        # Add both sides to the main layout
+        filtered_main_layout.addWidget(controls_widget, 1)  # 1/3 width
+        filtered_main_layout.addWidget(preview_widget, 2)   # 2/3 width
+        
+        export_section_layout.addLayout(filtered_main_layout)
+        
+        export_import_layout.addWidget(export_section)
+        
+        # Import section
+        import_section = QGroupBox("Import Options")
+        import_section_layout = QHBoxLayout(import_section)
         
         import_db_btn = QPushButton("Import Database")
         import_db_btn.clicked.connect(self.import_database)
-        export_import_buttons.addWidget(import_db_btn)
+        import_section_layout.addWidget(import_db_btn)
         
-        export_import_buttons.addStretch()
-        export_import_layout.addLayout(export_import_buttons)
+        import_section_layout.addStretch()
+        export_import_layout.addWidget(import_section)
         
         # Export/Import status
         self.export_import_status_label = QLabel("Ready for database export/import operations...")
@@ -1043,7 +1108,10 @@ class DatabaseBrowserQt6(QDialog):
         
         layout.addStretch()
         
-        self.tab_widget.addTab(tab, "Batch Import & Migration")
+        # Initialize filter values
+        self.update_export_filter_values()
+        
+        self.tab_widget.addTab(tab, "Import/Export")
     
     # Event handlers and functionality methods
     def update_spectrum_list(self):
@@ -1874,38 +1942,17 @@ class DatabaseBrowserQt6(QDialog):
         pass
 
     def migrate_legacy_database(self):
-        """Migrate legacy raman_database.pkl to Qt6 format."""
-        # Look for raman_database.pkl in current directory
-        legacy_db_path = "raman_database.pkl"
-        
-        if not os.path.exists(legacy_db_path):
-            QMessageBox.warning(
-                self, 
-                "Legacy Database Not Found", 
-                f"Could not find raman_database.pkl in the current directory.\n\n"
-                f"Current directory: {os.getcwd()}\n\n"
-                f"Use 'Browse for PKL File' to locate your database file manually."
-            )
-            return
-        
-        # Confirm migration
-        reply = QMessageBox.question(
-            self,
-            "Confirm Migration",
-            f"Found legacy database: {legacy_db_path}\n"
-            f"Size: {os.path.getsize(legacy_db_path) / (1024*1024):.1f} MB\n\n"
-            f"This will migrate the database to Qt6 format at:\n"
-            f"{self.raman_db.db_path}\n\n"
-            f"Any existing Qt6 database will be backed up.\n\n"
-            f"Continue with migration?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes
+        """Migrate legacy database files to Qt6 format."""
+        # Show message that legacy files are no longer provided
+        QMessageBox.information(
+            self, 
+            "Legacy Database Migration", 
+            "Legacy database files (raman_database.pkl) are no longer provided.\n\n"
+            "If you have an existing legacy database file from a previous installation, "
+            "use 'Browse for PKL File' to locate and migrate it manually.\n\n"
+            "Otherwise, you can start with a fresh database or import spectra individually."
         )
-        
-        if reply != QMessageBox.Yes:
-            return
-        
-        self._perform_migration(legacy_db_path)
+        return
 
     def browse_pkl_file(self):
         """Browse for legacy database PKL file to migrate."""
@@ -2145,13 +2192,13 @@ class DatabaseBrowserQt6(QDialog):
             traceback.print_exc()
 
     def import_database(self):
-        """Import a pre-migrated database file."""
+        """Import a database file (SQLite or filtered pickle)."""
         # Browse for database file
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import RamanLab Database",
             os.path.expanduser("~"),
-            "SQLite Database (*.sqlite);;All files (*.*)"
+            "Database Files (*.sqlite *.pkl);;SQLite Database (*.sqlite);;Pickle Files (*.pkl);;All files (*.*)"
         )
         
         if not file_path:
@@ -2165,31 +2212,57 @@ class DatabaseBrowserQt6(QDialog):
             self.export_import_status_label.setText("Validating database file...")
             QApplication.processEvents()
             
-            # Validate the database file by trying to read it
-            import sqlite3
-            with sqlite3.connect(file_path) as conn:
-                cursor = conn.cursor()
-                # Check if it has the expected table structure
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                tables = [row[0] for row in cursor.fetchall()]
+            # Determine file type and validate
+            file_extension = os.path.splitext(file_path)[1].lower()
+            
+            if file_extension == '.pkl':
+                # Handle pickle file (filtered export)
+                with open(file_path, 'rb') as f:
+                    data = pickle.load(f)
                 
-                if 'spectra' not in tables:
-                    raise ValueError("Not a valid RamanLab database file")
+                # Validate pickle structure
+                if not isinstance(data, dict) or 'spectra' not in data:
+                    raise ValueError("Not a valid RamanLab pickle file")
                 
-                # Get basic stats
-                cursor.execute("SELECT COUNT(*) FROM spectra")
-                count = cursor.fetchone()[0]
+                count = len(data['spectra'])
+                file_type = "Filtered Pickle"
+                
+                # Show filter information if available
+                metadata = data.get('metadata', {})
+                filter_info = ""
+                if metadata.get('export_type') == 'filtered':
+                    filter_type = metadata.get('filter_type', 'Unknown')
+                    filter_value = metadata.get('filter_value', 'Unknown')
+                    filter_info = f"\nFilter: {filter_type} = '{filter_value}'"
+                
+            else:
+                # Handle SQLite file (full database)
+                import sqlite3
+                with sqlite3.connect(file_path) as conn:
+                    cursor = conn.cursor()
+                    # Check if it has the expected table structure
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                    tables = [row[0] for row in cursor.fetchall()]
+                    
+                    if 'spectra' not in tables:
+                        raise ValueError("Not a valid RamanLab database file")
+                    
+                    # Get basic stats
+                    cursor.execute("SELECT COUNT(*) FROM spectra")
+                    count = cursor.fetchone()[0]
+                    file_type = "SQLite Database"
+                    filter_info = ""
             
             # Confirm import
             file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
             reply = QMessageBox.question(
                 self,
                 "Confirm Database Import",
-                f"Import database from: {os.path.basename(file_path)}\n"
-                f"Contains approximately {count} spectra\n"
+                f"Import {file_type} from: {os.path.basename(file_path)}\n"
+                f"Contains {count} spectra{filter_info}\n"
                 f"File size: {file_size:.1f} MB\n\n"
-                f"This will replace your current database.\n"
-                f"Your existing database will be backed up first.\n\n"
+                f"This will {'merge with' if file_extension == '.pkl' else 'replace'} your current database.\n"
+                f"{'Your existing database will be backed up first.' if file_extension != '.pkl' else 'Existing spectra with same names will be updated.'}\n\n"
                 f"Continue with import?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No  # Default to No for safety
@@ -2199,27 +2272,56 @@ class DatabaseBrowserQt6(QDialog):
                 self.export_import_status_label.setText("Import cancelled.")
                 return
             
-            self.export_import_status_label.setText("Backing up current database...")
-            QApplication.processEvents()
-            
-            # Backup current database if it exists
-            if os.path.exists(self.raman_db.db_path):
-                backup_path = str(self.raman_db.db_path) + f".backup_{int(time.time())}"
-                import shutil
-                shutil.copy2(self.raman_db.db_path, backup_path)
-                backup_msg = f"Current database backed up to: {os.path.basename(backup_path)}"
+            if file_extension == '.pkl':
+                # Handle pickle file import (merge)
+                self.export_import_status_label.setText("Importing filtered database...")
+                QApplication.processEvents()
+                
+                # Load pickle data
+                with open(file_path, 'rb') as f:
+                    import_data = pickle.load(f)
+                
+                spectra_to_import = import_data['spectra']
+                imported_count = 0
+                updated_count = 0
+                
+                # Merge spectra into current database
+                for spectrum_name, spectrum_data in spectra_to_import.items():
+                    if spectrum_name in self.raman_db.database:
+                        updated_count += 1
+                    else:
+                        imported_count += 1
+                    
+                    # Add/update spectrum in database
+                    self.raman_db.database[spectrum_name] = spectrum_data
+                
+                # Save the updated database
+                self.raman_db.save_database()
+                backup_msg = f"Merged {imported_count} new and updated {updated_count} existing spectra."
+                
             else:
-                backup_msg = "No existing database to backup."
-            
-            self.export_import_status_label.setText("Importing new database...")
-            QApplication.processEvents()
-            
-            # Copy the new database file
-            import shutil
-            shutil.copy2(file_path, self.raman_db.db_path)
-            
-            # Reload the database in memory
-            self.raman_db.load_database()
+                # Handle SQLite file import (replace)
+                self.export_import_status_label.setText("Backing up current database...")
+                QApplication.processEvents()
+                
+                # Backup current database if it exists
+                if os.path.exists(self.raman_db.db_path):
+                    backup_path = str(self.raman_db.db_path) + f".backup_{int(time.time())}"
+                    import shutil
+                    shutil.copy2(self.raman_db.db_path, backup_path)
+                    backup_msg = f"Current database backed up to: {os.path.basename(backup_path)}"
+                else:
+                    backup_msg = "No existing database to backup."
+                
+                self.export_import_status_label.setText("Importing new database...")
+                QApplication.processEvents()
+                
+                # Copy the new database file
+                import shutil
+                shutil.copy2(file_path, self.raman_db.db_path)
+                
+                # Reload the database in memory
+                self.raman_db.load_database()
             
             # Update UI
             self.update_spectrum_list()
@@ -2227,16 +2329,28 @@ class DatabaseBrowserQt6(QDialog):
             
             # Success message
             stats = self.raman_db.get_database_stats()
-            message = (
-                f"Database imported successfully!\n\n"
-                f"✅ Imported: {stats['total_spectra']} spectra\n"
-                f"✅ Database size: {stats['database_size']}\n\n"
-                f"{backup_msg}\n\n"
-                f"The new database is now active and ready to use!"
-            )
+            
+            if file_extension == '.pkl':
+                message = (
+                    f"Filtered database imported successfully!\n\n"
+                    f"✅ Total spectra in database: {stats['total_spectra']}\n"
+                    f"✅ Database size: {stats['database_size']}\n"
+                    f"🔍 Source: {file_type}{filter_info}\n\n"
+                    f"{backup_msg}\n\n"
+                    f"The filtered spectra have been merged into your database!"
+                )
+                self.export_import_status_label.setText(f"Merged filtered database successfully ({count} spectra)")
+            else:
+                message = (
+                    f"Database imported successfully!\n\n"
+                    f"✅ Imported: {stats['total_spectra']} spectra\n"
+                    f"✅ Database size: {stats['database_size']}\n\n"
+                    f"{backup_msg}\n\n"
+                    f"The new database is now active and ready to use!"
+                )
+                self.export_import_status_label.setText(f"Imported {stats['total_spectra']} spectra successfully")
             
             QMessageBox.information(self, "Import Complete", message)
-            self.export_import_status_label.setText(f"Imported {stats['total_spectra']} spectra successfully")
             
         except Exception as e:
             error_msg = f"Import failed: {str(e)}"
@@ -2244,6 +2358,473 @@ class DatabaseBrowserQt6(QDialog):
             self.export_import_status_label.setText(f"Import failed: {str(e)}")
             import traceback
             traceback.print_exc()
+    
+    def toggle_custom_field_visibility(self):
+        """Toggle visibility of custom field input based on filter type selection."""
+        is_custom = self.export_filter_type.currentText() == "Custom Metadata Field"
+        self.export_custom_field.setVisible(is_custom)
+    
+    def update_export_filter_values(self):
+        """Update the filter value dropdown based on the selected filter type."""
+        self.export_filter_value.clear()
+        filter_type = self.export_filter_type.currentText()
+        
+        try:
+            if filter_type == "Chemical Family":
+                # Get unique chemical families from metadata
+                families = set()
+                all_metadata_keys = set()  # For debugging
+                
+                for spectrum_data in self.raman_db.database.values():
+                    metadata = spectrum_data.get('metadata', {})
+                    all_metadata_keys.update(metadata.keys())  # Collect all keys for debugging
+                    
+                    # Check multiple possible keys for chemical family (expanded list)
+                    family_keys = [
+                        'chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY', 
+                        'family', 'Family', 'FAMILY',
+                        'chemical_type', 'Chemical_Type', 'CHEMICAL_TYPE',
+                        'type', 'Type', 'TYPE',
+                        'material_type', 'Material_Type', 'MATERIAL_TYPE',
+                        'category', 'Category', 'CATEGORY'
+                    ]
+                    
+                    # Also check for any key containing 'family', 'type', or 'category' (case insensitive)
+                    for key in metadata.keys():
+                        key_lower = key.lower()
+                        if any(term in key_lower for term in ['family', 'type', 'category', 'plastic']):
+                            family_keys.append(key)
+                    
+                    # Remove duplicates while preserving order
+                    family_keys = list(dict.fromkeys(family_keys))
+                    
+                    for key in family_keys:
+                        if key in metadata and metadata[key]:
+                            family_value = str(metadata[key]).strip()
+                            # Filter out empty, unknown, or nonsensical values
+                            if (family_value and 
+                                family_value.lower() not in ['unknown', 'none', 'n/a', '', 'null', 'nan'] and
+                                len(family_value) < 100 and  # Avoid very long text
+                                not family_value.startswith('http')):  # Avoid URLs
+                                families.add(family_value)
+                                print(f"DEBUG: Found chemical family '{family_value}' in key '{key}'")
+                                break
+                
+                # Debug output
+                print(f"DEBUG: Found {len(families)} chemical families: {sorted(families)}")
+                print(f"DEBUG: Sample metadata keys found: {sorted(list(all_metadata_keys))[:20]}")
+                
+                # If no families found, add a debug option
+                if len(families) == 0:
+                    self.export_filter_value.addItem("(No chemical families found - check metadata)")
+                else:
+                    self.export_filter_value.addItems(sorted(families))
+                
+            elif filter_type == "Mineral Name":
+                # Get unique mineral names
+                minerals = set()
+                for spectrum_data in self.raman_db.database.values():
+                    metadata = spectrum_data.get('metadata', {})
+                    # Enhanced search for mineral names
+                    name_keys = [
+                        'mineral_name', 'Mineral_Name', 'MINERAL_NAME', 
+                        'name', 'Name', 'NAME',
+                        'mineral', 'Mineral', 'MINERAL',
+                        'species', 'Species', 'SPECIES'
+                    ]
+                    
+                    # Also check for any key containing 'mineral', 'name', or 'species'
+                    for key in metadata.keys():
+                        key_lower = key.lower()
+                        if any(term in key_lower for term in ['mineral', 'name', 'species']) and 'file' not in key_lower:
+                            name_keys.append(key)
+                    
+                    name_keys = list(dict.fromkeys(name_keys))
+                    
+                    for key in name_keys:
+                        if key in metadata and metadata[key]:
+                            mineral_name = str(metadata[key]).strip()
+                            if (mineral_name and 
+                                mineral_name.lower() not in ['unknown', 'none', 'n/a', '', 'null', 'nan'] and
+                                len(mineral_name) < 100 and
+                                not mineral_name.startswith('http')):
+                                minerals.add(mineral_name)
+                                print(f"DEBUG: Found mineral name '{mineral_name}' in key '{key}'")
+                                break
+                
+                if len(minerals) == 0:
+                    self.export_filter_value.addItem("(No mineral names found)")
+                else:
+                    self.export_filter_value.addItems(sorted(minerals))
+                
+            elif filter_type == "Hey Classification":
+                # Get unique Hey classifications
+                hey_classes = set()
+                for spectrum_data in self.raman_db.database.values():
+                    metadata = spectrum_data.get('metadata', {})
+                    # Enhanced search for Hey classifications
+                    hey_keys = [
+                        'hey_classification', 'Hey_Classification', 'HEY_CLASSIFICATION',
+                        'hey_class', 'Hey_Class', 'HEY_CLASS',
+                        'hey', 'Hey', 'HEY'
+                    ]
+                    
+                    # Also check for any key containing 'hey'
+                    for key in metadata.keys():
+                        key_lower = key.lower()
+                        if 'hey' in key_lower:
+                            hey_keys.append(key)
+                    
+                    hey_keys = list(dict.fromkeys(hey_keys))
+                    
+                    for key in hey_keys:
+                        if key in metadata and metadata[key]:
+                            hey_value = str(metadata[key]).strip()
+                            if (hey_value and 
+                                hey_value.lower() not in ['unknown', 'none', 'n/a', '', 'null', 'nan'] and
+                                len(hey_value) < 100):
+                                hey_classes.add(hey_value)
+                                print(f"DEBUG: Found Hey classification '{hey_value}' in key '{key}'")
+                                break
+                
+                if len(hey_classes) == 0:
+                    self.export_filter_value.addItem("(No Hey classifications found)")
+                else:
+                    self.export_filter_value.addItems(sorted(hey_classes))
+                
+            elif filter_type == "Celestian Group":
+                # Get unique Celestian groups
+                celestian_groups = set()
+                for spectrum_data in self.raman_db.database.values():
+                    metadata = spectrum_data.get('metadata', {})
+                    # Enhanced search for Celestian groups
+                    celestian_keys = [
+                        'celestian_group', 'Celestian_Group', 'CELESTIAN_GROUP',
+                        'celestian', 'Celestian', 'CELESTIAN',
+                        'group', 'Group', 'GROUP'
+                    ]
+                    
+                    # Also check for any key containing 'celestian' or 'group'
+                    for key in metadata.keys():
+                        key_lower = key.lower()
+                        if 'celestian' in key_lower or ('group' in key_lower and 'file' not in key_lower):
+                            celestian_keys.append(key)
+                    
+                    celestian_keys = list(dict.fromkeys(celestian_keys))
+                    
+                    for key in celestian_keys:
+                        if key in metadata and metadata[key]:
+                            celestian_value = str(metadata[key]).strip()
+                            if (celestian_value and 
+                                celestian_value.lower() not in ['unknown', 'none', 'n/a', '', 'null', 'nan'] and
+                                len(celestian_value) < 100):
+                                celestian_groups.add(celestian_value)
+                                print(f"DEBUG: Found Celestian group '{celestian_value}' in key '{key}'")
+                                break
+                
+                if len(celestian_groups) == 0:
+                    self.export_filter_value.addItem("(No Celestian groups found)")
+                else:
+                    self.export_filter_value.addItems(sorted(celestian_groups))
+                
+            elif filter_type == "Custom Metadata Field":
+                # For custom fields, user will type both field name and value
+                self.export_filter_value.addItem("Enter value...")
+                
+        except Exception as e:
+            print(f"Error updating filter values: {e}")
+    
+    def preview_export_filter(self):
+        """Preview which spectra match the current filter criteria."""
+        filter_type = self.export_filter_type.currentText()
+        filter_value = self.export_filter_value.currentText().strip()
+        
+        if not filter_value or filter_value == "Enter value...":
+            self.export_filter_preview.setText("Please select or enter a filter value.")
+            return
+        
+        try:
+            matching_spectra = self.get_filtered_spectra(filter_type, filter_value)
+            
+            if len(matching_spectra) == 0:
+                self.export_filter_preview.setText(f"No spectra found matching '{filter_value}' in {filter_type}.")
+            else:
+                # Show first few matches and total count
+                preview_list = list(matching_spectra.keys())[:10]
+                preview_text = f"Found {len(matching_spectra)} spectra matching '{filter_value}' in {filter_type}:\n\n"
+                preview_text += "\n".join(f"• {name}" for name in preview_list)
+                if len(matching_spectra) > 10:
+                    preview_text += f"\n... and {len(matching_spectra) - 10} more"
+                self.export_filter_preview.setText(preview_text)
+                
+        except Exception as e:
+            self.export_filter_preview.setText(f"Error previewing filter: {str(e)}")
+    
+    def get_filtered_spectra(self, filter_type, filter_value):
+        """Get spectra that match the specified filter criteria."""
+        matching_spectra = {}
+        
+        for spectrum_name, spectrum_data in self.raman_db.database.items():
+            metadata = spectrum_data.get('metadata', {})
+            
+            match_found = False
+            
+            if filter_type == "Chemical Family":
+                # Use the same enhanced search logic as update_export_filter_values
+                family_keys = [
+                    'chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY', 
+                    'family', 'Family', 'FAMILY',
+                    'chemical_type', 'Chemical_Type', 'CHEMICAL_TYPE',
+                    'type', 'Type', 'TYPE',
+                    'material_type', 'Material_Type', 'MATERIAL_TYPE',
+                    'category', 'Category', 'CATEGORY'
+                ]
+                
+                # Also check for any key containing 'family', 'type', or 'category' (case insensitive)
+                for key in metadata.keys():
+                    key_lower = key.lower()
+                    if any(term in key_lower for term in ['family', 'type', 'category', 'plastic']):
+                        family_keys.append(key)
+                
+                # Remove duplicates while preserving order
+                family_keys = list(dict.fromkeys(family_keys))
+                
+                for key in family_keys:
+                    if key in metadata and str(metadata[key]).strip() == filter_value:
+                        match_found = True
+                        print(f"DEBUG: Found match for '{filter_value}' in key '{key}' for spectrum '{spectrum_name}'")
+                        break
+                        
+            elif filter_type == "Mineral Name":
+                # Enhanced search for mineral names
+                name_keys = [
+                    'mineral_name', 'Mineral_Name', 'MINERAL_NAME', 
+                    'name', 'Name', 'NAME',
+                    'mineral', 'Mineral', 'MINERAL',
+                    'species', 'Species', 'SPECIES'
+                ]
+                
+                # Also check for any key containing 'mineral', 'name', or 'species'
+                for key in metadata.keys():
+                    key_lower = key.lower()
+                    if any(term in key_lower for term in ['mineral', 'name', 'species']) and 'file' not in key_lower:
+                        name_keys.append(key)
+                
+                name_keys = list(dict.fromkeys(name_keys))
+                
+                for key in name_keys:
+                    if key in metadata and str(metadata[key]).strip() == filter_value:
+                        match_found = True
+                        print(f"DEBUG: Found match for '{filter_value}' in key '{key}' for spectrum '{spectrum_name}'")
+                        break
+                        
+            elif filter_type == "Hey Classification":
+                # Enhanced search for Hey classifications
+                hey_keys = [
+                    'hey_classification', 'Hey_Classification', 'HEY_CLASSIFICATION',
+                    'hey_class', 'Hey_Class', 'HEY_CLASS',
+                    'hey', 'Hey', 'HEY'
+                ]
+                
+                # Also check for any key containing 'hey'
+                for key in metadata.keys():
+                    key_lower = key.lower()
+                    if 'hey' in key_lower:
+                        hey_keys.append(key)
+                
+                hey_keys = list(dict.fromkeys(hey_keys))
+                
+                for key in hey_keys:
+                    if key in metadata and str(metadata[key]).strip() == filter_value:
+                        match_found = True
+                        print(f"DEBUG: Found match for '{filter_value}' in key '{key}' for spectrum '{spectrum_name}'")
+                        break
+                        
+            elif filter_type == "Celestian Group":
+                # Enhanced search for Celestian groups
+                celestian_keys = [
+                    'celestian_group', 'Celestian_Group', 'CELESTIAN_GROUP',
+                    'celestian', 'Celestian', 'CELESTIAN',
+                    'group', 'Group', 'GROUP'
+                ]
+                
+                # Also check for any key containing 'celestian' or 'group'
+                for key in metadata.keys():
+                    key_lower = key.lower()
+                    if 'celestian' in key_lower or ('group' in key_lower and 'file' not in key_lower):
+                        celestian_keys.append(key)
+                
+                celestian_keys = list(dict.fromkeys(celestian_keys))
+                
+                for key in celestian_keys:
+                    if key in metadata and str(metadata[key]).strip() == filter_value:
+                        match_found = True
+                        print(f"DEBUG: Found match for '{filter_value}' in key '{key}' for spectrum '{spectrum_name}'")
+                        break
+                        
+            elif filter_type == "Custom Metadata Field":
+                custom_field = self.export_custom_field.text().strip()
+                if custom_field and custom_field in metadata:
+                    if str(metadata[custom_field]).strip() == filter_value:
+                        match_found = True
+            
+            if match_found:
+                matching_spectra[spectrum_name] = spectrum_data
+        
+        return matching_spectra
+    
+    def export_filtered_database(self):
+        """Export a filtered subset of the database."""
+        filter_type = self.export_filter_type.currentText()
+        filter_value = self.export_filter_value.currentText().strip()
+        
+        if not filter_value or filter_value == "Enter value...":
+            QMessageBox.warning(self, "No Filter Value", "Please select or enter a filter value.")
+            return
+        
+        try:
+            # Get filtered spectra
+            matching_spectra = self.get_filtered_spectra(filter_type, filter_value)
+            
+            if len(matching_spectra) == 0:
+                QMessageBox.warning(
+                    self, 
+                    "No Matching Spectra", 
+                    f"No spectra found matching '{filter_value}' in {filter_type}."
+                )
+                return
+            
+            # Get save location
+            safe_filter_value = "".join(c for c in filter_value if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            default_filename = f"RamanLab_{filter_type.replace(' ', '_')}_{safe_filter_value}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                f"Export Filtered Database ({filter_type}: {filter_value})",
+                os.path.join(os.path.expanduser("~"), "Desktop", default_filename),
+                "Pickle Files (*.pkl);;All files (*.*)"
+            )
+            
+            if not file_path:
+                return
+            
+            # Confirm export
+            reply = QMessageBox.question(
+                self,
+                "Confirm Filtered Export",
+                f"Export {len(matching_spectra)} spectra?\n\n"
+                f"Filter: {filter_type} = '{filter_value}'\n"
+                f"Export to: {os.path.basename(file_path)}\n\n"
+                f"This will create a portable database subset.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply != QMessageBox.Yes:
+                self.export_import_status_label.setText("Filtered export cancelled.")
+                return
+            
+            self.export_import_status_label.setText("Exporting filtered database...")
+            QApplication.processEvents()
+            
+            # Create export data structure
+            export_data = {
+                'metadata': {
+                    'export_type': 'filtered',
+                    'filter_type': filter_type,
+                    'filter_value': filter_value,
+                    'export_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'total_spectra': len(matching_spectra),
+                    'ramanlab_version': 'Qt6'
+                },
+                'spectra': matching_spectra
+            }
+            
+            # Save to pickle file
+            with open(file_path, 'wb') as f:
+                pickle.dump(export_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            # Create an info file alongside the pickle
+            info_file = file_path.replace('.pkl', '_info.txt')
+            with open(info_file, 'w', encoding='utf-8') as f:
+                f.write(f"RamanLab Filtered Database Export\n")
+                f.write(f"{'='*50}\n\n")
+                f.write(f"Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Filter Type: {filter_type}\n")
+                f.write(f"Filter Value: {filter_value}\n")
+                f.write(f"Total Spectra: {len(matching_spectra)}\n\n")
+                f.write(f"Included Spectra:\n")
+                for i, name in enumerate(sorted(matching_spectra.keys()), 1):
+                    f.write(f"{i:3d}. {name}\n")
+                f.write(f"\nInstallation Instructions:\n")
+                f.write(f"1. Copy the .pkl file to your RamanLab directory\n")
+                f.write(f"2. Use 'Database > Import Database' in RamanLab\n")
+                f.write(f"3. Select the .pkl file to load all {len(matching_spectra)} spectra\n\n")
+                f.write(f"This filtered subset can be shared with other RamanLab users!\n")
+            
+            # Success message
+            message = (
+                f"Filtered database exported successfully!\n\n"
+                f"📄 Database file: {os.path.basename(file_path)}\n"
+                f"📋 Info file: {os.path.basename(info_file)}\n"
+                f"🔍 Filter: {filter_type} = '{filter_value}'\n\n"
+                f"Contains {len(matching_spectra)} spectra ready for sharing!\n\n"
+                f"Recipients can import this filtered database directly into RamanLab."
+            )
+            
+            QMessageBox.information(self, "Filtered Export Complete", message)
+            self.export_import_status_label.setText(f"Exported {len(matching_spectra)} filtered spectra successfully")
+            
+        except Exception as e:
+            error_msg = f"Filtered export failed: {str(e)}"
+            QMessageBox.critical(self, "Export Error", error_msg)
+            self.export_import_status_label.setText(f"Filtered export failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def debug_metadata_keys(self):
+        """Debug method to show all metadata keys and their values from a sample of spectra."""
+        try:
+            if not self.raman_db.database:
+                self.export_filter_preview.setText("No spectra in database to debug.")
+                return
+            
+            # Get first 5 spectra for debugging
+            sample_spectra = list(self.raman_db.database.items())[:5]
+            
+            debug_text = "DEBUG: Metadata Keys Analysis\n" + "="*50 + "\n\n"
+            
+            all_keys = set()
+            for spectrum_name, spectrum_data in sample_spectra:
+                metadata = spectrum_data.get('metadata', {})
+                all_keys.update(metadata.keys())
+                
+                debug_text += f"Spectrum: {spectrum_name}\n"
+                debug_text += f"Metadata keys ({len(metadata)}):\n"
+                
+                for key, value in metadata.items():
+                    value_str = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                    debug_text += f"  • {key}: {value_str}\n"
+                
+                debug_text += "\n"
+            
+            debug_text += f"\nALL UNIQUE METADATA KEYS ({len(all_keys)}):\n"
+            debug_text += "\n".join(f"• {key}" for key in sorted(all_keys))
+            
+            # Look for potential chemical family keys
+            potential_family_keys = []
+            for key in all_keys:
+                key_lower = key.lower()
+                if any(term in key_lower for term in ['family', 'type', 'category', 'plastic', 'chemical', 'material']):
+                    potential_family_keys.append(key)
+            
+            if potential_family_keys:
+                debug_text += f"\n\nPOTENTIAL CHEMICAL FAMILY KEYS:\n"
+                debug_text += "\n".join(f"• {key}" for key in sorted(potential_family_keys))
+            
+            self.export_filter_preview.setText(debug_text)
+            
+        except Exception as e:
+            self.export_filter_preview.setText(f"Debug error: {str(e)}")
     
     # Hey Index Tab Methods
     def update_hey_index_data(self):

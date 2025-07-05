@@ -140,26 +140,82 @@ class MaterialConfigs:
             }
         }
     
+    # Class variable to store custom configurations
+    _custom_configs = {}
+    
     @staticmethod
     def get_available_materials():
         """Get list of available material configurations."""
-        return [
+        built_in_materials = [
             'Kidney Stones (COM)',
             'Quartz',
             'Feldspar', 
-            'Calcite'
+            'Calcite',
+            'Other (Custom)'
         ]
+        # Add any custom materials that have been defined
+        custom_materials = list(MaterialConfigs._custom_configs.keys())
+        return built_in_materials + custom_materials
     
     @staticmethod
     def get_config(material_name):
         """Get configuration for specified material."""
-        configs = {
+        built_in_configs = {
             'Kidney Stones (COM)': MaterialConfigs.get_kidney_stones_config(),
             'Quartz': MaterialConfigs.get_quartz_config(),
             'Feldspar': MaterialConfigs.get_feldspar_config(),
             'Calcite': MaterialConfigs.get_calcite_config()
         }
-        return configs.get(material_name, MaterialConfigs.get_kidney_stones_config())
+        
+        # Check built-in configs first
+        if material_name in built_in_configs:
+            return built_in_configs[material_name]
+        
+        # Check custom configs
+        if material_name in MaterialConfigs._custom_configs:
+            return MaterialConfigs._custom_configs[material_name]
+        
+        # Return default config if not found
+        return MaterialConfigs.get_kidney_stones_config()
+    
+    @staticmethod
+    def add_custom_material(material_name, config):
+        """Add a custom material configuration."""
+        MaterialConfigs._custom_configs[material_name] = config
+    
+    @staticmethod
+    def get_custom_template():
+        """Get a template for creating custom material configurations."""
+        return {
+            'name': 'Custom Material',
+            'characteristic_peaks': {
+                'main': 1000,      # Primary peak (cm-1)
+                'secondary': 500,  # Secondary peak (cm-1)
+                'tertiary': 1500   # Tertiary peak (cm-1)
+            },
+            'reference_regions': {
+                'baseline': (200, 400),        # Baseline region
+                'fingerprint': (400, 800),     # Fingerprint region  
+                'high_freq': (800, 1200)       # High frequency region
+            },
+            'densities': {
+                'crystalline': 2.5,    # Pure crystalline density (g/cm³)
+                'matrix': 2.0,         # Mixed matrix density (g/cm³)
+                'low_density': 1.5     # Low density/amorphous (g/cm³)
+            },
+            'density_ranges': {
+                'low_range': (1.4, 1.6),        # Low density range
+                'medium_range': (1.8, 2.2),     # Medium density range
+                'mixed_range': (2.0, 2.4),      # Mixed range
+                'crystalline_range': (2.4, 2.6) # Crystalline range
+            },
+            'reference_intensity': 800,   # Reference intensity for normalization
+            'classification_thresholds': {
+                'low': 0.3,       # Low crystallinity threshold
+                'medium': 0.6,    # Medium crystallinity threshold
+                'high': 0.85      # High crystallinity threshold
+            }
+        }
 
 
 class RamanDensityAnalyzer:
@@ -168,17 +224,24 @@ class RamanDensityAnalyzer:
     Supports multiple material types with configurable parameters.
     """
     
-    def __init__(self, material_type='Kidney Stones (COM)'):
+    def __init__(self, material_type='Kidney Stones (COM)', custom_config=None):
         """
         Initialize density analyzer with specified material configuration.
         
         Parameters:
         -----------
         material_type : str
-            Type of material to analyze ('Kidney Stones (COM)', 'Quartz', 'Feldspar', 'Calcite')
+            Type of material to analyze ('Kidney Stones (COM)', 'Quartz', 'Feldspar', 'Calcite', 'Other (Custom)')
+        custom_config : dict, optional
+            Custom material configuration (only used when material_type is 'Other (Custom)')
         """
         self.material_type = material_type
-        self.config = MaterialConfigs.get_config(material_type)
+        
+        # Handle custom configuration
+        if material_type == 'Other (Custom)' and custom_config is not None:
+            self.config = custom_config
+        else:
+            self.config = MaterialConfigs.get_config(material_type)
         
         # Set up material-specific parameters
         self.characteristic_peaks = self.config['characteristic_peaks']

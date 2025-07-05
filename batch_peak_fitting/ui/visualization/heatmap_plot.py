@@ -189,7 +189,7 @@ class HeatmapPlot(BasePlot):
         # Setup axes
         self.axes.set_xlabel('Wavenumber (cm⁻¹)')
         self.axes.set_ylabel('Spectrum Index')
-        self.axes.set_title(self.title)
+        self.axes.set_title(self.get_dynamic_title())
         
         # Apply tight layout (with error handling for matplotlib warnings)
         try:
@@ -328,6 +328,27 @@ class HeatmapPlot(BasePlot):
             return np.array(result.get('residuals', []))
         else:
             return np.array(result.get('intensities', []))
+    
+    def get_dynamic_title(self):
+        """Get dynamic title including number of spectra"""
+        base_title = "Heatmap"
+        
+        if not self.data_processor:
+            return base_title
+        
+        try:
+            # Get number of loaded files
+            file_list = self.data_processor.get_file_list()
+            n_files = len(file_list)
+            
+            if n_files > 0:
+                data_type = self.settings['data_type'].replace('_', ' ').title()
+                return f"{base_title} - {data_type} ({n_files} spectra)"
+            else:
+                return base_title
+        except Exception as e:
+            print(f"Warning: Could not get dataset info for heatmap title: {e}")
+            return base_title
     
     def update_data_cache(self):
         """Update cached data from data processor"""

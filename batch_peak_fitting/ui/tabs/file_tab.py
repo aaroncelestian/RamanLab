@@ -13,6 +13,77 @@ from PySide6.QtCore import Qt
 
 from ..base_tab import BaseTab
 
+# Unified button style for consistent UI
+BUTTON_STYLE = """
+    QPushButton {
+        background-color: #f8f9fa;
+        color: #495057;
+        border: 1px solid #dee2e6;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #e9ecef;
+        border: 1px solid #adb5bd;
+        color: #212529;
+    }
+    QPushButton:pressed {
+        background-color: #dee2e6;
+        border: 1px solid #6c757d;
+    }
+    QPushButton:disabled {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        color: #6c757d;
+        opacity: 0.6;
+    }
+"""
+
+PRIMARY_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #0d6efd;
+        color: white;
+        border: 1px solid #0a58ca;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #0b5ed7;
+        border: 1px solid #09408e;
+    }
+    QPushButton:pressed {
+        background-color: #0a58ca;
+        border: 1px solid #08356d;
+    }
+"""
+
+DANGER_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #dc3545;
+        color: white;
+        border: 1px solid #bb2d3b;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-weight: 500;
+        font-size: 11px;
+        min-width: 50px;
+    }
+    QPushButton:hover {
+        background-color: #c82333;
+        border: 1px solid #a02834;
+    }
+    QPushButton:pressed {
+        background-color: #bb2d3b;
+        border: 1px solid #8d2130;
+    }
+"""
+
 
 class FileTab(BaseTab):
     """
@@ -41,44 +112,14 @@ class FileTab(BaseTab):
         # Buttons
         button_layout = QHBoxLayout()
         
-        add_btn = QPushButton("Add Files")
+        add_btn = QPushButton("Add")
         add_btn.setToolTip("Add spectrum files for batch processing")
-        add_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976D2;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1565C0;
-            }
-            QPushButton:pressed {
-                background-color: #0D47A1;
-            }
-        """)
+        add_btn.setStyleSheet(PRIMARY_BUTTON_STYLE)
         button_layout.addWidget(add_btn)
         
-        remove_btn = QPushButton("Remove Selected")
+        remove_btn = QPushButton("Remove")
         remove_btn.setToolTip("Remove selected files from the list")
-        remove_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #D32F2F;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #C62828;
-            }
-            QPushButton:pressed {
-                background-color: #B71C1C;
-            }
-        """)
+        remove_btn.setStyleSheet(DANGER_BUTTON_STYLE)
         button_layout.addWidget(remove_btn)
         
         file_layout.addLayout(button_layout)
@@ -87,56 +128,36 @@ class FileTab(BaseTab):
         nav_group = QGroupBox("Navigation")
         nav_layout = QHBoxLayout(nav_group)
         
-        first_btn = QPushButton("First")
+        first_btn = QPushButton("◀◀")
         first_btn.setToolTip("Go to first spectrum")
         nav_layout.addWidget(first_btn)
         
-        prev_btn = QPushButton("Previous")
+        prev_btn = QPushButton("◀")
         prev_btn.setToolTip("Go to previous spectrum")
         nav_layout.addWidget(prev_btn)
         
-        next_btn = QPushButton("Next")
+        next_btn = QPushButton("▶")
         next_btn.setToolTip("Go to next spectrum")
         nav_layout.addWidget(next_btn)
         
-        last_btn = QPushButton("Last")
+        last_btn = QPushButton("▶▶")
         last_btn.setToolTip("Go to last spectrum")
         nav_layout.addWidget(last_btn)
         
-        # Style navigation buttons
-        nav_button_style = """
-            QPushButton {
-                background-color: #424242;
-                color: white;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #616161;
-            }
-            QPushButton:pressed {
-                background-color: #212121;
-            }
-            QPushButton:disabled {
-                background-color: #BDBDBD;
-                color: #757575;
-            }
-        """
-        
+        # Apply consistent style to navigation buttons
         for btn in [first_btn, prev_btn, next_btn, last_btn]:
-            btn.setStyleSheet(nav_button_style)
+            btn.setStyleSheet(BUTTON_STYLE)
         
         # Status label
         self.current_file_label = QLabel("No files loaded")
         self.current_file_label.setStyleSheet("""
             QLabel {
-                background-color: #F5F5F5;
-                border: 1px solid #E0E0E0;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
                 padding: 5px;
-                border-radius: 3px;
+                border-radius: 4px;
                 font-family: monospace;
+                color: #495057;
             }
         """)
         
@@ -172,26 +193,19 @@ class FileTab(BaseTab):
     def connect_core_signals(self):
         """Connect to core component signals"""
         if self.data_processor:
-            self.data_processor.spectra_list_changed.connect(self._update_file_list)
-            self.data_processor.current_spectrum_changed.connect(self._update_current_selection)
-            self.data_processor.spectrum_loaded.connect(self._update_status)
+            self.data_processor.current_spectrum_changed.connect(self._update_current_spectrum_display)
+            self.data_processor.spectra_list_changed.connect(self._update_file_list_display)
     
     def _add_files(self):
-        """Add spectrum files for batch processing"""
-        file_paths, _ = QFileDialog.getOpenFileNames(
-            self, "Select Spectrum Files", "",
-            "Text files (*.txt);;CSV files (*.csv);;All files (*.*)"
-        )
+        """Add files to the batch processing list"""
+        file_dialog = QFileDialog()
+        file_dialog.setFileMode(QFileDialog.ExistingFiles)
+        file_dialog.setNameFilter("Spectrum files (*.txt *.csv *.spc *.asp)")
         
-        if file_paths:
-            if self.data_processor:
-                files_added = self.data_processor.add_files(file_paths)
-                self.emit_status(f"Added {files_added} files")
-                self.emit_action("files_added", {"count": files_added, "paths": file_paths})
-            else:
-                self.emit_status("Error: No data processor available")
-        else:
-            self.emit_status("No files selected")
+        if file_dialog.exec():
+            files = file_dialog.selectedFiles()
+            self.emit_action("add_files", {"files": files})
+            self.emit_status(f"Added {len(files)} files")
     
     def _remove_selected_files(self):
         """Remove selected files from the list"""
@@ -200,134 +214,73 @@ class FileTab(BaseTab):
             QMessageBox.warning(self, "No Selection", "Please select files to remove.")
             return
         
-        # Get indices of selected items
-        indices = []
-        for item in selected_items:
-            row = self.file_list_widget.row(item)
-            indices.append(row)
-        
-        if self.data_processor:
-            files_removed = self.data_processor.remove_files(indices)
-            self.emit_status(f"Removed {files_removed} files")
-            self.emit_action("files_removed", {"count": files_removed, "indices": indices})
-        else:
-            self.emit_status("Error: No data processor available")
-    
-    def _on_file_double_click(self, item):
-        """Handle double-click on file list item"""
-        row = self.file_list_widget.row(item)
-        if self.data_processor:
-            success = self.data_processor.load_spectrum(row)
-            if success:
-                self.emit_status(f"Loaded spectrum {row + 1}")
-                self.emit_action("spectrum_selected", {"index": row})
-            else:
-                self.emit_status(f"Failed to load spectrum {row + 1}")
-        else:
-            self.emit_status("Error: No data processor available")
+        file_paths = [item.text() for item in selected_items]
+        self.emit_action("remove_files", {"files": file_paths})
+        self.emit_status(f"Removed {len(file_paths)} files")
     
     def _navigate_spectrum(self, direction):
         """Navigate through spectra"""
-        if self.data_processor:
-            success = self.data_processor.navigate_spectrum(direction)
-            
-            direction_names = {
-                0: "first",
-                -2: "last", 
-                -1: "previous",
-                1: "next"
-            }
-            
-            if success:
-                self.emit_status(f"Navigated to {direction_names.get(direction, 'unknown')} spectrum")
-                self.emit_action("spectrum_navigated", {"direction": direction})
-            else:
-                self.emit_status("Navigation failed")
-        else:
-            self.emit_status("Error: No data processor available")
-    
-    def _update_file_list(self, file_list):
-        """Update the file list display"""
-        self.file_list_widget.clear()
+        nav_actions = {
+            0: "navigate_first",
+            -1: "navigate_previous", 
+            1: "navigate_next",
+            -2: "navigate_last"
+        }
         
+        action = nav_actions.get(direction)
+        if action:
+            self.emit_action(action, {})
+    
+    def _on_file_double_click(self, item):
+        """Handle file double-click"""
+        file_path = item.text()
+        self.emit_action("load_file", {"file_path": file_path})
+        self.emit_status(f"Loading: {os.path.basename(file_path)}")
+    
+    def _update_current_spectrum_display(self, index):
+        """Update current spectrum display"""
+        if hasattr(self, 'data_processor') and self.data_processor and 0 <= index < len(self.data_processor.spectra_files):
+            file_path = self.data_processor.spectra_files[index]
+            filename = os.path.basename(file_path)
+            self.current_file_label.setText(f"Current: {filename}")
+        else:
+            self.current_file_label.setText("No files loaded")
+    
+    def _update_file_list_display(self, file_list):
+        """Update file list display"""
+        self.file_list_widget.clear()
         for file_path in file_list:
             filename = os.path.basename(file_path)
             self.file_list_widget.addItem(filename)
         
         # Update navigation button states
-        self._update_navigation_buttons(len(file_list))
-        
-        self.emit_status(f"File list updated: {len(file_list)} files")
-    
-    def _update_current_selection(self, index):
-        """Update current file selection"""
-        if 0 <= index < self.file_list_widget.count():
-            self.file_list_widget.setCurrentRow(index)
-        
-        self._update_navigation_buttons(self.file_list_widget.count(), index)
-    
-    def _update_status(self, spectrum_data):
-        """Update the status label"""
-        if self.data_processor:
-            status = self.data_processor.get_file_status()
-            self.current_file_label.setText(status)
-        else:
-            self.current_file_label.setText("No data processor")
-    
-    def _update_navigation_buttons(self, total_files, current_index=None):
-        """Update navigation button enabled states"""
-        has_files = total_files > 0
-        
-        # Get current index if not provided
-        if current_index is None and self.data_processor:
-            current_index = self.data_processor.current_spectrum_index
-        
-        # Enable/disable buttons based on state
-        self.first_btn.setEnabled(has_files and current_index > 0)
-        self.prev_btn.setEnabled(has_files and current_index > 0)
-        self.next_btn.setEnabled(has_files and current_index < total_files - 1)
-        self.last_btn.setEnabled(has_files and current_index < total_files - 1)
-    
-    def update_from_data_processor(self, data=None):
-        """Update tab when data processor state changes"""
-        if self.data_processor:
-            file_list = self.data_processor.get_file_list()
-            self._update_file_list(file_list)
-            self._update_current_selection(self.data_processor.current_spectrum_index)
-            self._update_status(None)  # Will get status from data processor
+        has_files = len(file_list) > 0
+        for btn in [self.first_btn, self.prev_btn, self.next_btn, self.last_btn]:
+            btn.setEnabled(has_files)
     
     def get_tab_data(self):
         """Get current tab state"""
         base_data = super().get_tab_data()
         
-        # Add file-specific data
+        file_list = []
+        for i in range(self.file_list_widget.count()):
+            file_list.append(self.file_list_widget.item(i).text())
+        
         base_data.update({
-            'selected_files': [
-                self.file_list_widget.item(i).text() 
-                for i in range(self.file_list_widget.count())
-            ] if self.file_list_widget else [],
-            'current_selection': self.file_list_widget.currentRow() if self.file_list_widget else -1
+            'file_count': len(file_list),
+            'file_list': file_list,
+            'current_file': self.current_file_label.text()
         })
         
         return base_data
     
     def reset_to_defaults(self):
         """Reset tab to default state"""
-        if self.file_list_widget:
-            self.file_list_widget.clear()
+        self.file_list_widget.clear()
+        self.current_file_label.setText("No files loaded")
         
-        if self.current_file_label:
-            self.current_file_label.setText("No files loaded")
+        # Disable navigation buttons
+        for btn in [self.first_btn, self.prev_btn, self.next_btn, self.last_btn]:
+            btn.setEnabled(False)
         
-        self._update_navigation_buttons(0)
-        self.emit_status("Tab reset to defaults")
-    
-    def validate_input(self):
-        """Validate current input state"""
-        if not self.file_list_widget:
-            return False, "File list widget not initialized"
-        
-        if self.file_list_widget.count() == 0:
-            return False, "No files loaded"
-        
-        return True, "" 
+        self.emit_status("Tab reset to defaults") 

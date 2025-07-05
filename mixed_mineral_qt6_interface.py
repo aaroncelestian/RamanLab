@@ -471,12 +471,12 @@ class MixedMineralAnalysisQt6(QDialog):
             
             # Look for SQLite database - including the specific file mentioned by user
             potential_sql_paths = [
-                'RamanLab_Database_20250602.sqlite',  # User mentioned this specific file
+                'RamanLab_Database_20250602.pkl',  # User mentioned this specific file
                 'RamanLab_Database.sqlite',
                 'mineral_database.sqlite',
-                os.path.join(os.path.dirname(__file__), 'RamanLab_Database_20250602.sqlite'),
+                os.path.join(os.path.dirname(__file__), 'RamanLab_Database_20250602.pkl'),
                 os.path.join(os.path.dirname(__file__), 'RamanLab_Database.sqlite'),
-                os.path.join(os.path.dirname(__file__), '..', 'RamanLab_Database_20250602.sqlite'),
+                os.path.join(os.path.dirname(__file__), '..', 'RamanLab_Database_20250602.pkl'),
                 os.path.join(os.path.dirname(__file__), '..', 'RamanLab_Database.sqlite'),
                 # Check for common SQLite database names
                 'raman_database.sqlite',

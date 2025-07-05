@@ -334,7 +334,7 @@ python test_stage3.py
 
 ### Required Files
 ```
-✅ raman_database.pkl (250 MB) - Core mineral database
+✅ RamanLab_Database_20250602.pkl (250 MB) - Main RamanLab database
 ✅ RRUFF_Export_with_Hey_Classification.csv (3.1 MB) - RRUFF data
 ✅ mineral_modes.pkl (6.5 MB) - Mineral mode database
 ```

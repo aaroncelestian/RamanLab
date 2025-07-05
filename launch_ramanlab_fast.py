@@ -10,7 +10,7 @@ Usage:
     python launch_ramanlab_fast.py
 
 Author: Aaron Celestian
-Version: 1.0.2
+Version: 1.0.0
 License: MIT
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 def main():
     """Launch RamanLab without dependency checking for faster startup."""
-    print("🔬 RamanLab v1.0.2 'DTW Performance Enhancement' - Fast Launch")
+    print("🔬 RamanLab v1.0.0 'Debut' - Fast Launch")
     
     # Get the script directory
     script_dir = Path(__file__).parent.absolute()

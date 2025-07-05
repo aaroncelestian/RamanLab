@@ -188,7 +188,7 @@ python3 main.py
    ```bash
    python3 check_dependencies.py
    ```
-3. Make sure all the check boxes are checked on the output. If they are, then you are good to go! If not, then you need to install the missing ones (except for the raman_database.pkl, that can be added later) before proceeding.
+3. Make sure all the check boxes are checked on the output. If they are, then you are good to go! If not, then you need to install the missing ones before proceeding.
 4. After all dependencies are installed, you are good to go:
    ```bash
    python3 main.py

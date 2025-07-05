@@ -10,7 +10,7 @@ Usage:
     python install_desktop_icon.py
 
 Author: Aaron Celestian
-Version: 1.0.3
+Version: 1.1.0
 License: MIT
 """
 
@@ -140,9 +140,9 @@ pause
     <key>CFBundleDisplayName</key>
     <string>{self.app_name}</string>
     <key>CFBundleVersion</key>
-            <string>1.0.3</string>
-                  <key>CFBundleShortVersionString</key>
-          <string>1.0.3</string>
+                    <string>1.1.0</string>
+    <key>CFBundleShortVersionString</key>
+        <string>1.1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
@@ -344,7 +344,7 @@ StartupWMClass={self.app_name}
 def main():
     """Main installer function."""
     print("=" * 60)
-    print("🔬 RamanLab Desktop Icon Installer v1.0.3")
+    print("🔬 RamanLab Desktop Icon Installer v1.1.0")
     print("=" * 60)
     
     installer = DesktopIconInstaller()

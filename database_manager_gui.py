@@ -83,48 +83,22 @@ class DatabaseValidator(QThread):
             result['exists'] = True
             result['file_size'] = os.path.getsize(file_path)
             
-            # Handle different file types
-            if file_path.endswith('.sqlite') or file_path.endswith('.db'):
-                # SQLite database validation
-                import sqlite3
-                conn = sqlite3.connect(file_path)
-                cursor = conn.cursor()
-                
-                # Check if it has expected tables
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                tables = [row[0] for row in cursor.fetchall()]
-                
-                if 'spectra' in tables:
-                    cursor.execute("SELECT COUNT(*) FROM spectra")
-                    result['entry_count'] = cursor.fetchone()[0]
-                    
-                    # Get sample entries
-                    cursor.execute("SELECT name FROM spectra LIMIT 3")
-                    result['sample_entries'] = [row[0] for row in cursor.fetchall()]
-                    
-                    result['readable'] = True
-                    result['format_valid'] = True
-                else:
-                    result['error'] = 'SQLite database missing expected "spectra" table'
-                
-                conn.close()
-                
+            # Handle PKL files only (SQLite support removed)
+            # PKL file validation
+            with open(file_path, 'rb') as f:
+                data = pickle.load(f)
+            
+            result['readable'] = True
+            result['format_valid'] = True
+            
+            if isinstance(data, dict):
+                result['entry_count'] = len(data)
+                # Get sample entries (first 3)
+                sample_keys = list(data.keys())[:3]
+                result['sample_entries'] = sample_keys
             else:
-                # PKL file validation
-                with open(file_path, 'rb') as f:
-                    data = pickle.load(f)
-                
-                result['readable'] = True
-                result['format_valid'] = True
-                
-                if isinstance(data, dict):
-                    result['entry_count'] = len(data)
-                    # Get sample entries (first 3)
-                    sample_keys = list(data.keys())[:3]
-                    result['sample_entries'] = sample_keys
-                else:
-                    result['error'] = 'Database is not in expected dictionary format'
-                
+                result['error'] = 'Database is not in expected dictionary format'
+            
         except Exception as e:
             result['error'] = str(e)
         
@@ -139,7 +113,7 @@ class DatabaseManagerGUI(QMainWindow):
         
         # Database file definitions
         self.database_files = {
-            'RamanLab_Database_20250602.sqlite': None,
+            'RamanLab_Database_20250602.pkl': None,  # This is actually a pickle file
             'mineral_modes.pkl': None
         }
         
@@ -268,8 +242,12 @@ class DatabaseManagerGUI(QMainWindow):
         self.test_browser_btn = QPushButton("🧪 Test Database Browser")
         self.test_browser_btn.clicked.connect(self.test_database_browser)
         
+        self.inspect_btn = QPushButton("🔍 Inspect File Details")
+        self.inspect_btn.clicked.connect(self.inspect_file_details)
+        
         controls_layout.addWidget(self.validate_btn)
         controls_layout.addWidget(self.test_browser_btn)
+        controls_layout.addWidget(self.inspect_btn)
         
         layout.addWidget(controls_group)
         
@@ -314,9 +292,13 @@ class DatabaseManagerGUI(QMainWindow):
         restore_btn = QPushButton("🔄 Restore Backup")
         restore_btn.clicked.connect(self.restore_backup)
         
+        fix_extensions_btn = QPushButton("🔧 Fix File Extensions")
+        fix_extensions_btn.clicked.connect(self.fix_file_extensions)
+        
         buttons_layout.addWidget(backup_btn)
         buttons_layout.addWidget(move_btn)
         buttons_layout.addWidget(restore_btn)
+        buttons_layout.addWidget(fix_extensions_btn)
         
         repair_layout.addLayout(buttons_layout)
         layout.addWidget(repair_group)
@@ -372,8 +354,14 @@ class DatabaseManagerGUI(QMainWindow):
         
         <h4>Expected Database Files:</h4>
         <ul>
-            <li><b>RamanLab_Database_20250602.sqlite</b> - Main SQLite Raman spectra database</li>
+            <li><b>RamanLab_Database_20250602.pkl</b> - Main Raman spectra database (PKL format)</li>
             <li><b>mineral_modes.pkl</b> - Mineral vibrational modes database (PKL format)</li>
+        </ul>
+        
+        <h4>File Extension Issues:</h4>
+        <ul>
+            <li>If you have files that won't validate, they might be pickle files with wrong extensions</li>
+            <li>Use "🔧 Fix File Extensions" in the Repair tab to automatically correct misnamed files</li>
         </ul>
         
         <h4>Common Issues:</h4>
@@ -391,10 +379,8 @@ class DatabaseManagerGUI(QMainWindow):
     
     def browse_database_file(self, db_name):
         """Browse for a database file."""
-        if db_name.endswith('.sqlite'):
-            filter_string = "SQLite Database (*.sqlite);;Database Files (*.db);;All Files (*)"
-        else:
-            filter_string = "Pickle Files (*.pkl);;All Files (*)"
+        # Only support PKL files now
+        filter_string = "Pickle Files (*.pkl);;All Files (*)"
             
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
@@ -406,12 +392,22 @@ class DatabaseManagerGUI(QMainWindow):
         if file_path:
             self.database_files[db_name] = file_path
             self.db_widgets[db_name]['path_label'].setText(file_path)
-            self.db_widgets[db_name]['status_label'].setText("❓")
-            self.log(f"Selected {db_name}: {file_path}")
+            
+            # Immediately validate the selected file
+            validator = DatabaseValidator({db_name: file_path})
+            result = validator.validate_database_file(file_path)
+            
+            if result['readable'] and result['format_valid']:
+                self.db_widgets[db_name]['status_label'].setText("✅")
+                self.log(f"✅ Selected {db_name}: {file_path} ({result['entry_count']} entries)")
+            else:
+                self.db_widgets[db_name]['status_label'].setText("❌")
+                self.log(f"❌ Selected {db_name}: {file_path} - Validation failed: {result.get('error', 'Unknown error')}")
     
     def auto_detect_databases(self):
         """Automatically detect database files in the current directory."""
         detected = []
+        validated = []
         
         for db_name in self.database_files.keys():
             # Check current directory first
@@ -419,11 +415,24 @@ class DatabaseManagerGUI(QMainWindow):
             if os.path.exists(current_path):
                 self.database_files[db_name] = current_path
                 self.db_widgets[db_name]['path_label'].setText(current_path)
-                self.db_widgets[db_name]['status_label'].setText("✅")
+                
+                # Validate the detected file
+                validator = DatabaseValidator({db_name: current_path})
+                result = validator.validate_database_file(current_path)
+                
+                if result['readable'] and result['format_valid']:
+                    self.db_widgets[db_name]['status_label'].setText("✅")
+                    validated.append(f"{db_name} ({result['entry_count']} entries)")
+                else:
+                    self.db_widgets[db_name]['status_label'].setText("❌")
+                    self.log(f"⚠️ {db_name} found but validation failed: {result.get('error', 'Unknown error')}")
+                
                 detected.append(db_name)
         
         if detected:
-            self.log(f"Auto-detected databases: {', '.join(detected)}")
+            self.log(f"Auto-detected files: {', '.join(detected)}")
+            if validated:
+                self.log(f"Successfully validated: {', '.join(validated)}")
         else:
             self.log("No databases auto-detected in current directory")
     
@@ -516,40 +525,62 @@ class DatabaseManagerGUI(QMainWindow):
                 self.log("❌ Database browser file not found!")
                 return
             
-            # Test if we can import required modules
-            try:
-                import pickle
-                import sqlite3
-                
-                test_results = []
-                for db_name, db_path in self.database_files.items():
-                    if db_path and os.path.exists(db_path):
-                        try:
-                            if db_path.endswith('.sqlite') or db_path.endswith('.db'):
-                                # Test SQLite database
-                                conn = sqlite3.connect(db_path)
-                                cursor = conn.cursor()
-                                cursor.execute("SELECT COUNT(*) FROM spectra")
-                                count = cursor.fetchone()[0]
-                                conn.close()
-                                test_results.append(f"✅ {db_name}: SQLite database readable ({count} spectra)")
-                            else:
-                                # Test PKL database
-                                with open(db_path, 'rb') as f:
-                                    data = pickle.load(f)
-                                test_results.append(f"✅ {db_name}: PKL database readable ({len(data)} entries)")
-                        except Exception as e:
-                            test_results.append(f"❌ {db_name}: Cannot read - {str(e)}")
-                
-                self.log("Database Browser Test Results:")
-                for result in test_results:
-                    self.log(result)
-                    
-            except ImportError as e:
-                self.log(f"❌ Missing dependencies: {e}")
+            # Test PKL files only (SQLite support removed)
+            test_results = []
+            for db_name, db_path in self.database_files.items():
+                if db_path and os.path.exists(db_path):
+                    try:
+                        # Test PKL database only
+                        with open(db_path, 'rb') as f:
+                            data = pickle.load(f)
+                        test_results.append(f"✅ {db_name}: PKL database readable ({len(data)} entries)")
+                    except Exception as e:
+                        test_results.append(f"❌ {db_name}: Cannot read - {str(e)}")
+            
+            self.log("Database Browser Test Results:")
+            for result in test_results:
+                self.log(result)
                 
         except Exception as e:
             self.log(f"❌ Browser test failed: {e}")
+    
+    def inspect_file_details(self):
+        """Inspect detailed information about the database files."""
+        self.log("🔍 Inspecting file details...")
+        
+        for db_name, db_path in self.database_files.items():
+            if db_path and os.path.exists(db_path):
+                self.log(f"\n📁 Inspecting {db_name}:")
+                self.log(f"   Path: {db_path}")
+                self.log(f"   Size: {os.path.getsize(db_path)} bytes")
+                
+                try:
+                    # Read first 32 bytes to check file signature
+                    with open(db_path, 'rb') as f:
+                        header = f.read(32)
+                    
+                    self.log(f"   Header (first 16 bytes): {header[:16]}")
+                    self.log(f"   Header (hex): {header[:16].hex()}")
+                    
+                    # Only check PKL files (SQLite support removed)
+                    if db_path.endswith('.pkl'):
+                        # Check if it's a valid pickle file
+                        try:
+                            with open(db_path, 'rb') as f:
+                                data = pickle.load(f)
+                            self.log(f"   ✅ Valid pickle file")
+                            self.log(f"   Type: {type(data)}")
+                            if hasattr(data, '__len__'):
+                                self.log(f"   Length: {len(data)}")
+                        except Exception as e:
+                            self.log(f"   ❌ Pickle loading error: {e}")
+                    else:
+                        self.log(f"   ⚠️ Unsupported file type (only .pkl files supported)")
+                
+                except Exception as e:
+                    self.log(f"   ❌ File inspection error: {e}")
+            else:
+                self.log(f"⚠️ {db_name}: File not selected or does not exist")
     
     def fix_database_paths(self):
         """Fix database path issues in Python files."""
@@ -568,7 +599,7 @@ class DatabaseManagerGUI(QMainWindow):
             'raman_spectra_qt6.py': [
                 {
                     'pattern': r'primary_db_path = self\.db_directory / "raman_database\.pkl"',
-                    'replacement': 'primary_db_path = self.db_directory / "RamanLab_Database_20250602.sqlite"'
+                    'replacement': 'primary_db_path = self.db_directory / "RamanLab_Database_20250602.pkl"'
                 }
             ],
             'raman_polarization_analyzer.py': [
@@ -707,6 +738,57 @@ class DatabaseManagerGUI(QMainWindow):
             self.script_dir = directory
             self.ramanlab_dir_label.setText(directory)
             self.auto_detect_databases()
+    
+    def fix_file_extensions(self):
+        """Fix files that have wrong extensions (PKL files only now)."""
+        self.log("🔧 Checking for files with incorrect extensions...")
+        
+        fixed_files = []
+        
+        for db_name, db_path in self.database_files.items():
+            if db_path and os.path.exists(db_path):
+                try:
+                    # Read file header
+                    with open(db_path, 'rb') as f:
+                        header = f.read(16)
+                    
+                    # Check for misnamed pickle files (SQLite support removed)
+                    if not db_name.endswith('.pkl') and header.startswith(b'\x80'):
+                        # This is a pickle file with wrong extension
+                        new_name = os.path.splitext(db_name)[0] + '.pkl'
+                        new_path = os.path.join(os.path.dirname(db_path), new_name)
+                        
+                        # Create backup if requested
+                        if self.backup_checkbox.isChecked():
+                            backup_path = db_path + '.backup'
+                            shutil.copy2(db_path, backup_path)
+                            self.log(f"Created backup: {backup_path}")
+                        
+                        # Rename the file
+                        os.rename(db_path, new_path)
+                        
+                        # Update the database manager to look for the correct file
+                        self.database_files[new_name] = new_path
+                        del self.database_files[db_name]
+                        
+                        # Update the GUI
+                        if new_name in self.db_widgets:
+                            self.db_widgets[new_name]['path_label'].setText(new_path)
+                        
+                        fixed_files.append(f"{db_name} → {new_name}")
+                        self.log(f"✅ Renamed {db_name} to {new_name}")
+                
+                except Exception as e:
+                    self.log(f"❌ Error checking {db_name}: {e}")
+        
+        if fixed_files:
+            self.log(f"🎉 Fixed {len(fixed_files)} files with incorrect extensions:")
+            for fix in fixed_files:
+                self.log(f"   {fix}")
+            self.log("Re-running auto-detection with corrected filenames...")
+            self.auto_detect_databases()
+        else:
+            self.log("ℹ️ No files found with incorrect extensions")
     
     def log(self, message):
         """Log a message to all text areas."""

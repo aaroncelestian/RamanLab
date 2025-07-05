@@ -93,7 +93,7 @@ def main():
     # Database files to check
     database_files = [
         'mineral_modes.pkl',
-        'raman_database.pkl'
+        'RamanLab_Database_20250602.pkl'
     ]
     
     all_good = True
