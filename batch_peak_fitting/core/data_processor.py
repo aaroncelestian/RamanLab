@@ -8,8 +8,14 @@ import numpy as np
 import pandas as pd
 import os
 from pathlib import Path
-import chardet
 from PySide6.QtCore import QObject, Signal
+
+# Optional import for encoding detection
+try:
+    import chardet
+    CHARDET_AVAILABLE = True
+except ImportError:
+    CHARDET_AVAILABLE = False
 
 
 class DataProcessor(QObject):
@@ -299,8 +305,27 @@ class DataProcessor(QObject):
             try:
                 with open(file_path, 'rb') as f:
                     raw_data = f.read()
+                    
+                # Use chardet if available, otherwise try common encodings
+                if CHARDET_AVAILABLE:
                     detected = chardet.detect(raw_data)
                     encoding = detected['encoding'] or 'utf-8'
+                else:
+                    # Fallback: try to detect encoding manually
+                    encoding = 'utf-8'
+                    # Try to decode with utf-8 first
+                    try:
+                        raw_data.decode('utf-8')
+                        encoding = 'utf-8'
+                    except UnicodeDecodeError:
+                        # If utf-8 fails, try common alternatives
+                        for fallback_encoding in ['latin1', 'cp1252', 'iso-8859-1']:
+                            try:
+                                raw_data.decode(fallback_encoding)
+                                encoding = fallback_encoding
+                                break
+                            except UnicodeDecodeError:
+                                continue
                 
                 with open(file_path, 'r', encoding=encoding) as f:
                     lines = f.readlines()

@@ -39,6 +39,7 @@ openpyxl>=3.0.0             # Excel file reading and writing support
 fastdtw>=0.3.4              # Fast Dynamic Time Warping for spectral matching
 tqdm>=4.60.0                # Progress bars for long-running operations
 psutil>=5.8.0               # System and process monitoring utilities
+chardet>=3.0.0              # Character encoding detection for file loading
 
 # ============================================================================
 # UPDATE CHECKER & VERSION MANAGEMENT (REQUIRED - Core functionality)
@@ -114,13 +115,13 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # ============================================================================
 #
 # CORE REQUIRED DEPENDENCIES (Essential - RamanLab won't work without these):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet
 #
 # FULL INSTALL (All Required + Recommended Optional):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask umap-learn pymatgen reportlab pyinstaller
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet umap-learn pymatgen reportlab pyinstaller
 #
 # MINIMAL INSTALL (If some packages fail):
-# 1. First try: pip install PySide6 numpy scipy matplotlib pandas scikit-learn joblib
+# 1. First try: pip install PySide6 numpy scipy matplotlib pandas scikit-learn joblib chardet
 # 2. Then add: pip install seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip dask
 # 3. Optional extras: pip install umap-learn pymatgen reportlab pyinstaller
 #
@@ -142,6 +143,7 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # - For macOS users: Install Xcode Command Line Tools if needed
 # - For Linux users: Install system packages for Qt6 development
 # - If optional packages fail, skip them - basic functionality will still work
+# - If batch peak fitting fails with "No module named 'chardet'": pip install chardet
 #
 # SYSTEM-SPECIFIC NOTES:
 # - Windows: All packages should install via pip
