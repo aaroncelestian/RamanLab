@@ -6,6 +6,8 @@ No background threads to avoid Qt threading issues.
 
 import webbrowser
 import platform
+import subprocess
+import os
 from packaging import version as packaging_version
 
 try:
@@ -61,6 +63,24 @@ class SimpleUpdateDialog(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         
+        # Auto-update button (most convenient option)
+        auto_update_btn = QPushButton("🔄 Auto Update")
+        auto_update_btn.clicked.connect(self.auto_update)
+        auto_update_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10B981;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+        """)
+        button_layout.addWidget(auto_update_btn)
+        
         # Download button
         download_btn = QPushButton("📥 Download from GitHub")
         download_btn.clicked.connect(self.download_update)
@@ -102,6 +122,138 @@ class SimpleUpdateDialog(QDialog):
         except Exception as e:
             QMessageBox.information(self, "Manual Command", 
                                   "Run this in your RamanLab directory:\n\ngit pull")
+    
+    def auto_update(self):
+        """Automatically perform git pull operation."""
+        try:
+            # Check if we're in a git repository
+            if not os.path.exists('.git'):
+                QMessageBox.warning(self, "Not a Git Repository", 
+                                  "This directory is not a git repository.\n\n"
+                                  "Auto-update only works if you cloned RamanLab using git.\n\n"
+                                  "Please use 'Download from GitHub' instead or clone the repository using:\n"
+                                  "git clone https://github.com/aaroncelestian/RamanLab.git")
+                return
+            
+            # Show progress dialog
+            progress_dialog = QProgressDialog("Updating RamanLab...", "Cancel", 0, 0, self)
+            progress_dialog.setWindowTitle("Auto Update")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            progress_dialog.show()
+            progress_dialog.repaint()
+            
+            # Check if user cancelled
+            if progress_dialog.wasCanceled():
+                return
+            
+            # Check for uncommitted changes
+            progress_dialog.setLabelText("Checking for local changes...")
+            progress_dialog.repaint()
+            
+            try:
+                # Check git status
+                status_result = subprocess.run(['git', 'status', '--porcelain'], 
+                                             capture_output=True, text=True, timeout=10)
+                
+                if progress_dialog.wasCanceled():
+                    return
+                    
+                if status_result.returncode == 0 and status_result.stdout.strip():
+                    # There are uncommitted changes
+                    progress_dialog.close()
+                    reply = QMessageBox.question(self, "Uncommitted Changes", 
+                                               "You have uncommitted changes in your RamanLab directory.\n\n"
+                                               "These changes might be lost during the update.\n\n"
+                                               "Do you want to continue with the update anyway?",
+                                               QMessageBox.Yes | QMessageBox.No,
+                                               QMessageBox.No)
+                    if reply != QMessageBox.Yes:
+                        return
+                    
+                    # Restart progress dialog
+                    progress_dialog = QProgressDialog("Updating RamanLab...", "Cancel", 0, 0, self)
+                    progress_dialog.setWindowTitle("Auto Update")
+                    progress_dialog.setWindowModality(Qt.WindowModal)
+                    progress_dialog.setMinimumDuration(0)
+                    progress_dialog.show()
+                    progress_dialog.repaint()
+                    
+            except subprocess.TimeoutExpired:
+                progress_dialog.close()
+                QMessageBox.warning(self, "Update Failed", 
+                                  "Git status check timed out.\n\n"
+                                  "Please try the manual update method.")
+                return
+            except Exception as e:
+                progress_dialog.close()
+                QMessageBox.warning(self, "Update Failed", 
+                                  f"Could not check git status: {str(e)}\n\n"
+                                  "Please try the manual update method.")
+                return
+            
+            # Perform git pull
+            progress_dialog.setLabelText("Pulling latest changes from GitHub...")
+            progress_dialog.repaint()
+            
+            if progress_dialog.wasCanceled():
+                return
+            
+            try:
+                # Run git pull
+                pull_result = subprocess.run(['git', 'pull'], 
+                                           capture_output=True, text=True, timeout=30)
+                
+                progress_dialog.close()
+                
+                if pull_result.returncode == 0:
+                    # Success
+                    QMessageBox.information(self, "Update Successful! 🎉", 
+                                          f"RamanLab has been updated successfully!\n\n"
+                                          f"Updated to version {self.update_info['version']}\n\n"
+                                          "Changes:\n"
+                                          f"{pull_result.stdout}\n\n"
+                                          "Please restart RamanLab to use the new version.")
+                    self.accept()
+                else:
+                    # Git pull failed
+                    error_msg = pull_result.stderr or pull_result.stdout or "Unknown error"
+                    
+                    if "merge conflict" in error_msg.lower():
+                        QMessageBox.warning(self, "Merge Conflict", 
+                                          "Update failed due to merge conflicts.\n\n"
+                                          "This happens when you have local changes that conflict with the update.\n\n"
+                                          "Please resolve manually:\n"
+                                          "1. Open terminal in RamanLab directory\n"
+                                          "2. Run: git status\n"
+                                          "3. Resolve conflicts or reset with: git reset --hard origin/main\n"
+                                          "4. Run: git pull")
+                    elif "authentication" in error_msg.lower() or "permission" in error_msg.lower():
+                        QMessageBox.warning(self, "Authentication Error", 
+                                          "Update failed due to authentication issues.\n\n"
+                                          "This might happen if you need to login to GitHub.\n\n"
+                                          "Please try the manual update method or check your GitHub credentials.")
+                    else:
+                        QMessageBox.warning(self, "Update Failed", 
+                                          f"Git pull failed:\n\n{error_msg}\n\n"
+                                          "Please try the manual update method.")
+                        
+            except subprocess.TimeoutExpired:
+                progress_dialog.close()
+                QMessageBox.warning(self, "Update Failed", 
+                                  "Git pull timed out.\n\n"
+                                  "This might happen with slow internet connections.\n\n"
+                                  "Please try the manual update method.")
+            except Exception as e:
+                progress_dialog.close()
+                QMessageBox.warning(self, "Update Failed", 
+                                  f"Could not run git pull: {str(e)}\n\n"
+                                  "Please try the manual update method.")
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Update Failed", 
+                              f"Unexpected error during auto-update: {str(e)}\n\n"
+                              "Please try the manual update method.")
 
 
 def simple_check_for_updates(parent=None, show_no_update=True):
