@@ -47,13 +47,22 @@ from PySide6.QtGui import QAction, QDesktopServices, QPixmap, QFont
 # Version info
 from version import __version__, __author__, __copyright__
 
-# Import batch peak fitting module (modular version)
+# Import batch peak fitting module (modular version) with enhanced error handling
 try:
     from batch_peak_fitting.main import launch_batch_peak_fitting
     BATCH_AVAILABLE = True
-except ImportError:
+    print("✅ Batch peak fitting module loaded successfully")
+except ImportError as e:
     BATCH_AVAILABLE = False
-    print("Warning: Batch peak fitting module not available")
+    print(f"⚠️  Warning: Batch peak fitting module not available: {e}")
+    print("   This may be due to:")
+    print("   • Missing core dependencies (run: python check_dependencies.py)")
+    print("   • Incorrect working directory (ensure you're in RamanLab root)")
+    print("   • Missing __init__.py files in batch_peak_fitting subdirectories")
+except Exception as e:
+    BATCH_AVAILABLE = False
+    print(f"❌ Error loading batch peak fitting module: {e}")
+    print("   Run 'python check_dependencies.py' for detailed diagnostics")
 
 # Import update checker
 # TEMPORARILY DISABLED to isolate threading issues
@@ -3803,10 +3812,40 @@ class RamanAnalysisAppQt6(QMainWindow):
             batch_peak_fitting_btn.setStyleSheet(dark_blue_style)
             primary_layout.addWidget(batch_peak_fitting_btn)
         else:
-            # Show info about missing batch capabilities
-            missing_label = QLabel("Batch Peak Fitting: Module not available")
-            missing_label.setStyleSheet("color: orange; font-style: italic; padding: 8px; background-color: #FFF3E0; border-radius: 4px;")
-            primary_layout.addWidget(missing_label)
+            # Show info about missing batch capabilities with helpful diagnostics
+            missing_widget = QWidget()
+            missing_layout = QVBoxLayout(missing_widget)
+            missing_layout.setContentsMargins(8, 8, 8, 8)
+            
+            missing_label = QLabel("⚠️ Batch Peak Fitting: Module not available")
+            missing_label.setStyleSheet("color: #FF6B00; font-weight: bold; font-size: 12px;")
+            missing_layout.addWidget(missing_label)
+            
+            help_label = QLabel("Click 'Check Dependencies' below for diagnosis")
+            help_label.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+            missing_layout.addWidget(help_label)
+            
+            # Add a button to run dependency checker
+            check_deps_btn = QPushButton("🔍 Check Dependencies")
+            check_deps_btn.clicked.connect(self.run_dependency_checker)
+            check_deps_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #FF6B00;
+                    color: white;
+                    border: none;
+                    padding: 6px;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #E55A00;
+                }
+            """)
+            missing_layout.addWidget(check_deps_btn)
+            
+            missing_widget.setStyleSheet("background-color: #FFF3E0; border: 1px solid #FFB74D; border-radius: 6px;")
+            primary_layout.addWidget(missing_widget)
         
         layout.addWidget(primary_group)
         
@@ -4076,11 +4115,104 @@ class RamanAnalysisAppQt6(QMainWindow):
             "• Exportable PDF and HTML reports"
         )
 
+    def run_dependency_checker(self):
+        """Run the dependency checker to help diagnose batch peak fitting issues."""
+        try:
+            import subprocess
+            import sys
+            from pathlib import Path
+            
+            # Check if check_dependencies.py exists
+            deps_checker = Path("check_dependencies.py")
+            if not deps_checker.exists():
+                QMessageBox.warning(
+                    self,
+                    "Dependency Checker Not Found",
+                    "The dependency checker script (check_dependencies.py) was not found.\n\n"
+                    "Please ensure you're running from the RamanLab root directory."
+                )
+                return
+            
+            # Show information dialog
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Information)
+            msg.setWindowTitle("Running Dependency Checker")
+            msg.setText("Running dependency diagnostics...")
+            msg.setInformativeText(
+                "This will check for common issues with the batch peak fitting module.\n"
+                "Please check the terminal/console for detailed output."
+            )
+            msg.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+            msg.setDefaultButton(QMessageBox.Ok)
+            
+            if msg.exec() == QMessageBox.Ok:
+                # Run the checker in a subprocess
+                try:
+                    print("\n" + "="*60)
+                    print("🔍 Running dependency checker from GUI...")
+                    print("="*60)
+                    
+                    result = subprocess.run(
+                        [sys.executable, "check_dependencies.py"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    
+                    # Print output to console
+                    print(result.stdout)
+                    if result.stderr:
+                        print("Errors:")
+                        print(result.stderr)
+                    
+                    # Show results in GUI
+                    if result.returncode == 0:
+                        QMessageBox.information(
+                            self,
+                            "Dependency Check Complete",
+                            "✅ All checks passed! Check the console for details.\n\n"
+                            "If batch peak fitting is still not available, try restarting the application."
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            "Issues Found",
+                            "⚠️ Some issues were found. Check the console for detailed diagnostics.\n\n"
+                            "Follow the troubleshooting tips shown in the console output."
+                        )
+                        
+                except subprocess.TimeoutExpired:
+                    QMessageBox.warning(
+                        self,
+                        "Timeout",
+                        "Dependency check timed out. Please run manually:\npython check_dependencies.py"
+                    )
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Error",
+                        f"Failed to run dependency checker:\n{str(e)}\n\n"
+                        "Please run manually: python check_dependencies.py"
+                    )
+                    
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Cannot run dependency checker:\n{str(e)}\n\n"
+                "Please run manually from terminal:\npython check_dependencies.py"
+            )
+
     def launch_batch_peak_fitting(self):
         """Launch the modular batch peak fitting application."""
         if not BATCH_AVAILABLE:
-            QMessageBox.warning(self, "Not Available", 
-                              "Batch processing module is not available.")
+            QMessageBox.warning(
+                self, 
+                "Module Not Available", 
+                "Batch peak fitting module is not available.\n\n"
+                "This may be due to missing dependencies or installation issues.\n"
+                "Use the 'Check Dependencies' button in the Advanced tab for diagnosis."
+            )
             return
         
         try:
@@ -4094,8 +4226,12 @@ class RamanAnalysisAppQt6(QMainWindow):
                 launch_batch_peak_fitting(self)
                 
         except Exception as e:
-            QMessageBox.critical(self, "Error", 
-                               f"Failed to launch batch processing: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Launch Error", 
+                f"Failed to launch batch peak fitting:\n{str(e)}\n\n"
+                "Use the 'Check Dependencies' button in the Advanced tab for diagnosis."
+            )
 
     def launch_map_analysis(self):
         """Launch Raman mapping analysis tool."""

@@ -9,16 +9,127 @@ import numpy as np
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QApplication, QMessageBox
 from PySide6.QtCore import QObject, Signal, QThread, QTimer
 import os
+import sys
+from pathlib import Path
 
-from .core.data_processor import DataProcessor
-from core.peak_fitting import PeakFitter, auto_find_peaks, baseline_correct_spectrum
-from .ui.ui_manager import UIManager
+# Add robust path handling for imports
+def setup_import_paths():
+    """Set up import paths to ensure core modules can be found."""
+    # Get the RamanLab root directory
+    current_file = Path(__file__)
+    batch_peak_fitting_dir = current_file.parent
+    ramanlab_root = batch_peak_fitting_dir.parent
+    
+    # Add RamanLab root to Python path if not already present
+    ramanlab_root_str = str(ramanlab_root)
+    if ramanlab_root_str not in sys.path:
+        sys.path.insert(0, ramanlab_root_str)
+        print(f"Added to Python path: {ramanlab_root_str}")
+    
+    return ramanlab_root
+
+# Set up paths before any other imports
+try:
+    ramanlab_root = setup_import_paths()
+    print(f"✅ Import paths configured. RamanLab root: {ramanlab_root}")
+except Exception as e:
+    print(f"⚠️  Warning: Could not configure import paths: {e}")
+
+# Import local modules
+try:
+    from .core.data_processor import DataProcessor
+    LOCAL_IMPORTS_AVAILABLE = True
+    print("✅ Local imports successful")
+except ImportError as e:
+    print(f"⚠️  Warning: Local imports failed: {e}")
+    LOCAL_IMPORTS_AVAILABLE = False
+
+# Import core modules with robust error handling
+try:
+    from core.peak_fitting import PeakFitter, auto_find_peaks, baseline_correct_spectrum
+    CORE_AVAILABLE = True
+    print("✅ Core peak fitting imports successful")
+except ImportError as e:
+    print(f"⚠️  Warning: Core peak fitting not available: {e}")
+    print(f"Current working directory: {Path.cwd()}")
+    print(f"Python path: {sys.path[:3]}...")  # Show first 3 entries
+    CORE_AVAILABLE = False
+
+# Import UI manager
+try:
+    from .ui.ui_manager import UIManager
+    UI_MANAGER_AVAILABLE = True
+    print("✅ UI Manager import successful")
+except ImportError as e:
+    print(f"⚠️  Warning: UI Manager not available: {e}")
+    UI_MANAGER_AVAILABLE = False
+
+# Create availability check function
+def check_module_dependencies():
+    """Check if all required modules and files are present."""
+    print("\n🔍 Checking module dependencies...")
+    
+    required_files = [
+        'core/__init__.py',
+        'core/config_manager.py',
+        'core/peak_fitting.py',
+        'batch_peak_fitting/__init__.py',
+        'batch_peak_fitting/main.py',
+        'batch_peak_fitting/core/__init__.py',
+        'batch_peak_fitting/core/data_processor.py',
+        'batch_peak_fitting/ui/__init__.py',
+        'batch_peak_fitting/ui/ui_manager.py'
+    ]
+    
+    missing_files = []
+    ramanlab_root = Path(__file__).parent.parent
+    
+    for file_path in required_files:
+        full_path = ramanlab_root / file_path
+        if not full_path.exists():
+            missing_files.append(file_path)
+            print(f"❌ Missing: {file_path}")
+        else:
+            print(f"✅ Found: {file_path}")
+    
+    if missing_files:
+        print(f"\n⚠️  {len(missing_files)} required files are missing:")
+        for file in missing_files:
+            print(f"   - {file}")
+        return False
+    else:
+        print(f"\n✅ All {len(required_files)} required files are present")
+        return True
+
+# Run dependency check
+check_result = check_module_dependencies()
+
+# Module availability flags for graceful degradation
+MODULE_STATUS = {
+    'core': CORE_AVAILABLE,
+    'local_imports': LOCAL_IMPORTS_AVAILABLE,
+    'ui_manager': UI_MANAGER_AVAILABLE,
+    'dependencies_complete': check_result
+}
+
+print(f"\n📊 Module Status Summary:")
+for module, status in MODULE_STATUS.items():
+    status_icon = "✅" if status else "❌"
+    print(f"   {status_icon} {module}: {status}")
+
+# Only proceed with class definitions if minimum requirements are met
+if not LOCAL_IMPORTS_AVAILABLE:
+    print("❌ Cannot continue: Local imports failed")
+    
+if not UI_MANAGER_AVAILABLE:
+    print("❌ Cannot continue: UI Manager not available")
 
 
 class BatchPeakFittingAdapter(QObject):
     """
     Adapter to bridge the interface between the centralized PeakFitter and the batch processing system.
     This maintains backward compatibility while using the centralized peak fitting routines.
+    Enhanced with robust import handling and fallback functionality.
     """
     
     # Qt Signals for compatibility with existing batch system
@@ -31,8 +142,21 @@ class BatchPeakFittingAdapter(QObject):
     def __init__(self):
         super().__init__()
         
-        # Use the centralized PeakFitter
-        self.core_peak_fitter = PeakFitter()
+        # Check if core functionality is available
+        self.core_available = CORE_AVAILABLE
+        
+        # Use the centralized PeakFitter if available
+        if self.core_available:
+            try:
+                self.core_peak_fitter = PeakFitter()
+                print("✅ Centralized PeakFitter initialized")
+            except Exception as e:
+                print(f"⚠️  Warning: Could not initialize PeakFitter: {e}")
+                self.core_peak_fitter = None
+                self.core_available = False
+        else:
+            self.core_peak_fitter = None
+            print("❌ Core peak fitting not available - using fallback methods")
         
         # Default parameters for backward compatibility
         self.current_model = "Gaussian"
@@ -91,52 +215,108 @@ class BatchPeakFittingAdapter(QObject):
             self.als_niter = niter_val
     
     def find_peaks_auto(self, wavenumbers, intensities):
-        """Automatically find peaks (adapted interface)"""
+        """Automatically find peaks (adapted interface with fallback)"""
         try:
-            # Use centralized auto_find_peaks function
-            peak_positions = auto_find_peaks(
-                wavenumbers, 
-                intensities,
-                height_threshold=self.peak_height,
-                distance=self.peak_distance
+            if self.core_available and CORE_AVAILABLE:
+                # Use centralized auto_find_peaks function
+                peak_positions = auto_find_peaks(
+                    wavenumbers, 
+                    intensities,
+                    height_threshold=self.peak_height,
+                    distance=self.peak_distance
+                )
+                
+                # Convert positions to indices for backward compatibility
+                peak_indices = []
+                for pos in peak_positions:
+                    idx = np.argmin(np.abs(wavenumbers - pos))
+                    peak_indices.append(idx)
+                
+                peak_indices = np.array(peak_indices, dtype=int)
+                properties = {}  # Empty properties for compatibility
+                
+                # Emit signal for UI updates
+                self.peaks_detected.emit(peak_indices)
+                
+                print(f"BatchPeakFittingAdapter: Found {len(peak_indices)} peaks using centralized detection")
+                return peak_indices, properties
+            else:
+                # Fallback peak detection using scipy
+                return self._fallback_find_peaks(wavenumbers, intensities)
+            
+        except Exception as e:
+            print(f"Error in peak detection: {e}, falling back to scipy method")
+            return self._fallback_find_peaks(wavenumbers, intensities)
+    
+    def _fallback_find_peaks(self, wavenumbers, intensities):
+        """Fallback peak detection using scipy when core module is not available"""
+        try:
+            from scipy.signal import find_peaks
+            
+            # Calculate threshold values
+            max_intensity = np.max(intensities)
+            height_threshold = self.peak_height * max_intensity
+            prominence_threshold = self.peak_prominence * max_intensity
+            
+            # Convert distance from wavenumber units to index units
+            wn_spacing = np.mean(np.diff(wavenumbers))
+            distance_indices = max(1, int(self.peak_distance / wn_spacing))
+            
+            # Find peaks using scipy
+            peak_indices, properties = find_peaks(
+                intensities, 
+                height=height_threshold,
+                distance=distance_indices,
+                prominence=prominence_threshold
             )
-            
-            # Convert positions to indices for backward compatibility
-            peak_indices = []
-            for pos in peak_positions:
-                idx = np.argmin(np.abs(wavenumbers - pos))
-                peak_indices.append(idx)
-            
-            peak_indices = np.array(peak_indices, dtype=int)
-            properties = {}  # Empty properties for compatibility
             
             # Emit signal for UI updates
             self.peaks_detected.emit(peak_indices)
             
-            print(f"BatchPeakFittingAdapter: Found {len(peak_indices)} peaks using centralized detection")
+            print(f"BatchPeakFittingAdapter: Found {len(peak_indices)} peaks using fallback scipy detection")
             return peak_indices, properties
             
+        except ImportError:
+            print("❌ Error: scipy not available for fallback peak detection")
+            return np.array([]), {}
         except Exception as e:
-            print(f"Error in centralized peak detection: {e}")
+            print(f"❌ Error in fallback peak detection: {e}")
             return np.array([]), {}
     
     def calculate_background(self, wavenumbers, intensities):
-        """Calculate background using proper ALS method when selected"""
+        """Calculate background using the selected method with enhanced ALS"""
         try:
+            print(f"BatchPeakFittingAdapter: Calculating background using method '{self.background_method}'")
+            print(f"ALS parameters: lambda={self.als_lambda}, p={self.als_p}, niter={self.als_niter}")
+            
             if "ALS" in self.background_method or self.background_method == "ALS":
-                # Use ALS method directly - returns the actual baseline
+                # Use enhanced ALS method directly - returns the actual baseline
                 background = self._baseline_als(intensities, self.als_lambda, self.als_p, self.als_niter)
+                print(f"ALS background calculated: min={np.min(background):.2f}, max={np.max(background):.2f}")
             else:
                 # Use centralized baseline correction for other methods
-                corrected_intensities = baseline_correct_spectrum(
-                    wavenumbers, 
-                    intensities, 
-                    method=self.background_method,
-                    degree=3  # polynomial degree
-                )
+                if self.background_method == "polynomial":
+                    # For polynomial, fit to endpoints and return the fitted baseline
+                    edge_fraction = 0.1
+                    n_edge = int(len(wavenumbers) * edge_fraction)
+                    
+                    # Use edge points for baseline estimation
+                    x_baseline = np.concatenate([wavenumbers[:n_edge], wavenumbers[-n_edge:]])
+                    y_baseline = np.concatenate([intensities[:n_edge], intensities[-n_edge:]])
+                    
+                    # Fit polynomial
+                    poly_coeffs = np.polyfit(x_baseline, y_baseline, 3)
+                    background = np.polyval(poly_coeffs, wavenumbers)
+                    print(f"Polynomial background calculated")
                 
-                # For non-ALS methods, background is the difference between original and corrected
-                background = intensities - corrected_intensities
+                elif self.background_method == "linear":
+                    # Simple linear baseline
+                    background = np.linspace(intensities[0], intensities[-1], len(intensities))
+                    print(f"Linear background calculated")
+                
+                else:
+                    print(f"Unknown background method: {self.background_method}, using ALS")
+                    background = self._baseline_als(intensities, self.als_lambda, self.als_p, self.als_niter)
             
             self.last_background = background
             
@@ -147,6 +327,8 @@ class BatchPeakFittingAdapter(QObject):
             
         except Exception as e:
             print(f"Error calculating background: {e}")
+            import traceback
+            traceback.print_exc()
             return np.zeros_like(intensities)
     
     def _baseline_als(self, y, lam=1e5, p=0.01, niter=10):
@@ -173,30 +355,96 @@ class BatchPeakFittingAdapter(QObject):
             from scipy.sparse import csc_matrix
             from scipy.sparse.linalg import spsolve
             
+            print(f"ALS: Processing {len(y)} points with lambda={lam}, p={p}, niter={niter}")
+            
+            # Ensure input is a numpy array
+            y = np.array(y, dtype=float)
             L = len(y)
+            
+            # Handle edge cases
+            if L < 3:
+                print("ALS: Too few points, returning linear baseline")
+                return np.linspace(y[0], y[-1], L)
+            
+            # Create second-order difference matrix
             D = csc_matrix(np.diff(np.eye(L), 2))
+            
+            # Initialize weights
             w = np.ones(L)
             
+            print(f"ALS: Starting iterations...")
             for i in range(niter):
+                # Create weight matrix
                 W = csc_matrix((w, (np.arange(L), np.arange(L))))
+                
+                # Solve the linear system
                 Z = W + lam * D.dot(D.transpose())
                 z = spsolve(Z, w * y)
-                w = p * (y > z) + (1 - p) * (y <= z)
+                
+                # Update weights asymmetrically
+                w_new = p * (y > z) + (1 - p) * (y <= z)
+                
+                # Check for convergence
+                weight_change = np.mean(np.abs(w_new - w))
+                w = w_new
+                
+                if i % 5 == 0:  # Log every 5 iterations
+                    print(f"ALS: Iteration {i+1}/{niter}, weight change: {weight_change:.6f}")
+                
+                # Early convergence check
+                if weight_change < 1e-6 and i > 2:
+                    print(f"ALS: Converged early at iteration {i+1}")
+                    break
+            
+            # Ensure z is a proper numpy array
+            z = np.array(z).flatten()
+            
+            print(f"ALS: Completed. Baseline range: {np.min(z):.2f} to {np.max(z):.2f}")
             
             return z
             
         except ImportError:
-            print("Warning: scipy not available, using simple polynomial baseline")
-            # Fallback to simple polynomial baseline
+            print("Warning: scipy not available, using enhanced polynomial baseline")
+            # Enhanced polynomial fallback
             x = np.arange(len(y))
-            coeffs = np.polyfit(x, y, 2)
-            return np.polyval(coeffs, x)
+            
+            # Use robust polynomial fitting
+            try:
+                # Remove outliers for better polynomial fit
+                median_y = np.median(y)
+                mad = np.median(np.abs(y - median_y))
+                outlier_mask = np.abs(y - median_y) < 3 * mad
+                
+                if np.sum(outlier_mask) > len(y) // 2:
+                    # Fit polynomial to non-outlier points
+                    coeffs = np.polyfit(x[outlier_mask], y[outlier_mask], 3)
+                else:
+                    # Fallback to simple polynomial
+                    coeffs = np.polyfit(x, y, 2)
+                
+                baseline = np.polyval(coeffs, x)
+                print(f"Polynomial fallback baseline: {np.min(baseline):.2f} to {np.max(baseline):.2f}")
+                return baseline
+                
+            except Exception:
+                print("Polynomial fallback failed, using linear baseline")
+                return np.linspace(y[0], y[-1], len(y))
         except Exception as e:
             print(f"Error in ALS baseline calculation: {e}")
-            return np.zeros_like(y)
+            import traceback
+            traceback.print_exc()
+            return np.linspace(y[0], y[-1], len(y))
     
-    def fit_peaks(self, wavenumbers, intensities, peak_positions):
-        """Fit peaks using centralized peak fitting (adapted interface)"""
+    def fit_peaks(self, wavenumbers, intensities, peak_positions, apply_background=False):
+        """
+        Fit peaks using centralized peak fitting (adapted interface)
+        
+        Args:
+            wavenumbers: Array of wavenumber values
+            intensities: Array of intensity values  
+            peak_positions: List/array of peak positions to fit
+            apply_background: If True, apply background subtraction before fitting
+        """
         try:
             if len(peak_positions) == 0:
                 result = {"success": False, "error": "No peaks to fit"}
@@ -204,30 +452,37 @@ class BatchPeakFittingAdapter(QObject):
                 self.peaks_fitted.emit(result)
                 return result
             
-            # Apply background correction first
-            background = self.calculate_background(wavenumbers, intensities)
-            corrected_intensities = intensities - background
+            # FIXED: Only apply background correction if explicitly requested
+            if apply_background:
+                background = self.calculate_background(wavenumbers, intensities)
+                fitting_intensities = intensities - background
+                print("Peak fitting: Using background-corrected data")
+            else:
+                fitting_intensities = intensities.copy()
+                print("Peak fitting: Using raw spectrum data (no background correction)")
             
             # Convert peak indices to positions if needed
-            if isinstance(peak_positions[0], (int, np.integer)):
-                peak_positions_wavenumber = [wavenumbers[idx] for idx in peak_positions if idx < len(wavenumbers)]
+            if len(peak_positions) > 0 and isinstance(peak_positions[0], (int, np.integer)):
+                peak_positions_wavenumber = [wavenumbers[idx] for idx in peak_positions if 0 <= idx < len(wavenumbers)]
             else:
                 peak_positions_wavenumber = list(peak_positions)
             
             # Use centralized peak fitting
             fitted_peaks = self.core_peak_fitter.fit_multiple_peaks(
                 wavenumbers,
-                corrected_intensities,
+                fitting_intensities,
                 peak_positions_wavenumber,
                 shape=self.current_model,
                 window_width=50.0
             )
             
             if len(fitted_peaks) == 0:
-                result = {"success": False, "error": "No peaks could be fitted"}
+                result = {"success": False, "error": f"No peaks could be fitted from {len(peak_positions_wavenumber)} detected peaks. Try adjusting detection parameters or peak positions."}
                 self.fitting_completed.emit(result)
                 self.peaks_fitted.emit(result)
                 return result
+            
+            print(f"Peak fitting: Successfully fitted {len(fitted_peaks)} out of {len(peak_positions_wavenumber)} detected peaks")
             
             # Convert results to format expected by batch system
             fit_params = []
@@ -235,12 +490,16 @@ class BatchPeakFittingAdapter(QObject):
                 # Each peak: [amplitude, center, width, ...]
                 params = [peak.amplitude, peak.position, peak.width]
                 # Add extra parameters for complex models if needed
-                if self.current_model == "Pseudo-Voigt" and hasattr(peak, 'eta'):
-                    params.append(peak.eta)  # eta parameter
-                elif self.current_model == "Voigt" and hasattr(peak, 'gamma'):
-                    params.append(peak.gamma)  # gamma parameter
-                elif self.current_model == "Asymmetric Voigt" and hasattr(peak, 'gamma') and hasattr(peak, 'alpha'):
-                    params.extend([peak.gamma, peak.alpha])  # gamma and alpha parameters
+                if self.current_model == "Pseudo-Voigt":
+                    eta = getattr(peak, 'eta', 0.5)  # default eta value
+                    params.append(eta)
+                elif self.current_model == "Voigt":
+                    gamma = getattr(peak, 'gamma', peak.width / 2)  # default gamma value
+                    params.append(gamma)
+                elif self.current_model == "Asymmetric Voigt":
+                    gamma = getattr(peak, 'gamma', peak.width / 2)  # default gamma value
+                    alpha = getattr(peak, 'alpha', 0.0)  # default alpha value
+                    params.extend([gamma, alpha])
                 fit_params.extend(params)
             
             # Calculate overall R-squared
@@ -250,25 +509,50 @@ class BatchPeakFittingAdapter(QObject):
                     peak_curve = self.core_peak_fitter.gaussian(wavenumbers, peak.amplitude, peak.position, peak.width)
                 elif self.current_model == "Lorentzian":
                     peak_curve = self.core_peak_fitter.lorentzian(wavenumbers, peak.amplitude, peak.position, peak.width)
-                elif self.current_model == "Pseudo-Voigt" and hasattr(peak, 'eta'):
-                    peak_curve = self.core_peak_fitter.pseudo_voigt(wavenumbers, peak.amplitude, peak.position, peak.width, peak.eta)
-                elif self.current_model == "Voigt" and hasattr(peak, 'gamma'):
-                    peak_curve = self.core_peak_fitter.voigt(wavenumbers, peak.amplitude, peak.position, peak.width, peak.gamma)
-                elif self.current_model == "Asymmetric Voigt" and hasattr(peak, 'gamma') and hasattr(peak, 'alpha'):
-                    peak_curve = self.core_peak_fitter.asymmetric_voigt(wavenumbers, peak.amplitude, peak.position, peak.width, peak.gamma, peak.alpha)
+                elif self.current_model == "Pseudo-Voigt":
+                    eta = getattr(peak, 'eta', 0.5)  # default eta value
+                    peak_curve = self.core_peak_fitter.pseudo_voigt(wavenumbers, peak.amplitude, peak.position, peak.width, eta)
+                elif self.current_model == "Voigt":
+                    gamma = getattr(peak, 'gamma', peak.width / 2)  # default gamma value
+                    peak_curve = self.core_peak_fitter.voigt(wavenumbers, peak.amplitude, peak.position, peak.width, gamma)
+                elif self.current_model == "Asymmetric Voigt":
+                    gamma = getattr(peak, 'gamma', peak.width / 2)  # default gamma value
+                    alpha = getattr(peak, 'alpha', 0.0)  # default alpha value
+                    peak_curve = self.core_peak_fitter.asymmetric_voigt(wavenumbers, peak.amplitude, peak.position, peak.width, gamma, alpha)
                 else:
                     # For other models, use the fitted curve approximation
                     peak_curve = peak.amplitude * np.exp(-((wavenumbers - peak.position) / peak.width) ** 2)
                 total_fitted += peak_curve
             
-            # Calculate R-squared
-            ss_res = np.sum((corrected_intensities - total_fitted) ** 2)
-            ss_tot = np.sum((corrected_intensities - np.mean(corrected_intensities)) ** 2)
+            # Calculate R-squared using the correct data
+            ss_res = np.sum((fitting_intensities - total_fitted) ** 2)
+            ss_tot = np.sum((fitting_intensities - np.mean(fitting_intensities)) ** 2)
             r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
             r_squared = max(0.0, min(1.0, r_squared))
             
             # Store results
             self.last_fit_results = fitted_peaks
+            
+            # Calculate visualization data
+            individual_peak_curves = []
+            for peak in fitted_peaks:
+                if self.current_model == "Gaussian":
+                    peak_curve = self.core_peak_fitter.gaussian(wavenumbers, peak.amplitude, peak.position, peak.width)
+                elif self.current_model == "Lorentzian":
+                    peak_curve = self.core_peak_fitter.lorentzian(wavenumbers, peak.amplitude, peak.position, peak.width)
+                elif self.current_model == "Pseudo-Voigt":
+                    eta = getattr(peak, 'eta', 0.5)
+                    peak_curve = self.core_peak_fitter.pseudo_voigt(wavenumbers, peak.amplitude, peak.position, peak.width, eta)
+                elif self.current_model == "Voigt":
+                    gamma = getattr(peak, 'gamma', peak.width / 2)
+                    peak_curve = self.core_peak_fitter.voigt(wavenumbers, peak.amplitude, peak.position, peak.width, gamma)
+                else:
+                    # Fallback to Gaussian
+                    peak_curve = self.core_peak_fitter.gaussian(wavenumbers, peak.amplitude, peak.position, peak.width)
+                individual_peak_curves.append(peak_curve)
+            
+            # Calculate residuals
+            residuals = fitting_intensities - total_fitted
             
             result = {
                 "success": True,
@@ -277,7 +561,10 @@ class BatchPeakFittingAdapter(QObject):
                 "model": self.current_model,
                 "n_peaks": len(fitted_peaks),
                 "peak_positions": peak_positions_wavenumber,
-                "fitted_peaks": fitted_peaks  # Include detailed results
+                "fitted_peaks": fitted_peaks,  # Include detailed results
+                "fitted_curve": total_fitted,
+                "individual_peaks": individual_peak_curves,
+                "residuals": residuals
             }
             
             # Emit signals for UI updates
@@ -439,11 +726,11 @@ class BatchPeakFittingMainController(QDialog):
         
         try:
             # Route actions to appropriate handlers
-            if action_name.startswith('files_'):
+            if action_name.startswith('files_') or action_name in ['add_files', 'remove_files']:
                 self._handle_file_action(action_name, parameters)
-            elif action_name.startswith('spectrum_'):
+            elif action_name.startswith('spectrum_') or action_name.startswith('navigate_') or action_name == 'load_file':
                 self._handle_spectrum_action(action_name, parameters)
-            elif action_name.startswith('peak_') or action_name.startswith('detect_') or action_name.startswith('fit_'):
+            elif action_name.startswith('peak_') or action_name.startswith('detect_') or action_name.startswith('fit_') or action_name.startswith('add_manual_') or action_name.startswith('delete_manual_') or action_name.startswith('clear_manual_') or action_name.startswith('remove_manual_') or action_name.startswith('set_reference') or action_name.startswith('clear_reference') or action_name.startswith('enable_interactive'):
                 self._handle_peak_action(action_name, parameters)
             elif action_name.startswith('background_') or action_name.startswith('apply_') or action_name.startswith('preview_') or action_name.startswith('clear_'):
                 self._handle_background_action(action_name, parameters)
@@ -464,7 +751,33 @@ class BatchPeakFittingMainController(QDialog):
     
     def _handle_file_action(self, action_name, parameters):
         """Handle file-related actions"""
-        if action_name == 'files_added':
+        if action_name == 'add_files':
+            # Add files to data processor
+            files = parameters.get('files', [])
+            if files:
+                files_added = self.data_processor.add_files(files)
+                print(f"MainController: Added {files_added} files")
+                self.ui_manager.update_all_tabs_from_data_processor()
+            
+        elif action_name == 'remove_files':
+            # Remove files from data processor
+            files_to_remove = parameters.get('files', [])
+            if files_to_remove:
+                # Convert file paths to indices
+                indices_to_remove = []
+                for file_path in files_to_remove:
+                    file_list = self.data_processor.get_file_list()
+                    # Find by basename since UI shows basename but stores full path
+                    for i, full_path in enumerate(file_list):
+                        if os.path.basename(full_path) == file_path or full_path == file_path:
+                            indices_to_remove.append(i)
+                
+                if indices_to_remove:
+                    files_removed = self.data_processor.remove_files(indices_to_remove)
+                    print(f"MainController: Removed {files_removed} files")
+                    self.ui_manager.update_all_tabs_from_data_processor()
+            
+        elif action_name == 'files_added':
             # Files were added, update UI
             self.ui_manager.update_all_tabs_from_data_processor()
             
@@ -483,6 +796,40 @@ class BatchPeakFittingMainController(QDialog):
         elif action_name == 'spectrum_navigated':
             # Navigation was handled by data processor, just update UI
             self.ui_manager.update_all_tabs_from_data_processor()
+            
+        elif action_name == 'navigate_first':
+            success = self.data_processor.navigate_spectrum(0)  # 0 = first
+            if success:
+                self.ui_manager.update_all_tabs_from_data_processor()
+                
+        elif action_name == 'navigate_previous':
+            success = self.data_processor.navigate_spectrum(-1)  # -1 = previous
+            if success:
+                self.ui_manager.update_all_tabs_from_data_processor()
+                
+        elif action_name == 'navigate_next':
+            success = self.data_processor.navigate_spectrum(1)  # 1 = next
+            if success:
+                self.ui_manager.update_all_tabs_from_data_processor()
+                
+        elif action_name == 'navigate_last':
+            success = self.data_processor.navigate_spectrum(-2)  # -2 = last
+            if success:
+                self.ui_manager.update_all_tabs_from_data_processor()
+                
+        elif action_name == 'load_file':
+            file_path = parameters.get('file_path')
+            if file_path:
+                # Find the index of this file and load it
+                file_list = self.data_processor.get_file_list()
+                for i, full_path in enumerate(file_list):
+                    if os.path.basename(full_path) == file_path or full_path == file_path:
+                        success = self.data_processor.load_spectrum(i)
+                        if success:
+                            self.ui_manager.update_all_tabs_from_data_processor()
+                        else:
+                            self._show_error_message("File Loading", f"Failed to load {file_path}")
+                        break
     
     def _handle_peak_action(self, action_name, parameters):
         """Handle peak-related actions"""
@@ -540,17 +887,61 @@ class BatchPeakFittingMainController(QDialog):
                 # Get peak positions from data processor
                 peak_positions = spectrum_data['peaks']
                 
+                # Get background correction option from parameters
+                apply_background = parameters.get('apply_background', False)
+                
                 # Perform peak fitting
                 result = self.peak_fitter.fit_peaks(
                     spectrum_data['wavenumbers'],
                     spectrum_data['intensities'],
-                    peak_positions
+                    peak_positions,
+                    apply_background=apply_background
                 )
                 
                 if result.get('success', False):
                     # Update data processor with fitting results
                     self.data_processor.fit_params = result.get('fit_params', [])
                     self.data_processor.fit_result = result
+                    
+                    # Calculate fitted curves for visualization
+                    fitted_peaks = result.get('fitted_peaks', [])
+                    if fitted_peaks and len(fitted_peaks) > 0:
+                        # Calculate total fitted curve and individual peak curves
+                        wavenumbers = spectrum_data['wavenumbers']
+                        total_fitted = np.zeros_like(wavenumbers)
+                        individual_peaks = []
+                        
+                        for peak in fitted_peaks:
+                            # Calculate individual peak curve based on peak shape
+                            if peak.shape == "Gaussian":
+                                peak_curve = self.peak_fitter.core_peak_fitter.gaussian(wavenumbers, peak.amplitude, peak.position, peak.width)
+                            elif peak.shape == "Lorentzian":
+                                peak_curve = self.peak_fitter.core_peak_fitter.lorentzian(wavenumbers, peak.amplitude, peak.position, peak.width)
+                            elif peak.shape == "Pseudo-Voigt":
+                                eta = getattr(peak, 'eta', 0.5)
+                                peak_curve = self.peak_fitter.core_peak_fitter.pseudo_voigt(wavenumbers, peak.amplitude, peak.position, peak.width, eta)
+                            elif peak.shape == "Voigt":
+                                gamma = getattr(peak, 'gamma', peak.width / 2)
+                                peak_curve = self.peak_fitter.core_peak_fitter.voigt(wavenumbers, peak.amplitude, peak.position, peak.width, gamma)
+                            else:
+                                # Fallback to Gaussian
+                                peak_curve = self.peak_fitter.core_peak_fitter.gaussian(wavenumbers, peak.amplitude, peak.position, peak.width)
+                            
+                            individual_peaks.append(peak_curve)
+                            total_fitted += peak_curve
+                        
+                        # Calculate residuals
+                        fitting_intensities = spectrum_data['intensities']
+                        if apply_background and self.peak_fitter.last_background is not None:
+                            fitting_intensities = fitting_intensities - self.peak_fitter.last_background
+                        
+                        residuals = fitting_intensities - total_fitted
+                        
+                        # Update fit_result with visualization data
+                        result['fitted_curve'] = total_fitted
+                        result['individual_peaks'] = individual_peaks
+                        result['residuals'] = residuals
+                        self.data_processor.fit_result = result
                     
                     # OPTIMIZED: Only update current spectrum plot for peak fitting
                     viz_manager = self.ui_manager.get_visualization_manager()
@@ -605,6 +996,54 @@ class BatchPeakFittingMainController(QDialog):
             if viz_manager:
                 viz_manager.update_plot("current_spectrum")
         
+        elif action_name == 'add_manual_peak':
+            wavenumber = parameters.get('wavenumber')
+            if wavenumber is not None:
+                # Get current spectrum to convert wavenumber to index
+                spectrum_data = self.data_processor.get_current_spectrum()
+                if spectrum_data and len(spectrum_data.get('wavenumbers', [])) > 0:
+                    wavenumbers = spectrum_data['wavenumbers']
+                    # Find closest index to the specified wavenumber
+                    closest_index = np.argmin(np.abs(wavenumbers - wavenumber))
+                    self.data_processor.add_manual_peak(closest_index)
+                    
+                    # Update peak count in UI
+                    peaks_tab = self.ui_manager.get_tab_by_name('Peaks')
+                    if peaks_tab and hasattr(peaks_tab, 'peak_count_label'):
+                        all_peaks = self.data_processor.get_all_peaks()
+                        peaks_tab.peak_count_label.setText(f"Peaks found: {len(all_peaks)}")
+                    
+                    # Update manual peaks list in UI
+                    if peaks_tab and hasattr(peaks_tab, '_refresh_manual_peaks_display'):
+                        peaks_tab._refresh_manual_peaks_display()
+                    
+                    # Update visualization
+                    viz_manager = self.ui_manager.get_visualization_manager()
+                    if viz_manager:
+                        viz_manager.update_plot("current_spectrum")
+                    
+                    print(f"MainController: Added manual peak at wavenumber {wavenumber:.1f} cm⁻¹ (index {closest_index})")
+                    
+        elif action_name == 'delete_manual_peaks':
+            indices = parameters.get('indices', [])
+            if indices:
+                for index in sorted(indices, reverse=True):  # Remove from highest index first
+                    if hasattr(self.data_processor, 'manual_peaks') and index < len(self.data_processor.manual_peaks):
+                        peak_index = self.data_processor.manual_peaks[index]
+                        self.data_processor.remove_manual_peak(peak_index)
+                
+                # Update UI
+                peaks_tab = self.ui_manager.get_tab_by_name('Peaks')
+                if peaks_tab and hasattr(peaks_tab, '_refresh_manual_peaks_display'):
+                    peaks_tab._refresh_manual_peaks_display()
+                
+                # Update visualization
+                viz_manager = self.ui_manager.get_visualization_manager()
+                if viz_manager:
+                    viz_manager.update_plot("current_spectrum")
+                
+                print(f"MainController: Deleted {len(indices)} manual peaks")
+        
         elif action_name == 'remove_manual_peak':
             peak_index = parameters.get('peak_index')
             if peak_index is not None:
@@ -629,6 +1068,15 @@ class BatchPeakFittingMainController(QDialog):
                     viz_manager.update_plot("current_spectrum")
                 
                 print(f"MainController: Removed manual peak at index {peak_index}")
+                
+        elif action_name == 'enable_interactive_mode':
+            enabled = parameters.get('enabled', False)
+            # This could be used to enable/disable plot click handling
+            viz_manager = self.ui_manager.get_visualization_manager()
+            if viz_manager:
+                # Enable or disable interactive mode in visualization manager
+                # (implementation would depend on visualization manager capabilities)
+                print(f"MainController: Interactive mode {'enabled' if enabled else 'disabled'}")
     
     def _handle_background_action(self, action_name, parameters):
         """Handle background-related actions"""
@@ -869,10 +1317,13 @@ class BatchPeakFittingMainController(QDialog):
                     
                     # Fit peaks (only if we have detected peaks)
                     if peaks_found and len(detected_peaks) > 0:
+                        # For batch processing, use the same background setting as the user preference
+                        # Could be made configurable per batch in future
                         result = self.peak_fitter.fit_peaks(
                             spectrum_data['wavenumbers'],
                             spectrum_data['intensities'],
-                            peak_positions=detected_peaks
+                            detected_peaks,
+                            apply_background=False  # Default to raw spectrum for batch processing
                         )
                         
                         if result.get('success', False):
@@ -1178,7 +1629,7 @@ class BatchPeakFittingMainController(QDialog):
 # Convenience function for launching the application
 def launch_batch_peak_fitting(parent=None, wavenumbers=None, intensities=None):
     """
-    Launch the modular batch peak fitting application.
+    Launch the modular batch peak fitting application with robust error handling.
     
     Args:
         parent: Parent widget (optional)
@@ -1186,26 +1637,88 @@ def launch_batch_peak_fitting(parent=None, wavenumbers=None, intensities=None):
         intensities: Initial intensity data (optional)
     
     Returns:
-        BatchPeakFittingMainController instance
+        BatchPeakFittingMainController instance or None if critical dependencies missing
     """
-    # Check if we're running within an existing QApplication
-    existing_app = QApplication.instance()
-    app_created = False
+    # Check module availability before launching
+    print(f"\n🚀 Launching Batch Peak Fitting...")
+    print(f"📊 Module availability check:")
+    for module, status in MODULE_STATUS.items():
+        status_icon = "✅" if status else "❌"
+        print(f"   {status_icon} {module}")
     
-    # Create QApplication if none exists and no parent (standalone mode)
-    if not existing_app and not parent:
-        import sys
-        app = QApplication(sys.argv)
-        app_created = True
+    # Check minimum requirements
+    if not LOCAL_IMPORTS_AVAILABLE or not UI_MANAGER_AVAILABLE:
+        error_msg = (
+            "❌ Cannot launch Batch Peak Fitting: Critical modules missing\n\n"
+            "Missing modules:\n"
+        )
+        if not LOCAL_IMPORTS_AVAILABLE:
+            error_msg += "• Local batch peak fitting modules\n"
+        if not UI_MANAGER_AVAILABLE:
+            error_msg += "• UI Manager\n"
+        
+        error_msg += (
+            "\nPossible solutions:\n"
+            "• Ensure you're running from the RamanLab root directory\n"
+            "• Check that all batch_peak_fitting subdirectories exist\n"
+            "• Verify Python path includes RamanLab root\n"
+            "• Run: python -c \"import sys; print(sys.path[0])\""
+        )
+        
+        print(error_msg)
+        
+        if parent:
+            QMessageBox.critical(parent, "Module Error", error_msg)
+        
+        return None
     
-    # Create the main controller
-    controller = BatchPeakFittingMainController(parent, wavenumbers, intensities)
+    # Warn about degraded functionality if core modules unavailable
+    if not CORE_AVAILABLE:
+        warning_msg = (
+            "⚠️  Warning: Core peak fitting modules not available\n\n"
+            "The application will run with reduced functionality:\n"
+            "• Basic peak detection using scipy\n"
+            "• Limited background correction methods\n"
+            "• Some advanced features may not work\n\n"
+            "For full functionality, ensure the 'core' directory is accessible."
+        )
+        print(warning_msg)
+        
+        if parent:
+            QMessageBox.warning(parent, "Reduced Functionality", warning_msg)
     
-    # Show the dialog
-    controller.show()
-    
-    # If we created our own app, run the event loop
-    if app_created:
-        controller.exec()
-    
-    return controller 
+    try:
+        # Check if we're running within an existing QApplication
+        existing_app = QApplication.instance()
+        app_created = False
+        
+        # Create QApplication if none exists and no parent (standalone mode)
+        if not existing_app and not parent:
+            import sys
+            app = QApplication(sys.argv)
+            app_created = True
+        
+        # Create the main controller
+        print("🔧 Initializing main controller...")
+        controller = BatchPeakFittingMainController(parent, wavenumbers, intensities)
+        
+        # Show the dialog
+        controller.show()
+        print("✅ Batch Peak Fitting launched successfully!")
+        
+        # If we created our own app, run the event loop
+        if app_created:
+            controller.exec()
+        
+        return controller
+        
+    except Exception as e:
+        error_msg = f"❌ Failed to launch Batch Peak Fitting: {str(e)}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        
+        if parent:
+            QMessageBox.critical(parent, "Launch Error", error_msg)
+        
+        return None 

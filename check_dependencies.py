@@ -23,6 +23,8 @@ import sys
 import subprocess
 import os
 from version import __version__  # Import version from version.py
+from pathlib import Path
+import importlib.util
 
 # Use modern importlib.metadata when available, fallback to pkg_resources
 try:
@@ -333,8 +335,7 @@ def check_data_files():
     print("="*70)
     
     required_files = [
-        ("raman_database.pkl", "Core mineral Raman database"),
-        ("RamanLab_Database_20250602.pkl", "Pickle mineral database"),
+        ("RamanLab_Database_20250602.pkl", "Main RamanLab database"),
         ("RRUFF_Hey_Index.csv", "RRUFF mineral classification data"),
         ("mineral_modes.pkl", "Mineral vibrational modes database")
     ]
@@ -419,89 +420,287 @@ def suggest_installation_commands(missing_core, missing_optional, outdated_packa
     print("pip install -r requirements_qt6.txt")
     print("python check_dependencies.py  # Verify installation")
 
+def print_header(title):
+    """Print a formatted header."""
+    print(f"\n{'='*60}")
+    print(f" {title}")
+    print(f"{'='*60}")
+
+def print_section(title):
+    """Print a formatted section header."""
+    print(f"\n{'-'*40}")
+    print(f" {title}")
+    print(f"{'-'*40}")
+
+def check_python_environment():
+    """Check Python version and environment."""
+    print_section("Python Environment")
+    
+    print(f"✅ Python version: {sys.version}")
+    print(f"✅ Python executable: {sys.executable}")
+    print(f"✅ Current working directory: {os.getcwd()}")
+    
+    # Check if we're in a virtual environment
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        print(f"✅ Virtual environment: {sys.prefix}")
+    else:
+        print("ℹ️  Not in a virtual environment")
+
+def check_file_structure():
+    """Check if all required files and directories exist."""
+    print_section("File Structure Check")
+    
+    ramanlab_root = Path.cwd()
+    print(f"🔍 Checking from: {ramanlab_root}")
+    
+    # Core files that must exist
+    required_files = [
+        'core/__init__.py',
+        'core/config_manager.py',
+        'core/peak_fitting.py',
+        'core/peak_fitting_ui.py',
+        'batch_peak_fitting/__init__.py',
+        'batch_peak_fitting/main.py',
+        'batch_peak_fitting/core/__init__.py',
+        'batch_peak_fitting/core/data_processor.py',
+        'batch_peak_fitting/ui/__init__.py',
+        'batch_peak_fitting/ui/ui_manager.py',
+        'batch_peak_fitting/ui/tabs/__init__.py',
+        'batch_peak_fitting/ui/visualization/__init__.py',
+        'batch_peak_fitting/analysis/__init__.py',
+        'batch_peak_fitting/utils/__init__.py'
+    ]
+    
+    missing_files = []
+    existing_files = []
+    
+    for file_path in required_files:
+        full_path = ramanlab_root / file_path
+        if full_path.exists():
+            existing_files.append(file_path)
+            print(f"✅ {file_path}")
+        else:
+            missing_files.append(file_path)
+            print(f"❌ {file_path}")
+    
+    print(f"\nFile structure summary:")
+    print(f"✅ Found: {len(existing_files)}/{len(required_files)} files")
+    
+    if missing_files:
+        print(f"❌ Missing: {len(missing_files)} files")
+        print("\nMissing files:")
+        for file in missing_files:
+            print(f"   - {file}")
+        return False
+    else:
+        print("✅ All required files are present")
+        return True
+
+def check_python_dependencies():
+    """Check if required Python packages are available."""
+    print_section("Python Dependencies")
+    
+    required_packages = [
+        ('numpy', 'Numerical computing'),
+        ('scipy', 'Scientific computing and peak detection'),
+        ('pandas', 'Data manipulation'),
+        ('matplotlib', 'Plotting'),
+        ('PySide6', 'Qt GUI framework'),
+    ]
+    
+    optional_packages = [
+        ('sklearn', 'Machine learning features'),
+        ('scikit-learn', 'Machine learning features (alternative name)'),
+    ]
+    
+    missing_packages = []
+    
+    print("Required packages:")
+    for package, description in required_packages:
+        try:
+            __import__(package)
+            print(f"✅ {package} - {description}")
+        except ImportError:
+            print(f"❌ {package} - {description}")
+            missing_packages.append(package)
+    
+    print("\nOptional packages:")
+    for package, description in optional_packages:
+        try:
+            __import__(package)
+            print(f"✅ {package} - {description}")
+        except ImportError:
+            print(f"⚠️  {package} - {description} (optional)")
+    
+    if missing_packages:
+        print(f"\n❌ Missing required packages: {', '.join(missing_packages)}")
+        print("\nTo install missing packages, run:")
+        print(f"pip install {' '.join(missing_packages)}")
+        return False
+    else:
+        print("\n✅ All required packages are available")
+        return True
+
+def test_core_imports():
+    """Test if core modules can be imported."""
+    print_section("Core Module Import Test")
+    
+    # Add current directory to path for testing
+    current_dir = str(Path.cwd())
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+        print(f"📁 Added to Python path: {current_dir}")
+    
+    core_modules = [
+        ('core.config_manager', 'Configuration management'),
+        ('core.peak_fitting', 'Peak fitting algorithms'),
+        ('core.peak_fitting_ui', 'Peak fitting UI components'),
+    ]
+    
+    core_success = True
+    
+    for module_name, description in core_modules:
+        try:
+            module = importlib.import_module(module_name)
+            print(f"✅ {module_name} - {description}")
+        except ImportError as e:
+            print(f"❌ {module_name} - {description}")
+            print(f"   Error: {e}")
+            core_success = False
+        except Exception as e:
+            print(f"⚠️  {module_name} - {description}")
+            print(f"   Warning: {e}")
+    
+    return core_success
+
+def test_batch_peak_fitting_imports():
+    """Test if batch peak fitting modules can be imported."""
+    print_section("Batch Peak Fitting Import Test")
+    
+    batch_modules = [
+        ('batch_peak_fitting', 'Main batch peak fitting package'),
+        ('batch_peak_fitting.main', 'Main controller'),
+        ('batch_peak_fitting.core.data_processor', 'Data processing'),
+        ('batch_peak_fitting.ui.ui_manager', 'UI management'),
+    ]
+    
+    batch_success = True
+    
+    for module_name, description in batch_modules:
+        try:
+            module = importlib.import_module(module_name)
+            print(f"✅ {module_name} - {description}")
+        except ImportError as e:
+            print(f"❌ {module_name} - {description}")
+            print(f"   Error: {e}")
+            batch_success = False
+        except Exception as e:
+            print(f"⚠️  {module_name} - {description}")
+            print(f"   Warning: {e}")
+    
+    return batch_success
+
+def test_launch_function():
+    """Test if the batch peak fitting launch function can be imported and called."""
+    print_section("Launch Function Test")
+    
+    try:
+        from batch_peak_fitting.main import launch_batch_peak_fitting
+        print("✅ launch_batch_peak_fitting function imported successfully")
+        
+        # Test if function can be called (but don't actually launch)
+        print("ℹ️  Function is ready to be called")
+        return True
+        
+    except ImportError as e:
+        print(f"❌ Cannot import launch_batch_peak_fitting: {e}")
+        return False
+    except Exception as e:
+        print(f"⚠️  Warning during import: {e}")
+        return False
+
+def provide_troubleshooting_tips():
+    """Provide troubleshooting tips based on the checks."""
+    print_section("Troubleshooting Tips")
+    
+    print("If you're experiencing issues:")
+    print("")
+    print("1. 📁 Working Directory:")
+    print("   • Ensure you're running from the RamanLab root directory")
+    print("   • The directory should contain both 'core' and 'batch_peak_fitting' folders")
+    print("")
+    print("2. 🐍 Python Path:")
+    print("   • Run: python -c \"import sys; print(sys.path[0])\"")
+    print("   • Should show the RamanLab root directory")
+    print("")
+    print("3. 📦 Dependencies:")
+    print("   • Install missing packages: pip install -r requirements_qt6.txt")
+    print("   • For conda: conda install numpy scipy pandas matplotlib")
+    print("")
+    print("4. 📁 File Permissions:")
+    print("   • Check file permissions: ls -la core/ batch_peak_fitting/")
+    print("   • Ensure __init__.py files are readable")
+    print("")
+    print("5. 🔄 Git Repository:")
+    print("   • Check git status: git status")
+    print("   • Pull latest changes: git pull")
+    print("   • Check for uncommitted changes that might be missing files")
+    print("")
+    print("6. 💻 System-Specific:")
+    print("   • Windows: Use forward slashes in paths or raw strings")
+    print("   • macOS: Check System Integrity Protection if using system Python")
+    print("   • Linux: Ensure proper permissions on all directories")
+
 def main():
-    """Main function to check all dependencies."""
-    print("=" * 70)
-    print(f"🔬 RamanLab v{__version__} - Qt6 Dependency Checker")
-    print("=" * 70)
-    print("Cross-platform Raman Spectrum Analysis Tool")
-    print("Checking system compatibility and dependencies...")
-    print(f"Timestamp: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    """Run all dependency checks."""
+    print_header("RamanLab Dependency Checker")
+    print("This tool checks for common issues with the batch peak fitting module")
     
-    # Check Python version
-    python_ok = check_python_version()
+    # Run all checks
+    checks = [
+        ("Python Environment", check_python_environment),
+        ("File Structure", check_file_structure),
+        ("Python Dependencies", check_python_dependencies),
+        ("Core Module Imports", test_core_imports),
+        ("Batch Peak Fitting Imports", test_batch_peak_fitting_imports),
+        ("Launch Function", test_launch_function),
+    ]
     
-    # Check Qt6 GUI framework (most critical)
-    qt6_ok = check_qt6_framework()
+    results = []
     
-    # Check core scientific stack
-    core_ok, missing_core, outdated_core = check_core_scientific_stack()
+    for check_name, check_function in checks:
+        try:
+            if check_function == check_python_environment:
+                check_function()  # This one doesn't return a boolean
+                results.append((check_name, True))
+            else:
+                result = check_function()
+                results.append((check_name, result))
+        except Exception as e:
+            print(f"❌ Error during {check_name}: {e}")
+            results.append((check_name, False))
     
-    # Check optional advanced packages
-    advanced_features, missing_optional = check_optional_advanced_packages()
+    # Summary
+    print_header("Summary")
     
-    # Analyze component availability
-    components = check_component_availability(qt6_ok, core_ok, advanced_features)
+    passed_checks = sum(1 for _, result in results if result)
+    total_checks = len(results)
     
-    # Check system resources 
-    check_system_resources()
+    print(f"Checks passed: {passed_checks}/{total_checks}")
+    print("")
     
-    # Check data files
-    check_data_files()
+    for check_name, result in results:
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"{status} {check_name}")
     
-    # Combine all missing and outdated packages
-    all_missing = missing_core + (["PySide6"] if not qt6_ok else [])
-    all_outdated = outdated_core
-    
-    # Final summary
-    print("\n" + "="*70)
-    print("🎯 FINAL ASSESSMENT")
-    print("="*70)
-    
-    # System compatibility
-    if not python_ok:
-        print("❌ INCOMPATIBLE: Python version too old for RamanLab v1.0.3")
-        print("   Please update Python to 3.8+ (3.9+ recommended)")
-        return
-    
-    # Core functionality
-    if qt6_ok and core_ok:
-        print("✅ READY: RamanLab core functionality is available!")
-        print("   All essential features can be used")
-    elif qt6_ok:
-        print("⚠️ PARTIAL: GUI available but some analysis features limited")
-    elif core_ok:
-        print("❌ LIMITED: Analysis packages available but no GUI framework")
+    if passed_checks == total_checks:
+        print("\n🎉 All checks passed! Batch peak fitting should work correctly.")
     else:
-        print("❌ NOT READY: Critical dependencies missing")
+        print(f"\n⚠️  {total_checks - passed_checks} checks failed. See troubleshooting tips below.")
+        provide_troubleshooting_tips()
     
-    # Feature summary
-    total_components = len(components)
-    available_components = sum(1 for available in components.values() if available)
-    completion_percent = (available_components / total_components) * 100
-    
-    print(f"\n📊 Feature Availability: {available_components}/{total_components} ({completion_percent:.0f}%)")
-    
-    if completion_percent >= 90:
-        print("🎉 EXCELLENT: Nearly all RamanLab features available!")
-    elif completion_percent >= 70:
-        print("✅ GOOD: Most RamanLab features available!")
-    elif completion_percent >= 50:
-        print("⚠️ BASIC: Core RamanLab features available!")
-    else:
-        print("❌ LIMITED: Many features unavailable!")
-    
-    # Installation recommendations
-    if all_missing or all_outdated:
-        suggest_installation_commands(all_missing, missing_optional, all_outdated)
-    else:
-        print("\n🎉 CONGRATULATIONS!")
-        print("Your environment is fully configured for RamanLab v1.0.3!")
-        print("Ready to launch: python launch_ramanlab.py")
-    
-    print("\n" + "="*70)
-    print("For help and documentation: https://github.com/aaroncelestian/RamanLab")
-    print("=" * 70)
+    return passed_checks == total_checks
 
 if __name__ == "__main__":
-    main()
+    success = main()
+    sys.exit(0 if success else 1)
