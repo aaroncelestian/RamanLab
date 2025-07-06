@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.1.3"
-__version_info__ = (1, 1, 3)
+__version__ = "1.1.4"
+__version_info__ = (1, 1, 4)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -13,11 +13,46 @@ __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
 __release_date__ = "2025-01-28"
-__release_name__ = "Matplotlib Toolbar Fix"
+__release_name__ = "Jupyter Console Integration & Enhanced Dependency Management"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.1.4": {
+        "date": "2025-01-28",
+        "name": "Jupyter Console Integration & Enhanced Dependency Management",
+        "description": "Added interactive Jupyter console integration and comprehensive dependency management tools",
+        "major_features": [
+            "🐍 Interactive Jupyter console integration with qtconsole, jupyter-client, and ipykernel",
+            "📦 Automated dependency update script with interactive and command-line modes",
+            "🔍 Enhanced dependency checker with Jupyter package detection and component status",
+            "📋 Comprehensive user documentation and troubleshooting guides",
+            "💻 Live data access and custom analysis capabilities within RamanLab",
+            "🛠️ Multiple update options: automatic, manual, and full system updates"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Added qtconsole>=5.4.0 for interactive console widget integration",
+            "Added jupyter-client>=7.0.0 for kernel management and communication",
+            "Added ipykernel>=6.0.0 for enhanced Python environment support",
+            "Created update_dependencies.py script with --jupyter, --core, --all flags",
+            "Enhanced check_dependencies.py with Jupyter package detection",
+            "Added Interactive Console component to availability tracking",
+            "Implemented virtual environment detection and warnings",
+            "Added graceful fallback - RamanLab works fine without Jupyter packages"
+        ],
+        "bug_fixes": [
+            "Improved dependency management workflow for users",
+            "Enhanced user experience with clear update instructions",
+            "Added comprehensive troubleshooting documentation",
+            "Fixed dependency checking loop for packages with 4-tuple format"
+        ],
+        "future_roadmap": [
+            "Enhanced interactive console features and RamanLab integration",
+            "Advanced scripting capabilities within the console environment",
+            "Custom analysis workflow development tools"
+        ]
+    },
     "1.1.3": {
         "date": "2025-01-28",
         "name": "Matplotlib Toolbar Fix",

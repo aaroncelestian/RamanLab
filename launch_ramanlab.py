@@ -10,7 +10,7 @@ Usage:
     python launch_ramanlab.py --fast  # Skip dependency checks for faster startup
 
 Author: Aaron Celestian
-Version: 1.1.3
+Version: 1.1.4
 License: MIT
 """
 

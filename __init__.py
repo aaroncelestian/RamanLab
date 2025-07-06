@@ -6,4 +6,4 @@ including spectral processing, mineral identification, and database management.
 """
 
 # Version
-__version__ = "1.1.3" 
+__version__ = "1.1.4" 

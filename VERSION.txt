@@ -1,10 +1,50 @@
-RamanLab Version 1.1.3 - "Matplotlib Toolbar Fix"
+RamanLab Version 1.1.4 - "Jupyter Console Integration & Enhanced Dependency Management"
 Release Date: January 28, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🚀 **Version 1.1.3 Update**
+🚀 **Version 1.1.4 Update**
 
-This update fixes matplotlib toolbar button vertical centering across all RamanLab modules,
+This exciting update introduces interactive Jupyter console integration and comprehensive 
+dependency management tools, bringing advanced interactive analysis capabilities directly 
+into RamanLab while making updates and dependency management seamless for users.
+
+🎯 **Major New Features:**
+• 🐍 **Interactive Jupyter Console Integration** - Run Python commands directly within RamanLab
+• 📊 **Live Data Access** - Access loaded spectra and analysis results interactively
+• 🔬 **Advanced Analysis Capabilities** - Run custom analysis scripts without leaving RamanLab
+• 📈 **Dynamic Plotting** - Create custom plots and visualizations on-the-fly
+• 🧪 **Interactive Experimentation** - Test analysis parameters and methods in real-time
+• 📦 **Automated Dependency Updates** - New update script with interactive and command-line modes
+
+🛠️ **New Tools & Scripts:**
+• **update_dependencies.py** - Interactive dependency updater with --jupyter, --core, --all flags
+• **Enhanced check_dependencies.py** - Now detects Jupyter packages and shows component status
+• **JUPYTER_INTEGRATION_UPDATE.md** - Comprehensive user guide and troubleshooting
+
+🔧 **Technical Enhancements:**
+• Added qtconsole>=5.4.0 for interactive console widget integration
+• Added jupyter-client>=7.0.0 for kernel management and communication
+• Added ipykernel>=6.0.0 for enhanced Python environment support
+• Enhanced requirements_qt6.txt with comprehensive installation instructions
+• Added Interactive Console component to availability tracking
+• Implemented virtual environment detection and warnings
+• Multiple update options: automatic, manual, and full system updates
+
+📋 **User Experience Improvements:**
+• Clear documentation and troubleshooting guides
+• Graceful fallback - RamanLab works perfectly without Jupyter packages
+• Enhanced dependency management workflow
+• Interactive console features seamlessly integrated into existing interface
+
+🎯 **How to Update:**
+Run any of these commands to get the new features:
+• `python update_dependencies.py --jupyter` (recommended for new features)
+• `python update_dependencies.py --all` (full update)
+• `pip install qtconsole jupyter-client ipykernel` (manual)
+
+🔄 **Previous Release - Version 1.1.3 "Matplotlib Toolbar Fix"**
+
+This update fixed matplotlib toolbar button vertical centering across all RamanLab modules,
 ensuring consistent and professional appearance throughout the application.
 
 🎯 **Key Improvements:**
@@ -12,12 +52,6 @@ ensuring consistent and professional appearance throughout the application.
 • 📐 **Improved button alignment** for better visual consistency
 • 🎨 **Enhanced user interface** with proper toolbar button positioning
 • 🔄 **Simplified CSS approach** for better cross-platform compatibility
-
-🔧 **Technical Details:**
-• Adopted proven stylesheet approach from batch processing monitor
-• Removed problematic Qt property overrides that caused alignment issues
-• Simplified CompactNavigationToolbar implementation for better reliability
-• Enhanced visual consistency across different RamanLab components
 
 🔄 **Previous Release - Version 1.1.2 Major Update**
 
