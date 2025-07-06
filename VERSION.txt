@@ -1,8 +1,8 @@
-RamanLab Version 1.1.1 - "Major Feature Update: Auto-Update & Advanced Batch Processing"
+RamanLab Version 1.1.2 - "Major Feature Update: Auto-Update & Advanced Batch Processing"
 Release Date: January 28, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🚀 **Version 1.1.1 Major Update**
+🚀 **Version 1.1.2 Major Update**
 
 This revolutionary update introduces groundbreaking features that transform RamanLab
 into a self-updating, sophisticated analysis platform with completely redesigned

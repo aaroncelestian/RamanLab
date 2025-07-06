@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.1.1"
-__version_info__ = (1, 1, 1)
+__version__ = "1.1.2"
+__version_info__ = (1, 1, 2)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -18,7 +18,7 @@ __release_status__ = "stable"
 
 # Version history
 __changes__ = {
-    "1.1.1": {
+    "1.1.2": {
         "date": "2025-01-28",
         "name": "Major Feature Update: Auto-Update & Advanced Batch Processing",
         "description": "Revolutionary update introducing automatic background updates and completely redesigned sophisticated batch peak fitting system",
