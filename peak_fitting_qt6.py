@@ -2626,9 +2626,89 @@ class SpectralDeconvolutionQt6(QDialog):
         return tab
         
     def create_analysis_tab(self):
-        """Create analysis results tab with plotting information."""
+        """Create analysis results tab with plotting information and data loading options."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        
+        # Data Loading section
+        data_group = QGroupBox("📂 Data Loading for Analysis")
+        data_layout = QVBoxLayout(data_group)
+        
+        # Current data status
+        self.analysis_data_status = QLabel("No data loaded for analysis")
+        self.analysis_data_status.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        data_layout.addWidget(self.analysis_data_status)
+        
+        # Data loading options
+        data_options_layout = QHBoxLayout()
+        
+        # Load from pickle file
+        load_pickle_btn = QPushButton("📁 Load Pickle File")
+        load_pickle_btn.setToolTip("Load a pickle file containing batch processing results")
+        load_pickle_btn.clicked.connect(self.load_analysis_pickle_file)
+        load_pickle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        data_options_layout.addWidget(load_pickle_btn)
+        
+        # Use Advanced tab data
+        use_advanced_btn = QPushButton("🔗 Use Advanced Tab Data")
+        use_advanced_btn.setToolTip("Use the pickle file selected in the Advanced tab")
+        use_advanced_btn.clicked.connect(self.use_advanced_tab_data)
+        use_advanced_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        data_options_layout.addWidget(use_advanced_btn)
+        
+        # Use current batch results
+        use_batch_btn = QPushButton("⚡ Use Current Batch Results")
+        use_batch_btn.setToolTip("Use results from the most recent batch processing")
+        use_batch_btn.clicked.connect(self.use_current_batch_results)
+        use_batch_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        data_options_layout.addWidget(use_batch_btn)
+        
+        data_layout.addLayout(data_options_layout)
+        
+        # Data preview
+        self.analysis_data_preview = QTextEdit()
+        self.analysis_data_preview.setReadOnly(True)
+        self.analysis_data_preview.setMaximumHeight(80)
+        self.analysis_data_preview.setPlainText("Load data to see preview...")
+        data_layout.addWidget(self.analysis_data_preview)
+        
+        layout.addWidget(data_group)
         
         # Information about plotting functionality
         info_group = QGroupBox("📊 Plotting Analysis")
@@ -2637,9 +2717,8 @@ class SpectralDeconvolutionQt6(QDialog):
         info_text = QLabel("""
         <b>Plotting Analysis Features:</b><br><br>
         
-        Comprehensive plotting analysis is now available in the <b>Plotting Analysis</b> tab 
-        in the right panel. Switch between "Current Spectrum" and "Plotting Analysis" tabs 
-        to access advanced visualization tools.<br><br>
+        Comprehensive plotting analysis is available in the <b>Plotting Analysis</b> tab 
+        in the right panel. Load data above, then switch to plotting analysis.<br><br>
         
         <b>Available Plot Types:</b><br>
         • <b>Peak Features Grid:</b> 2×2 plots showing amplitude, position, FWHM, and R² trends<br>
@@ -2647,8 +2726,8 @@ class SpectralDeconvolutionQt6(QDialog):
         • <b>Heatmap Plot:</b> 2D intensity visualization with multiple colormaps<br><br>
         
         <b>How to Use:</b><br>
-        1. Run batch processing to generate data<br>
-        2. Click the "Plotting Analysis" tab in the right panel<br>
+        1. Load data using one of the buttons above<br>
+        2. Click "Switch to Plotting Analysis Tab" below<br>
         3. Choose your plot type and customize settings<br>
         4. Analyze trends across your spectral dataset
         """)
@@ -2698,6 +2777,156 @@ class SpectralDeconvolutionQt6(QDialog):
         """Switch to the Plotting Analysis tab in the visualization panel."""
         if hasattr(self, 'visualization_tabs'):
             self.visualization_tabs.setCurrentIndex(1)  # Switch to Plotting Analysis tab
+    
+    def load_analysis_pickle_file(self):
+        """Load a pickle file directly for analysis plotting."""
+        from pathlib import Path
+        import pickle
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Batch Results File for Analysis", "", 
+            "Pickle Files (*.pkl);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    data = pickle.load(f)
+                
+                # Store the data for analysis
+                self.analysis_batch_results = data
+                
+                # Update status
+                file_name = Path(file_path).name
+                self.analysis_data_status.setText(f"✅ Loaded: {file_name}")
+                self.analysis_data_status.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
+                
+                # Update preview
+                n_files = len(data)
+                n_regions = sum(len(r['regions']) for r in data)
+                n_peaks = sum(len(r['regions'][0]['peaks']) for r in data if r['regions'])
+                
+                preview_text = f"📊 Analysis Data Loaded Successfully!\n"
+                preview_text += f"• Files: {n_files}\n"
+                preview_text += f"• Regions: {n_regions}\n"
+                preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
+                preview_text += f"• Source: {file_name}"
+                
+                self.analysis_data_preview.setPlainText(preview_text)
+                
+                # Refresh plotting data
+                self.refresh_analysis_plots()
+                
+                QMessageBox.information(self, "Data Loaded", 
+                                      f"Successfully loaded batch results from {file_name}.\n\n"
+                                      f"• {n_files} spectra loaded\n"
+                                      f"• {n_regions} regions analyzed\n"
+                                      f"• Ready for plotting analysis\n\n"
+                                      "Switch to 'Plotting Analysis' tab to visualize your data!")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"Failed to load pickle file: {str(e)}")
+                self.analysis_data_status.setText("❌ Failed to load data")
+                self.analysis_data_status.setStyleSheet("color: #f44336; font-weight: bold; padding: 5px;")
+    
+    def use_advanced_tab_data(self):
+        """Use the pickle file selected in the Advanced tab."""
+        import pickle
+        from pathlib import Path
+        
+        # Check if Advanced tab has a selected file
+        if not hasattr(self, 'selected_data_file') or not self.selected_data_file:
+            QMessageBox.warning(self, "No Data Selected", 
+                              "No pickle file is selected in the Advanced tab.\n\n"
+                              "Please go to the Advanced tab and use 'Select Pickle File' "
+                              "in the Data Management section first.")
+            return
+        
+        try:
+            with open(self.selected_data_file, 'rb') as f:
+                data = pickle.load(f)
+            
+            # Store the data for analysis
+            self.analysis_batch_results = data
+            
+            # Update status
+            file_name = Path(self.selected_data_file).name
+            self.analysis_data_status.setText(f"🔗 Using Advanced Tab Data: {file_name}")
+            self.analysis_data_status.setStyleSheet("color: #FF9800; font-weight: bold; padding: 5px;")
+            
+            # Update preview
+            n_files = len(data)
+            n_regions = sum(len(r['regions']) for r in data)
+            n_peaks = sum(len(r['regions'][0]['peaks']) for r in data if r['regions'])
+            
+            preview_text = f"🔗 Using Advanced Tab Data!\n"
+            preview_text += f"• Files: {n_files}\n"
+            preview_text += f"• Regions: {n_regions}\n"
+            preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
+            preview_text += f"• Source: Advanced Tab → {file_name}"
+            
+            self.analysis_data_preview.setPlainText(preview_text)
+            
+            # Refresh plotting data
+            self.refresh_analysis_plots()
+            
+            QMessageBox.information(self, "Data Connected", 
+                                  f"Successfully connected to Advanced tab data: {file_name}.\n\n"
+                                  f"• {n_files} spectra available\n"
+                                  f"• {n_regions} regions analyzed\n"
+                                  f"• Ready for plotting analysis\n\n"
+                                  "Switch to 'Plotting Analysis' tab to visualize your data!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Failed to load data from Advanced tab: {str(e)}")
+            self.analysis_data_status.setText("❌ Failed to load Advanced tab data")
+            self.analysis_data_status.setStyleSheet("color: #f44336; font-weight: bold; padding: 5px;")
+    
+    def use_current_batch_results(self):
+        """Use results from the most recent batch processing."""
+        # Check if current batch results are available
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            QMessageBox.warning(self, "No Batch Results", 
+                              "No batch processing results are available.\n\n"
+                              "Please run batch processing in the Batch tab first, "
+                              "or load a pickle file using the other options.")
+            return
+        
+        try:
+            # Store the data for analysis
+            self.analysis_batch_results = self.batch_results
+            
+            # Update status
+            self.analysis_data_status.setText("⚡ Using Current Batch Results")
+            self.analysis_data_status.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
+            
+            # Update preview
+            n_files = len(self.batch_results)
+            n_regions = sum(len(r['regions']) for r in self.batch_results)
+            n_peaks = sum(len(r['regions'][0]['peaks']) for r in self.batch_results if r['regions'])
+            
+            preview_text = f"⚡ Using Current Batch Results!\n"
+            preview_text += f"• Files: {n_files}\n"
+            preview_text += f"• Regions: {n_regions}\n"
+            preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
+            preview_text += f"• Source: Recent batch processing"
+            
+            self.analysis_data_preview.setPlainText(preview_text)
+            
+            # Refresh plotting data
+            self.refresh_analysis_plots()
+            
+            QMessageBox.information(self, "Data Ready", 
+                                  f"Successfully loaded current batch results.\n\n"
+                                  f"• {n_files} spectra available\n"
+                                  f"• {n_regions} regions analyzed\n"
+                                  f"• Ready for plotting analysis\n\n"
+                                  "Switch to 'Plotting Analysis' tab to visualize your data!")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Failed to load current batch results: {str(e)}")
+            self.analysis_data_status.setText("❌ Failed to load current batch results")
+            self.analysis_data_status.setStyleSheet("color: #f44336; font-weight: bold; padding: 5px;")
 
     def create_grid_plot_widget(self):
         """Create 2x2 grid plot widget for peak features analysis."""
@@ -2989,13 +3218,20 @@ class SpectralDeconvolutionQt6(QDialog):
 
     def update_data_source_info(self):
         """Update data source information display."""
-        if hasattr(self, 'batch_results') and self.batch_results:
-            total_files = len(self.batch_results)
-            total_regions = sum(len(r.get('regions', [])) for r in self.batch_results)
+        # Check for analysis data first, then fall back to batch results
+        data_source = None
+        if hasattr(self, 'analysis_batch_results') and self.analysis_batch_results:
+            data_source = self.analysis_batch_results
+        elif hasattr(self, 'batch_results') and self.batch_results:
+            data_source = self.batch_results
+        
+        if data_source:
+            total_files = len(data_source)
+            total_regions = sum(len(r.get('regions', [])) for r in data_source)
             
             # Count successful fits
             successful_fits = 0
-            for file_result in self.batch_results:
+            for file_result in data_source:
                 for region_result in file_result.get('regions', []):
                     if region_result.get('total_r2') is not None:
                         successful_fits += 1
@@ -3014,7 +3250,14 @@ class SpectralDeconvolutionQt6(QDialog):
 
     def refresh_current_plot(self):
         """Refresh the currently visible plot."""
-        if not hasattr(self, 'batch_results') or not self.batch_results:
+        # Check for analysis data first, then fall back to batch results
+        data_source = None
+        if hasattr(self, 'analysis_batch_results') and self.analysis_batch_results:
+            data_source = self.analysis_batch_results
+        elif hasattr(self, 'batch_results') and self.batch_results:
+            data_source = self.batch_results
+        
+        if not data_source:
             return
         
         current_plot = self.analysis_plots_stack.currentIndex()
@@ -3030,7 +3273,14 @@ class SpectralDeconvolutionQt6(QDialog):
         """Extract peak features data from batch results."""
         import numpy as np
         
-        if not hasattr(self, 'batch_results') or not self.batch_results:
+        # Check for analysis data first, then fall back to batch results
+        data_source = None
+        if hasattr(self, 'analysis_batch_results') and self.analysis_batch_results:
+            data_source = self.analysis_batch_results
+        elif hasattr(self, 'batch_results') and self.batch_results:
+            data_source = self.batch_results
+        
+        if not data_source:
             return None
         
         # Determine which peak to analyze
@@ -3051,7 +3301,7 @@ class SpectralDeconvolutionQt6(QDialog):
         }
         
         spectrum_index = 0
-        for file_result in self.batch_results:
+        for file_result in data_source:
             filename = file_result.get('filename', f'Spectrum_{spectrum_index}')
             
             for region_result in file_result.get('regions', []):
@@ -3082,13 +3332,20 @@ class SpectralDeconvolutionQt6(QDialog):
 
     def extract_spectral_data(self):
         """Extract spectral data from batch results for waterfall and heatmap plots."""
-        if not hasattr(self, 'batch_results') or not self.batch_results:
+        # Check for analysis data first, then fall back to batch results
+        data_source = None
+        if hasattr(self, 'analysis_batch_results') and self.analysis_batch_results:
+            data_source = self.analysis_batch_results
+        elif hasattr(self, 'batch_results') and self.batch_results:
+            data_source = self.batch_results
+        
+        if not data_source:
             return None
         
         spectra_data = []
         filenames = []
         
-        for file_result in self.batch_results:
+        for file_result in data_source:
             filename = file_result.get('filename', 'Unknown')
             
             for region_result in file_result.get('regions', []):
