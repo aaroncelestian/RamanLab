@@ -210,39 +210,108 @@ class BatchProcessingMonitor(QDialog):
         
     def setup_plot_area(self, layout):
         """Setup the real-time plotting area."""
-        # Create matplotlib figure
-        self.figure = Figure(figsize=(12, 6))
+        # Create matplotlib figure with extra height for proper spacing
+        self.figure = Figure(figsize=(12, 7))
         self.canvas = FigureCanvas(self.figure)
         
-        # Create subplots
-        gs = self.figure.add_gridspec(2, 2, height_ratios=[2, 1], width_ratios=[3, 1])
-        self.ax_main = self.figure.add_subplot(gs[0, 0])      # Main spectrum plot
-        self.ax_stats = self.figure.add_subplot(gs[0, 1])     # Statistics plot
-        self.ax_progress = self.figure.add_subplot(gs[1, :])  # Progress overview
+        # Create optimized layout: plots fill most space, legend on the side
+        # Left column: spectrum and residuals, Right column: legend spanning full height
+        gs = self.figure.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[5, 1], 
+                                    hspace=0.2, wspace=0.2)
+        self.ax_main = self.figure.add_subplot(gs[0, 0])      # Main spectrum plot (clean, no legend)
+        self.ax_progress = self.figure.add_subplot(gs[1, 0], sharex=self.ax_main)  # Residuals plot
+        self.ax_legend = self.figure.add_subplot(gs[:, 1])    # Legend area spanning full right column
         
-        # Configure main plot
+        # Configure main plot - clean without legend
         self.ax_main.set_xlabel("Wavenumber (cm⁻¹)")
         self.ax_main.set_ylabel("Intensity (a.u.)")
         self.ax_main.set_title("Current Spectrum")
         self.ax_main.grid(True, alpha=0.3)
         
-        # Configure stats plot
-        self.ax_stats.set_title("Processing Stats")
-        self.ax_stats.axis('off')
-        
-        # Configure residuals plot
+        # Configure residuals plot - clean and minimal
         self.ax_progress.set_xlabel("Wavenumber (cm⁻¹)")
-        self.ax_progress.set_ylabel("Residuals")
-        self.ax_progress.set_title("Fit Quality - Residuals (Measured - Fitted)")
+        # No y-label or title for cleaner appearance
         self.ax_progress.grid(True, alpha=0.3)
         
-        self.figure.tight_layout()
+        # Configure dedicated legend area - spans full right column
+        self.ax_legend.set_title("Legend", fontsize=11, pad=15)
+        self.ax_legend.axis('off')
+        
+        # Connect zoom/pan events to keep plots synchronized
+        self.ax_main.callbacks.connect('xlim_changed', self._on_xlim_changed)
+        self.ax_progress.callbacks.connect('xlim_changed', self._on_xlim_changed)
+        
+        # Use constrained_layout for better automatic spacing
+        self.figure.set_constrained_layout(True)
+        
+        # Add canvas to layout
         layout.addWidget(self.canvas)
+        
+        # Add matplotlib navigation toolbar for interactive zooming/panning
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar.setStyleSheet("""
+            QToolBar {
+                background-color: #f0f0f0;
+                border: 1px solid #c0c0c0;
+                spacing: 3px;
+            }
+            QToolButton {
+                background-color: #ffffff;
+                border: 1px solid #c0c0c0;
+                border-radius: 3px;
+                padding: 2px;
+                margin: 1px;
+            }
+            QToolButton:hover {
+                background-color: #e0e0e0;
+            }
+            QToolButton:pressed {
+                background-color: #d0d0d0;
+            }
+        """)
+        layout.addWidget(self.toolbar)
+        
+        # Add info label about interactive features
+        info_label = QLabel("💡 Use toolbar above to zoom and pan plots. Both spectrum and residuals will stay synchronized!")
+        info_label.setStyleSheet("""
+            QLabel {
+                background-color: #e8f4fd;
+                border: 1px solid #bee5eb;
+                border-radius: 4px;
+                padding: 8px;
+                color: #0c5460;
+                font-size: 11px;
+                font-style: italic;
+            }
+        """)
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
         
         # Initialize data storage for progress tracking
         self.file_indices = []
         self.peaks_counts = []
         self.processing_times = []
+        
+    def _on_xlim_changed(self, ax):
+        """Callback to keep spectrum and residuals plots synchronized during interactive zoom/pan."""
+        if hasattr(self, 'ax_main') and hasattr(self, 'ax_progress'):
+            # Prevent infinite recursion by temporarily disconnecting callbacks
+            self.ax_main.callbacks.disconnect('xlim_changed', self._on_xlim_changed)
+            self.ax_progress.callbacks.disconnect('xlim_changed', self._on_xlim_changed)
+            
+            # Get the current x-limits from the changed axis
+            xlims = ax.get_xlim()
+            
+            # Apply the same limits to both axes
+            self.ax_main.set_xlim(xlims)
+            self.ax_progress.set_xlim(xlims)
+            
+            # Redraw the canvas
+            self.canvas.draw_idle()
+            
+            # Reconnect callbacks
+            self.ax_main.callbacks.connect('xlim_changed', self._on_xlim_changed)
+            self.ax_progress.callbacks.connect('xlim_changed', self._on_xlim_changed)
         
     def setup_status_area(self, layout):
         """Setup the status information area."""
@@ -395,11 +464,34 @@ class BatchProcessingMonitor(QDialog):
         self.ax_main.set_xlabel("Wavenumber (cm⁻¹)")
         self.ax_main.set_ylabel("Intensity (a.u.)")
         self.ax_main.set_title("Current Spectrum")
-        self.ax_main.legend()
+        # No legend on main plot - it's now in dedicated area
         self.ax_main.grid(True, alpha=0.3)
+        
+        # Update the external legend
+        self._update_external_legend()
         
         # Update residuals plot
         self.update_residuals_plot(wavenumbers, corrected, peaks, region_start, region_end, full_wavenumbers, full_intensities, fitted_peaks, residuals)
+    
+    def _update_external_legend(self):
+        """Update the external legend area with current plot elements."""
+        self.ax_legend.clear()
+        self.ax_legend.set_title("Legend", fontsize=11, pad=15)
+        self.ax_legend.axis('off')
+        
+        # Get legend elements from main plot
+        handles, labels = self.ax_main.get_legend_handles_labels()
+        
+        if handles and labels:
+            # Create legend in the dedicated area with better spacing
+            legend = self.ax_legend.legend(handles, labels, loc='upper center', 
+                                         frameon=False, fontsize=10,
+                                         bbox_to_anchor=(0.5, 0.9))
+            
+            # Style the legend text with better readability
+            for text in legend.get_texts():
+                text.set_fontsize(10)
+                text.set_color('#333333')
     
     def update_residuals_plot(self, wavenumbers, corrected_intensities, peaks=None, region_start=None, region_end=None, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None):
         """Update the residuals plot showing fit quality."""
@@ -413,9 +505,6 @@ class BatchProcessingMonitor(QDialog):
             # Add zero line for reference
             self.ax_progress.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
             
-            # Set appropriate title
-            self.ax_progress.set_title("Fitting Region Analysis - Residuals (Data - Fitted)")
-            
         else:
             # Fall back to showing background-corrected signal
             residual_wave = wavenumbers
@@ -427,9 +516,6 @@ class BatchProcessingMonitor(QDialog):
                 
                 # Add zero line for reference
                 self.ax_progress.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
-                
-                # Set appropriate title
-                self.ax_progress.set_title("Fitting Region Analysis - Background Corrected Signal")
         
         # Highlight fitting regions
         if region_start is not None and region_end is not None:
@@ -444,6 +530,12 @@ class BatchProcessingMonitor(QDialog):
         self.ax_progress.set_xlabel("Wavenumber (cm⁻¹)")
         self.ax_progress.set_ylabel("Intensity (a.u.)")
         self.ax_progress.grid(True, alpha=0.3)
+        
+        # X-axis alignment is automatically handled by sharex in setup
+        # Just ensure limits are synchronized if needed
+        if hasattr(self, 'ax_main'):
+            main_xlims = self.ax_main.get_xlim()
+            self.ax_progress.set_xlim(main_xlims)
         
         # Refresh the canvas
         self.canvas.draw()
@@ -463,30 +555,11 @@ class BatchProcessingMonitor(QDialog):
         stats_text += f"Current: {peaks_found} peaks"
         self.stats_text.setText(stats_text)
         
-        # Update statistics plot
-        self.ax_stats.clear()
-        self.ax_stats.text(0.1, 0.8, f"Total Files: {total_files}", transform=self.ax_stats.transAxes, fontsize=10)
-        self.ax_stats.text(0.1, 0.7, f"Processed: {file_index + 1}", transform=self.ax_stats.transAxes, fontsize=10)
-        self.ax_stats.text(0.1, 0.6, f"Total Peaks: {total_peaks}", transform=self.ax_stats.transAxes, fontsize=10)
-        self.ax_stats.text(0.1, 0.5, f"Current File: {peaks_found} peaks", transform=self.ax_stats.transAxes, fontsize=10)
-        self.ax_stats.text(0.1, 0.4, f"Avg Time: {avg_time:.2f}s", transform=self.ax_stats.transAxes, fontsize=10)
+        # Processing stats are now shown in the status area below plots
+        # No need for separate stats plot area
         
-        if len(self.processing_times) > 0:
-            remaining_files = total_files - (file_index + 1)
-            estimated_time = remaining_files * avg_time
-            self.ax_stats.text(0.1, 0.3, f"Est. Remaining: {estimated_time:.1f}s", 
-                             transform=self.ax_stats.transAxes, fontsize=10)
-        
-        self.ax_stats.axis('off')
-        
-        # Update progress plot
-        if len(self.file_indices) > 1:
-            self.ax_progress.clear()
-            self.ax_progress.plot(self.file_indices, self.peaks_counts, 'bo-', markersize=4)
-            self.ax_progress.set_xlabel("File Index")
-            self.ax_progress.set_ylabel("Peaks Found")
-            self.ax_progress.set_title("Peak Detection Progress")
-            self.ax_progress.grid(True, alpha=0.3)
+        # Don't overwrite the residuals plot - it should always show residuals
+        # The residuals plot is updated by update_residuals_plot() called from update_spectrum_plot()
         
         # Refresh the canvas
         self.canvas.draw()
@@ -533,24 +606,198 @@ class BatchProcessingMonitor(QDialog):
             QMessageBox.warning(self, "No Results", "No results to export.")
             return
         
-        # Get save directory
-        save_dir = QFileDialog.getExistingDirectory(
-            self, "Select Directory for CSV Export", "", 
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        # Get base filename and location from user
+        base_file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Batch Results - Choose Base Filename", 
+            "batch_analysis_results.csv",
+            "CSV Files (*.csv);;All Files (*)"
         )
         
-        if not save_dir:
+        if not base_file_path:
             return
         
         try:
-            self._export_comprehensive_csv(save_dir)
+            self._export_comprehensive_csv_with_custom_names(base_file_path)
+            save_dir = Path(base_file_path).parent
             QMessageBox.information(self, "Export Complete", 
-                                  f"CSV files exported successfully to:\n{save_dir}")
+                                  f"CSV files exported successfully to:\n{save_dir}\n\n"
+                                  f"Files created:\n"
+                                  f"• Summary with peak parameters\n"
+                                  f"• Detailed peak parameters\n" 
+                                  f"• Full spectral data")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {str(e)}")
     
+    def _export_comprehensive_csv_with_custom_names(self, base_file_path):
+        """Export comprehensive CSV files with user-chosen base filename."""
+        base_path = Path(base_file_path)
+        base_name = base_path.stem  # Get filename without extension
+        save_dir = base_path.parent
+        
+        # Generate descriptive filenames based on user's choice
+        summary_file = save_dir / f"{base_name}_summary.csv"
+        peak_params_file = save_dir / f"{base_name}_peak_parameters.csv"
+        spectral_data_file = save_dir / f"{base_name}_spectral_data.csv"
+        
+        if not self.stored_results:
+            return
+        
+        # Create a unified wavenumber grid (use the first spectrum as reference)
+        reference_wavenumbers = self.stored_results[0]['wavenumbers']
+        
+        # Initialize the main DataFrame with wavenumbers
+        csv_data = {'Wavenumber_cm-1': reference_wavenumbers}
+        
+        # Track peak parameters for separate summary
+        peak_summary = []
+        
+        for i, result in enumerate(self.stored_results):
+            filename = result['filename']
+            wavenumbers = result['wavenumbers']
+            intensities = result['intensities']
+            background = result.get('background')
+            fitted_peaks = result.get('fitted_peaks')
+            residuals = result.get('residuals')
+            peaks = result.get('peaks')
+            fit_params = result.get('fit_params')
+            total_r2 = result.get('total_r2')
+            
+            # Create clean filename for column headers (remove extension and special chars)
+            clean_name = Path(filename).stem.replace(' ', '_').replace('-', '_')
+            
+            # Interpolate all data to the reference wavenumber grid
+            raw_interp = np.interp(reference_wavenumbers, wavenumbers, intensities)
+            csv_data[f'{clean_name}_Raw'] = raw_interp
+            
+            # Fitted data (if available)
+            if fitted_peaks is not None:
+                fitted_interp = np.interp(reference_wavenumbers, wavenumbers, fitted_peaks)
+                csv_data[f'{clean_name}_Fitted'] = fitted_interp
+            else:
+                csv_data[f'{clean_name}_Fitted'] = np.zeros_like(reference_wavenumbers)
+            
+            # Background (if available)
+            if background is not None:
+                bg_interp = np.interp(reference_wavenumbers, wavenumbers, background)
+                csv_data[f'{clean_name}_Background'] = bg_interp
+            else:
+                csv_data[f'{clean_name}_Background'] = np.zeros_like(reference_wavenumbers)
+            
+            # Residuals/Difference (if available)
+            if residuals is not None:
+                resid_interp = np.interp(reference_wavenumbers, wavenumbers, residuals)
+                csv_data[f'{clean_name}_Difference'] = resid_interp
+            else:
+                # Fallback: raw - background if no residuals available
+                if background is not None:
+                    bg_corrected = intensities - background
+                    diff_interp = np.interp(reference_wavenumbers, wavenumbers, bg_corrected)
+                    csv_data[f'{clean_name}_Difference'] = diff_interp
+                else:
+                    csv_data[f'{clean_name}_Difference'] = np.zeros_like(reference_wavenumbers)
+            
+            # Collect peak summary data
+            if peaks is not None and fit_params is not None:
+                n_peaks = len(peaks)
+                for j in range(n_peaks):
+                    if j * 3 + 2 < len(fit_params):
+                        amplitude = fit_params[j * 3]
+                        center = fit_params[j * 3 + 1]
+                        width = fit_params[j * 3 + 2]
+                        
+                        # Calculate FWHM and area
+                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                        area = amplitude * width * np.sqrt(2 * np.pi)
+                        
+                        peak_summary.append({
+                            'Filename': filename,
+                            'Peak_Number': j + 1,
+                            'Center_cm-1': center,
+                            'Amplitude': amplitude,
+                            'Width_Sigma': width,
+                            'FWHM': fwhm,
+                            'Area': area,
+                            'Total_R2': total_r2 if j == 0 else '',  # Only show R² for first peak
+                            'Peak_Height_Raw': intensities[peaks[j]] if j < len(peaks) else np.nan
+                        })
+        
+        # Save main CSV with 4 columns per spectrum
+        main_df = pd.DataFrame(csv_data)
+        main_df.to_csv(spectral_data_file, index=False)
+        print(f"✅ Saved spectral data: {spectral_data_file}")
+        
+        # Save peak parameters summary
+        if peak_summary:
+            peak_df = pd.DataFrame(peak_summary)
+            peak_df.to_csv(peak_params_file, index=False)
+            print(f"✅ Saved peak parameters: {peak_params_file}")
+        
+        # Save enhanced processing summary with individual peak parameters
+        summary_data = []
+        max_peaks = 0
+        
+        # First pass: determine the maximum number of peaks for column creation
+        for result in self.stored_results:
+            peaks = result.get('peaks')
+            n_peaks = len(peaks) if peaks is not None else 0
+            max_peaks = max(max_peaks, n_peaks)
+        
+        # Second pass: create summary data with peak parameters as columns
+        for result in self.stored_results:
+            peaks = result.get('peaks')
+            fit_params = result.get('fit_params')
+            total_r2 = result.get('total_r2')
+            n_peaks = len(peaks) if peaks is not None else 0
+            
+            # Base summary info
+            summary_row = {
+                'Filename': result['filename'],
+                'Number_of_Peaks': n_peaks,
+                'Total_R2': total_r2,
+                'Fitting_Success': 'Yes' if total_r2 is not None and total_r2 > 0 else 'No',
+                'Region_Start': result.get('region_start', 'Full'),
+                'Region_End': result.get('region_end', 'Spectrum')
+            }
+            
+            # Add individual peak parameters as columns
+            if fit_params is not None and n_peaks > 0:
+                for i in range(max_peaks):
+                    if i < n_peaks and i * 3 + 2 < len(fit_params):
+                        amplitude = fit_params[i * 3]
+                        center = fit_params[i * 3 + 1]
+                        width = fit_params[i * 3 + 2]
+                        
+                        # Calculate FWHM
+                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                        
+                        # Add peak parameters
+                        summary_row[f'Peak{i+1}_Amplitude'] = amplitude
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = center
+                        summary_row[f'Peak{i+1}_FWHM'] = fwhm
+                        summary_row[f'Peak{i+1}_Width_Sigma'] = width
+                    else:
+                        # Fill with NaN for missing peaks
+                        summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                        summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                        summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+            else:
+                # No fit parameters available - fill with NaN
+                for i in range(max_peaks):
+                    summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                    summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                    summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                    summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+            
+            summary_data.append(summary_row)
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_csv(summary_file, index=False)
+            print(f"✅ Saved enhanced processing summary: {summary_file}")
+
     def _export_comprehensive_csv(self, save_dir):
-        """Export comprehensive CSV with 4 columns per spectrum (Raw, Fitted, Background, Difference)."""
+        """Export comprehensive CSV with 4 columns per spectrum (Raw, Fitted, Background, Difference). LEGACY METHOD."""
         save_path = Path(save_dir)
         
         if not self.stored_results:
@@ -646,26 +893,69 @@ class BatchProcessingMonitor(QDialog):
             peak_df.to_csv(save_path / 'batch_peak_parameters.csv', index=False)
             print(f"✅ Saved peak parameters: {len(peak_summary)} peaks")
         
-        # Save processing summary
+        # Save enhanced processing summary with individual peak parameters
         summary_data = []
+        max_peaks = 0
+        
+        # First pass: determine the maximum number of peaks for column creation
         for result in self.stored_results:
             peaks = result.get('peaks')
+            n_peaks = len(peaks) if peaks is not None else 0
+            max_peaks = max(max_peaks, n_peaks)
+        
+        # Second pass: create summary data with peak parameters as columns
+        for result in self.stored_results:
+            peaks = result.get('peaks')
+            fit_params = result.get('fit_params')
             total_r2 = result.get('total_r2')
             n_peaks = len(peaks) if peaks is not None else 0
             
-            summary_data.append({
+            # Base summary info
+            summary_row = {
                 'Filename': result['filename'],
                 'Number_of_Peaks': n_peaks,
                 'Total_R2': total_r2,
-                'Fitting_Success': 'Yes' if total_r2 is not None else 'No',
+                'Fitting_Success': 'Yes' if total_r2 is not None and total_r2 > 0 else 'No',
                 'Region_Start': result.get('region_start', 'Full'),
                 'Region_End': result.get('region_end', 'Spectrum')
-            })
+            }
+            
+            # Add individual peak parameters as columns
+            if fit_params is not None and n_peaks > 0:
+                for i in range(max_peaks):
+                    if i < n_peaks and i * 3 + 2 < len(fit_params):
+                        amplitude = fit_params[i * 3]
+                        center = fit_params[i * 3 + 1]
+                        width = fit_params[i * 3 + 2]
+                        
+                        # Calculate FWHM
+                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                        
+                        # Add peak parameters
+                        summary_row[f'Peak{i+1}_Amplitude'] = amplitude
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = center
+                        summary_row[f'Peak{i+1}_FWHM'] = fwhm
+                        summary_row[f'Peak{i+1}_Width_Sigma'] = width
+                    else:
+                        # Fill with NaN for missing peaks
+                        summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                        summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                        summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+            else:
+                # No fit parameters available - fill with NaN
+                for i in range(max_peaks):
+                    summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                    summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                    summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                    summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+            
+            summary_data.append(summary_row)
         
         if summary_data:
             summary_df = pd.DataFrame(summary_data)
             summary_df.to_csv(save_path / 'batch_summary.csv', index=False)
-            print(f"✅ Saved processing summary: {len(summary_data)} files")
+            print(f"✅ Saved enhanced processing summary: {len(summary_data)} files with up to {max_peaks} peaks per file")
     
     def processing_failed(self, error_message):
         """Signal that processing failed."""
@@ -690,7 +980,7 @@ class BatchProcessingMonitor(QDialog):
         if self.stored_results:
             self.setup_navigation_display()
     
-    def store_processing_result(self, wavenumbers, intensities, background, peaks, region_start, region_end, filename, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None):
+    def store_processing_result(self, wavenumbers, intensities, background, peaks, region_start, region_end, filename, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None, fit_params=None, total_r2=None):
         """Store a processing result for later navigation."""
         result = {
             'wavenumbers': wavenumbers,
@@ -703,7 +993,9 @@ class BatchProcessingMonitor(QDialog):
             'region_end': region_end,
             'filename': filename,
             'full_wavenumbers': full_wavenumbers,
-            'full_intensities': full_intensities
+            'full_intensities': full_intensities,
+            'fit_params': fit_params,
+            'total_r2': total_r2
         }
         self.stored_results.append(result)
     
@@ -1663,6 +1955,30 @@ class SpectralDeconvolutionQt6(QDialog):
         fit_layout.addWidget(self.results_text)
         
         layout.addWidget(fit_group)
+        
+        # Analysis Results table (moved from Analysis tab)
+        results_group = QGroupBox("Analysis Results")
+        results_layout = QVBoxLayout(results_group)
+        
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(5)
+        self.results_table.setHorizontalHeaderLabels([
+            "Peak", "Position", "Amplitude", "Width", "R²"
+        ])
+        self.results_table.horizontalHeader().setStretchLastSection(True)
+        results_layout.addWidget(self.results_table)
+        
+        layout.addWidget(results_group)
+        
+        # Export options (moved from Analysis tab)
+        export_group = QGroupBox("Export")
+        export_layout = QVBoxLayout(export_group)
+        
+        export_btn = QPushButton("Export Results")
+        export_btn.clicked.connect(self.export_results)
+        export_layout.addWidget(export_btn)
+        
+        layout.addWidget(export_group)
         layout.addStretch()
         
         return tab
@@ -1893,32 +2209,19 @@ class SpectralDeconvolutionQt6(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Results table
-        results_group = QGroupBox("Analysis Results")
-        results_layout = QVBoxLayout(results_group)
+        # Information about where analysis results are now located
+        info_group = QGroupBox("Analysis Results Location")
+        info_layout = QVBoxLayout(info_group)
         
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(5)
-        self.results_table.setHorizontalHeaderLabels([
-            "Peak", "Position", "Amplitude", "Width", "R²"
-        ])
-        self.results_table.horizontalHeader().setStretchLastSection(True)
-        results_layout.addWidget(self.results_table)
+        info_text = QLabel("Analysis results and export functionality have been moved to the Peak Fitting tab for better workflow integration.")
+        info_text.setStyleSheet("color: #666; font-style: italic; padding: 10px;")
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
         
-        layout.addWidget(results_group)
-        
-        # Export options
-        export_group = QGroupBox("Export")
-        export_layout = QVBoxLayout(export_group)
-        
-        export_btn = QPushButton("Export Results")
-        export_btn.clicked.connect(self.export_results)
-        export_layout.addWidget(export_btn)
-        
-        layout.addWidget(export_group)
+        layout.addWidget(info_group)
         layout.addStretch()
         
-        return tab 
+        return tab
     
     def create_batch_tab(self):
         """Create batch processing tab for processing multiple spectra."""
@@ -5290,7 +5593,8 @@ class SpectralDeconvolutionQt6(QDialog):
                             region_wave, original_region_int, background, peaks,
                             start, end, Path(file_path).name,
                             full_wavenumbers=wavenumbers, full_intensities=intensities,
-                            fitted_peaks=fitted_peaks, residuals=residuals
+                            fitted_peaks=fitted_peaks, residuals=residuals,
+                            fit_params=fit_params, total_r2=total_r2
                         )
                         
                         # Allow GUI to update
@@ -5569,36 +5873,57 @@ class SpectralDeconvolutionQt6(QDialog):
             QMessageBox.warning(self, "No Results", "No batch results to export. Please run batch processing first.")
             return
         
-        # Check if the monitor has results
+        # Check if the monitor has results (prefer monitor's enhanced export)
         if hasattr(self, 'last_batch_monitor') and self.last_batch_monitor:
             if self.last_batch_monitor.stored_results:
-                # Use the monitor's CSV export functionality
+                # Use the monitor's CSV export functionality with custom naming
                 self.last_batch_monitor.export_to_csv()
                 return
         
-        # Fallback: create monitor-style export from batch_results
-        save_dir = QFileDialog.getExistingDirectory(
-            self, "Select Directory for CSV Export", "", 
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        # Fallback: create export from batch_results with custom naming
+        base_file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Batch Results - Choose Base Filename", 
+            "batch_analysis_results.csv",
+            "CSV Files (*.csv);;All Files (*)"
         )
         
-        if not save_dir:
+        if not base_file_path:
             return
         
         try:
-            self._convert_batch_results_to_csv(save_dir)
+            self._convert_batch_results_to_csv_with_custom_names(base_file_path)
+            save_dir = Path(base_file_path).parent
             QMessageBox.information(self, "Export Complete", 
-                                  f"CSV files exported successfully to:\n{save_dir}")
+                                  f"CSV files exported successfully to:\n{save_dir}\n\n"
+                                  f"Files created:\n"
+                                  f"• Summary with peak parameters\n"
+                                  f"• Detailed peak parameters\n"
+                                  f"• Full spectral data")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {str(e)}")
     
-    def _convert_batch_results_to_csv(self, save_dir):
-        """Convert batch_results to CSV format (fallback method)."""
-        save_path = Path(save_dir)
+    def _convert_batch_results_to_csv_with_custom_names(self, base_file_path):
+        """Convert batch_results to CSV format with custom filenames."""
+        base_path = Path(base_file_path)
+        base_name = base_path.stem  # Get filename without extension
+        save_dir = base_path.parent
+        
+        # Generate descriptive filenames based on user's choice
+        summary_file = save_dir / f"{base_name}_summary.csv"
+        peak_params_file = save_dir / f"{base_name}_peak_parameters.csv"
         
         peak_data = []
         summary_data = []
+        max_peaks = 0
         
+        # First pass: determine maximum number of peaks for enhanced summary
+        for file_result in self.batch_results:
+            for region_result in file_result['regions']:
+                peaks = region_result.get('peaks')
+                n_peaks = len(peaks) if peaks is not None else 0
+                max_peaks = max(max_peaks, n_peaks)
+        
+        # Second pass: process data
         for file_result in self.batch_results:
             filename = file_result['filename']
             
@@ -5611,17 +5936,155 @@ class SpectralDeconvolutionQt6(QDialog):
                 
                 n_peaks = len(peaks) if peaks is not None else 0
                 
-                # Add to summary
-                summary_data.append({
+                # Enhanced summary with individual peak parameters as columns
+                summary_row = {
                     'Filename': filename,
                     'Region_Start': region_start,
                     'Region_End': region_end,
                     'Number_of_Peaks': n_peaks,
                     'Total_R2': total_r2,
-                    'Fitting_Success': 'Yes' if total_r2 is not None else 'No'
-                })
+                    'Fitting_Success': 'Yes' if total_r2 is not None and total_r2 > 0 else 'No'
+                }
                 
-                # Add peak parameters if available
+                # Add individual peak parameters as columns
+                if fit_params is not None and n_peaks > 0:
+                    for i in range(max_peaks):
+                        if i < n_peaks and i * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[i * 3]
+                            center = fit_params[i * 3 + 1]
+                            width = fit_params[i * 3 + 2]
+                            
+                            # Calculate FWHM
+                            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                            
+                            # Add peak parameters
+                            summary_row[f'Peak{i+1}_Amplitude'] = amplitude
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = center
+                            summary_row[f'Peak{i+1}_FWHM'] = fwhm
+                            summary_row[f'Peak{i+1}_Width_Sigma'] = width
+                        else:
+                            # Fill with NaN for missing peaks
+                            summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                            summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                            summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+                else:
+                    # No fit parameters available - fill with NaN
+                    for i in range(max_peaks):
+                        summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                        summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                        summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+                
+                summary_data.append(summary_row)
+                
+                # Add peak parameters for detailed file (unchanged for backward compatibility)
+                if peaks is not None and fit_params is not None:
+                    for i in range(n_peaks):
+                        if i * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[i * 3]
+                            center = fit_params[i * 3 + 1]
+                            width = fit_params[i * 3 + 2]
+                            
+                            # Calculate FWHM and area
+                            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                            area = amplitude * width * np.sqrt(2 * np.pi)
+                            
+                            peak_data.append({
+                                'Filename': filename,
+                                'Region_Start': region_start,
+                                'Region_End': region_end,
+                                'Peak_Number': i + 1,
+                                'Center_cm-1': center,
+                                'Amplitude': amplitude,
+                                'Width_Sigma': width,
+                                'FWHM': fwhm,
+                                'Area': area,
+                                'Total_R2': total_r2 if i == 0 else ''
+                            })
+        
+        # Save CSV files with custom names
+        if peak_data:
+            peak_df = pd.DataFrame(peak_data)
+            peak_df.to_csv(peak_params_file, index=False)
+            print(f"✅ Saved detailed peak parameters: {peak_params_file}")
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_csv(summary_file, index=False)
+            print(f"✅ Saved enhanced summary: {summary_file}")
+
+    def _convert_batch_results_to_csv(self, save_dir):
+        """Convert batch_results to CSV format (legacy fallback method)."""
+        save_path = Path(save_dir)
+        
+        peak_data = []
+        summary_data = []
+        max_peaks = 0
+        
+        # First pass: determine maximum number of peaks for enhanced summary
+        for file_result in self.batch_results:
+            for region_result in file_result['regions']:
+                peaks = region_result.get('peaks')
+                n_peaks = len(peaks) if peaks is not None else 0
+                max_peaks = max(max_peaks, n_peaks)
+        
+        # Second pass: process data
+        for file_result in self.batch_results:
+            filename = file_result['filename']
+            
+            for region_result in file_result['regions']:
+                region_start = region_result['start']
+                region_end = region_result['end']
+                peaks = region_result.get('peaks')
+                fit_params = region_result.get('fit_params')
+                total_r2 = region_result.get('total_r2')
+                
+                n_peaks = len(peaks) if peaks is not None else 0
+                
+                # Enhanced summary with individual peak parameters as columns
+                summary_row = {
+                    'Filename': filename,
+                    'Region_Start': region_start,
+                    'Region_End': region_end,
+                    'Number_of_Peaks': n_peaks,
+                    'Total_R2': total_r2,
+                    'Fitting_Success': 'Yes' if total_r2 is not None and total_r2 > 0 else 'No'
+                }
+                
+                # Add individual peak parameters as columns
+                if fit_params is not None and n_peaks > 0:
+                    for i in range(max_peaks):
+                        if i < n_peaks and i * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[i * 3]
+                            center = fit_params[i * 3 + 1]
+                            width = fit_params[i * 3 + 2]
+                            
+                            # Calculate FWHM
+                            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                            
+                            # Add peak parameters
+                            summary_row[f'Peak{i+1}_Amplitude'] = amplitude
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = center
+                            summary_row[f'Peak{i+1}_FWHM'] = fwhm
+                            summary_row[f'Peak{i+1}_Width_Sigma'] = width
+                        else:
+                            # Fill with NaN for missing peaks
+                            summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                            summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                            summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+                else:
+                    # No fit parameters available - fill with NaN
+                    for i in range(max_peaks):
+                        summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                        summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                        summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+                
+                summary_data.append(summary_row)
+                
+                # Add peak parameters for detailed file (unchanged for backward compatibility)
                 if peaks is not None and fit_params is not None:
                     for i in range(n_peaks):
                         if i * 3 + 2 < len(fit_params):
@@ -5655,7 +6118,7 @@ class SpectralDeconvolutionQt6(QDialog):
         if summary_data:
             summary_df = pd.DataFrame(summary_data)
             summary_df.to_csv(save_path / 'batch_summary.csv', index=False)
-            print(f"✅ Saved summary: {len(summary_data)} files processed")
+            print(f"✅ Saved enhanced summary: {len(summary_data)} regions processed with up to {max_peaks} peaks per region")
     
     def reopen_batch_monitor(self):
         """Reopen the batch processing monitor if available."""

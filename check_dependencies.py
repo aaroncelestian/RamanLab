@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Dependency Checker for RamanLab Qt6 Version 1.1.2
+Dependency Checker for RamanLab Qt6 Version 1.1.3
 ==================================================
 This script checks if your Python environment has all required dependencies
 for RamanLab Qt6, reports their versions, and provides installation instructions if needed.

@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.1.2"
-__version_info__ = (1, 1, 2)
+__version__ = "1.1.3"
+__version_info__ = (1, 1, 3)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -13,11 +13,30 @@ __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
 __release_date__ = "2025-01-28"
-__release_name__ = "Major Feature Update: Auto-Update & Advanced Batch Processing"
+__release_name__ = "Matplotlib Toolbar Fix"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.1.3": {
+        "date": "2025-01-28",
+        "name": "Matplotlib Toolbar Fix",
+        "description": "Fixed matplotlib toolbar button vertical centering across all RamanLab modules",
+        "major_features": [],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Fixed matplotlib toolbar vertical centering by simplifying CSS approach and removing complex property overrides",
+            "Adopted proven stylesheet approach from batch processing monitor for consistent button alignment",
+            "Removed problematic Qt property overrides that were causing alignment issues",
+            "Simplified CompactNavigationToolbar implementation for better cross-platform compatibility"
+        ],
+        "bug_fixes": [
+            "Fixed matplotlib toolbar button vertical centering across all modules",
+            "Resolved CSS alignment issues in polarization_ui/matplotlib_config.py",
+            "Improved toolbar appearance consistency across different RamanLab components"
+        ],
+        "future_roadmap": []
+    },
     "1.1.2": {
         "date": "2025-01-28",
         "name": "Major Feature Update: Auto-Update & Advanced Batch Processing",

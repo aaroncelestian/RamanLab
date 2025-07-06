@@ -7,7 +7,7 @@ spectroscopic data and analysis results.
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+# NavigationToolbar import moved below with the rest of polarization_ui imports
 
 # Import compact styling from root ui directory
 import sys

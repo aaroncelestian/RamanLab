@@ -69,58 +69,25 @@ class CompactNavigationToolbar(NavigationToolbar2QT):
         compact_size = original_size * 0.7
         self.setIconSize(compact_size)
         
-        # Set maximum height
-        self.setMaximumHeight(32)
-        self.setMinimumHeight(28)
-        
-        # Apply professional stylesheet
+        # Use the proven approach from peak_fitting_qt6.py that works properly
         self.setStyleSheet("""
             QToolBar {
-                spacing: 1px;
-                padding: 2px 4px;
-                border: none;
-                background-color: #f8f9fa;
-                border-bottom: 1px solid #dee2e6;
+                background-color: #f0f0f0;
+                border: 1px solid #c0c0c0;
+                spacing: 3px;
             }
-            
             QToolButton {
-                padding: 3px;
+                background-color: #ffffff;
+                border: 1px solid #c0c0c0;
+                border-radius: 3px;
+                padding: 2px;
                 margin: 1px;
-                border: 1px solid transparent;
-                border-radius: 4px;
-                background-color: transparent;
-                min-width: 20px;
-                min-height: 20px;
             }
-            
             QToolButton:hover {
-                background-color: #e9ecef;
-                border: 1px solid #ced4da;
+                background-color: #e0e0e0;
             }
-            
             QToolButton:pressed {
-                background-color: #dee2e6;
-                border: 1px solid #adb5bd;
-            }
-            
-            QToolButton:checked {
-                background-color: #0d6efd;
-                border: 1px solid #0a58ca;
-                color: white;
-            }
-            
-            QToolButton:disabled {
-                opacity: 0.5;
-                background-color: transparent;
-                border: 1px solid transparent;
-            }
-            
-            /* Style the coordinates display */
-            QLabel {
-                color: #495057;
-                font-size: 9px;
-                padding: 2px 4px;
-                background-color: transparent;
+                background-color: #d0d0d0;
             }
         """)
 

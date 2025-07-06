@@ -1,10 +1,27 @@
-RamanLab Version 1.1.2 - "Major Feature Update: Auto-Update & Advanced Batch Processing"
+RamanLab Version 1.1.3 - "Matplotlib Toolbar Fix"
 Release Date: January 28, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🚀 **Version 1.1.2 Major Update**
+🚀 **Version 1.1.3 Update**
 
-This revolutionary update introduces groundbreaking features that transform RamanLab
+This update fixes matplotlib toolbar button vertical centering across all RamanLab modules,
+ensuring consistent and professional appearance throughout the application.
+
+🎯 **Key Improvements:**
+• 🔧 **Fixed matplotlib toolbar vertical centering** across all modules
+• 📐 **Improved button alignment** for better visual consistency
+• 🎨 **Enhanced user interface** with proper toolbar button positioning
+• 🔄 **Simplified CSS approach** for better cross-platform compatibility
+
+🔧 **Technical Details:**
+• Adopted proven stylesheet approach from batch processing monitor
+• Removed problematic Qt property overrides that caused alignment issues
+• Simplified CompactNavigationToolbar implementation for better reliability
+• Enhanced visual consistency across different RamanLab components
+
+🔄 **Previous Release - Version 1.1.2 Major Update**
+
+This revolutionary update introduced groundbreaking features that transform RamanLab
 into a self-updating, sophisticated analysis platform with completely redesigned
 batch processing capabilities.
 

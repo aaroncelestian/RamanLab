@@ -5,7 +5,7 @@ Qt6-based module for analyzing 2D Raman spectroscopy data, including data loadin
 organization, and preparation for machine learning analysis.
 """
 
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 __author__ = "Aaron J. Celestian Ph.D."
 
 from .main import main
