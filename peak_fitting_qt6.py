@@ -2607,19 +2607,22 @@ class SpectralDeconvolutionQt6(QDialog):
         
         radio_layout = QHBoxLayout()
         
-        self.batch_auto_peaks_radio = QRadioButton("Auto-detect Peaks")
+        self.batch_auto_peaks_radio = QRadioButton("Auto-detect")
+        #self.batch_auto_peaks_radio.setText("Auto-detect") # Explicitly set text
         self.batch_auto_peaks_radio.setChecked(True)
         self.batch_auto_peaks_radio.setToolTip("Automatically detect peaks in each spectrum using peak detection parameters")
         self.peak_source_group.addButton(self.batch_auto_peaks_radio, 0)
         radio_layout.addWidget(self.batch_auto_peaks_radio)
         
-        self.batch_found_peaks_radio = QRadioButton("Use Find Peaks Results")
+        self.batch_found_peaks_radio = QRadioButton("Auto fit")
+        #self.batch_found_peaks_radio.setText("Auto fit") # Explicitly set text
         self.batch_found_peaks_radio.setChecked(False)
-        self.batch_found_peaks_radio.setToolTip("Use peaks found in the Find Peaks tab (if available)")
+        self.batch_found_peaks_radio.setToolTip("Use the auto-detected peaks in the Find Peaks tab (if available)")
         self.peak_source_group.addButton(self.batch_found_peaks_radio, 1)
         radio_layout.addWidget(self.batch_found_peaks_radio)
         
-        self.batch_manual_peaks_radio = QRadioButton("Use Manual Peaks")
+        self.batch_manual_peaks_radio = QRadioButton("User fit")
+        #self.batch_manual_peaks_radio.setText("User fit") # Explicitly set text
         self.batch_manual_peaks_radio.setChecked(False)
         self.batch_manual_peaks_radio.setToolTip("Use manually selected peaks from the main interface (if available)")
         self.peak_source_group.addButton(self.batch_manual_peaks_radio, 2)
@@ -2755,6 +2758,12 @@ class SpectralDeconvolutionQt6(QDialog):
         map_analysis_btn.clicked.connect(self.launch_map_analysis_module)
         modules_layout.addWidget(map_analysis_btn)
         
+        # Advanced Jupyter Console launcher
+        jupyter_console_btn = QPushButton("🐍 Advanced Jupyter Console")
+        jupyter_console_btn.setToolTip("Launch advanced Jupyter console with selected pickle file from Data Management")
+        jupyter_console_btn.clicked.connect(self.launch_jupyter_console)
+        modules_layout.addWidget(jupyter_console_btn)
+        
         layout.addWidget(modules_group)
         
         # Data management section
@@ -2797,11 +2806,11 @@ class SpectralDeconvolutionQt6(QDialog):
             if has_manual_peaks:
                 count = len(self.manual_peaks)
                 self.batch_manual_peaks_radio.setEnabled(True)
-                self.batch_manual_peaks_radio.setText(f"Use Manual Peaks ({count})")
+                self.batch_manual_peaks_radio.setText(f"User fit")
                 self.batch_manual_peaks_radio.setToolTip(f"Use {count} manually selected peaks from the main interface")
             else:
                 self.batch_manual_peaks_radio.setEnabled(False)
-                self.batch_manual_peaks_radio.setText("Use Manual Peaks (none available)")
+                self.batch_manual_peaks_radio.setText("User fit")
                 self.batch_manual_peaks_radio.setToolTip("No manual peaks available. Select peaks in the main interface first.")
                 # If this radio button was selected but no manual peaks available, switch to auto-detect
                 if self.batch_manual_peaks_radio.isChecked():
@@ -2816,11 +2825,11 @@ class SpectralDeconvolutionQt6(QDialog):
             if has_found_peaks:
                 count = len(self.peaks)
                 self.batch_found_peaks_radio.setEnabled(True)
-                self.batch_found_peaks_radio.setText(f"Use Find Peaks Results ({count})")
+                self.batch_found_peaks_radio.setText(f"Auto fit")
                 self.batch_found_peaks_radio.setToolTip(f"Use {count} peaks found in the Find Peaks tab")
             else:
                 self.batch_found_peaks_radio.setEnabled(False)
-                self.batch_found_peaks_radio.setText("Use Find Peaks Results (none available)")
+                self.batch_found_peaks_radio.setText("Auto fit")
                 self.batch_found_peaks_radio.setToolTip("No peaks found yet. Use Find Peaks tab to detect peaks first.")
                 # If this radio button was selected but no found peaks available, switch to auto-detect
                 if self.batch_found_peaks_radio.isChecked():
@@ -6486,7 +6495,11 @@ class SpectralDeconvolutionQt6(QDialog):
                             'start': start,
                             'end': end,
                             'wavenumbers': region_wave,
-                            'intensities': region_int,
+                            'intensities': region_int,  # Background-corrected intensities
+                            'original_intensities': original_region_int,  # Original intensities
+                            'background': background,  # Background profile
+                            'full_wavenumbers': wavenumbers,  # Complete spectrum wavenumbers
+                            'full_intensities': intensities,  # Complete spectrum intensities
                             'peaks': peaks,
                             'fitted_peaks': fitted_peaks,
                             'fit_params': fit_params,
@@ -6740,13 +6753,155 @@ class SpectralDeconvolutionQt6(QDialog):
         if file_path:
             try:
                 import pickle
+                import pandas as pd
+                
+                # Convert batch results to pandas format expected by jupyter console
+                converted_data = self._convert_batch_results_to_pandas_format()
+                
                 with open(file_path, 'wb') as f:
-                    pickle.dump(self.batch_results, f)
+                    pickle.dump(converted_data, f)
                 
                 QMessageBox.information(self, "Export Complete", f"Batch results exported to {file_path}")
                 
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(e)}")
+    
+    def _convert_batch_results_to_pandas_format(self):
+        """Convert batch results to pandas format expected by jupyter console."""
+        import pandas as pd
+        import numpy as np
+        
+        peak_data = []
+        summary_data = []
+        spectra_dict = {}
+        
+        # Process each file result
+        for file_result in self.batch_results:
+            filename = file_result['filename']
+            filepath = file_result.get('filepath', '')
+            
+            # Add to spectra dict for each region
+            for region_idx, region_result in enumerate(file_result['regions']):
+                region_start = region_result['start']
+                region_end = region_result['end']
+                peaks = region_result.get('peaks')
+                fit_params = region_result.get('fit_params')
+                total_r2 = region_result.get('total_r2')
+                wavenumbers = region_result.get('wavenumbers')
+                intensities = region_result.get('intensities')
+                
+                # Create unique key for spectra dict
+                if len(file_result['regions']) > 1:
+                    spectrum_key = f"{filename}_region_{region_idx+1}"
+                else:
+                    spectrum_key = filename
+                
+                # Store comprehensive spectrum data
+                if wavenumbers is not None and intensities is not None:
+                    spectrum_data = {
+                        'wavenumbers': wavenumbers,
+                        'intensities': intensities,  # Background-corrected intensities
+                        'filename': filename,
+                        'region_start': region_start,
+                        'region_end': region_end
+                    }
+                    
+                    # Add original intensities (before background correction)
+                    original_intensities = region_result.get('original_intensities')
+                    if original_intensities is not None:
+                        spectrum_data['original_intensities'] = original_intensities
+                    
+                    # Add background profile
+                    background = region_result.get('background')
+                    if background is not None:
+                        spectrum_data['background'] = background
+                    
+                    # Add fitted peaks (calculated profile) if available
+                    fitted_peaks = region_result.get('fitted_peaks')
+                    if fitted_peaks is not None:
+                        spectrum_data['fitted_peaks'] = fitted_peaks
+                    
+                    # Add residuals if available
+                    residuals = region_result.get('residuals')
+                    if residuals is not None:
+                        spectrum_data['residuals'] = residuals
+                    
+                    # Add full spectrum data if available (beyond just the region)
+                    # This is useful for plotting complete spectra
+                    full_wavenumbers = region_result.get('full_wavenumbers')
+                    full_intensities = region_result.get('full_intensities')
+                    if full_wavenumbers is not None and full_intensities is not None:
+                        spectrum_data['full_wavenumbers'] = full_wavenumbers
+                        spectrum_data['full_intensities'] = full_intensities
+                    
+                    spectra_dict[spectrum_key] = spectrum_data
+                
+                n_peaks = len(peaks) if peaks is not None else 0
+                
+                # Create summary row
+                summary_row = {
+                    'file_index': len(summary_data),
+                    'filename': filename,
+                    'filepath': filepath,
+                    'region_start': region_start,
+                    'region_end': region_end,
+                    'n_peaks': n_peaks,
+                    'total_r2': total_r2,
+                    'processing_time': None,  # Not available from batch_results
+                    'fitting_success': 'Yes' if total_r2 is not None and total_r2 > 0 else 'No'
+                }
+                
+                summary_data.append(summary_row)
+                
+                # Add peak parameters if available
+                if peaks is not None and fit_params is not None and n_peaks > 0:
+                    for i in range(n_peaks):
+                        if i * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[i * 3]
+                            center = fit_params[i * 3 + 1]
+                            width = fit_params[i * 3 + 2]
+                            
+                            # Calculate derived parameters
+                            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                            area = amplitude * width * np.sqrt(2 * np.pi)
+                            
+                            # Create peak center in wavenumbers
+                            peak_center_wavenumber = center
+                            
+                            peak_row = {
+                                'file_index': len(summary_data) - 1,
+                                'filename': filename,
+                                'region_start': region_start,
+                                'region_end': region_end,
+                                'peak_number': i + 1,
+                                'peak_center': peak_center_wavenumber,
+                                'amplitude': amplitude,
+                                'width': width,
+                                'fwhm': fwhm,
+                                'area': area,
+                                'total_r2': total_r2 if i == 0 else None  # Only show R2 for first peak
+                            }
+                            
+                            peak_data.append(peak_row)
+        
+        # Create pandas DataFrames
+        summary_df = pd.DataFrame(summary_data) if summary_data else pd.DataFrame()
+        peaks_df = pd.DataFrame(peak_data) if peak_data else pd.DataFrame()
+        
+        # Create the expected data structure
+        converted_data = {
+            'summary_df': summary_df,
+            'peaks_df': peaks_df,
+            'spectra_dict': spectra_dict,
+            'metadata': {
+                'export_method': 'batch_processing',
+                'total_files': len(self.batch_results),
+                'total_regions': sum(len(r['regions']) for r in self.batch_results),
+                'total_peaks': len(peak_data)
+            }
+        }
+        
+        return converted_data
     
     def export_batch_to_csv(self):
         """Export batch results to comprehensive CSV files from the batch tab."""
@@ -7126,6 +7281,78 @@ class SpectralDeconvolutionQt6(QDialog):
                               "Please ensure map_analysis_2d is accessible.")
         except Exception as e:
             QMessageBox.critical(self, "Launch Error", f"Failed to launch map analysis module: {str(e)}")
+    
+    def launch_jupyter_console(self):
+        """Launch the advanced Jupyter console with selected pickle file from data management."""
+        try:
+            import subprocess
+            import sys
+            import os
+            from pathlib import Path
+            
+            # Check if a pickle file is selected in the data management groupbox
+            selected_pickle_file = getattr(self, 'selected_data_file', None)
+            
+            # Try the advanced console first, then fall back to simplified version
+            console_files = ['advanced_jupyter_console.py', 'simple_jupyter_console.py']
+            console_launched = False
+            
+            for console_file in console_files:
+                try:
+                    if selected_pickle_file and os.path.exists(selected_pickle_file):
+                        # Launch with the selected pickle file
+                        subprocess.Popen([sys.executable, console_file, selected_pickle_file])
+                        
+                        # Get file info for the message
+                        file_name = Path(selected_pickle_file).name
+                        try:
+                            import pickle
+                            with open(selected_pickle_file, 'rb') as f:
+                                data = pickle.load(f)
+                            n_spectra = len(data) if isinstance(data, list) else "Unknown"
+                        except:
+                            n_spectra = "Unknown"
+                        
+                        console_type = "Advanced" if console_file.startswith('advanced') else "Simplified"
+                        QMessageBox.information(self, "Console Launched", 
+                                              f"{console_type} Jupyter Console launched with selected data file.\n\n"
+                                              f"• File: {file_name}\n"
+                                              f"• Spectra: {n_spectra}\n"
+                                              f"• Data available as pandas DataFrames\n"
+                                              f"• Console type: {console_type}\n\n"
+                                              f"The console runs independently - you can continue using RamanLab.")
+                    else:
+                        # Launch without data
+                        subprocess.Popen([sys.executable, console_file])
+                        
+                        console_type = "Advanced" if console_file.startswith('advanced') else "Simplified"
+                        QMessageBox.information(self, "Console Launched", 
+                                              f"{console_type} Jupyter Console launched.\n\n"
+                                              "No pickle file selected in Data Management.\n"
+                                              "Use 'Select Pickle File' in the Data Management section\n"
+                                              "or load a file directly in the console.")
+                    
+                    console_launched = True
+                    break
+                    
+                except Exception as e:
+                    print(f"Failed to launch {console_file}: {e}")
+                    continue
+            
+            if not console_launched:
+                QMessageBox.critical(self, "Launch Error", 
+                                   "Failed to launch any Jupyter console.\n\n"
+                                   "Make sure the console files are available:\n"
+                                   "• advanced_jupyter_console.py\n"
+                                   "• simple_jupyter_console.py\n\n"
+                                   "For full functionality, install: pip install qtconsole jupyter-client ipykernel")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", 
+                               f"Failed to launch Jupyter console:\n{str(e)}\n\n"
+                               "Make sure the console files are available.\n"
+                               "For full functionality, install: pip install qtconsole jupyter-client ipykernel")
+            print(f"Jupyter console launch error: {e}")
 
 
 # Launch function for integration with main app

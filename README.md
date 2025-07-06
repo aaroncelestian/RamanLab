@@ -42,7 +42,7 @@ python install_desktop_icon.py
 
 **Download Essential Databases:**
 - **Pre-compiled Raman Databases**
- [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15717961.svg)](https://doi.org/10.5281/zenodo.15717961)
+https://doi.org/10.6084/m9.figshare.29482199.v1 
 
 - Place these files in the RamanLab directory.
 
