@@ -1239,6 +1239,17 @@ class SpectralDeconvolutionQt6(QDialog):
         self.fft_magnitude = None
         self.fft_phase = None
         
+        # Persistent plot settings for analysis tab (waterfall plot)
+        self.persistent_plot_settings = {
+            'waterfall_line_thickness': 1.5,
+            'waterfall_y_offset': 100.0,
+            'waterfall_interval': 1,
+            'waterfall_colormap': 'black',
+            'heatmap_colormap': 'viridis',
+            'heatmap_interpolation': 'nearest',
+            'heatmap_aspect': 'auto'
+        }
+        
         self.setup_ui()
         self.initial_plot()
         
@@ -2643,7 +2654,7 @@ class SpectralDeconvolutionQt6(QDialog):
         data_options_layout = QHBoxLayout()
         
         # Load from pickle file
-        load_pickle_btn = QPushButton("📁 Load Pickle File")
+        load_pickle_btn = QPushButton("Load Pickle")
         load_pickle_btn.setToolTip("Load a pickle file containing batch processing results")
         load_pickle_btn.clicked.connect(self.load_analysis_pickle_file)
         load_pickle_btn.setStyleSheet("""
@@ -2662,7 +2673,7 @@ class SpectralDeconvolutionQt6(QDialog):
         data_options_layout.addWidget(load_pickle_btn)
         
         # Use Advanced tab data
-        use_advanced_btn = QPushButton("🔗 Use Advanced Tab Data")
+        use_advanced_btn = QPushButton("Advanced Tab")
         use_advanced_btn.setToolTip("Use the pickle file selected in the Advanced tab")
         use_advanced_btn.clicked.connect(self.use_advanced_tab_data)
         use_advanced_btn.setStyleSheet("""
@@ -2681,7 +2692,7 @@ class SpectralDeconvolutionQt6(QDialog):
         data_options_layout.addWidget(use_advanced_btn)
         
         # Use current batch results
-        use_batch_btn = QPushButton("⚡ Use Current Batch Results")
+        use_batch_btn = QPushButton("From Batch")
         use_batch_btn.setToolTip("Use results from the most recent batch processing")
         use_batch_btn.clicked.connect(self.use_current_batch_results)
         use_batch_btn.setStyleSheet("""
@@ -2801,16 +2812,49 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.analysis_data_status.setText(f"✅ Loaded: {file_name}")
                 self.analysis_data_status.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
                 
-                # Update preview
-                n_files = len(data)
-                n_regions = sum(len(r['regions']) for r in data)
-                n_peaks = sum(len(r['regions'][0]['peaks']) for r in data if r['regions'])
-                
-                preview_text = f"📊 Analysis Data Loaded Successfully!\n"
-                preview_text += f"• Files: {n_files}\n"
-                preview_text += f"• Regions: {n_regions}\n"
-                preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
-                preview_text += f"• Source: {file_name}"
+                # Update preview - handle both old and new format
+                try:
+                    if isinstance(data, dict) and 'metadata' in data:
+                        # New pandas format
+                        n_files = data['metadata'].get('total_files', 0)
+                        n_regions = data['metadata'].get('total_regions', 0)
+                        n_peaks = data['metadata'].get('total_peaks', 0)
+                        
+                        preview_text = f"📊 Analysis Data Loaded Successfully!\n"
+                        preview_text += f"• Files: {n_files}\n"
+                        preview_text += f"• Regions: {n_regions}\n"
+                        preview_text += f"• Total peaks: {n_peaks}\n"
+                        preview_text += f"• Format: Pandas/Advanced\n"
+                        preview_text += f"• Source: {file_name}"
+                        
+                    elif isinstance(data, list):
+                        # Old format (list of file results)
+                        n_files = len(data)
+                        n_regions = sum(len(r.get('regions', [])) for r in data)
+                        n_peaks = sum(len(r.get('regions', [{}])[0].get('peaks', [])) for r in data if r.get('regions'))
+                        
+                        preview_text = f"📊 Analysis Data Loaded Successfully!\n"
+                        preview_text += f"• Files: {n_files}\n"
+                        preview_text += f"• Regions: {n_regions}\n"
+                        preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
+                        preview_text += f"• Format: Legacy\n"
+                        preview_text += f"• Source: {file_name}"
+                        
+                    else:
+                        # Unknown format
+                        preview_text = f"📊 Analysis Data Loaded!\n"
+                        preview_text += f"• Format: Unknown\n"
+                        preview_text += f"• Source: {file_name}\n"
+                        preview_text += f"• Data type: {type(data).__name__}"
+                        n_files = 1
+                        n_regions = 1
+                        
+                except Exception as preview_e:
+                    preview_text = f"📊 Analysis Data Loaded!\n"
+                    preview_text += f"• Source: {file_name}\n"
+                    preview_text += f"• Preview error: {str(preview_e)}"
+                    n_files = 1
+                    n_regions = 1
                 
                 self.analysis_data_preview.setPlainText(preview_text)
                 
@@ -2819,8 +2863,7 @@ class SpectralDeconvolutionQt6(QDialog):
                 
                 QMessageBox.information(self, "Data Loaded", 
                                       f"Successfully loaded batch results from {file_name}.\n\n"
-                                      f"• {n_files} spectra loaded\n"
-                                      f"• {n_regions} regions analyzed\n"
+                                      f"• Data loaded successfully\n"
                                       f"• Ready for plotting analysis\n\n"
                                       "Switch to 'Plotting Analysis' tab to visualize your data!")
                 
@@ -2854,16 +2897,49 @@ class SpectralDeconvolutionQt6(QDialog):
             self.analysis_data_status.setText(f"🔗 Using Advanced Tab Data: {file_name}")
             self.analysis_data_status.setStyleSheet("color: #FF9800; font-weight: bold; padding: 5px;")
             
-            # Update preview
-            n_files = len(data)
-            n_regions = sum(len(r['regions']) for r in data)
-            n_peaks = sum(len(r['regions'][0]['peaks']) for r in data if r['regions'])
-            
-            preview_text = f"🔗 Using Advanced Tab Data!\n"
-            preview_text += f"• Files: {n_files}\n"
-            preview_text += f"• Regions: {n_regions}\n"
-            preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
-            preview_text += f"• Source: Advanced Tab → {file_name}"
+            # Update preview - handle both old and new format
+            try:
+                if isinstance(data, dict) and 'metadata' in data:
+                    # New pandas format
+                    n_files = data['metadata'].get('total_files', 0)
+                    n_regions = data['metadata'].get('total_regions', 0)
+                    n_peaks = data['metadata'].get('total_peaks', 0)
+                    
+                    preview_text = f"🔗 Using Advanced Tab Data!\n"
+                    preview_text += f"• Files: {n_files}\n"
+                    preview_text += f"• Regions: {n_regions}\n"
+                    preview_text += f"• Total peaks: {n_peaks}\n"
+                    preview_text += f"• Format: Pandas/Advanced\n"
+                    preview_text += f"• Source: Advanced Tab → {file_name}"
+                    
+                elif isinstance(data, list):
+                    # Old format (list of file results)
+                    n_files = len(data)
+                    n_regions = sum(len(r.get('regions', [])) for r in data)
+                    n_peaks = sum(len(r.get('regions', [{}])[0].get('peaks', [])) for r in data if r.get('regions'))
+                    
+                    preview_text = f"🔗 Using Advanced Tab Data!\n"
+                    preview_text += f"• Files: {n_files}\n"
+                    preview_text += f"• Regions: {n_regions}\n"
+                    preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
+                    preview_text += f"• Format: Legacy\n"
+                    preview_text += f"• Source: Advanced Tab → {file_name}"
+                    
+                else:
+                    # Unknown format
+                    preview_text = f"🔗 Using Advanced Tab Data!\n"
+                    preview_text += f"• Format: Unknown\n"
+                    preview_text += f"• Source: Advanced Tab → {file_name}\n"
+                    preview_text += f"• Data type: {type(data).__name__}"
+                    n_files = 1
+                    n_regions = 1
+                    
+            except Exception as preview_e:
+                preview_text = f"🔗 Using Advanced Tab Data!\n"
+                preview_text += f"• Source: Advanced Tab → {file_name}\n"
+                preview_text += f"• Preview error: {str(preview_e)}"
+                n_files = 1
+                n_regions = 1
             
             self.analysis_data_preview.setPlainText(preview_text)
             
@@ -2872,8 +2948,7 @@ class SpectralDeconvolutionQt6(QDialog):
             
             QMessageBox.information(self, "Data Connected", 
                                   f"Successfully connected to Advanced tab data: {file_name}.\n\n"
-                                  f"• {n_files} spectra available\n"
-                                  f"• {n_regions} regions analyzed\n"
+                                  f"• Data loaded successfully\n"
                                   f"• Ready for plotting analysis\n\n"
                                   "Switch to 'Plotting Analysis' tab to visualize your data!")
             
@@ -2900,16 +2975,49 @@ class SpectralDeconvolutionQt6(QDialog):
             self.analysis_data_status.setText("⚡ Using Current Batch Results")
             self.analysis_data_status.setStyleSheet("color: #4CAF50; font-weight: bold; padding: 5px;")
             
-            # Update preview
-            n_files = len(self.batch_results)
-            n_regions = sum(len(r['regions']) for r in self.batch_results)
-            n_peaks = sum(len(r['regions'][0]['peaks']) for r in self.batch_results if r['regions'])
-            
-            preview_text = f"⚡ Using Current Batch Results!\n"
-            preview_text += f"• Files: {n_files}\n"
-            preview_text += f"• Regions: {n_regions}\n"
-            preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
-            preview_text += f"• Source: Recent batch processing"
+            # Update preview - handle both old and new format
+            try:
+                if isinstance(self.batch_results, dict) and 'metadata' in self.batch_results:
+                    # New pandas format
+                    n_files = self.batch_results['metadata'].get('total_files', 0)
+                    n_regions = self.batch_results['metadata'].get('total_regions', 0)
+                    n_peaks = self.batch_results['metadata'].get('total_peaks', 0)
+                    
+                    preview_text = f"⚡ Using Current Batch Results!\n"
+                    preview_text += f"• Files: {n_files}\n"
+                    preview_text += f"• Regions: {n_regions}\n"
+                    preview_text += f"• Total peaks: {n_peaks}\n"
+                    preview_text += f"• Format: Pandas/Advanced\n"
+                    preview_text += f"• Source: Recent batch processing"
+                    
+                elif isinstance(self.batch_results, list):
+                    # Old format (list of file results)
+                    n_files = len(self.batch_results)
+                    n_regions = sum(len(r.get('regions', [])) for r in self.batch_results)
+                    n_peaks = sum(len(r.get('regions', [{}])[0].get('peaks', [])) for r in self.batch_results if r.get('regions'))
+                    
+                    preview_text = f"⚡ Using Current Batch Results!\n"
+                    preview_text += f"• Files: {n_files}\n"
+                    preview_text += f"• Regions: {n_regions}\n"
+                    preview_text += f"• Peaks per spectrum: ~{n_peaks}\n"
+                    preview_text += f"• Format: Legacy\n"
+                    preview_text += f"• Source: Recent batch processing"
+                    
+                else:
+                    # Unknown format
+                    preview_text = f"⚡ Using Current Batch Results!\n"
+                    preview_text += f"• Format: Unknown\n"
+                    preview_text += f"• Source: Recent batch processing\n"
+                    preview_text += f"• Data type: {type(self.batch_results).__name__}"
+                    n_files = 1
+                    n_regions = 1
+                    
+            except Exception as preview_e:
+                preview_text = f"⚡ Using Current Batch Results!\n"
+                preview_text += f"• Source: Recent batch processing\n"
+                preview_text += f"• Preview error: {str(preview_e)}"
+                n_files = 1
+                n_regions = 1
             
             self.analysis_data_preview.setPlainText(preview_text)
             
@@ -2918,8 +3026,7 @@ class SpectralDeconvolutionQt6(QDialog):
             
             QMessageBox.information(self, "Data Ready", 
                                   f"Successfully loaded current batch results.\n\n"
-                                  f"• {n_files} spectra available\n"
-                                  f"• {n_regions} regions analyzed\n"
+                                  f"• Data loaded successfully\n"
                                   f"• Ready for plotting analysis\n\n"
                                   "Switch to 'Plotting Analysis' tab to visualize your data!")
             
@@ -3103,11 +3210,8 @@ class SpectralDeconvolutionQt6(QDialog):
 
     def setup_plot_controls(self):
         """Setup plot-specific controls based on current plot type."""
-        # Clear existing controls
-        for i in reversed(range(self.plot_controls_layout.count())):
-            child = self.plot_controls_layout.itemAt(i).widget()
-            if child:
-                child.setParent(None)
+        # Clear existing controls completely
+        self.clear_plot_controls()
         
         current_plot = self.analysis_plots_stack.currentIndex()
         
@@ -3117,6 +3221,97 @@ class SpectralDeconvolutionQt6(QDialog):
             self.setup_waterfall_plot_controls()
         elif current_plot == 2:  # Heatmap plot
             self.setup_heatmap_plot_controls()
+    
+    def clear_plot_controls(self):
+        """Completely clear all plot controls from the layout."""
+        while self.plot_controls_layout.count():
+            item = self.plot_controls_layout.takeAt(0)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+                else:
+                    # Handle nested layouts
+                    layout = item.layout()
+                    if layout:
+                        self.clear_layout_recursively(layout)
+                        
+    def clear_layout_recursively(self, layout):
+        """Recursively clear a layout and all its nested layouts."""
+        while layout.count():
+            item = layout.takeAt(0)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+                else:
+                    nested_layout = item.layout()
+                    if nested_layout:
+                        self.clear_layout_recursively(nested_layout)
+
+    def _determine_max_peaks_in_data(self):
+        """Determine the maximum number of peaks in any single spectrum from the data source."""
+        # Check for analysis data first, then fall back to batch results
+        data_source = None
+        if hasattr(self, 'analysis_batch_results') and self.analysis_batch_results:
+            data_source = self.analysis_batch_results
+        elif hasattr(self, 'batch_results') and self.batch_results:
+            data_source = self.batch_results
+        
+        if not data_source:
+            return 3  # Default fallback
+        
+        max_peaks = 0
+        
+        # Handle both new and old data formats
+        if isinstance(data_source, dict) and 'peaks_df' in data_source:
+            # New pandas format
+            import pandas as pd
+            peaks_df = data_source['peaks_df']
+            
+            if not peaks_df.empty:
+                # Find the maximum peak number in the dataframe
+                max_peaks = peaks_df['peak_number'].max() if 'peak_number' in peaks_df.columns else 0
+        
+        elif isinstance(data_source, list):
+            # Old format (list of file results)
+            for file_result in data_source:
+                for region_result in file_result.get('regions', []):
+                    peaks = region_result.get('peaks')
+                    if peaks is not None:
+                        max_peaks = max(max_peaks, len(peaks))
+        
+        return max(max_peaks, 3)  # Ensure at least 3 peaks are shown
+
+    def _update_peak_selection_dropdown(self):
+        """Update the peak selection dropdown based on available data."""
+        if not hasattr(self, 'peak_selection_combo'):
+            return
+        
+        # Store current selection
+        current_selection = self.peak_selection_combo.currentText()
+        
+        # Determine max peaks
+        max_peaks = self._determine_max_peaks_in_data()
+        
+        # Clear and repopulate the dropdown
+        self.peak_selection_combo.clear()
+        
+        # Add individual peak options
+        peak_options = []
+        for i in range(1, max_peaks + 1):
+            peak_options.append(f"Peak {i}")
+        
+        # Add the "All Peaks (Average)" option
+        peak_options.append("All Peaks (Average)")
+        
+        self.peak_selection_combo.addItems(peak_options)
+        
+        # Try to restore previous selection, default to Peak 1
+        if current_selection in peak_options:
+            self.peak_selection_combo.setCurrentText(current_selection)
+        else:
+            self.peak_selection_combo.setCurrentText("Peak 1")
 
     def setup_grid_plot_controls(self):
         """Setup controls for 2x2 grid plot."""
@@ -3125,10 +3320,14 @@ class SpectralDeconvolutionQt6(QDialog):
         peak_selection_layout.addWidget(QLabel("Peak to analyze:"))
         
         self.peak_selection_combo = QComboBox()
+        # Initial setup with defaults - will be updated when data is loaded
         self.peak_selection_combo.addItems(["Peak 1", "Peak 2", "Peak 3", "All Peaks (Average)"])
         self.peak_selection_combo.setCurrentText("Peak 1")
         self.peak_selection_combo.currentTextChanged.connect(self.refresh_current_plot)
         peak_selection_layout.addWidget(self.peak_selection_combo)
+        
+        # Update dropdown based on current data
+        self._update_peak_selection_dropdown()
         
         self.plot_controls_layout.addLayout(peak_selection_layout)
         
@@ -3140,15 +3339,29 @@ class SpectralDeconvolutionQt6(QDialog):
 
     def setup_waterfall_plot_controls(self):
         """Setup controls for waterfall plot."""
+        # Line thickness control
+        thickness_layout = QHBoxLayout()
+        thickness_layout.addWidget(QLabel("Line thickness:"))
+        
+        self.line_thickness_spin = QDoubleSpinBox()
+        self.line_thickness_spin.setRange(0.1, 5.0)
+        self.line_thickness_spin.setValue(self.persistent_plot_settings['waterfall_line_thickness'])
+        self.line_thickness_spin.setSingleStep(0.1)
+        self.line_thickness_spin.setSuffix(" pt")
+        self.line_thickness_spin.valueChanged.connect(self._update_waterfall_setting_and_plot)
+        thickness_layout.addWidget(self.line_thickness_spin)
+        
+        self.plot_controls_layout.addLayout(thickness_layout)
+        
         # Y-offset control
         offset_layout = QHBoxLayout()
         offset_layout.addWidget(QLabel("Y-offset:"))
         
         self.y_offset_spin = QDoubleSpinBox()
         self.y_offset_spin.setRange(0, 10000)
-        self.y_offset_spin.setValue(100)
+        self.y_offset_spin.setValue(self.persistent_plot_settings['waterfall_y_offset'])
         self.y_offset_spin.setSuffix(" units")
-        self.y_offset_spin.valueChanged.connect(self.refresh_current_plot)
+        self.y_offset_spin.valueChanged.connect(self._update_waterfall_setting_and_plot)
         offset_layout.addWidget(self.y_offset_spin)
         
         self.plot_controls_layout.addLayout(offset_layout)
@@ -3159,35 +3372,72 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.interval_spin = QSpinBox()
         self.interval_spin.setRange(1, 20)
-        self.interval_spin.setValue(1)
+        self.interval_spin.setValue(self.persistent_plot_settings['waterfall_interval'])
         self.interval_spin.setSuffix(" spectrum")
-        self.interval_spin.valueChanged.connect(self.refresh_current_plot)
+        self.interval_spin.valueChanged.connect(self._update_waterfall_setting_and_plot)
         interval_layout.addWidget(self.interval_spin)
         
         self.plot_controls_layout.addLayout(interval_layout)
         
-        # Colormap selection
+        # Colormap selection with many more options
         colormap_layout = QHBoxLayout()
         colormap_layout.addWidget(QLabel("Colormap:"))
         
         self.waterfall_colormap_combo = QComboBox()
-        self.waterfall_colormap_combo.addItems(["viridis", "plasma", "inferno", "magma", "jet", "rainbow", "cool", "hot"])
-        self.waterfall_colormap_combo.setCurrentText("viridis")
-        self.waterfall_colormap_combo.currentTextChanged.connect(self.refresh_current_plot)
+        # Custom colormaps first
+        custom_colormaps = ["black", "black_to_gray", "blue_to_red"]
+        # Standard matplotlib colormaps organized by category
+        sequential_colormaps = ["viridis", "plasma", "inferno", "magma", "cividis"]
+        perceptual_colormaps = ["turbo", "tab10", "Set1", "Set2", "Pastel1"]
+        diverging_colormaps = ["coolwarm", "bwr", "seismic", "RdYlBu", "RdBu"]
+        classic_colormaps = ["jet", "rainbow", "hsv", "cool", "hot", "spring", "summer", "autumn", "winter"]
+        grayscale_colormaps = ["gray", "bone", "copper", "pink"]
+        
+        all_colormaps = (custom_colormaps + sequential_colormaps + perceptual_colormaps + 
+                        diverging_colormaps + classic_colormaps + grayscale_colormaps)
+        
+        self.waterfall_colormap_combo.addItems(all_colormaps)
+        self.waterfall_colormap_combo.setCurrentText(self.persistent_plot_settings['waterfall_colormap'])
+        self.waterfall_colormap_combo.currentTextChanged.connect(self._update_waterfall_setting_and_plot)
         colormap_layout.addWidget(self.waterfall_colormap_combo)
         
         self.plot_controls_layout.addLayout(colormap_layout)
 
+    def _update_waterfall_setting_and_plot(self):
+        """Update persistent waterfall settings and refresh the plot."""
+        # Update persistent settings
+        if hasattr(self, 'line_thickness_spin'):
+            self.persistent_plot_settings['waterfall_line_thickness'] = self.line_thickness_spin.value()
+        if hasattr(self, 'y_offset_spin'):
+            self.persistent_plot_settings['waterfall_y_offset'] = self.y_offset_spin.value()
+        if hasattr(self, 'interval_spin'):
+            self.persistent_plot_settings['waterfall_interval'] = self.interval_spin.value()
+        if hasattr(self, 'waterfall_colormap_combo'):
+            self.persistent_plot_settings['waterfall_colormap'] = self.waterfall_colormap_combo.currentText()
+        
+        # Refresh the plot
+        self.refresh_current_plot()
+
     def setup_heatmap_plot_controls(self):
         """Setup controls for heatmap plot."""
-        # Colormap selection
+        # Colormap selection with more options
         colormap_layout = QHBoxLayout()
         colormap_layout.addWidget(QLabel("Colormap:"))
         
         self.heatmap_colormap_combo = QComboBox()
-        self.heatmap_colormap_combo.addItems(["viridis", "plasma", "inferno", "magma", "jet", "rainbow", "cool", "hot"])
-        self.heatmap_colormap_combo.setCurrentText("viridis")
-        self.heatmap_colormap_combo.currentTextChanged.connect(self.refresh_current_plot)
+        # Standard matplotlib colormaps organized by category
+        sequential_colormaps = ["viridis", "plasma", "inferno", "magma", "cividis"]
+        perceptual_colormaps = ["turbo", "tab10", "Set1", "Set2", "Pastel1"]
+        diverging_colormaps = ["coolwarm", "bwr", "seismic", "RdYlBu", "RdBu"]
+        classic_colormaps = ["jet", "rainbow", "hsv", "cool", "hot", "spring", "summer", "autumn", "winter"]
+        grayscale_colormaps = ["gray", "bone", "copper", "pink"]
+        
+        all_colormaps = (sequential_colormaps + perceptual_colormaps + 
+                        diverging_colormaps + classic_colormaps + grayscale_colormaps)
+        
+        self.heatmap_colormap_combo.addItems(all_colormaps)
+        self.heatmap_colormap_combo.setCurrentText(self.persistent_plot_settings['heatmap_colormap'])
+        self.heatmap_colormap_combo.currentTextChanged.connect(self._update_heatmap_setting_and_plot)
         colormap_layout.addWidget(self.heatmap_colormap_combo)
         
         self.plot_controls_layout.addLayout(colormap_layout)
@@ -3198,8 +3448,8 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.interpolation_combo = QComboBox()
         self.interpolation_combo.addItems(["nearest", "bilinear", "bicubic", "spline16", "spline36"])
-        self.interpolation_combo.setCurrentText("nearest")
-        self.interpolation_combo.currentTextChanged.connect(self.refresh_current_plot)
+        self.interpolation_combo.setCurrentText(self.persistent_plot_settings['heatmap_interpolation'])
+        self.interpolation_combo.currentTextChanged.connect(self._update_heatmap_setting_and_plot)
         interp_layout.addWidget(self.interpolation_combo)
         
         self.plot_controls_layout.addLayout(interp_layout)
@@ -3210,11 +3460,24 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.aspect_combo = QComboBox()
         self.aspect_combo.addItems(["auto", "equal"])
-        self.aspect_combo.setCurrentText("auto")
-        self.aspect_combo.currentTextChanged.connect(self.refresh_current_plot)
+        self.aspect_combo.setCurrentText(self.persistent_plot_settings['heatmap_aspect'])
+        self.aspect_combo.currentTextChanged.connect(self._update_heatmap_setting_and_plot)
         aspect_layout.addWidget(self.aspect_combo)
         
         self.plot_controls_layout.addLayout(aspect_layout)
+    
+    def _update_heatmap_setting_and_plot(self):
+        """Update persistent heatmap settings and refresh the plot."""
+        # Update persistent settings
+        if hasattr(self, 'heatmap_colormap_combo'):
+            self.persistent_plot_settings['heatmap_colormap'] = self.heatmap_colormap_combo.currentText()
+        if hasattr(self, 'interpolation_combo'):
+            self.persistent_plot_settings['heatmap_interpolation'] = self.interpolation_combo.currentText()
+        if hasattr(self, 'aspect_combo'):
+            self.persistent_plot_settings['heatmap_aspect'] = self.aspect_combo.currentText()
+        
+        # Refresh the plot
+        self.refresh_current_plot()
 
     def update_data_source_info(self):
         """Update data source information display."""
@@ -3226,17 +3489,43 @@ class SpectralDeconvolutionQt6(QDialog):
             data_source = self.batch_results
         
         if data_source:
-            total_files = len(data_source)
-            total_regions = sum(len(r.get('regions', [])) for r in data_source)
+            # Handle both new pandas format and old list format
+            if isinstance(data_source, dict) and 'metadata' in data_source:
+                # New pandas format
+                metadata = data_source['metadata']
+                total_files = metadata.get('total_files', 0)
+                total_regions = metadata.get('total_regions', 0)
+                total_peaks = metadata.get('total_peaks', 0)
+                
+                # Count successful fits from peaks_df
+                successful_fits = 0
+                if 'peaks_df' in data_source:
+                    import pandas as pd
+                    peaks_df = data_source['peaks_df']
+                    if not peaks_df.empty:
+                        # Count non-null R² values
+                        successful_fits = peaks_df['total_r2'].notna().sum()
+                
+                info_text = f"✓ {total_files} files, {total_regions} regions, {successful_fits} successful fits"
+                
+            elif isinstance(data_source, list):
+                # Old format (list of file results)
+                total_files = len(data_source)
+                total_regions = sum(len(r.get('regions', [])) for r in data_source)
+                
+                # Count successful fits
+                successful_fits = 0
+                for file_result in data_source:
+                    for region_result in file_result.get('regions', []):
+                        if region_result.get('total_r2') is not None:
+                            successful_fits += 1
+                
+                info_text = f"✓ {total_files} files, {total_regions} regions, {successful_fits} successful fits"
+                
+            else:
+                # Unknown format
+                info_text = "✓ Data loaded (unknown format)"
             
-            # Count successful fits
-            successful_fits = 0
-            for file_result in data_source:
-                for region_result in file_result.get('regions', []):
-                    if region_result.get('total_r2') is not None:
-                        successful_fits += 1
-            
-            info_text = f"✓ {total_files} files, {total_regions} regions, {successful_fits} successful fits"
             self.data_source_label.setText(info_text)
             self.data_source_label.setStyleSheet("color: #2e7d32; font-weight: bold; padding: 5px;")
         else:
@@ -3246,6 +3535,8 @@ class SpectralDeconvolutionQt6(QDialog):
     def refresh_analysis_plots(self):
         """Refresh all analysis plots with current data."""
         self.update_data_source_info()
+        # Update peak selection dropdown when data changes
+        self._update_peak_selection_dropdown()
         self.refresh_current_plot()
 
     def refresh_current_plot(self):
@@ -3286,10 +3577,14 @@ class SpectralDeconvolutionQt6(QDialog):
         # Determine which peak to analyze
         peak_selection = self.peak_selection_combo.currentText() if hasattr(self, 'peak_selection_combo') else "Peak 1"
         peak_index = 0  # Default to first peak
-        if "Peak 2" in peak_selection:
-            peak_index = 1
-        elif "Peak 3" in peak_selection:
-            peak_index = 2
+        
+        # Extract peak number from selection text (e.g., "Peak 5" -> 5)
+        if "Peak " in peak_selection and "All Peaks" not in peak_selection:
+            try:
+                peak_number = int(peak_selection.split("Peak ")[1])
+                peak_index = peak_number - 1  # Convert to 0-based index
+            except (ValueError, IndexError):
+                peak_index = 0  # Fallback to first peak
         
         data = {
             'filenames': [],
@@ -3301,32 +3596,59 @@ class SpectralDeconvolutionQt6(QDialog):
         }
         
         spectrum_index = 0
-        for file_result in data_source:
-            filename = file_result.get('filename', f'Spectrum_{spectrum_index}')
+        
+        # Handle both new and old data formats
+        if isinstance(data_source, dict) and 'peaks_df' in data_source:
+            # New pandas format
+            import pandas as pd
+            peaks_df = data_source['peaks_df']
             
-            for region_result in file_result.get('regions', []):
-                peaks = region_result.get('peaks')
-                fit_params = region_result.get('fit_params')
-                total_r2 = region_result.get('total_r2')
+            if not peaks_df.empty:
+                # Filter for the selected peak
+                selected_peak = peaks_df[peaks_df['peak_number'] == peak_index + 1]
                 
-                if peaks is not None and fit_params is not None and len(peaks) > peak_index:
-                    # Extract parameters for the selected peak
-                    if peak_index * 3 + 2 < len(fit_params):
-                        amplitude = fit_params[peak_index * 3]
-                        center = fit_params[peak_index * 3 + 1]
-                        width = fit_params[peak_index * 3 + 2]
-                        
-                        # Calculate FWHM
-                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
-                        
-                        data['filenames'].append(filename)
-                        data['amplitudes'].append(amplitude)
-                        data['positions'].append(center)
-                        data['fwhms'].append(fwhm)
-                        data['r2_values'].append(total_r2 if total_r2 is not None else 0)
-                        data['spectrum_indices'].append(spectrum_index)
+                for _, row in selected_peak.iterrows():
+                    data['filenames'].append(row['filename'])
+                    data['amplitudes'].append(row['amplitude'])
+                    data['positions'].append(row['peak_center'])
+                    data['fwhms'].append(row['fwhm'])
+                    # Robust access to total_r2 column
+                    try:
+                        r2_value = row['total_r2'] if 'total_r2' in row and pd.notna(row['total_r2']) else 0
+                    except (KeyError, IndexError):
+                        r2_value = 0
+                    data['r2_values'].append(r2_value)
+                    data['spectrum_indices'].append(spectrum_index)
+                    spectrum_index += 1
+        
+        elif isinstance(data_source, list):
+            # Old format (list of file results)
+            for file_result in data_source:
+                filename = file_result.get('filename', f'Spectrum_{spectrum_index}')
                 
-                spectrum_index += 1
+                for region_result in file_result.get('regions', []):
+                    peaks = region_result.get('peaks')
+                    fit_params = region_result.get('fit_params')
+                    total_r2 = region_result.get('total_r2')
+                    
+                    if peaks is not None and fit_params is not None and len(peaks) > peak_index:
+                        # Extract parameters for the selected peak
+                        if peak_index * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[peak_index * 3]
+                            center = fit_params[peak_index * 3 + 1]
+                            width = fit_params[peak_index * 3 + 2]
+                            
+                            # Calculate FWHM
+                            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                            
+                            data['filenames'].append(filename)
+                            data['amplitudes'].append(amplitude)
+                            data['positions'].append(center)
+                            data['fwhms'].append(fwhm)
+                            data['r2_values'].append(total_r2 if total_r2 is not None else 0)
+                            data['spectrum_indices'].append(spectrum_index)
+                    
+                    spectrum_index += 1
         
         return data if data['filenames'] else None
 
@@ -3345,20 +3667,50 @@ class SpectralDeconvolutionQt6(QDialog):
         spectra_data = []
         filenames = []
         
-        for file_result in data_source:
-            filename = file_result.get('filename', 'Unknown')
+        # Handle both new and old data formats
+        if isinstance(data_source, dict) and 'spectra_dict' in data_source:
+            # New pandas format
+            spectra_dict = data_source['spectra_dict']
             
-            for region_result in file_result.get('regions', []):
-                wavenumbers = region_result.get('wavenumbers')
-                intensities = region_result.get('intensities')
+            for spectrum_key, spectrum_data in spectra_dict.items():
+                # Robust access to spectrum data
+                try:
+                    if isinstance(spectrum_data, dict):
+                        wavenumbers = spectrum_data.get('wavenumbers')
+                        intensities = spectrum_data.get('intensities')
+                        filename = spectrum_data.get('filename', spectrum_key)
+                    else:
+                        # Skip non-dictionary entries
+                        continue
+                        
+                    if wavenumbers is not None and intensities is not None:
+                        spectra_data.append({
+                            'wavenumbers': wavenumbers,
+                            'intensities': intensities,
+                            'filename': filename
+                        })
+                        filenames.append(filename)
+                except (AttributeError, TypeError) as e:
+                    # Skip problematic entries
+                    print(f"Warning: Skipping spectrum {spectrum_key} due to data format issue: {e}")
+                    continue
+        
+        elif isinstance(data_source, list):
+            # Old format (list of file results)
+            for file_result in data_source:
+                filename = file_result.get('filename', 'Unknown')
                 
-                if wavenumbers is not None and intensities is not None:
-                    spectra_data.append({
-                        'wavenumbers': wavenumbers,
-                        'intensities': intensities,
-                        'filename': filename
-                    })
-                    filenames.append(filename)
+                for region_result in file_result.get('regions', []):
+                    wavenumbers = region_result.get('wavenumbers')
+                    intensities = region_result.get('intensities')
+                    
+                    if wavenumbers is not None and intensities is not None:
+                        spectra_data.append({
+                            'wavenumbers': wavenumbers,
+                            'intensities': intensities,
+                            'filename': filename
+                        })
+                        filenames.append(filename)
         
         return spectra_data if spectra_data else None
 
@@ -3431,16 +3783,18 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.waterfall_ax.clear()
         
-        # Get control values
-        y_offset = self.y_offset_spin.value() if hasattr(self, 'y_offset_spin') else 100
-        interval = self.interval_spin.value() if hasattr(self, 'interval_spin') else 1
-        colormap_name = self.waterfall_colormap_combo.currentText() if hasattr(self, 'waterfall_colormap_combo') else 'viridis'
+        # Get control values from persistent settings or controls
+        line_thickness = (self.line_thickness_spin.value() if hasattr(self, 'line_thickness_spin') 
+                         else self.persistent_plot_settings['waterfall_line_thickness'])
+        y_offset = (self.y_offset_spin.value() if hasattr(self, 'y_offset_spin') 
+                   else self.persistent_plot_settings['waterfall_y_offset'])
+        interval = (self.interval_spin.value() if hasattr(self, 'interval_spin') 
+                   else self.persistent_plot_settings['waterfall_interval'])
+        colormap_name = (self.waterfall_colormap_combo.currentText() if hasattr(self, 'waterfall_colormap_combo') 
+                        else self.persistent_plot_settings['waterfall_colormap'])
         
         # Select spectra based on interval
         selected_spectra = spectra_data[::interval]
-        
-        # Get colormap
-        colormap = plt.get_cmap(colormap_name)
         n_spectra = len(selected_spectra)
         
         for i, spectrum in enumerate(selected_spectra):
@@ -3451,12 +3805,12 @@ class SpectralDeconvolutionQt6(QDialog):
             # Apply offset
             offset_intensities = intensities + (i * y_offset)
             
-            # Get color from colormap
-            color = colormap(i / max(1, n_spectra - 1))
+            # Get color based on colormap selection
+            color = self._get_waterfall_color(colormap_name, i, n_spectra)
             
             # Plot spectrum
             self.waterfall_ax.plot(wavenumbers, offset_intensities, 
-                                  color=color, linewidth=1.5, alpha=0.8,
+                                  color=color, linewidth=line_thickness, alpha=0.8,
                                   label=f'{i}: {filename}')
         
         # Customize plot
@@ -3478,6 +3832,43 @@ class SpectralDeconvolutionQt6(QDialog):
         self.waterfall_figure.tight_layout()
         self.waterfall_canvas.draw()
 
+    def _get_waterfall_color(self, colormap_name, index, total_spectra):
+        """Get color for waterfall plot based on colormap and index."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        if colormap_name == "black":
+            # All lines in black
+            return 'black'
+        
+        elif colormap_name == "black_to_gray":
+            # Gradient from black to gray
+            if total_spectra <= 1:
+                return 'black'
+            # Map from 0 (black) to 0.7 (light gray)
+            gray_value = (index / (total_spectra - 1)) * 0.7
+            return (gray_value, gray_value, gray_value)
+        
+        elif colormap_name == "blue_to_red":
+            # Gradient from blue to red
+            if total_spectra <= 1:
+                return 'blue'
+            # Map from blue to red
+            red_component = index / (total_spectra - 1)
+            blue_component = 1 - red_component
+            return (red_component, 0, blue_component)
+        
+        else:
+            # Use matplotlib colormap
+            try:
+                colormap = plt.get_cmap(colormap_name)
+                if total_spectra <= 1:
+                    return colormap(0.5)
+                return colormap(index / (total_spectra - 1))
+            except ValueError:
+                # Fallback to black if colormap doesn't exist
+                return 'black'
+
     def update_heatmap_plot(self):
         """Update the heatmap plot with spectral data."""
         import numpy as np
@@ -3490,10 +3881,13 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.heatmap_ax.clear()
         
-        # Get control values
-        colormap_name = self.heatmap_colormap_combo.currentText() if hasattr(self, 'heatmap_colormap_combo') else 'viridis'
-        interpolation = self.interpolation_combo.currentText() if hasattr(self, 'interpolation_combo') else 'nearest'
-        aspect = self.aspect_combo.currentText() if hasattr(self, 'aspect_combo') else 'auto'
+        # Get control values from persistent settings or controls
+        colormap_name = (self.heatmap_colormap_combo.currentText() if hasattr(self, 'heatmap_colormap_combo') 
+                        else self.persistent_plot_settings['heatmap_colormap'])
+        interpolation = (self.interpolation_combo.currentText() if hasattr(self, 'interpolation_combo') 
+                        else self.persistent_plot_settings['heatmap_interpolation'])
+        aspect = (self.aspect_combo.currentText() if hasattr(self, 'aspect_combo') 
+                 else self.persistent_plot_settings['heatmap_aspect'])
         
         # Prepare data for heatmap
         # Find common wavenumber range
@@ -3572,7 +3966,11 @@ class SpectralDeconvolutionQt6(QDialog):
         # File list
         self.batch_file_list = QListWidget()
         self.batch_file_list.setMaximumHeight(150)
-        file_layout.addWidget(QLabel("Selected Files:"))
+        self.batch_file_list.itemDoubleClicked.connect(self.on_batch_file_double_click)
+        self.batch_file_list.setToolTip("Double-click a file to display it in the main plot window.\n"
+                                       "If batch processing has been completed, fitted results will be shown.\n"
+                                       "Otherwise, the raw spectrum will be displayed.")
+        file_layout.addWidget(QLabel("Selected Files (double-click to view):"))
         file_layout.addWidget(self.batch_file_list)
         
         # File management buttons
@@ -7217,6 +7615,197 @@ class SpectralDeconvolutionQt6(QDialog):
         """Clear the batch file list."""
         self.batch_file_list.clear()
     
+    def on_batch_file_double_click(self, item):
+        """Handle double-click on a batch file to show it in the main plot."""
+        try:
+            # Get the file path from the item
+            file_path = item.data(Qt.UserRole)
+            if not file_path:
+                return
+            
+            # Check if we have batch results for this file
+            batch_result = self._find_batch_result_for_file(file_path)
+            
+            if batch_result:
+                # Display the fitted spectrum with peaks and background
+                self._display_batch_result(batch_result, file_path)
+            else:
+                # Load and display the raw spectrum
+                self._load_and_display_raw_spectrum(file_path)
+            
+            # Switch to the Current Spectrum tab to show the plot
+            self.visualization_tabs.setCurrentIndex(0)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Display Error", 
+                              f"Error displaying spectrum:\n{str(e)}")
+    
+    def _find_batch_result_for_file(self, file_path):
+        """Find the batch result for a given file path."""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return None
+        
+        filename = Path(file_path).name
+        
+        # Handle both old and new batch result formats
+        if isinstance(self.batch_results, dict) and 'spectra_dict' in self.batch_results:
+            # New pandas format - look in spectra_dict
+            spectra_dict = self.batch_results['spectra_dict']
+            
+            # Try exact filename match first
+            if filename in spectra_dict:
+                return spectra_dict[filename]
+            
+            # Try matching by stored filename field
+            for spectrum_key, spectrum_data in spectra_dict.items():
+                if isinstance(spectrum_data, dict):
+                    stored_filename = spectrum_data.get('filename', '')
+                    if stored_filename == filename:
+                        return spectrum_data
+            
+            return None
+            
+        elif isinstance(self.batch_results, list):
+            # Old format - list of file results
+            for result in self.batch_results:
+                if result.get('filename') == filename or result.get('filepath') == file_path:
+                    return result
+            
+            return None
+        
+        return None
+    
+    def _display_batch_result(self, batch_result, file_path):
+        """Display a batch result with fitted peaks and background."""
+        try:
+            # Handle both old and new batch result formats
+            if isinstance(batch_result, dict) and 'regions' in batch_result:
+                # Old format with regions
+                if not batch_result.get('regions'):
+                    # Fallback to raw spectrum if no regions
+                    self._load_and_display_raw_spectrum(file_path)
+                    return
+                
+                first_region = batch_result['regions'][0]
+                
+                # Update spectrum data
+                self.wavenumbers = first_region.get('wavenumbers', np.array([]))
+                self.original_intensities = first_region.get('original_intensities', np.array([]))
+                self.processed_intensities = first_region.get('corrected_intensities', self.original_intensities)
+                self.background = first_region.get('background', None)
+                self.peaks = first_region.get('peaks', np.array([]))
+                self.current_file = file_path
+                
+                # Set fitted peaks and results
+                self.fit_params = first_region.get('fit_params', [])
+                self.residuals = first_region.get('residuals', None)
+                
+                # Show status message
+                region_text = f"{first_region.get('region_start', 0):.0f}-{first_region.get('region_end', 0):.0f} cm⁻¹"
+                peaks_count = len(self.peaks) if self.peaks is not None else 0
+                status_msg = f"Displaying batch result: {Path(file_path).name} (Region: {region_text}, {peaks_count} peaks fitted)"
+                
+                # Get R² value for display
+                r_squared = first_region.get('total_r2', 0.0)
+                fitted_peaks = first_region.get('fitted_peaks', None)
+                
+            elif isinstance(batch_result, dict) and 'wavenumbers' in batch_result:
+                # New pandas format - direct spectrum data
+                self.wavenumbers = batch_result.get('wavenumbers', np.array([]))
+                self.original_intensities = batch_result.get('original_intensities', np.array([]))
+                self.processed_intensities = batch_result.get('intensities', self.original_intensities)
+                self.background = batch_result.get('background', None)
+                self.current_file = file_path
+                
+                # For peaks, we'll need to extract from the fitted_peaks data if available
+                self.fit_params = []  # Will be populated if we can extract from fitted peaks
+                self.residuals = batch_result.get('residuals', None)
+                
+                # Try to extract peak positions from fitted_peaks if available
+                fitted_peaks_data = batch_result.get('fitted_peaks', None)
+                if fitted_peaks_data is not None and len(fitted_peaks_data) > 0:
+                    # The fitted peaks contain the full curve - we need to find the actual peak positions
+                    # For now, we'll use a simplified approach
+                    self.peaks = np.array([])  # Set empty for now
+                else:
+                    self.peaks = np.array([])
+                
+                # Show status message
+                region_text = f"{batch_result.get('region_start', 0):.0f}-{batch_result.get('region_end', 0):.0f} cm⁻¹"
+                status_msg = f"Displaying batch result: {Path(file_path).name} (Region: {region_text}, fitted data)"
+                
+                # Get R² value for display - not directly available in new format
+                r_squared = 0.0  # Will be calculated if needed
+                fitted_peaks = fitted_peaks_data
+                
+            else:
+                # Unknown format - fallback to raw spectrum
+                self._load_and_display_raw_spectrum(file_path)
+                return
+            
+            # Update UI elements
+            self.update_window_title()
+            self.update_status_bar()
+            
+            # Update the plot
+            self.update_plot()
+            
+            # Show fit results if available
+            if self.fit_params or fitted_peaks is not None:
+                self.display_fit_results(r_squared, fitted_peaks)
+            
+            # Update peak list
+            self.update_peak_list()
+            
+            # Show status message
+            self.status_bar.showMessage(status_msg)
+            
+        except Exception as e:
+            # If anything fails, fall back to raw spectrum
+            print(f"Warning: Error displaying batch result, falling back to raw spectrum: {e}")
+            self._load_and_display_raw_spectrum(file_path)
+    
+    def _load_and_display_raw_spectrum(self, file_path):
+        """Load and display a raw spectrum file."""
+        try:
+            # Try to load using the existing load method
+            if hasattr(self, 'spectrum_loader') and self.spectrum_loader:
+                wavenumbers, intensities, metadata = self.spectrum_loader.load_spectrum(file_path)
+                
+                if wavenumbers is None or intensities is None:
+                    error_msg = metadata.get("error", "Unknown error occurred")
+                    raise Exception(f"Failed to load spectrum: {error_msg}")
+            else:
+                # Fallback loading
+                data = np.loadtxt(file_path)
+                if data.ndim == 1:
+                    raise Exception("File must contain at least 2 columns")
+                elif data.shape[1] < 2:
+                    raise Exception("File must contain at least 2 columns")
+                wavenumbers = data[:, 0]
+                intensities = data[:, 1]
+            
+            # Update spectrum data
+            self.wavenumbers = wavenumbers
+            self.original_intensities = intensities
+            self.processed_intensities = self.original_intensities.copy()
+            self.current_file = file_path
+            
+            # Reset analysis state
+            self.reset_analysis_state()
+            
+            # Update UI
+            self.update_window_title()
+            self.update_status_bar()
+            self.update_plot()
+            
+            # Show status message
+            self.status_bar.showMessage(f"Loaded raw spectrum: {Path(file_path).name} "
+                                       f"({len(wavenumbers)} points)")
+            
+        except Exception as e:
+            raise Exception(f"Error loading spectrum file: {str(e)}")
+    
     def add_batch_region(self):
         """Add a region to the batch processing list."""
         start = self.region_start_spin.value()
@@ -8242,10 +8831,37 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.data_file_label.setText(Path(file_path).name)
                 self.selected_data_file = file_path
                 
-                # Update preview
-                preview_text = f"Loaded: {Path(file_path).name}\n"
-                preview_text += f"Files: {len(data)}\n"
-                preview_text += f"Total regions: {sum(len(r['regions']) for r in data)}\n"
+                # Update preview - handle both old and new format
+                try:
+                    if isinstance(data, dict) and 'metadata' in data:
+                        # New pandas format
+                        n_files = data['metadata'].get('total_files', 0)
+                        n_regions = data['metadata'].get('total_regions', 0)
+                        
+                        preview_text = f"Loaded: {Path(file_path).name}\n"
+                        preview_text += f"Files: {n_files}\n"
+                        preview_text += f"Total regions: {n_regions}\n"
+                        preview_text += f"Format: Pandas/Advanced\n"
+                        
+                    elif isinstance(data, list):
+                        # Old format (list of file results)
+                        n_files = len(data)
+                        n_regions = sum(len(r.get('regions', [])) for r in data)
+                        
+                        preview_text = f"Loaded: {Path(file_path).name}\n"
+                        preview_text += f"Files: {n_files}\n"
+                        preview_text += f"Total regions: {n_regions}\n"
+                        preview_text += f"Format: Legacy\n"
+                        
+                    else:
+                        # Unknown format
+                        preview_text = f"Loaded: {Path(file_path).name}\n"
+                        preview_text += f"Format: Unknown\n"
+                        preview_text += f"Data type: {type(data).__name__}\n"
+                        
+                except Exception as preview_e:
+                    preview_text = f"Loaded: {Path(file_path).name}\n"
+                    preview_text += f"Preview error: {str(preview_e)}\n"
                 
                 self.data_preview_text.setPlainText(preview_text)
                 

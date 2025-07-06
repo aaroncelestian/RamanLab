@@ -70,6 +70,19 @@ umap-learn>=0.5.0           # UMAP dimensionality reduction for cluster analysis
                             # Used in advanced cluster visualization features
 
 # ============================================================================
+# JUPYTER CONSOLE INTEGRATION (OPTIONAL - Enhanced features, basic functionality works without)
+# ============================================================================
+qtconsole>=5.4.0            # Qt-based Jupyter console widget for interactive analysis
+                            # OPTIONAL: Skip if installation fails - advanced console features unavailable
+                            # Enables interactive Python console within RamanLab
+jupyter-client>=7.0.0       # Jupyter client for kernel management and communication
+                            # OPTIONAL: Skip if installation fails - interactive console unavailable
+                            # Required for Jupyter console functionality
+ipykernel>=6.0.0            # IPython kernel for Jupyter console integration
+                            # OPTIONAL: Skip if installation fails - interactive console unavailable
+                            # Provides enhanced interactive Python environment
+
+# ============================================================================
 # ADVANCED CRYSTALLOGRAPHY (OPTIONAL - Enhanced features, basic functionality works without)
 # ============================================================================
 pymatgen>=2022.0.0          # Materials analysis and crystal structure processing
@@ -118,7 +131,7 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet
 #
 # FULL INSTALL (All Required + Recommended Optional):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet umap-learn pymatgen reportlab pyinstaller
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet umap-learn pymatgen reportlab pyinstaller qtconsole jupyter-client ipykernel
 #
 # MINIMAL INSTALL (If some packages fail):
 # 1. First try: pip install PySide6 numpy scipy matplotlib pandas scikit-learn joblib chardet
@@ -129,6 +142,9 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # pip install -r requirements_qt6.txt
 # pip install tensorflow keras umap-learn emcee  # Optional advanced features
 #
+# JUPYTER CONSOLE FEATURES (New!):
+# pip install qtconsole jupyter-client ipykernel  # Interactive console integration
+#
 # VIRTUAL ENVIRONMENT SETUP (Recommended):
 # python -m venv ramanlab_env
 # source ramanlab_env/bin/activate  # Windows: ramanlab_env\Scripts\activate
@@ -136,6 +152,12 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 #
 # DEPENDENCY VERIFICATION:
 # python check_dependencies.py
+#
+# AUTOMATED UPDATES:
+# python update_dependencies.py           # Interactive update mode
+# python update_dependencies.py --all     # Update all packages
+# python update_dependencies.py --jupyter # Update only Jupyter packages  
+# python update_dependencies.py --core    # Update only core packages
 #
 # TROUBLESHOOTING:
 # - If installation fails, try upgrading pip: pip install --upgrade pip

@@ -17,6 +17,7 @@ from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
 import threading
 import weakref
+from PySide6.QtWidgets import QSplitter
 
 # Version for backward compatibility
 STATE_MANAGER_VERSION = "1.0.0"
@@ -664,28 +665,598 @@ class MapAnalysisSerializer(StateSerializerInterface):
                 'version' in state_data)
 
 
+class RamanAnalysisAppSerializer(StateSerializerInterface):
+    """Serializer for the main RamanLab analysis application"""
+    
+    def serialize_state(self, module_instance) -> Dict[str, Any]:
+        """Extract all relevant state from RamanAnalysisAppQt6 instance"""
+        try:
+            state = {
+                'module_type': 'raman_analysis_app',
+                'version': '1.0.0',
+                
+                # Current spectrum data
+                'current_spectrum': {
+                    'wavenumbers': self._array_to_list(getattr(module_instance, 'current_wavenumbers', [])),
+                    'intensities': self._array_to_list(getattr(module_instance, 'current_intensities', [])),
+                    'processed_intensities': self._array_to_list(getattr(module_instance, 'processed_intensities', [])),
+                    'original_wavenumbers': self._array_to_list(getattr(module_instance, 'original_wavenumbers', [])),
+                    'original_intensities': self._array_to_list(getattr(module_instance, 'original_intensities', [])),
+                    'file_path': getattr(module_instance, 'spectrum_file_path', None),
+                    'metadata': getattr(module_instance, 'metadata', {})
+                },
+                
+                # Processing state
+                'processing_state': {
+                    'detected_peaks': self._array_to_list(getattr(module_instance, 'detected_peaks', [])),
+                    'manual_peaks': getattr(module_instance, 'manual_peaks', []),
+                    'peak_selection_mode': getattr(module_instance, 'peak_selection_mode', False),
+                    'peak_selection_tolerance': getattr(module_instance, 'peak_selection_tolerance', 20),
+                    'background_preview': self._array_to_list(getattr(module_instance, 'background_preview', [])),
+                    'smoothing_preview': self._array_to_list(getattr(module_instance, 'smoothing_preview', [])),
+                    'background_preview_active': getattr(module_instance, 'background_preview_active', False),
+                    'smoothing_preview_active': getattr(module_instance, 'smoothing_preview_active', False),
+                    'preview_background': self._array_to_list(getattr(module_instance, 'preview_background', [])),
+                    'preview_corrected': self._array_to_list(getattr(module_instance, 'preview_corrected', [])),
+                    'preview_smoothed': self._array_to_list(getattr(module_instance, 'preview_smoothed', []))
+                },
+                
+                # UI state
+                'ui_state': {
+                    'window_geometry': self._get_window_geometry(module_instance),
+                    'current_tab': getattr(module_instance.tab_widget, 'currentIndex', lambda: 0)() if hasattr(module_instance, 'tab_widget') else 0,
+                    'splitter_sizes': self._get_splitter_sizes(module_instance)
+                },
+                
+                # Search state (if any recent searches)
+                'search_state': {
+                    'last_search_results': self._serialize_search_results(module_instance),
+                    'search_parameters': self._serialize_search_parameters(module_instance)
+                },
+                
+                # Database state
+                'database_state': {
+                    'database_loaded': hasattr(module_instance, 'raman_db') and module_instance.raman_db is not None,
+                    'database_size': len(getattr(module_instance, 'database', {}))
+                },
+                
+                # Analysis metadata
+                'analysis_metadata': {
+                    'session_created': datetime.now(timezone.utc).isoformat(),
+                    'has_spectrum': module_instance.current_wavenumbers is not None,
+                    'spectrum_points': len(module_instance.current_wavenumbers) if module_instance.current_wavenumbers is not None else 0,
+                    'has_peaks': module_instance.detected_peaks is not None or len(getattr(module_instance, 'manual_peaks', [])) > 0,
+                    'processing_applied': module_instance.processed_intensities is not None and not np.array_equal(
+                        module_instance.processed_intensities, 
+                        module_instance.current_intensities
+                    ) if module_instance.processed_intensities is not None and module_instance.current_intensities is not None else False
+                }
+            }
+            
+            return state
+            
+        except Exception as e:
+            print(f"Error serializing main app state: {e}")
+            return {}
+    
+    def deserialize_state(self, state_data: Dict[str, Any], module_instance) -> bool:
+        """Restore RamanAnalysisAppQt6 state"""
+        try:
+            # Restore current spectrum data
+            spectrum_data = state_data.get('current_spectrum', {})
+            if spectrum_data.get('wavenumbers') and spectrum_data.get('intensities'):
+                module_instance.current_wavenumbers = np.array(spectrum_data['wavenumbers'])
+                module_instance.current_intensities = np.array(spectrum_data['intensities'])
+                module_instance.processed_intensities = np.array(spectrum_data.get('processed_intensities', spectrum_data['intensities']))
+                module_instance.original_wavenumbers = np.array(spectrum_data.get('original_wavenumbers', spectrum_data['wavenumbers']))
+                module_instance.original_intensities = np.array(spectrum_data.get('original_intensities', spectrum_data['intensities']))
+                module_instance.spectrum_file_path = spectrum_data.get('file_path')
+                module_instance.metadata = spectrum_data.get('metadata', {})
+            
+            # Restore processing state
+            processing_state = state_data.get('processing_state', {})
+            if processing_state.get('detected_peaks'):
+                module_instance.detected_peaks = np.array(processing_state['detected_peaks'])
+            module_instance.manual_peaks = processing_state.get('manual_peaks', [])
+            module_instance.peak_selection_mode = processing_state.get('peak_selection_mode', False)
+            module_instance.peak_selection_tolerance = processing_state.get('peak_selection_tolerance', 20)
+            module_instance.background_preview_active = processing_state.get('background_preview_active', False)
+            module_instance.smoothing_preview_active = processing_state.get('smoothing_preview_active', False)
+            
+            # Restore preview data if available
+            if processing_state.get('background_preview'):
+                module_instance.background_preview = np.array(processing_state['background_preview'])
+            if processing_state.get('smoothing_preview'):
+                module_instance.smoothing_preview = np.array(processing_state['smoothing_preview'])
+            if processing_state.get('preview_background'):
+                module_instance.preview_background = np.array(processing_state['preview_background'])
+            if processing_state.get('preview_corrected'):
+                module_instance.preview_corrected = np.array(processing_state['preview_corrected'])
+            if processing_state.get('preview_smoothed'):
+                module_instance.preview_smoothed = np.array(processing_state['preview_smoothed'])
+            
+            # Restore UI state
+            ui_state = state_data.get('ui_state', {})
+            if ui_state.get('window_geometry'):
+                self._restore_window_geometry(module_instance, ui_state['window_geometry'])
+            if hasattr(module_instance, 'tab_widget') and 'current_tab' in ui_state:
+                module_instance.tab_widget.setCurrentIndex(ui_state['current_tab'])
+            if ui_state.get('splitter_sizes'):
+                self._restore_splitter_sizes(module_instance, ui_state['splitter_sizes'])
+            
+            # Update UI to reflect restored state
+            if hasattr(module_instance, 'update_plot'):
+                module_instance.update_plot()
+            if hasattr(module_instance, 'update_info_display') and module_instance.spectrum_file_path:
+                module_instance.update_info_display(module_instance.spectrum_file_path)
+            if hasattr(module_instance, 'update_peak_count_display'):
+                module_instance.update_peak_count_display()
+            if hasattr(module_instance, 'update_window_title'):
+                filename = Path(module_instance.spectrum_file_path).name if module_instance.spectrum_file_path else None
+                module_instance.update_window_title(filename)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error deserializing main app state: {e}")
+            return False
+    
+    def get_state_summary(self, state_data: Dict[str, Any]) -> str:
+        """Generate summary of main app state"""
+        metadata = state_data.get('analysis_metadata', {})
+        spectrum_data = state_data.get('current_spectrum', {})
+        
+        summary = f"RamanLab Main Application Session\n"
+        summary += f"├─ Has Spectrum: {'Yes' if metadata.get('has_spectrum', False) else 'No'}\n"
+        if metadata.get('has_spectrum', False):
+            summary += f"├─ Spectrum Points: {metadata.get('spectrum_points', 0)}\n"
+            summary += f"├─ Source File: {Path(spectrum_data.get('file_path', 'Unknown')).name if spectrum_data.get('file_path') else 'Unknown'}\n"
+        summary += f"├─ Has Peaks: {'Yes' if metadata.get('has_peaks', False) else 'No'}\n"
+        summary += f"├─ Processing Applied: {'Yes' if metadata.get('processing_applied', False) else 'No'}\n"
+        summary += f"├─ Database Loaded: {'Yes' if state_data.get('database_state', {}).get('database_loaded', False) else 'No'}\n"
+        summary += f"└─ Session Created: {metadata.get('session_created', 'Unknown')}"
+        
+        return summary
+    
+    def validate_state(self, state_data: Dict[str, Any]) -> bool:
+        """Validate main app state data"""
+        required_keys = ['module_type', 'version', 'current_spectrum', 'processing_state']
+        
+        for key in required_keys:
+            if key not in state_data:
+                return False
+        
+        # Validate module type
+        if state_data['module_type'] != 'raman_analysis_app':
+            return False
+        
+        # Validate spectrum data structure
+        spectrum_data = state_data['current_spectrum']
+        if not isinstance(spectrum_data, dict):
+            return False
+        
+        return True
+    
+    def _array_to_list(self, arr):
+        """Convert numpy array to list for JSON serialization"""
+        if arr is None:
+            return []
+        if isinstance(arr, np.ndarray):
+            return arr.tolist()
+        elif isinstance(arr, list):
+            return arr
+        else:
+            return []
+    
+    def _get_window_geometry(self, module_instance):
+        """Get window geometry for saving"""
+        try:
+            if hasattr(module_instance, 'geometry'):
+                geom = module_instance.geometry()
+                return {
+                    'x': geom.x(),
+                    'y': geom.y(),
+                    'width': geom.width(),
+                    'height': geom.height()
+                }
+        except:
+            pass
+        return {}
+    
+    def _restore_window_geometry(self, module_instance, geometry_data):
+        """Restore window geometry"""
+        try:
+            if geometry_data and hasattr(module_instance, 'setGeometry'):
+                module_instance.setGeometry(
+                    geometry_data.get('x', 100),
+                    geometry_data.get('y', 100),
+                    geometry_data.get('width', 1600),
+                    geometry_data.get('height', 1000)
+                )
+        except Exception as e:
+            print(f"Could not restore window geometry: {e}")
+    
+    def _get_splitter_sizes(self, module_instance):
+        """Get splitter sizes for saving"""
+        try:
+            # Look for the main splitter in the central widget
+            central_widget = module_instance.centralWidget()
+            if central_widget:
+                for child in central_widget.findChildren(QSplitter):
+                    return child.sizes()
+        except:
+            pass
+        return []
+    
+    def _restore_splitter_sizes(self, module_instance, sizes):
+        """Restore splitter sizes"""
+        try:
+            if sizes:
+                central_widget = module_instance.centralWidget()
+                if central_widget:
+                    for child in central_widget.findChildren(QSplitter):
+                        child.setSizes(sizes)
+                        break
+        except Exception as e:
+            print(f"Could not restore splitter sizes: {e}")
+    
+    def _serialize_search_results(self, module_instance):
+        """Serialize recent search results if available"""
+        try:
+            if hasattr(module_instance, 'search_results_text'):
+                return module_instance.search_results_text.toPlainText()
+        except:
+            pass
+        return ""
+    
+    def _serialize_search_parameters(self, module_instance):
+        """Serialize current search parameters"""
+        # This could be expanded to save search algorithm, thresholds, etc.
+        return {}
+
+class MultiSpectrumManagerSerializer(StateSerializerInterface):
+    """Serializer for Multi-Spectrum Manager module"""
+    
+    def serialize_state(self, module_instance) -> Dict[str, Any]:
+        """Extract all relevant state from MultiSpectrumManagerQt6 instance"""
+        try:
+            state = {
+                'module_type': 'multi_spectrum_manager',
+                'version': '1.0.0',
+                
+                # Core spectrum data
+                'loaded_spectra': self._serialize_loaded_spectra(getattr(module_instance, 'loaded_spectra', {})),
+                'spectrum_settings': getattr(module_instance, 'spectrum_settings', {}),
+                'global_settings': getattr(module_instance, 'global_settings', {}),
+                
+                # UI state
+                'ui_settings': self._serialize_ui_settings(module_instance),
+                'window_geometry': self._get_window_geometry(module_instance),
+                'splitter_sizes': self._get_splitter_sizes(module_instance),
+                
+                # Current selection
+                'current_spectrum_selection': self._get_current_selection(module_instance),
+                
+                # Database search state
+                'database_search_state': self._serialize_database_search_state(module_instance),
+                
+                # Analysis metadata
+                'analysis_metadata': {
+                    'total_spectra': len(getattr(module_instance, 'loaded_spectra', {})),
+                    'last_modified': datetime.now(timezone.utc).isoformat(),
+                    'session_duration': getattr(module_instance, '_session_start_time', None)
+                }
+            }
+            
+            return state
+            
+        except Exception as e:
+            print(f"Error serializing multi-spectrum manager state: {e}")
+            return {}
+    
+    def deserialize_state(self, state_data: Dict[str, Any], module_instance) -> bool:
+        """Restore MultiSpectrumManagerQt6 state"""
+        try:
+            # Restore core spectrum data
+            loaded_spectra = self._deserialize_loaded_spectra(state_data.get('loaded_spectra', {}))
+            module_instance.loaded_spectra = loaded_spectra
+            module_instance.spectrum_settings = state_data.get('spectrum_settings', {})
+            module_instance.global_settings = state_data.get('global_settings', {})
+            
+            # Restore UI settings
+            ui_settings = state_data.get('ui_settings', {})
+            self._deserialize_ui_settings(ui_settings, module_instance)
+            
+            # Restore window geometry
+            geometry_data = state_data.get('window_geometry', {})
+            self._restore_window_geometry(module_instance, geometry_data)
+            
+            # Restore splitter sizes
+            splitter_sizes = state_data.get('splitter_sizes', [])
+            self._restore_splitter_sizes(module_instance, splitter_sizes)
+            
+            # Restore current selection
+            current_selection = state_data.get('current_spectrum_selection', {})
+            self._restore_current_selection(module_instance, current_selection)
+            
+            # Restore database search state
+            db_search_state = state_data.get('database_search_state', {})
+            self._restore_database_search_state(module_instance, db_search_state)
+            
+            # Update UI to reflect restored state
+            self._update_ui_after_restore(module_instance)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error deserializing multi-spectrum manager state: {e}")
+            return False
+    
+    def get_state_summary(self, state_data: Dict[str, Any]) -> str:
+        """Generate summary of multi-spectrum manager state"""
+        metadata = state_data.get('analysis_metadata', {})
+        global_settings = state_data.get('global_settings', {})
+        
+        summary = f"Multi-Spectrum Manager Session\n"
+        summary += f"├─ Total Spectra: {metadata.get('total_spectra', 0)}\n"
+        summary += f"├─ Normalize: {global_settings.get('normalize', 'Unknown')}\n"
+        summary += f"├─ Waterfall Mode: {global_settings.get('waterfall_mode', 'Unknown')}\n"
+        summary += f"├─ Show Legend: {global_settings.get('show_legend', 'Unknown')}\n"
+        summary += f"├─ Colormap: {global_settings.get('colormap', 'Unknown')}\n"
+        summary += f"└─ Last Modified: {metadata.get('last_modified', 'Unknown')[:19]}"
+        
+        return summary
+    
+    def validate_state(self, state_data: Dict[str, Any]) -> bool:
+        """Validate multi-spectrum manager state data"""
+        required_keys = ['module_type', 'version', 'loaded_spectra', 'global_settings']
+        
+        for key in required_keys:
+            if key not in state_data:
+                return False
+        
+        # Validate module type
+        if state_data['module_type'] != 'multi_spectrum_manager':
+            return False
+        
+        # Validate loaded spectra structure
+        loaded_spectra = state_data['loaded_spectra']
+        if not isinstance(loaded_spectra, dict):
+            return False
+        
+        # Validate global settings
+        global_settings = state_data['global_settings']
+        if not isinstance(global_settings, dict):
+            return False
+        
+        return True
+    
+    def _serialize_loaded_spectra(self, loaded_spectra):
+        """Serialize loaded spectra with numpy arrays converted to lists"""
+        if not loaded_spectra:
+            return {}
+        
+        safe_spectra = {}
+        for name, spectrum_data in loaded_spectra.items():
+            if isinstance(spectrum_data, dict):
+                safe_data = {}
+                for key, value in spectrum_data.items():
+                    if isinstance(value, np.ndarray):
+                        safe_data[key] = self._array_to_list(value)
+                    else:
+                        safe_data[key] = value
+                safe_spectra[name] = safe_data
+            else:
+                safe_spectra[name] = spectrum_data
+        
+        return safe_spectra
+    
+    def _deserialize_loaded_spectra(self, loaded_spectra_data):
+        """Deserialize loaded spectra with lists converted back to numpy arrays"""
+        if not loaded_spectra_data:
+            return {}
+        
+        spectra = {}
+        for name, spectrum_data in loaded_spectra_data.items():
+            if isinstance(spectrum_data, dict):
+                restored_data = {}
+                for key, value in spectrum_data.items():
+                    if isinstance(value, list) and key in ['wavenumbers', 'intensities']:
+                        restored_data[key] = np.array(value)
+                    else:
+                        restored_data[key] = value
+                spectra[name] = restored_data
+            else:
+                spectra[name] = spectrum_data
+        
+        return spectra
+    
+    def _serialize_ui_settings(self, module_instance):
+        """Serialize UI control settings"""
+        settings = {}
+        
+        # Control tab state
+        if hasattr(module_instance, 'control_tabs'):
+            settings['control_tabs_current'] = module_instance.control_tabs.currentIndex()
+        
+        # Global control values
+        for attr_name in ['normalize_check', 'legend_check', 'grid_check', 'waterfall_check']:
+            if hasattr(module_instance, attr_name):
+                widget = getattr(module_instance, attr_name)
+                if hasattr(widget, 'isChecked'):
+                    settings[attr_name] = widget.isChecked()
+        
+        # Slider values
+        for attr_name in ['line_width_slider', 'waterfall_spacing_slider']:
+            if hasattr(module_instance, attr_name):
+                widget = getattr(module_instance, attr_name)
+                if hasattr(widget, 'value'):
+                    settings[attr_name] = widget.value()
+        
+        # Combo box values
+        for attr_name in ['colormap_combo']:
+            if hasattr(module_instance, attr_name):
+                widget = getattr(module_instance, attr_name)
+                if hasattr(widget, 'currentText'):
+                    settings[attr_name] = widget.currentText()
+        
+        return settings
+    
+    def _deserialize_ui_settings(self, settings, module_instance):
+        """Restore UI control settings"""
+        # Control tab state
+        if 'control_tabs_current' in settings and hasattr(module_instance, 'control_tabs'):
+            module_instance.control_tabs.setCurrentIndex(settings['control_tabs_current'])
+        
+        # Global control values
+        for attr_name in ['normalize_check', 'legend_check', 'grid_check', 'waterfall_check']:
+            if attr_name in settings and hasattr(module_instance, attr_name):
+                widget = getattr(module_instance, attr_name)
+                if hasattr(widget, 'setChecked'):
+                    widget.setChecked(settings[attr_name])
+        
+        # Slider values
+        for attr_name in ['line_width_slider', 'waterfall_spacing_slider']:
+            if attr_name in settings and hasattr(module_instance, attr_name):
+                widget = getattr(module_instance, attr_name)
+                if hasattr(widget, 'setValue'):
+                    widget.setValue(settings[attr_name])
+        
+        # Combo box values
+        for attr_name in ['colormap_combo']:
+            if attr_name in settings and hasattr(module_instance, attr_name):
+                widget = getattr(module_instance, attr_name)
+                if hasattr(widget, 'setCurrentText'):
+                    widget.setCurrentText(settings[attr_name])
+    
+    def _get_window_geometry(self, module_instance):
+        """Get window geometry data"""
+        geometry = {}
+        if hasattr(module_instance, 'geometry'):
+            rect = module_instance.geometry()
+            geometry = {
+                'x': rect.x(),
+                'y': rect.y(),
+                'width': rect.width(),
+                'height': rect.height()
+            }
+        return geometry
+    
+    def _restore_window_geometry(self, module_instance, geometry_data):
+        """Restore window geometry"""
+        if geometry_data and hasattr(module_instance, 'setGeometry'):
+            module_instance.setGeometry(
+                geometry_data.get('x', 100),
+                geometry_data.get('y', 100),
+                geometry_data.get('width', 1600),
+                geometry_data.get('height', 1000)
+            )
+    
+    def _get_splitter_sizes(self, module_instance):
+        """Get splitter sizes from the main splitter"""
+        sizes = []
+        if hasattr(module_instance, 'centralWidget'):
+            central_widget = module_instance.centralWidget()
+            if central_widget:
+                for child in central_widget.findChildren(QSplitter):
+                    sizes.append(child.sizes())
+                    break  # Just get the first splitter
+        return sizes
+    
+    def _restore_splitter_sizes(self, module_instance, sizes):
+        """Restore splitter sizes"""
+        if sizes and hasattr(module_instance, 'centralWidget'):
+            central_widget = module_instance.centralWidget()
+            if central_widget:
+                for child in central_widget.findChildren(QSplitter):
+                    if sizes:
+                        child.setSizes(sizes[0])
+                    break  # Just set the first splitter
+    
+    def _get_current_selection(self, module_instance):
+        """Get current spectrum selection"""
+        selection = {}
+        if hasattr(module_instance, 'multi_spectrum_list'):
+            current_item = module_instance.multi_spectrum_list.currentItem()
+            if current_item:
+                selection['current_spectrum'] = current_item.text()
+        return selection
+    
+    def _restore_current_selection(self, module_instance, selection):
+        """Restore current spectrum selection"""
+        if selection.get('current_spectrum') and hasattr(module_instance, 'multi_spectrum_list'):
+            list_widget = module_instance.multi_spectrum_list
+            for i in range(list_widget.count()):
+                if list_widget.item(i).text() == selection['current_spectrum']:
+                    list_widget.setCurrentRow(i)
+                    break
+    
+    def _serialize_database_search_state(self, module_instance):
+        """Serialize database search state"""
+        state = {}
+        if hasattr(module_instance, 'db_search_field'):
+            state['search_text'] = module_instance.db_search_field.text()
+        return state
+    
+    def _restore_database_search_state(self, module_instance, state):
+        """Restore database search state"""
+        if state.get('search_text') and hasattr(module_instance, 'db_search_field'):
+            module_instance.db_search_field.setText(state['search_text'])
+            # Trigger the search to populate results
+            if hasattr(module_instance, 'filter_database_results'):
+                module_instance.filter_database_results()
+    
+    def _update_ui_after_restore(self, module_instance):
+        """Update UI elements after restoring state"""
+        # Update the spectrum list
+        if hasattr(module_instance, 'multi_spectrum_list'):
+            list_widget = module_instance.multi_spectrum_list
+            list_widget.clear()
+            for spectrum_name in module_instance.loaded_spectra.keys():
+                list_widget.addItem(spectrum_name)
+        
+        # Update the plot
+        if hasattr(module_instance, 'update_multi_plot'):
+            module_instance.update_multi_plot()
+        
+        # Update individual controls if there's a current selection
+        if hasattr(module_instance, 'update_individual_controls'):
+            current_item = getattr(module_instance, 'multi_spectrum_list', None)
+            if current_item and current_item.currentItem():
+                spectrum_name = current_item.currentItem().text()
+                module_instance.update_individual_controls(spectrum_name)
+    
+    def _array_to_list(self, arr):
+        """Convert numpy array to list, handling None values"""
+        if arr is None:
+            return None
+        if isinstance(arr, np.ndarray):
+            return arr.tolist()
+        return arr
+
 class UniversalStateManager:
-    """Universal state manager for all RamanLab analysis modules"""
+    """
+    Universal state manager for RamanLab analysis modules.
+    
+    Provides a centralized system for saving and restoring analysis states
+    across different modules with automatic serialization and data management.
+    """
     
     def __init__(self, base_directory: str = None):
-        if base_directory:
-            self.base_directory = Path(base_directory)
-        else:
-            from .config_manager import get_config_manager
-            config = get_config_manager()
-            self.base_directory = config.get_projects_folder()
+        """Initialize the universal state manager"""
+        self.base_directory = Path(base_directory) if base_directory else Path.home() / "RamanLab_Projects"
         self.base_directory.mkdir(exist_ok=True)
         
-        # Registry of module serializers
-        self._serializers: Dict[str, StateSerializerInterface] = {
+        # Module registration
+        self._active_modules = {}
+        self._serializers = {
             'batch_peak_fitting': BatchPeakFittingSerializer(),
             'polarization_analyzer': PolarizationAnalyzerSerializer(),
             'cluster_analysis': ClusterAnalysisSerializer(),
             'map_analysis_2d': MapAnalysisSerializer(),
+            'raman_analysis_app': RamanAnalysisAppSerializer(),
+            'multi_spectrum_manager': MultiSpectrumManagerSerializer(),
         }
-        
-        # Active module instances (weak references to avoid circular dependencies)
-        self._active_modules: Dict[str, weakref.ref] = {}
         
         # Auto-save settings
         self._auto_save_enabled = True

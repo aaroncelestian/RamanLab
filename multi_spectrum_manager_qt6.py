@@ -27,6 +27,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QStandardPaths
 from PySide6.QtGui import QFont, QColor
 
+# Import state management
+try:
+    from core.universal_state_manager import register_module, save_module_state, load_module_state
+    STATE_MANAGEMENT_AVAILABLE = True
+except ImportError:
+    STATE_MANAGEMENT_AVAILABLE = False
+    print("Warning: State management not available - continuing without session saving")
+
 
 class MultiSpectrumManagerQt6(QMainWindow):
     """Qt6 Multi-Spectrum Manager Window for RamanLab."""
@@ -64,8 +72,15 @@ class MultiSpectrumManagerQt6(QMainWindow):
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
+        # Initialize session tracking
+        self._session_start_time = None
+        
         # Create the UI
         self.setup_ui()
+        
+        # Setup state management after UI is created
+        if STATE_MANAGEMENT_AVAILABLE:
+            self.setup_state_management()
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -88,6 +103,118 @@ class MultiSpectrumManagerQt6(QMainWindow):
         
         # Set splitter proportions
         splitter.setSizes([400, 1000])
+    
+    def setup_state_management(self):
+        """Enable persistent state management for the Multi-Spectrum Manager."""
+        try:
+            # Register with state manager
+            register_module('multi_spectrum_manager', self)
+            
+            # Add convenient save/load methods
+            self.save_session_state = lambda notes="": save_module_state('multi_spectrum_manager', notes)
+            self.load_session_state = lambda: load_module_state('multi_spectrum_manager')
+            
+            # Hook auto-save into critical methods
+            self._add_auto_save_hooks()
+            
+            # Track session start time
+            import time
+            self._session_start_time = time.time()
+            
+            print("✅ Multi-Spectrum Manager state management enabled!")
+            print("💾 Auto-saves: ~/RamanLab_Projects/auto_saves/")
+            
+        except Exception as e:
+            print(f"Warning: Could not enable state management: {e}")
+    
+    def _add_auto_save_hooks(self):
+        """Add auto-save functionality to critical methods."""
+        
+        # Auto-save after loading spectra
+        if hasattr(self, 'load_spectrum_file_for_multi'):
+            original_method = self.load_spectrum_file_for_multi
+            
+            def auto_save_wrapper(*args, **kwargs):
+                result = original_method(*args, **kwargs)
+                if result:  # Only save if loading was successful
+                    save_module_state('multi_spectrum_manager', "Auto-save: spectrum loaded")
+                return result
+            
+            self.load_spectrum_file_for_multi = auto_save_wrapper
+        
+        # Auto-save after adding from database
+        if hasattr(self, 'add_selected_from_database'):
+            original_method = self.add_selected_from_database
+            
+            def auto_save_wrapper(*args, **kwargs):
+                result = original_method(*args, **kwargs)
+                save_module_state('multi_spectrum_manager', "Auto-save: spectrum added from database")
+                return result
+            
+            self.add_selected_from_database = auto_save_wrapper
+        
+        # Auto-save after adding current spectrum
+        if hasattr(self, 'add_current_spectrum'):
+            original_method = self.add_current_spectrum
+            
+            def auto_save_wrapper(*args, **kwargs):
+                result = original_method(*args, **kwargs)
+                save_module_state('multi_spectrum_manager', "Auto-save: current spectrum added")
+                return result
+            
+            self.add_current_spectrum = auto_save_wrapper
+        
+        # Auto-save after removing spectra
+        if hasattr(self, 'remove_spectrum_by_name'):
+            original_method = self.remove_spectrum_by_name
+            
+            def auto_save_wrapper(*args, **kwargs):
+                result = original_method(*args, **kwargs)
+                save_module_state('multi_spectrum_manager', "Auto-save: spectrum removed")
+                return result
+            
+            self.remove_spectrum_by_name = auto_save_wrapper
+        
+        # Auto-save after clearing all spectra
+        if hasattr(self, 'clear_all_multi_spectra'):
+            original_method = self.clear_all_multi_spectra
+            
+            def auto_save_wrapper(*args, **kwargs):
+                result = original_method(*args, **kwargs)
+                save_module_state('multi_spectrum_manager', "Auto-save: all spectra cleared")
+                return result
+            
+            self.clear_all_multi_spectra = auto_save_wrapper
+        
+        # Auto-save after global settings changes
+        if hasattr(self, 'update_multi_plot'):
+            original_method = self.update_multi_plot
+            
+            def auto_save_wrapper(*args, **kwargs):
+                result = original_method(*args, **kwargs)
+                # Update global settings from UI
+                self._update_global_settings()
+                save_module_state('multi_spectrum_manager', "Auto-save: settings changed")
+                return result
+            
+            self.update_multi_plot = auto_save_wrapper
+    
+    def _update_global_settings(self):
+        """Update global settings from UI controls."""
+        if hasattr(self, 'normalize_check'):
+            self.global_settings['normalize'] = self.normalize_check.isChecked()
+        if hasattr(self, 'legend_check'):
+            self.global_settings['show_legend'] = self.legend_check.isChecked()
+        if hasattr(self, 'grid_check'):
+            self.global_settings['grid'] = self.grid_check.isChecked()
+        if hasattr(self, 'waterfall_check'):
+            self.global_settings['waterfall_mode'] = self.waterfall_check.isChecked()
+        if hasattr(self, 'waterfall_spacing_slider'):
+            self.global_settings['waterfall_spacing'] = self.waterfall_spacing_slider.value() / 10.0
+        if hasattr(self, 'line_width_slider'):
+            self.global_settings['line_width'] = self.line_width_slider.value() / 10.0
+        if hasattr(self, 'colormap_combo'):
+            self.global_settings['colormap'] = self.colormap_combo.currentText()
     
     def create_left_panel(self, parent):
         """Create the left control panel."""
@@ -118,14 +245,14 @@ class MultiSpectrumManagerQt6(QMainWindow):
         left_layout.addWidget(spectra_group)
         
         # Control tabs
-        control_tabs = QTabWidget()
-        left_layout.addWidget(control_tabs)
+        self.control_tabs = QTabWidget()
+        left_layout.addWidget(self.control_tabs)
         
         # File Operations Tab
-        self.create_file_operations_tab(control_tabs)
+        self.create_file_operations_tab(self.control_tabs)
         
         # Spectrum Controls Tab
-        self.create_spectrum_controls_tab(control_tabs)
+        self.create_spectrum_controls_tab(self.control_tabs)
         
         parent.addWidget(left_panel)
     
@@ -194,6 +321,30 @@ class MultiSpectrumManagerQt6(QMainWindow):
         export_layout.addLayout(export_buttons)
         file_layout.addWidget(export_group)
         
+        # Session Management
+        if STATE_MANAGEMENT_AVAILABLE:
+            session_group = QGroupBox("Session Management")
+            session_layout = QVBoxLayout(session_group)
+            
+            # Session save/load buttons
+            session_buttons = QHBoxLayout()
+            save_session_btn = QPushButton("Save Session")
+            save_session_btn.clicked.connect(self.save_session_dialog)
+            session_buttons.addWidget(save_session_btn)
+            
+            load_session_btn = QPushButton("Load Session")
+            load_session_btn.clicked.connect(self.load_session_dialog)
+            session_buttons.addWidget(load_session_btn)
+            
+            session_layout.addLayout(session_buttons)
+            
+            # Session info
+            session_info_btn = QPushButton("Session Info")
+            session_info_btn.clicked.connect(self.show_session_info)
+            session_layout.addWidget(session_info_btn)
+            
+            file_layout.addWidget(session_group)
+        
         # Initialize database search
         self.populate_database_list()
         
@@ -211,28 +362,28 @@ class MultiSpectrumManagerQt6(QMainWindow):
         
         # Basic display options
         display_row1 = QHBoxLayout()
-        self.normalize_checkbox = QCheckBox("Normalize Spectra")
-        self.normalize_checkbox.setChecked(self.global_settings['normalize'])
-        self.normalize_checkbox.toggled.connect(self.update_multi_plot)
-        display_row1.addWidget(self.normalize_checkbox)
+        self.normalize_check = QCheckBox("Normalize Spectra")
+        self.normalize_check.setChecked(self.global_settings['normalize'])
+        self.normalize_check.toggled.connect(self.update_multi_plot)
+        display_row1.addWidget(self.normalize_check)
         
-        self.legend_checkbox = QCheckBox("Show Legend")
-        self.legend_checkbox.setChecked(self.global_settings['show_legend'])
-        self.legend_checkbox.toggled.connect(self.update_multi_plot)
-        display_row1.addWidget(self.legend_checkbox)
+        self.legend_check = QCheckBox("Show Legend")
+        self.legend_check.setChecked(self.global_settings['show_legend'])
+        self.legend_check.toggled.connect(self.update_multi_plot)
+        display_row1.addWidget(self.legend_check)
         
-        self.grid_checkbox = QCheckBox("Show Grid")
-        self.grid_checkbox.setChecked(self.global_settings['grid'])
-        self.grid_checkbox.toggled.connect(self.update_multi_plot)
-        display_row1.addWidget(self.grid_checkbox)
+        self.grid_check = QCheckBox("Show Grid")
+        self.grid_check.setChecked(self.global_settings['grid'])
+        self.grid_check.toggled.connect(self.update_multi_plot)
+        display_row1.addWidget(self.grid_check)
         global_layout.addLayout(display_row1)
         
         # Waterfall mode
         waterfall_row = QHBoxLayout()
-        self.waterfall_checkbox = QCheckBox("Waterfall Plot")
-        self.waterfall_checkbox.setChecked(self.global_settings['waterfall_mode'])
-        self.waterfall_checkbox.toggled.connect(self.update_multi_plot)
-        waterfall_row.addWidget(self.waterfall_checkbox)
+        self.waterfall_check = QCheckBox("Waterfall Plot")
+        self.waterfall_check.setChecked(self.global_settings['waterfall_mode'])
+        self.waterfall_check.toggled.connect(self.update_multi_plot)
+        waterfall_row.addWidget(self.waterfall_check)
         
         waterfall_row.addWidget(QLabel("Spacing:"))
         self.waterfall_spacing_slider = QSlider(Qt.Horizontal)
@@ -860,4 +1011,118 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 QMessageBox.information(self, "Success", f"Data exported successfully!")
                 
             except Exception as e:
-                QMessageBox.critical(self, "Export Error", f"Failed to export data:\n{str(e)}") 
+                QMessageBox.critical(self, "Export Error", f"Failed to export data:\n{str(e)}")
+    
+    def save_session_dialog(self):
+        """Show dialog for saving session state."""
+        if not STATE_MANAGEMENT_AVAILABLE:
+            QMessageBox.warning(self, "Not Available", "Session management not available.")
+            return
+        
+        # Get notes from user
+        notes, ok = QInputDialog.getText(
+            self,
+            "Save Multi-Spectrum Session",
+            "Enter session notes (optional):",
+            text=f"Session with {len(self.loaded_spectra)} spectra"
+        )
+        
+        if ok:
+            try:
+                success = self.save_session_state(notes)
+                if success:
+                    QMessageBox.information(
+                        self,
+                        "Session Saved",
+                        f"Multi-Spectrum session saved successfully!\n\n"
+                        f"Notes: {notes}\n"
+                        f"Spectra: {len(self.loaded_spectra)}\n"
+                        f"Location: ~/RamanLab_Projects/auto_saves/"
+                    )
+                else:
+                    QMessageBox.warning(self, "Save Failed", "Failed to save session.")
+            except Exception as e:
+                QMessageBox.critical(self, "Save Error", f"Error saving session:\n{str(e)}")
+    
+    def load_session_dialog(self):
+        """Show dialog for loading session state."""
+        if not STATE_MANAGEMENT_AVAILABLE:
+            QMessageBox.warning(self, "Not Available", "Session management not available.")
+            return
+        
+        # Warn user if current session has data
+        if self.loaded_spectra:
+            reply = QMessageBox.question(
+                self,
+                "Load Session",
+                f"Loading a session will replace your current work.\n\n"
+                f"Current session has {len(self.loaded_spectra)} spectra.\n"
+                f"Are you sure you want to continue?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply != QMessageBox.Yes:
+                return
+        
+        try:
+            success = self.load_session_state()
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Session Loaded",
+                    f"Multi-Spectrum session loaded successfully!\n\n"
+                    f"Spectra: {len(self.loaded_spectra)}\n"
+                    f"Settings restored: window layout, controls, etc."
+                )
+            else:
+                QMessageBox.warning(self, "Load Failed", "No saved session found or load failed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Error loading session:\n{str(e)}")
+    
+    def show_session_info(self):
+        """Show information about the current session."""
+        if not STATE_MANAGEMENT_AVAILABLE:
+            QMessageBox.warning(self, "Not Available", "Session management not available.")
+            return
+        
+        # Calculate session duration
+        session_duration = ""
+        if hasattr(self, '_session_start_time') and self._session_start_time:
+            import time
+            duration_seconds = int(time.time() - self._session_start_time)
+            hours = duration_seconds // 3600
+            minutes = (duration_seconds % 3600) // 60
+            seconds = duration_seconds % 60
+            session_duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        
+        # Gather session information
+        info = f"""Multi-Spectrum Manager Session Information
+
+📊 Current Session:
+   • Loaded Spectra: {len(self.loaded_spectra)}
+   • Session Duration: {session_duration}
+   • Auto-save: Enabled
+
+⚙️ Global Settings:
+   • Normalize: {self.global_settings.get('normalize', 'Unknown')}
+   • Waterfall Mode: {self.global_settings.get('waterfall_mode', 'Unknown')}
+   • Show Legend: {self.global_settings.get('show_legend', 'Unknown')}
+   • Line Width: {self.global_settings.get('line_width', 'Unknown')}
+   • Colormap: {self.global_settings.get('colormap', 'Unknown')}
+
+📁 Save Location:
+   • Auto-saves: ~/RamanLab_Projects/auto_saves/
+   • State file: multi_spectrum_manager_state.pkl
+
+💾 Session Management:
+   • Auto-save triggers on: spectrum loading, settings changes
+   • Manual save: Save Session button
+   • Session restore: Load Session button"""
+        
+        if self.loaded_spectra:
+            info += f"\n\n📋 Loaded Spectra:\n"
+            for i, name in enumerate(self.loaded_spectra.keys(), 1):
+                info += f"   {i}. {name}\n"
+        
+        QMessageBox.information(self, "Session Information", info) 

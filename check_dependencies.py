@@ -228,14 +228,22 @@ def check_optional_advanced_packages():
         ("pyinstaller", "5.0.0", "Standalone executable creation"),
         ("emcee", "3.0.0", "MCMC sampling for Bayesian analysis"),
         ("tensorflow", "2.12.0", "Deep learning framework"),
-        ("umap-learn", "0.5.0", "UMAP dimensionality reduction")
+        ("umap-learn", "0.5.0", "UMAP dimensionality reduction"),
+        ("qtconsole", "5.4.0", "Interactive Jupyter console integration"),
+        ("jupyter-client", "7.0.0", "Jupyter kernel management", "jupyter_client"),
+        ("ipykernel", "6.0.0", "IPython kernel for enhanced console")
     ]
     
     available_features = []
     missing_optional = []
     
-    for package, min_version, description in optional_packages:
-        import_name = "umap" if package == "umap-learn" else package
+    for package_info in optional_packages:
+        if len(package_info) == 4:
+            package, min_version, description, import_name = package_info
+        else:
+            package, min_version, description = package_info
+            import_name = "umap" if package == "umap-learn" else package
+        
         installed, version = check_package(package, min_version, description, import_name)
         if installed:
             available_features.append(package)
@@ -262,7 +270,8 @@ def check_component_availability(qt6_ok, core_ok, advanced_features):
         "🔍 Polarization Analysis": "pymatgen" in advanced_features,
         "📄 PDF Reports": "reportlab" in advanced_features,
         "🤖 Deep Learning": "tensorflow" in advanced_features,
-        "📦 Executable Creation": "pyinstaller" in advanced_features
+        "📦 Executable Creation": "pyinstaller" in advanced_features,
+        "🐍 Interactive Console": "qtconsole" in advanced_features and "jupyter-client" in advanced_features
     }
     
     available_count = 0
@@ -404,6 +413,12 @@ def suggest_installation_commands(missing_core, missing_optional, outdated_packa
                 print(f"pip install {package}  # For advanced group analysis visualization")
             elif package == "emcee":
                 print(f"pip install {package}  # For MCMC statistical analysis")
+            elif package == "qtconsole":
+                print(f"pip install {package}  # For interactive Jupyter console")
+            elif package == "jupyter-client":
+                print(f"pip install {package}  # Required for Jupyter console functionality")
+            elif package == "ipykernel":
+                print(f"pip install {package}  # For enhanced interactive Python environment")
             else:
                 print(f"pip install {package}")
     
@@ -652,6 +667,37 @@ def main():
     """Run all dependency checks."""
     print_header("RamanLab Dependency Checker")
     print("This tool checks for common issues with the integrated peak fitting and analysis modules")
+    
+    # Run comprehensive dependency checks first
+    print("\n" + "="*70)
+    print("COMPREHENSIVE DEPENDENCY ANALYSIS")
+    print("="*70)
+    
+    # Check Python version
+    python_ok = check_python_version()
+    
+    # Check Qt6 framework
+    qt6_ok = check_qt6_framework()
+    
+    # Check core scientific stack
+    core_ok = check_core_scientific_stack()
+    
+    # Check optional advanced packages (including Jupyter)
+    advanced_features, missing_optional = check_optional_advanced_packages()
+    
+    # Check component availability
+    components = check_component_availability(qt6_ok, core_ok, advanced_features)
+    
+    # Check system resources
+    check_system_resources()
+    
+    # Check data files
+    check_data_files()
+    
+    # Suggest installation commands if needed
+    missing_core = []  # This would be populated by core checks
+    outdated_packages = []  # This would be populated by version checks
+    suggest_installation_commands(missing_core, missing_optional, outdated_packages)
     
     # Run all checks
     checks = [

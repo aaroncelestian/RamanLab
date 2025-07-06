@@ -26,6 +26,8 @@ Thumbs.db
 Density/
 sample_spectra/
 __exampleData/
+test_data/
+test_batch_data/
 
 # Backup files
 *_backup.py

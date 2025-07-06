@@ -5,9 +5,7 @@
 **Natural History Museum of Los Angeles County**
 
 RamanLab is a comprehensive, cross-platform desktop application for analyzing and identifying Raman spectra. Built with PySide6, it provides a modern, professional interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities and specialized analysis tools.
-
-**Current Version:** 1.1.2  
-**Release Date:** 2025-06-22  
+ 
 **Framework:** Qt6 (PySide6)  
 **Platform Support:** Windows, macOS, Linux  
 **Python Requirements:** 3.8+ (3.9+ recommended)
@@ -16,6 +14,7 @@ RamanLab is a comprehensive, cross-platform desktop application for analyzing an
 
 ## 🚀 Quick Start
 
+Either use the terminal app (MacOS/Unnix) or the conda command-line (Windows)
 Get RamanLab running in 5 minutes:
 
 ```bash
