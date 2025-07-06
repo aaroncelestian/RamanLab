@@ -7,7 +7,7 @@ specifically optimized for RamanLab's interface requirements.
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 
 
 def configure_compact_ui():

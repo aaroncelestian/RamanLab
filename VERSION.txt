@@ -1,9 +1,47 @@
-RamanLab Version 1.1.0 - "Batch Peak Fitting Module Enhancement"
-Release Date: January 27, 2025
+RamanLab Version 1.1.1 - "Major Feature Update: Auto-Update & Advanced Batch Processing"
+Release Date: January 28, 2025
+Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🔄 **Version 1.1.0 Update**
+🚀 **Version 1.1.1 Major Update**
 
-This critical update resolves a Windows-specific database connection issue that
+This revolutionary update introduces groundbreaking features that transform RamanLab
+into a self-updating, sophisticated analysis platform with completely redesigned
+batch processing capabilities.
+
+🎯 **Major New Features:**
+• 🚀 **Automatic Background Git Pull**: Seamless automatic updates keep RamanLab current
+• 🔬 **Sophisticated Batch Peak Fitting**: Completely new advanced batch processing system
+• 🎯 **Enhanced Peak Detection**: Improved algorithms with superior accuracy and reliability
+• 📊 **Advanced Analysis Workflows**: Sophisticated batch processing with intelligent automation
+• 🔄 **Streamlined Interface**: Removed legacy components for cleaner, more focused experience
+• 🛠️ **Architectural Improvements**: Enhanced code organization and maintainability
+
+🔧 **Technical Innovations:**
+• Revolutionary automatic background git pull system for continuous updates
+• Completely redesigned batch peak fitting architecture with advanced algorithms
+• New sophisticated peak detection and analysis workflows with improved accuracy
+• Enhanced error handling and robustness throughout the batch processing system
+• Improved performance optimization and algorithm efficiency
+• Advanced integration capabilities for complex analytical workflows
+• Future-ready architecture designed for continuous feature expansion
+
+⚠️ **Important Changes:**
+• Legacy batch peak fitting button removed from main interface (replaced with integrated system)
+• Old batch processing methods deprecated in favor of new sophisticated implementation
+• Enhanced system provides backward compatibility while introducing advanced features
+
+🔮 **Future Roadmap:**
+• Continued improvements to the new batch peak fitting system
+• Additional sophisticated analysis algorithms in development
+• Enhanced automation features planned for upcoming releases
+• Expanded integration capabilities for advanced research workflows
+
+This update represents a major leap forward in RamanLab's capabilities, with more 
+sophisticated features to come in future releases!
+
+🔄 **Previous Release - Version 1.1.0 "Batch Peak Fitting Module Enhancement"**
+
+This critical update resolved a Windows-specific database connection issue that
 prevented users from accessing the Search/Match functionality, addressing the
 "Empty Database" error that occurred despite having valid database files.
 

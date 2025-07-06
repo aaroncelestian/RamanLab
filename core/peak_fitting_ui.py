@@ -66,18 +66,7 @@ class BackgroundControlsWidget(QWidget):
         self.create_linear_controls(layout)
         self.create_polynomial_controls(layout)
         
-        # Action buttons
-        buttons_layout = QHBoxLayout()
-        
-        apply_btn = QPushButton("Apply")
-        apply_btn.clicked.connect(self.apply_background.emit)
-        buttons_layout.addWidget(apply_btn)
-        
-        reset_btn = QPushButton("Reset")
-        reset_btn.clicked.connect(self.reset_spectrum.emit)
-        buttons_layout.addWidget(reset_btn)
-        
-        layout.addLayout(buttons_layout)
+        # Note: Action buttons are handled by the parent application
         
     def create_als_controls(self, parent_layout):
         """Create ALS parameter controls with sliders"""

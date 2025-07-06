@@ -20,9 +20,9 @@ from PySide6.QtWidgets import (
     QGroupBox, QSplitter, QMessageBox, QProgressBar, QSpinBox, 
     QDoubleSpinBox, QFormLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QScrollArea, QFrame, QGridLayout, QListWidget, QListWidgetItem,
-    QMenuBar, QMenu, QFileDialog, QStatusBar
+    QMenuBar, QMenu, QFileDialog, QStatusBar, QApplication
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QAction
 
 # Import matplotlib for Qt6
@@ -36,10 +36,13 @@ from polarization_ui.matplotlib_config import CompactNavigationToolbar as Naviga
 # Scientific computing
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
+from scipy.interpolate import interp1d
+from scipy.optimize import curve_fit
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.sparse import csc_matrix
 import pandas as pd
+import time
 
 # File loading utilities
 try:
@@ -141,6 +144,658 @@ class EnhancedPeakFitter(PeakFitter if CENTRALIZED_AVAILABLE else object):
             gaussian_part = EnhancedPeakFitter.gaussian(x, 1.0, cen, wid)
             lorentzian_part = EnhancedPeakFitter.lorentzian(x, 1.0, cen, wid)
             return amp * ((1 - eta) * gaussian_part + eta * lorentzian_part)
+
+
+class BatchProcessingMonitor(QDialog):
+    """Real-time monitor window for batch processing progress."""
+    
+    # Signals for communication
+    processing_cancelled = Signal()
+    processing_paused = Signal()
+    processing_resumed = Signal()
+    save_results_requested = Signal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Batch Processing Monitor")
+        self.setGeometry(100, 100, 1200, 800)
+        self.setModal(False)  # Allow interaction with main window
+        
+        # Processing state
+        self.is_paused = False
+        self.is_cancelled = False
+        
+        # Navigation state for reviewing results
+        self.stored_results = []  # Store all processing results for navigation
+        self.current_result_index = 0
+        self.is_completed = False
+        
+        # Setup UI
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the monitoring UI."""
+        layout = QVBoxLayout(self)
+        
+        # Header with progress info
+        header_layout = QHBoxLayout()
+        
+        # Progress information
+        self.progress_label = QLabel("Starting batch processing...")
+        self.progress_label.setFont(QFont("Arial", 12, QFont.Bold))
+        header_layout.addWidget(self.progress_label)
+        
+        header_layout.addStretch()
+        
+        # Control buttons
+        self.pause_btn = QPushButton("⏸️ Pause")
+        self.pause_btn.clicked.connect(self.toggle_pause)
+        header_layout.addWidget(self.pause_btn)
+        
+        self.cancel_btn = QPushButton("❌ Cancel")
+        self.cancel_btn.clicked.connect(self.cancel_processing)
+        header_layout.addWidget(self.cancel_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar)
+        
+        # Plot area
+        self.setup_plot_area(layout)
+        
+        # Status information
+        self.setup_status_area(layout)
+        
+    def setup_plot_area(self, layout):
+        """Setup the real-time plotting area."""
+        # Create matplotlib figure
+        self.figure = Figure(figsize=(12, 6))
+        self.canvas = FigureCanvas(self.figure)
+        
+        # Create subplots
+        gs = self.figure.add_gridspec(2, 2, height_ratios=[2, 1], width_ratios=[3, 1])
+        self.ax_main = self.figure.add_subplot(gs[0, 0])      # Main spectrum plot
+        self.ax_stats = self.figure.add_subplot(gs[0, 1])     # Statistics plot
+        self.ax_progress = self.figure.add_subplot(gs[1, :])  # Progress overview
+        
+        # Configure main plot
+        self.ax_main.set_xlabel("Wavenumber (cm⁻¹)")
+        self.ax_main.set_ylabel("Intensity (a.u.)")
+        self.ax_main.set_title("Current Spectrum")
+        self.ax_main.grid(True, alpha=0.3)
+        
+        # Configure stats plot
+        self.ax_stats.set_title("Processing Stats")
+        self.ax_stats.axis('off')
+        
+        # Configure residuals plot
+        self.ax_progress.set_xlabel("Wavenumber (cm⁻¹)")
+        self.ax_progress.set_ylabel("Residuals")
+        self.ax_progress.set_title("Fit Quality - Residuals (Measured - Fitted)")
+        self.ax_progress.grid(True, alpha=0.3)
+        
+        self.figure.tight_layout()
+        layout.addWidget(self.canvas)
+        
+        # Initialize data storage for progress tracking
+        self.file_indices = []
+        self.peaks_counts = []
+        self.processing_times = []
+        
+    def setup_status_area(self, layout):
+        """Setup the status information area."""
+        status_frame = QFrame()
+        status_frame.setFrameStyle(QFrame.StyledPanel)
+        status_layout = QHBoxLayout(status_frame)
+        
+        # Current file info
+        file_info_layout = QVBoxLayout()
+        file_info_layout.addWidget(QLabel("Current File:"))
+        self.current_file_label = QLabel("None")
+        self.current_file_label.setWordWrap(True)
+        file_info_layout.addWidget(self.current_file_label)
+        status_layout.addLayout(file_info_layout)
+        
+        # Processing statistics
+        stats_layout = QVBoxLayout()
+        stats_layout.addWidget(QLabel("Statistics:"))
+        self.stats_text = QLabel("Files: 0/0\nPeaks: 0\nTime: 0s")
+        self.stats_text.setAlignment(Qt.AlignTop)
+        stats_layout.addWidget(self.stats_text)
+        status_layout.addLayout(stats_layout)
+        
+        # Current region info
+        region_layout = QVBoxLayout()
+        region_layout.addWidget(QLabel("Current Region:"))
+        self.region_label = QLabel("None")
+        region_layout.addWidget(self.region_label)
+        status_layout.addLayout(region_layout)
+        
+        layout.addWidget(status_frame)
+        
+        # Navigation controls (initially hidden)
+        self.setup_navigation_controls(layout)
+        
+    def setup_navigation_controls(self, layout):
+        """Setup navigation controls for reviewing results after processing."""
+        self.nav_frame = QFrame()
+        self.nav_frame.setFrameStyle(QFrame.StyledPanel)
+        self.nav_frame.setVisible(False)  # Initially hidden
+        nav_layout = QVBoxLayout(self.nav_frame)
+        
+        # Navigation header
+        nav_header = QLabel("📊 Browse Results")
+        nav_header.setStyleSheet("font-weight: bold; font-size: 12px; color: #4CAF50;")
+        nav_layout.addWidget(nav_header)
+        
+        # Navigation controls
+        nav_controls_layout = QHBoxLayout()
+        
+        # Previous button
+        self.prev_btn = QPushButton("⬅️ Previous")
+        self.prev_btn.setToolTip("View previous spectrum")
+        self.prev_btn.clicked.connect(self.show_previous_result)
+        nav_controls_layout.addWidget(self.prev_btn)
+        
+        # Current result info
+        self.result_info_label = QLabel("Result 1 of 1")
+        self.result_info_label.setAlignment(Qt.AlignCenter)
+        self.result_info_label.setStyleSheet("font-weight: bold;")
+        nav_controls_layout.addWidget(self.result_info_label)
+        
+        # Next button
+        self.next_btn = QPushButton("Next ➡️")
+        self.next_btn.setToolTip("View next spectrum")
+        self.next_btn.clicked.connect(self.show_next_result)
+        nav_controls_layout.addWidget(self.next_btn)
+        
+        nav_layout.addLayout(nav_controls_layout)
+        
+        # File selector dropdown
+        file_selector_layout = QHBoxLayout()
+        file_selector_layout.addWidget(QLabel("Quick Jump:"))
+        
+        self.file_selector = QComboBox()
+        self.file_selector.setToolTip("Select a file to view its results")
+        self.file_selector.currentIndexChanged.connect(self.on_file_selected)
+        file_selector_layout.addWidget(self.file_selector)
+        
+        nav_layout.addLayout(file_selector_layout)
+        
+        layout.addWidget(self.nav_frame)
+        
+    def toggle_pause(self):
+        """Toggle pause/resume processing."""
+        self.is_paused = not self.is_paused
+        if self.is_paused:
+            self.pause_btn.setText("▶️ Resume")
+            self.processing_paused.emit()
+        else:
+            self.pause_btn.setText("⏸️ Pause")
+            self.processing_resumed.emit()
+    
+    def cancel_processing(self):
+        """Cancel the batch processing."""
+        self.is_cancelled = True
+        self.processing_cancelled.emit()
+        self.close()
+        
+    def update_progress(self, current_file, total_files, file_path):
+        """Update the overall progress."""
+        self.progress_bar.setMaximum(total_files)
+        self.progress_bar.setValue(current_file + 1)  # Fix: Use count, not index
+        
+        progress_text = f"Processing file {current_file + 1} of {total_files}"
+        self.progress_label.setText(progress_text)
+        
+        self.current_file_label.setText(Path(file_path).name)
+        
+    def update_region_info(self, region_start, region_end, region_index, total_regions):
+        """Update current region information."""
+        region_text = f"Region {region_index + 1}/{total_regions}: {region_start:.0f}-{region_end:.0f} cm⁻¹"
+        self.region_label.setText(region_text)
+        
+    def update_spectrum_plot(self, wavenumbers, intensities, background=None, peaks=None, region_start=None, region_end=None, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None):
+        """Update the real-time spectrum plot and residuals."""
+        self.ax_main.clear()
+        
+        # Plot original spectrum
+        self.ax_main.plot(wavenumbers, intensities, 'b-', label='Spectrum', linewidth=1)
+        
+        # Plot background if available
+        corrected = intensities
+        if background is not None:
+            corrected = intensities - background
+            self.ax_main.plot(wavenumbers, corrected, 'g-', label='Background Corrected', linewidth=1)
+            self.ax_main.plot(wavenumbers, background, 'r--', label='Background', alpha=0.7)
+        
+        # Plot fitted peaks if available
+        if fitted_peaks is not None:
+            self.ax_main.plot(wavenumbers, fitted_peaks, 'm-', label='Fitted Peaks', linewidth=2, alpha=0.8)
+        
+        # Plot detected peaks
+        if peaks is not None and len(peaks) > 0:
+            peak_intensities = intensities[peaks] if background is None else (intensities - background)[peaks]
+            self.ax_main.plot(wavenumbers[peaks], peak_intensities, 'ro', 
+                            markersize=8, label=f'Peaks ({len(peaks)})')
+            
+            # Add peak labels
+            for i, peak_idx in enumerate(peaks):
+                self.ax_main.annotate(f'{wavenumbers[peak_idx]:.0f}', 
+                                    (wavenumbers[peak_idx], peak_intensities[i]),
+                                    xytext=(5, 5), textcoords='offset points',
+                                    fontsize=8, alpha=0.8)
+        
+        # Highlight region if specified
+        if region_start is not None and region_end is not None:
+            self.ax_main.axvspan(region_start, region_end, alpha=0.2, color='yellow', label='Analysis Region')
+        
+        self.ax_main.set_xlabel("Wavenumber (cm⁻¹)")
+        self.ax_main.set_ylabel("Intensity (a.u.)")
+        self.ax_main.set_title("Current Spectrum")
+        self.ax_main.legend()
+        self.ax_main.grid(True, alpha=0.3)
+        
+        # Update residuals plot
+        self.update_residuals_plot(wavenumbers, corrected, peaks, region_start, region_end, full_wavenumbers, full_intensities, fitted_peaks, residuals)
+    
+    def update_residuals_plot(self, wavenumbers, corrected_intensities, peaks=None, region_start=None, region_end=None, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None):
+        """Update the residuals plot showing fit quality."""
+        self.ax_progress.clear()
+        
+        # Use actual residuals if available, otherwise show background-corrected signal
+        if residuals is not None:
+            # Plot the actual residuals (measured - fitted)
+            self.ax_progress.plot(wavenumbers, residuals, 'purple', linewidth=1, alpha=0.8)
+            
+            # Add zero line for reference
+            self.ax_progress.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+            
+            # Set appropriate title
+            self.ax_progress.set_title("Fitting Region Analysis - Residuals (Data - Fitted)")
+            
+        else:
+            # Fall back to showing background-corrected signal
+            residual_wave = wavenumbers
+            display_residuals = corrected_intensities
+            
+            # Plot residuals
+            if len(display_residuals) > 0:
+                self.ax_progress.plot(residual_wave, display_residuals, 'purple', linewidth=1, alpha=0.8)
+                
+                # Add zero line for reference
+                self.ax_progress.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+                
+                # Set appropriate title
+                self.ax_progress.set_title("Fitting Region Analysis - Background Corrected Signal")
+        
+        # Highlight fitting regions
+        if region_start is not None and region_end is not None:
+            self.ax_progress.axvspan(region_start, region_end, alpha=0.1, color='yellow')
+            
+        # Mark peak positions if available
+        if peaks is not None and len(peaks) > 0:
+            peak_wavenumbers = wavenumbers[peaks]
+            for peak_wave in peak_wavenumbers:
+                self.ax_progress.axvline(x=peak_wave, color='red', alpha=0.3, linestyle=':', linewidth=1)
+        
+        self.ax_progress.set_xlabel("Wavenumber (cm⁻¹)")
+        self.ax_progress.set_ylabel("Intensity (a.u.)")
+        self.ax_progress.grid(True, alpha=0.3)
+        
+        # Refresh the canvas
+        self.canvas.draw()
+        
+    def update_statistics(self, file_index, peaks_found, processing_time, total_peaks, total_files):
+        """Update processing statistics."""
+        # Store data for progress plot
+        self.file_indices.append(file_index)
+        self.peaks_counts.append(peaks_found)
+        self.processing_times.append(processing_time)
+        
+        # Update stats text
+        avg_time = sum(self.processing_times) / len(self.processing_times) if self.processing_times else 0
+        stats_text = f"Files: {file_index + 1}/{total_files}\n"
+        stats_text += f"Total Peaks: {total_peaks}\n"
+        stats_text += f"Avg Time: {avg_time:.2f}s\n"
+        stats_text += f"Current: {peaks_found} peaks"
+        self.stats_text.setText(stats_text)
+        
+        # Update statistics plot
+        self.ax_stats.clear()
+        self.ax_stats.text(0.1, 0.8, f"Total Files: {total_files}", transform=self.ax_stats.transAxes, fontsize=10)
+        self.ax_stats.text(0.1, 0.7, f"Processed: {file_index + 1}", transform=self.ax_stats.transAxes, fontsize=10)
+        self.ax_stats.text(0.1, 0.6, f"Total Peaks: {total_peaks}", transform=self.ax_stats.transAxes, fontsize=10)
+        self.ax_stats.text(0.1, 0.5, f"Current File: {peaks_found} peaks", transform=self.ax_stats.transAxes, fontsize=10)
+        self.ax_stats.text(0.1, 0.4, f"Avg Time: {avg_time:.2f}s", transform=self.ax_stats.transAxes, fontsize=10)
+        
+        if len(self.processing_times) > 0:
+            remaining_files = total_files - (file_index + 1)
+            estimated_time = remaining_files * avg_time
+            self.ax_stats.text(0.1, 0.3, f"Est. Remaining: {estimated_time:.1f}s", 
+                             transform=self.ax_stats.transAxes, fontsize=10)
+        
+        self.ax_stats.axis('off')
+        
+        # Update progress plot
+        if len(self.file_indices) > 1:
+            self.ax_progress.clear()
+            self.ax_progress.plot(self.file_indices, self.peaks_counts, 'bo-', markersize=4)
+            self.ax_progress.set_xlabel("File Index")
+            self.ax_progress.set_ylabel("Peaks Found")
+            self.ax_progress.set_title("Peak Detection Progress")
+            self.ax_progress.grid(True, alpha=0.3)
+        
+        # Refresh the canvas
+        self.canvas.draw()
+        
+    def wait_if_paused(self):
+        """Wait while processing is paused."""
+        while self.is_paused and not self.is_cancelled:
+            QApplication.processEvents()
+            time.sleep(0.1)
+    
+    def processing_completed(self):
+        """Signal that processing is complete and update buttons."""
+        self.progress_label.setText("✅ Batch processing completed successfully!")
+        self.progress_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        
+        # Ensure progress bar shows 100%
+        self.progress_bar.setValue(self.progress_bar.maximum())
+        
+        # Update buttons for completion state
+        self.pause_btn.setText("💾 Save CSV")
+        self.pause_btn.setToolTip("Save comprehensive CSV results")
+        self.pause_btn.clicked.disconnect()  # Disconnect old handler
+        self.pause_btn.clicked.connect(self.export_to_csv)
+        
+        self.cancel_btn.setText("✖️ Close")
+        self.cancel_btn.setToolTip("Close the batch processing monitor")
+        self.cancel_btn.clicked.disconnect()  # Disconnect old handler
+        self.cancel_btn.clicked.connect(self.close)
+        
+        # Update progress bar to show completion
+        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #4CAF50; }")
+        
+        # Show navigation controls for reviewing results
+        if self.stored_results:
+            self.setup_navigation_display()
+    
+    def save_results(self):
+        """Request to save results."""
+        self.save_results_requested.emit()
+    
+    def export_to_csv(self):
+        """Export comprehensive batch results to CSV files."""
+        if not self.stored_results:
+            QMessageBox.warning(self, "No Results", "No results to export.")
+            return
+        
+        # Get save directory
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "Select Directory for CSV Export", "", 
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        
+        if not save_dir:
+            return
+        
+        try:
+            self._export_comprehensive_csv(save_dir)
+            QMessageBox.information(self, "Export Complete", 
+                                  f"CSV files exported successfully to:\n{save_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {str(e)}")
+    
+    def _export_comprehensive_csv(self, save_dir):
+        """Export comprehensive CSV with 4 columns per spectrum (Raw, Fitted, Background, Difference)."""
+        save_path = Path(save_dir)
+        
+        if not self.stored_results:
+            return
+        
+        # Create a unified wavenumber grid (use the first spectrum as reference)
+        reference_wavenumbers = self.stored_results[0]['wavenumbers']
+        
+        # Initialize the main DataFrame with wavenumbers
+        csv_data = {'Wavenumber_cm-1': reference_wavenumbers}
+        
+        # Track peak parameters for separate summary
+        peak_summary = []
+        
+        for i, result in enumerate(self.stored_results):
+            filename = result['filename']
+            wavenumbers = result['wavenumbers']
+            intensities = result['intensities']
+            background = result.get('background')
+            fitted_peaks = result.get('fitted_peaks')
+            residuals = result.get('residuals')
+            peaks = result.get('peaks')
+            fit_params = result.get('fit_params')
+            total_r2 = result.get('total_r2')
+            
+            # Create clean filename for column headers (remove extension and special chars)
+            clean_name = Path(filename).stem.replace(' ', '_').replace('-', '_')
+            
+            # Interpolate all data to the reference wavenumber grid
+            raw_interp = np.interp(reference_wavenumbers, wavenumbers, intensities)
+            csv_data[f'{clean_name}_Raw'] = raw_interp
+            
+            # Fitted data (if available)
+            if fitted_peaks is not None:
+                fitted_interp = np.interp(reference_wavenumbers, wavenumbers, fitted_peaks)
+                csv_data[f'{clean_name}_Fitted'] = fitted_interp
+            else:
+                csv_data[f'{clean_name}_Fitted'] = np.zeros_like(reference_wavenumbers)
+            
+            # Background (if available)
+            if background is not None:
+                bg_interp = np.interp(reference_wavenumbers, wavenumbers, background)
+                csv_data[f'{clean_name}_Background'] = bg_interp
+            else:
+                csv_data[f'{clean_name}_Background'] = np.zeros_like(reference_wavenumbers)
+            
+            # Residuals/Difference (if available)
+            if residuals is not None:
+                resid_interp = np.interp(reference_wavenumbers, wavenumbers, residuals)
+                csv_data[f'{clean_name}_Difference'] = resid_interp
+            else:
+                # Fallback: raw - background if no residuals available
+                if background is not None:
+                    bg_corrected = intensities - background
+                    diff_interp = np.interp(reference_wavenumbers, wavenumbers, bg_corrected)
+                    csv_data[f'{clean_name}_Difference'] = diff_interp
+                else:
+                    csv_data[f'{clean_name}_Difference'] = np.zeros_like(reference_wavenumbers)
+            
+            # Collect peak summary data
+            if peaks is not None and fit_params is not None:
+                n_peaks = len(peaks)
+                for j in range(n_peaks):
+                    if j * 3 + 2 < len(fit_params):
+                        amplitude = fit_params[j * 3]
+                        center = fit_params[j * 3 + 1]
+                        width = fit_params[j * 3 + 2]
+                        
+                        # Calculate FWHM and area
+                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                        area = amplitude * width * np.sqrt(2 * np.pi)
+                        
+                        peak_summary.append({
+                            'Filename': filename,
+                            'Peak_Number': j + 1,
+                            'Center_cm-1': center,
+                            'Amplitude': amplitude,
+                            'Width_Sigma': width,
+                            'FWHM': fwhm,
+                            'Area': area,
+                            'Total_R2': total_r2 if j == 0 else '',  # Only show R² for first peak
+                            'Peak_Height_Raw': intensities[peaks[j]] if j < len(peaks) else np.nan
+                        })
+        
+        # Save main CSV with 4 columns per spectrum
+        main_df = pd.DataFrame(csv_data)
+        main_df.to_csv(save_path / 'batch_spectral_data.csv', index=False)
+        print(f"✅ Saved spectral data: {len(self.stored_results)} spectra × 4 columns = {len(self.stored_results) * 4} data columns")
+        
+        # Save peak parameters summary
+        if peak_summary:
+            peak_df = pd.DataFrame(peak_summary)
+            peak_df.to_csv(save_path / 'batch_peak_parameters.csv', index=False)
+            print(f"✅ Saved peak parameters: {len(peak_summary)} peaks")
+        
+        # Save processing summary
+        summary_data = []
+        for result in self.stored_results:
+            peaks = result.get('peaks')
+            total_r2 = result.get('total_r2')
+            n_peaks = len(peaks) if peaks is not None else 0
+            
+            summary_data.append({
+                'Filename': result['filename'],
+                'Number_of_Peaks': n_peaks,
+                'Total_R2': total_r2,
+                'Fitting_Success': 'Yes' if total_r2 is not None else 'No',
+                'Region_Start': result.get('region_start', 'Full'),
+                'Region_End': result.get('region_end', 'Spectrum')
+            })
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_csv(save_path / 'batch_summary.csv', index=False)
+            print(f"✅ Saved processing summary: {len(summary_data)} files")
+    
+    def processing_failed(self, error_message):
+        """Signal that processing failed."""
+        self.progress_label.setText(f"❌ Batch processing failed: {error_message}")
+        self.progress_label.setStyleSheet("color: #f44336; font-weight: bold;")
+        
+        # Update buttons for failure state
+        self.pause_btn.setText("💾 Save Partial")
+        self.pause_btn.setToolTip("Save partial results to pickle file")
+        self.pause_btn.clicked.disconnect()  # Disconnect old handler
+        self.pause_btn.clicked.connect(self.save_results)
+        
+        self.cancel_btn.setText("✖️ Close")
+        self.cancel_btn.setToolTip("Close the batch processing monitor")
+        self.cancel_btn.clicked.disconnect()  # Disconnect old handler
+        self.cancel_btn.clicked.connect(self.close)
+        
+        # Update progress bar to show failure
+        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #f44336; }")
+        
+        # Show navigation if we have results
+        if self.stored_results:
+            self.setup_navigation_display()
+    
+    def store_processing_result(self, wavenumbers, intensities, background, peaks, region_start, region_end, filename, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None):
+        """Store a processing result for later navigation."""
+        result = {
+            'wavenumbers': wavenumbers,
+            'intensities': intensities,
+            'background': background,
+            'peaks': peaks,
+            'fitted_peaks': fitted_peaks,
+            'residuals': residuals,
+            'region_start': region_start,
+            'region_end': region_end,
+            'filename': filename,
+            'full_wavenumbers': full_wavenumbers,
+            'full_intensities': full_intensities
+        }
+        self.stored_results.append(result)
+    
+    def setup_navigation_display(self):
+        """Setup navigation display when processing is complete."""
+        if not self.stored_results:
+            return
+            
+        self.is_completed = True
+        self.nav_frame.setVisible(True)
+        
+        # Populate file selector
+        self.file_selector.clear()
+        for i, result in enumerate(self.stored_results):
+            self.file_selector.addItem(f"{i+1}. {result['filename']}")
+        
+        # Update navigation state
+        self.current_result_index = 0
+        self.update_navigation_state()
+        self.show_result(0)
+        
+        # Change plot title
+        self.ax_main.set_title("Review Results - Navigate through processed spectra")
+        
+    def update_navigation_state(self):
+        """Update navigation button states and labels."""
+        if not self.stored_results:
+            return
+            
+        total_results = len(self.stored_results)
+        self.result_info_label.setText(f"Result {self.current_result_index + 1} of {total_results}")
+        
+        # Update button states
+        self.prev_btn.setEnabled(self.current_result_index > 0)
+        self.next_btn.setEnabled(self.current_result_index < total_results - 1)
+        
+        # Update file selector
+        self.file_selector.setCurrentIndex(self.current_result_index)
+    
+    def show_previous_result(self):
+        """Show the previous result."""
+        if self.current_result_index > 0:
+            self.current_result_index -= 1
+            self.show_result(self.current_result_index)
+            self.update_navigation_state()
+    
+    def show_next_result(self):
+        """Show the next result."""
+        if self.current_result_index < len(self.stored_results) - 1:
+            self.current_result_index += 1
+            self.show_result(self.current_result_index)
+            self.update_navigation_state()
+    
+    def on_file_selected(self, index):
+        """Handle file selection from dropdown."""
+        if 0 <= index < len(self.stored_results):
+            self.current_result_index = index
+            self.show_result(index)
+            self.update_navigation_state()
+    
+    def show_result(self, index):
+        """Display a specific result."""
+        if not (0 <= index < len(self.stored_results)):
+            return
+            
+        result = self.stored_results[index]
+        
+        # Update the spectrum plot with stored result
+        self.update_spectrum_plot(
+            result['wavenumbers'],
+            result['intensities'],
+            result['background'],
+            result['peaks'],
+            result['region_start'],
+            result['region_end'],
+            result.get('full_wavenumbers'),
+            result.get('full_intensities'),
+            result.get('fitted_peaks'),
+            result.get('residuals')
+        )
+        
+        # Update file info
+        self.current_file_label.setText(result['filename'])
+        
+        # Update region info
+        if result['region_start'] is not None and result['region_end'] is not None:
+            self.region_label.setText(f"Region: {result['region_start']:.0f}-{result['region_end']:.0f} cm⁻¹")
+        else:
+            self.region_label.setText("Full spectrum")
+        
+        # Refresh the plot
+        self.canvas.draw()
 
 
 class StackedTabWidget(QWidget):
@@ -594,12 +1249,13 @@ class SpectralDeconvolutionQt6(QDialog):
         
         # Create tabs with 2-row layout:
         # Row 1: Background, Peak Detection, Peak Fitting
-        # Row 2: Deconvolution, Analysis Results
+        # Row 2: Batch, Analysis Results, Advanced
         self.tab_widget.add_tab(self.create_background_tab(), "Background", row=0, col=0)
         self.tab_widget.add_tab(self.create_peak_detection_tab(), "Peak Detection", row=0, col=1)
         self.tab_widget.add_tab(self.create_fitting_tab(), "Peak Fitting", row=0, col=2)
-        self.tab_widget.add_tab(self.create_deconvolution_tab(), "Deconvolution", row=1, col=0)
+        self.tab_widget.add_tab(self.create_batch_tab(), "Batch", row=1, col=0)
         self.tab_widget.add_tab(self.create_analysis_tab(), "Analysis Results", row=1, col=1)
+        self.tab_widget.add_tab(self.create_advanced_tab(), "Advanced", row=1, col=2)
         
         return panel
         
@@ -749,34 +1405,13 @@ class SpectralDeconvolutionQt6(QDialog):
             return self.get_fallback_peak_parameters()
          
     def create_peak_detection_tab(self):
-        """Create peak detection tab with interactive selection using centralized controls."""
+        """Create peak detection tab with interactive selection using slider controls."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        # Use centralized peak fitting controls if available
-        if CENTRALIZED_AVAILABLE:
-            try:
-                # Use centralized peak fitting controls
-                self.peak_controls = PeakFittingControlsWidget()
-                self.peak_controls.parameters_changed.connect(self._trigger_peak_update)
-                self.peak_controls.model_changed.connect(self.on_centralized_model_changed)
-                layout.addWidget(self.peak_controls)
-                
-                # Action buttons for centralized controls
-                centralized_buttons_layout = QHBoxLayout()
-                
-                clear_btn = QPushButton("Clear All Peaks")
-                clear_btn.clicked.connect(self.clear_peaks)
-                centralized_buttons_layout.addWidget(clear_btn)
-                
-                layout.addLayout(centralized_buttons_layout)
-                
-            except Exception as e:
-                print(f"Warning: Could not create PeakFittingControlsWidget: {e}")
-                self._create_fallback_peak_controls(layout)
-        else:
-            # Fallback to manual controls
-            self._create_fallback_peak_controls(layout)
+        # Always use fallback controls (sliders) for better user experience
+        # The centralized controls use spinboxes which are less intuitive than sliders
+        self._create_fallback_peak_controls(layout)
         
         # Individual Peak Management group
         peak_management_group = QGroupBox("Individual Peak Management")
@@ -1033,42 +1668,74 @@ class SpectralDeconvolutionQt6(QDialog):
         return tab
     
     def _create_fallback_peak_controls(self, layout):
-        """Create fallback peak detection controls when centralized widget is not available."""
+        """Create enhanced peak detection controls with live-updating sliders."""
         # Peak detection group
-        peak_group = QGroupBox("Automatic Peak Detection")
+        peak_group = QGroupBox("Peak Detection - Live Updates")
         peak_layout = QVBoxLayout(peak_group)
         
-        # Parameters
+        # Parameters with enhanced sliders
         params_layout = QFormLayout()
         
+        # Height parameter
         self.height_slider = QSlider(Qt.Horizontal)
         self.height_slider.setRange(1, 100)
         self.height_slider.setValue(10)
+        self.height_slider.setTracking(True)  # Enable live tracking
+        self.height_slider.setToolTip("Minimum peak height as percentage of maximum intensity")
         self.height_label = QLabel("10%")
+        self.height_label.setMinimumWidth(40)
         height_layout = QHBoxLayout()
         height_layout.addWidget(self.height_slider)
         height_layout.addWidget(self.height_label)
         params_layout.addRow("Min Height:", height_layout)
         
+        # Distance parameter
         self.distance_slider = QSlider(Qt.Horizontal)
         self.distance_slider.setRange(1, 50)
         self.distance_slider.setValue(10)
+        self.distance_slider.setTracking(True)  # Enable live tracking
+        self.distance_slider.setToolTip("Minimum distance between peaks (data points)")
         self.distance_label = QLabel("10")
+        self.distance_label.setMinimumWidth(40)
         distance_layout = QHBoxLayout()
         distance_layout.addWidget(self.distance_slider)
         distance_layout.addWidget(self.distance_label)
         params_layout.addRow("Min Distance:", distance_layout)
         
+        # Prominence parameter
         self.prominence_slider = QSlider(Qt.Horizontal)
         self.prominence_slider.setRange(1, 50)
         self.prominence_slider.setValue(5)
+        self.prominence_slider.setTracking(True)  # Enable live tracking
+        self.prominence_slider.setToolTip("Minimum peak prominence as percentage of maximum intensity")
         self.prominence_label = QLabel("5%")
+        self.prominence_label.setMinimumWidth(40)
         prominence_layout = QHBoxLayout()
         prominence_layout.addWidget(self.prominence_slider)
         prominence_layout.addWidget(self.prominence_label)
         params_layout.addRow("Prominence:", prominence_layout)
         
         peak_layout.addLayout(params_layout)
+        
+        # Preset buttons for common peak detection settings
+        presets_layout = QHBoxLayout()
+        
+        sensitive_btn = QPushButton("Sensitive")
+        sensitive_btn.clicked.connect(lambda: self.apply_peak_preset(height=5, distance=5, prominence=2))
+        sensitive_btn.setToolTip("Detect more peaks - good for noisy spectra")
+        presets_layout.addWidget(sensitive_btn)
+        
+        balanced_btn = QPushButton("Balanced")
+        balanced_btn.clicked.connect(lambda: self.apply_peak_preset(height=10, distance=10, prominence=5))
+        balanced_btn.setToolTip("Balanced detection - good default settings")
+        presets_layout.addWidget(balanced_btn)
+        
+        strict_btn = QPushButton("Strict")
+        strict_btn.clicked.connect(lambda: self.apply_peak_preset(height=20, distance=20, prominence=10))
+        strict_btn.setToolTip("Detect only prominent peaks")
+        presets_layout.addWidget(strict_btn)
+        
+        peak_layout.addLayout(presets_layout)
         
         # Connect sliders to update labels
         self.height_slider.valueChanged.connect(self.update_height_label)
@@ -1252,6 +1919,260 @@ class SpectralDeconvolutionQt6(QDialog):
         layout.addStretch()
         
         return tab 
+    
+    def create_batch_tab(self):
+        """Create batch processing tab for processing multiple spectra."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # File management section
+        file_group = QGroupBox("📁 File Management")
+        file_layout = QVBoxLayout(file_group)
+        
+        # File list
+        self.batch_file_list = QListWidget()
+        self.batch_file_list.setMaximumHeight(150)
+        file_layout.addWidget(QLabel("Selected Files:"))
+        file_layout.addWidget(self.batch_file_list)
+        
+        # File management buttons
+        file_buttons_layout = QHBoxLayout()
+        
+        add_files_btn = QPushButton("Add Files")
+        add_files_btn.clicked.connect(self.add_batch_files)
+        file_buttons_layout.addWidget(add_files_btn)
+        
+        add_folder_btn = QPushButton("Add Folder")
+        add_folder_btn.clicked.connect(self.add_batch_folder)
+        file_buttons_layout.addWidget(add_folder_btn)
+        
+        clear_files_btn = QPushButton("Clear All")
+        clear_files_btn.clicked.connect(self.clear_batch_files)
+        file_buttons_layout.addWidget(clear_files_btn)
+        
+        file_layout.addLayout(file_buttons_layout)
+        layout.addWidget(file_group)
+        
+        # Fitting regions section
+        regions_group = QGroupBox("🎯 Fitting Regions")
+        regions_layout = QVBoxLayout(regions_group)
+        
+        # Region controls
+        region_controls_layout = QHBoxLayout()
+        
+        self.region_start_spin = QDoubleSpinBox()
+        self.region_start_spin.setRange(0, 4000)  # Initial range, will be updated dynamically
+        self.region_start_spin.setValue(400)
+        self.region_start_spin.setSuffix(" cm⁻¹")
+        region_controls_layout.addWidget(QLabel("Start:"))
+        region_controls_layout.addWidget(self.region_start_spin)
+        
+        self.region_end_spin = QDoubleSpinBox()
+        self.region_end_spin.setRange(0, 4000)  # Initial range, will be updated dynamically
+        self.region_end_spin.setValue(1600)
+        self.region_end_spin.setSuffix(" cm⁻¹")
+        region_controls_layout.addWidget(QLabel("End:"))
+        region_controls_layout.addWidget(self.region_end_spin)
+        
+        add_region_btn = QPushButton("Add Region")
+        add_region_btn.clicked.connect(self.add_batch_region)
+        region_controls_layout.addWidget(add_region_btn)
+        
+        regions_layout.addLayout(region_controls_layout)
+        
+        # Regions list
+        self.batch_regions_list = QListWidget()
+        self.batch_regions_list.setMaximumHeight(80)
+        regions_layout.addWidget(self.batch_regions_list)
+        
+        # Clear regions button
+        clear_regions_btn = QPushButton("Clear Regions")
+        clear_regions_btn.clicked.connect(self.clear_batch_regions)
+        regions_layout.addWidget(clear_regions_btn)
+        
+        layout.addWidget(regions_group)
+        
+        # Batch processing section
+        processing_group = QGroupBox("⚙️ Batch Processing")
+        processing_layout = QVBoxLayout(processing_group)
+        
+        # Processing settings
+        settings_layout = QVBoxLayout()
+        
+        # Add explanatory text
+        settings_info = QLabel("✓ Background correction and peak detection are automatically applied to all files")
+        settings_info.setStyleSheet("color: #666; font-style: italic; font-size: 11px; padding: 5px;")
+        settings_layout.addWidget(settings_info)
+        
+        checkbox_layout = QHBoxLayout()
+        
+        self.batch_background_checkbox = QCheckBox("Apply Background Correction")
+        self.batch_background_checkbox.setChecked(True)
+        self.batch_background_checkbox.setEnabled(False)  # Disable checkbox - always required
+        self.batch_background_checkbox.setToolTip("Background correction is essential for accurate peak detection")
+        checkbox_layout.addWidget(self.batch_background_checkbox)
+        
+        self.batch_auto_peaks_checkbox = QCheckBox("Auto-detect Peaks")
+        self.batch_auto_peaks_checkbox.setChecked(True)
+        self.batch_auto_peaks_checkbox.setEnabled(False)  # Disable checkbox - always required
+        self.batch_auto_peaks_checkbox.setToolTip("Peak detection is the core function of batch processing")
+        checkbox_layout.addWidget(self.batch_auto_peaks_checkbox)
+        
+        settings_layout.addLayout(checkbox_layout)
+        processing_layout.addLayout(settings_layout)
+        
+        # Progress bar
+        self.batch_progress_bar = QProgressBar()
+        self.batch_progress_bar.setVisible(False)
+        processing_layout.addWidget(self.batch_progress_bar)
+        
+        # Process button
+        self.batch_process_btn = QPushButton("🚀 Start Batch Processing")
+        self.batch_process_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 10px;
+                font-size: 12px;
+                font-weight: bold;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        self.batch_process_btn.clicked.connect(self.start_batch_processing)
+        processing_layout.addWidget(self.batch_process_btn)
+        
+        layout.addWidget(processing_group)
+        
+        # Results section
+        results_group = QGroupBox("📊 Results")
+        results_layout = QVBoxLayout(results_group)
+        
+        self.batch_results_text = QTextEdit()
+        self.batch_results_text.setReadOnly(True)
+        self.batch_results_text.setMaximumHeight(100)
+        results_layout.addWidget(self.batch_results_text)
+        
+        # Export buttons layout
+        export_buttons_layout = QHBoxLayout()
+        
+        # Export to pickle button
+        export_pickle_btn = QPushButton("Export to Pickle")
+        export_pickle_btn.clicked.connect(self.export_batch_results)
+        export_pickle_btn.setToolTip("Export results to pickle file for advanced analysis modules")
+        export_buttons_layout.addWidget(export_pickle_btn)
+        
+        # Export to CSV button
+        export_csv_btn = QPushButton("Export to CSV")
+        export_csv_btn.clicked.connect(self.export_batch_to_csv)
+        export_csv_btn.setToolTip("Export comprehensive CSV files with peak parameters, backgrounds, and residuals")
+        export_buttons_layout.addWidget(export_csv_btn)
+        
+        results_layout.addLayout(export_buttons_layout)
+        
+        # Monitor control buttons
+        monitor_buttons_layout = QHBoxLayout()
+        
+        # Reopen monitor button
+        reopen_monitor_btn = QPushButton("🔍 View Results Monitor")
+        reopen_monitor_btn.clicked.connect(self.reopen_batch_monitor)
+        reopen_monitor_btn.setToolTip("Reopen the batch processing monitor to view results")
+        monitor_buttons_layout.addWidget(reopen_monitor_btn)
+        
+        results_layout.addLayout(monitor_buttons_layout)
+        
+        layout.addWidget(results_group)
+        
+        layout.addStretch()
+        return tab
+    
+    def create_advanced_tab(self):
+        """Create advanced analysis tab with module launchers."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Header
+        header_label = QLabel("🔬 Advanced Analysis Modules")
+        header_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px;")
+        layout.addWidget(header_label)
+        
+        # Description
+        desc_label = QLabel("Launch specialized analysis modules that work with pickle files from batch processing:")
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        layout.addWidget(desc_label)
+        
+        # Module launchers
+        modules_group = QGroupBox("Analysis Modules")
+        modules_layout = QVBoxLayout(modules_group)
+        
+        # Deconvolution launcher
+        deconv_btn = QPushButton("🔧 Spectral Deconvolution")
+        deconv_btn.setToolTip("Launch advanced spectral deconvolution tools")
+        deconv_btn.clicked.connect(self.launch_deconvolution_module)
+        modules_layout.addWidget(deconv_btn)
+        
+        # Batch data analysis launcher
+        batch_analysis_btn = QPushButton("📈 Batch Data Analysis")
+        batch_analysis_btn.setToolTip("Analyze batch processing results with advanced statistics")
+        batch_analysis_btn.clicked.connect(self.launch_batch_analysis_module)
+        modules_layout.addWidget(batch_analysis_btn)
+        
+        # Geothermometry launcher
+        geotherm_btn = QPushButton("🌡️ Geothermometry Analysis")
+        geotherm_btn.setToolTip("Temperature analysis based on Raman spectra")
+        geotherm_btn.clicked.connect(self.launch_geothermometry_module)
+        modules_layout.addWidget(geotherm_btn)
+        
+        # Density analysis launcher
+        density_btn = QPushButton("⚖️ Density Analysis")
+        density_btn.setToolTip("Fluid density analysis from Raman spectra")
+        density_btn.clicked.connect(self.launch_density_module)
+        modules_layout.addWidget(density_btn)
+        
+        # Map analysis launcher
+        map_analysis_btn = QPushButton("🗺️ 2D Map Analysis")
+        map_analysis_btn.setToolTip("Analyze 2D Raman mapping data")
+        map_analysis_btn.clicked.connect(self.launch_map_analysis_module)
+        modules_layout.addWidget(map_analysis_btn)
+        
+        layout.addWidget(modules_group)
+        
+        # Data management section
+        data_group = QGroupBox("📁 Data Management")
+        data_layout = QVBoxLayout(data_group)
+        
+        # Data file selection
+        data_file_layout = QHBoxLayout()
+        
+        self.data_file_label = QLabel("No pickle file selected")
+        self.data_file_label.setStyleSheet("color: #666; font-style: italic;")
+        data_file_layout.addWidget(self.data_file_label)
+        
+        select_data_btn = QPushButton("Select Pickle File")
+        select_data_btn.clicked.connect(self.select_batch_data_file)
+        data_file_layout.addWidget(select_data_btn)
+        
+        data_layout.addLayout(data_file_layout)
+        
+        # Data preview
+        self.data_preview_text = QTextEdit()
+        self.data_preview_text.setReadOnly(True)
+        self.data_preview_text.setMaximumHeight(80)
+        self.data_preview_text.setPlainText("Select a pickle file to preview its contents...")
+        data_layout.addWidget(self.data_preview_text)
+        
+        layout.addWidget(data_group)
+        
+        layout.addStretch()
+        return tab
 
     # Implementation methods
     def initial_plot(self):
@@ -2037,6 +2958,31 @@ class SpectralDeconvolutionQt6(QDialog):
         if hasattr(self, 'prominence_slider') and hasattr(self, 'prominence_label'):
             value = self.prominence_slider.value()
             self.prominence_label.setText(f"{value}%")
+    
+    def apply_peak_preset(self, height, distance, prominence):
+        """Apply preset peak detection parameters."""
+        # Set slider values
+        if hasattr(self, 'height_slider'):
+            self.height_slider.setValue(height)
+        if hasattr(self, 'distance_slider'):
+            self.distance_slider.setValue(distance)
+        if hasattr(self, 'prominence_slider'):
+            self.prominence_slider.setValue(prominence)
+        
+        # Update labels
+        if hasattr(self, 'height_label'):
+            self.height_label.setText(f"{height}%")
+        if hasattr(self, 'distance_label'):
+            self.distance_label.setText(str(distance))
+        if hasattr(self, 'prominence_label'):
+            self.prominence_label.setText(f"{prominence}%")
+        
+        # Trigger peak detection update
+        self._trigger_peak_update()
+        
+        # Provide feedback in status bar
+        self.update_status_bar()
+        print(f"Applied preset: Height={height}%, Distance={distance}, Prominence={prominence}%")
     
     def detect_peaks(self):
         """Detect peaks in the spectrum (legacy method - now calls debounced detection)."""
@@ -4085,6 +5031,757 @@ class SpectralDeconvolutionQt6(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to remove peak: {str(e)}")
+    
+    # ==================== BATCH PROCESSING METHODS ====================
+    
+    def add_batch_files(self):
+        """Add files to the batch processing list."""
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Select Spectrum Files", "", 
+            "Spectrum Files (*.txt *.csv *.dat *.asc *.spc *.xy *.tsv);;All Files (*)"
+        )
+        
+        for file_path in files:
+            if file_path not in [self.batch_file_list.item(i).data(Qt.UserRole) 
+                                for i in range(self.batch_file_list.count())]:
+                item = QListWidgetItem(Path(file_path).name)
+                item.setData(Qt.UserRole, file_path)
+                self.batch_file_list.addItem(item)
+    
+    def add_batch_folder(self):
+        """Add all spectrum files from a folder to the batch processing list."""
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder with Spectrum Files")
+        if not folder:
+            return
+        
+        # Find supported spectrum files
+        supported_extensions = ['.txt', '.csv', '.dat', '.asc', '.spc', '.xy', '.tsv']
+        files = []
+        for ext in supported_extensions:
+            files.extend(Path(folder).glob(f"*{ext}"))
+        
+        added_count = 0
+        for file_path in files:
+            file_str = str(file_path)
+            if file_str not in [self.batch_file_list.item(i).data(Qt.UserRole) 
+                               for i in range(self.batch_file_list.count())]:
+                item = QListWidgetItem(file_path.name)
+                item.setData(Qt.UserRole, file_str)
+                self.batch_file_list.addItem(item)
+                added_count += 1
+        
+        QMessageBox.information(self, "Files Added", f"Added {added_count} files from {folder}")
+    
+    def clear_batch_files(self):
+        """Clear the batch file list."""
+        self.batch_file_list.clear()
+    
+    def add_batch_region(self):
+        """Add a region to the batch processing list."""
+        start = self.region_start_spin.value()
+        end = self.region_end_spin.value()
+        
+        if start >= end:
+            QMessageBox.warning(self, "Invalid Region", "Start wavenumber must be less than end wavenumber.")
+            return
+        
+        region_text = f"{start:.1f} - {end:.1f} cm⁻¹"
+        item = QListWidgetItem(region_text)
+        item.setData(Qt.UserRole, (start, end))
+        self.batch_regions_list.addItem(item)
+    
+    def clear_batch_regions(self):
+        """Clear the batch regions list."""
+        self.batch_regions_list.clear()
+    
+    def update_region_ranges_from_data(self, wavenumbers):
+        """Update region spinbox ranges based on actual data range."""
+        if len(wavenumbers) == 0:
+            return None, None
+            
+        min_wave = float(np.min(wavenumbers))
+        max_wave = float(np.max(wavenumbers))
+        
+        # Add small buffer
+        range_buffer = (max_wave - min_wave) * 0.05
+        min_range = max(0, min_wave - range_buffer)
+        max_range = max_wave + range_buffer
+        
+        # Update spinbox ranges
+        self.region_start_spin.setRange(min_range, max_range)
+        self.region_end_spin.setRange(min_range, max_range)
+        
+        # Update default values to reasonable ranges within the data
+        range_span = max_wave - min_wave
+        default_start = min_wave + range_span * 0.1  # Start at 10% into the range
+        default_end = min_wave + range_span * 0.9    # End at 90% into the range
+        
+        self.region_start_spin.setValue(default_start)
+        self.region_end_spin.setValue(default_end)
+        
+        return min_wave, max_wave
+    
+    def start_batch_processing(self):
+        """Start batch processing with current parameters and real-time monitoring."""
+        # Check if files are selected
+        if self.batch_file_list.count() == 0:
+            QMessageBox.warning(self, "No Files", "Please add files to process.")
+            return
+        
+        # Get current fitting parameters
+        try:
+            bg_params = self.get_fallback_background_parameters()
+            peak_params = self.get_peak_parameters()
+            
+            # Get regions
+            regions = []
+            for i in range(self.batch_regions_list.count()):
+                item = self.batch_regions_list.item(i)
+                start, end = item.data(Qt.UserRole)
+                regions.append((start, end))
+            
+            # If no regions specified, determine full spectrum range from first file
+            default_region_calculated = False
+            if not regions:
+                regions = None  # Will be set after loading first file
+            
+            # Create and show the real-time monitor
+            self.batch_monitor = BatchProcessingMonitor(self)
+            self.batch_monitor.show()
+            
+            # Store reference for reopening
+            self.last_batch_monitor = self.batch_monitor
+            
+            # Connect monitor signals
+            self.batch_monitor.processing_cancelled.connect(self._on_batch_cancelled)
+            self.batch_monitor.save_results_requested.connect(self.export_batch_results)
+            
+            # Show progress
+            self.batch_progress_bar.setVisible(True)
+            self.batch_progress_bar.setMaximum(self.batch_file_list.count())
+            self.batch_progress_bar.setValue(0)
+            
+            # Process files with real-time monitoring
+            results = []
+            total_peaks_found = 0
+            
+            for i in range(self.batch_file_list.count()):
+                # Check if processing was cancelled
+                if hasattr(self, 'batch_monitor') and self.batch_monitor.is_cancelled:
+                    break
+                    
+                item = self.batch_file_list.item(i)
+                file_path = item.data(Qt.UserRole)
+                
+                # Update monitor progress
+                self.batch_monitor.update_progress(i, self.batch_file_list.count(), file_path)
+                
+                try:
+                    start_time = time.time()
+                    
+                    # Load spectrum
+                    if FILE_LOADING_AVAILABLE:
+                        wavenumbers, intensities, metadata = load_spectrum_file(file_path)
+                        # Check if loading was successful
+                        if wavenumbers is None or intensities is None:
+                            error_msg = metadata.get("error", "Unknown error occurred")
+                            raise Exception(f"Failed to load spectrum: {error_msg}")
+                    else:
+                        # Fallback loading
+                        data = np.loadtxt(file_path)
+                        if data.ndim == 1:
+                            raise Exception("File must contain at least 2 columns (wavenumbers and intensities)")
+                        elif data.shape[1] < 2:
+                            raise Exception("File must contain at least 2 columns (wavenumbers and intensities)")
+                        wavenumbers = data[:, 0]
+                        intensities = data[:, 1]
+                    
+                    # Set default region based on first file if no regions specified
+                    if regions is None and not default_region_calculated:
+                        min_wave, max_wave = self.update_region_ranges_from_data(wavenumbers)
+                        if min_wave is not None and max_wave is not None:
+                            regions = [(min_wave, max_wave)]
+                            default_region_calculated = True
+                            print(f"Auto-detected spectrum range: {min_wave:.1f} - {max_wave:.1f} cm⁻¹")
+                        else:
+                            regions = [(0, 4000)]  # Fallback if range detection fails
+                    
+                    # Process each region
+                    file_results = {
+                        'filename': Path(file_path).name,
+                        'filepath': file_path,
+                        'regions': []
+                    }
+                    
+                    file_peaks_count = 0
+                    
+                    for region_idx, (start, end) in enumerate(regions):
+                        # Check pause/cancel state
+                        if hasattr(self, 'batch_monitor'):
+                            self.batch_monitor.wait_if_paused()
+                            if self.batch_monitor.is_cancelled:
+                                break
+                        
+                        # Update region info
+                        self.batch_monitor.update_region_info(start, end, region_idx, len(regions))
+                        
+                        # Filter data to region
+                        mask = (wavenumbers >= start) & (wavenumbers <= end)
+                        region_wave = wavenumbers[mask]
+                        region_int = intensities[mask]
+                        
+                        if len(region_wave) < 10:  # Skip very small regions
+                            continue
+                        
+                        # Store original intensities for plotting
+                        original_region_int = region_int.copy()
+                        background = None
+                        
+                        # Apply background correction if requested
+                        if self.batch_background_checkbox.isChecked():
+                            baseline_fitter = self._get_baseline_fitter()
+                            background = baseline_fitter.baseline_als(
+                                region_int, 
+                                bg_params.get('lambda', 1e5),
+                                bg_params.get('p', 0.01), 
+                                bg_params.get('niter', 10)
+                            )
+                            region_int = region_int - background
+                        
+                        # Auto-detect peaks if requested
+                        peaks = None
+                        fitted_peaks = None
+                        residuals = None
+                        fit_params = None
+                        total_r2 = None
+                        
+                        if self.batch_auto_peaks_checkbox.isChecked():
+                            peaks, _ = find_peaks(
+                                region_int, 
+                                height=peak_params.get('height', 0.1) * np.max(region_int),
+                                distance=peak_params.get('distance', 10),
+                                prominence=peak_params.get('prominence', 0.05) * np.max(region_int)
+                            )
+                            if peaks is not None and len(peaks) > 0:
+                                file_peaks_count += len(peaks)
+                                
+                                # PERFORM PEAK FITTING (not just detection)
+                                try:
+                                    fitted_peaks, fit_params, total_r2, residuals = self._fit_peaks_for_batch(
+                                        region_wave, region_int, peaks, peak_params
+                                    )
+                                    print(f"✅ Fitted {len(peaks)} peaks in {Path(file_path).name}, R² = {total_r2:.3f}")
+                                except Exception as e:
+                                    print(f"⚠️ Peak fitting failed for {Path(file_path).name}: {str(e)}")
+                                    fitted_peaks = None
+                                    residuals = region_int.copy()  # No fitting, show original
+                        
+                        # Update real-time plot with fitted peaks and residuals
+                        self.batch_monitor.update_spectrum_plot(
+                            region_wave, original_region_int, 
+                            background=background, peaks=peaks,
+                            region_start=start, region_end=end,
+                            full_wavenumbers=wavenumbers, full_intensities=intensities,
+                            fitted_peaks=fitted_peaks, residuals=residuals
+                        )
+                        
+                        # Store result for navigation after completion
+                        self.batch_monitor.store_processing_result(
+                            region_wave, original_region_int, background, peaks,
+                            start, end, Path(file_path).name,
+                            full_wavenumbers=wavenumbers, full_intensities=intensities,
+                            fitted_peaks=fitted_peaks, residuals=residuals
+                        )
+                        
+                        # Allow GUI to update
+                        QApplication.processEvents()
+                        
+                        # Small delay to see the visualization
+                        time.sleep(0.1)
+                        
+                        region_result = {
+                            'start': start,
+                            'end': end,
+                            'wavenumbers': region_wave,
+                            'intensities': region_int,
+                            'peaks': peaks,
+                            'fitted_peaks': fitted_peaks,
+                            'fit_params': fit_params,
+                            'residuals': residuals,
+                            'total_r2': total_r2,
+                            'background_params': bg_params,
+                            'peak_params': peak_params
+                        }
+                        
+                        file_results['regions'].append(region_result)
+                    
+                    # Check if cancelled during region processing
+                    if hasattr(self, 'batch_monitor') and self.batch_monitor.is_cancelled:
+                        break
+                    
+                    results.append(file_results)
+                    total_peaks_found += file_peaks_count
+                    
+                    # Update statistics
+                    processing_time = time.time() - start_time
+                    self.batch_monitor.update_statistics(
+                        i, file_peaks_count, processing_time, 
+                        total_peaks_found, self.batch_file_list.count()
+                    )
+                    
+                except Exception as e:
+                    error_msg = f"Error processing {file_path}: {str(e)}"
+                    QMessageBox.warning(self, "Processing Error", error_msg)
+                    print(f"Batch processing error: {error_msg}")
+                
+                # Update progress
+                self.batch_progress_bar.setValue(i + 1)
+            
+            # Store results for export
+            self.batch_results = results
+            
+            # Update results display
+            total_files = len(results)
+            total_regions = sum(len(r['regions']) for r in results)
+            
+            results_text = f"Batch Processing Complete!\n"
+            results_text += f"Files processed: {total_files}\n"
+            results_text += f"Regions analyzed: {total_regions}\n"
+            results_text += f"Peaks detected: {total_peaks_found}\n"
+            
+            self.batch_results_text.setPlainText(results_text)
+            self.batch_progress_bar.setVisible(False)
+            
+            # Show completion message if not cancelled
+            if not (hasattr(self, 'batch_monitor') and self.batch_monitor.is_cancelled):
+                # Signal completion to monitor
+                self.batch_monitor.processing_completed()
+                
+                QMessageBox.information(self, "Batch Complete", 
+                                      f"Batch processing completed successfully!\n\n"
+                                      f"Processed {total_files} files\n"
+                                      f"Found {total_peaks_found} peaks total\n"
+                                      f"Analyzed {total_regions} regions")
+            
+        except Exception as e:
+            error_msg = str(e)
+            QMessageBox.critical(self, "Batch Error", f"Batch processing failed: {error_msg}")
+            self.batch_progress_bar.setVisible(False)
+            if hasattr(self, 'batch_monitor'):
+                self.batch_monitor.processing_failed(error_msg)
+    
+    def _fit_peaks_for_batch(self, wavenumbers, intensities, peaks, peak_params):
+        """
+        Fit peaks for batch processing.
+        
+        Args:
+            wavenumbers: Region wavenumbers
+            intensities: Region intensities (background-corrected)
+            peaks: Peak indices
+            peak_params: Peak detection parameters
+            
+        Returns:
+            tuple: (fitted_peaks, fit_params, total_r2, residuals)
+        """
+        if len(peaks) == 0:
+            return None, None, None, intensities.copy()
+            
+        # Create initial parameter guesses
+        initial_params = []
+        bounds_lower = []
+        bounds_upper = []
+        
+        for peak_idx in peaks:
+            if 0 <= peak_idx < len(intensities):
+                # Amplitude: Use actual intensity at peak
+                amp = intensities[peak_idx]
+                
+                # Center: Use wavenumber at peak
+                cen = wavenumbers[peak_idx]
+                
+                # Width: Estimate from local curvature
+                wid = self._estimate_peak_width_for_batch(wavenumbers, intensities, peak_idx)
+                
+                initial_params.extend([amp, cen, wid])
+                
+                # Set reasonable bounds
+                bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
+                bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
+        
+        if not initial_params:
+            return None, None, None, intensities.copy()
+        
+        # Get current model
+        current_model = peak_params.get('model', 'gaussian')
+        
+        # Define fitting strategies
+        strategies = [
+            {
+                'p0': initial_params,
+                'bounds': (bounds_lower, bounds_upper),
+                'method': 'trf',
+                'max_nfev': 1000
+            },
+            {
+                'p0': initial_params,
+                'bounds': ([b * 0.5 for b in bounds_lower], [b * 1.5 for b in bounds_upper]),
+                'method': 'lm',
+                'max_nfev': 500
+            },
+            {
+                'p0': initial_params,
+                'method': 'lm',
+                'max_nfev': 1000
+            }
+        ]
+        
+        # Try fitting with different strategies
+        for strategy in strategies:
+            try:
+                if 'bounds' in strategy:
+                    popt, pcov = curve_fit(
+                        lambda x, *params: self._multi_peak_model_for_batch(x, params, current_model),
+                        wavenumbers, intensities,
+                        p0=strategy['p0'],
+                        bounds=strategy['bounds'],
+                        method=strategy['method'],
+                        max_nfev=strategy['max_nfev']
+                    )
+                else:
+                    popt, pcov = curve_fit(
+                        lambda x, *params: self._multi_peak_model_for_batch(x, params, current_model),
+                        wavenumbers, intensities,
+                        p0=strategy['p0'],
+                        method=strategy['method'],
+                        max_nfev=strategy['max_nfev']
+                    )
+                
+                # Calculate fitted curve and residuals
+                fitted_curve = self._multi_peak_model_for_batch(wavenumbers, popt, current_model)
+                residuals = intensities - fitted_curve
+                
+                # Calculate R-squared
+                ss_res = np.sum(residuals ** 2)
+                ss_tot = np.sum((intensities - np.mean(intensities)) ** 2)
+                total_r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+                
+                return fitted_curve, popt, total_r2, residuals
+                
+            except Exception as e:
+                continue
+        
+        # If all strategies failed, return None
+        return None, None, None, intensities.copy()
+    
+    def _multi_peak_model_for_batch(self, x, params, model='gaussian'):
+        """Multi-peak model for batch processing."""
+        if len(params) % 3 != 0:
+            raise ValueError("Parameters must be multiples of 3 (amp, cen, wid)")
+        
+        n_peaks = len(params) // 3
+        y = np.zeros_like(x)
+        
+        for i in range(n_peaks):
+            amp = params[i * 3]
+            cen = params[i * 3 + 1]
+            wid = params[i * 3 + 2]
+            
+            if model == 'gaussian':
+                y += amp * np.exp(-(x - cen)**2 / (2 * wid**2))
+            elif model == 'lorentzian':
+                y += amp * (wid**2 / ((x - cen)**2 + wid**2))
+            elif model == 'pseudo_voigt':
+                eta = 0.5  # Default mixing parameter
+                gaussian_part = np.exp(-(x - cen)**2 / (2 * wid**2))
+                lorentzian_part = wid**2 / ((x - cen)**2 + wid**2)
+                y += amp * ((1 - eta) * gaussian_part + eta * lorentzian_part)
+            else:
+                # Default to gaussian
+                y += amp * np.exp(-(x - cen)**2 / (2 * wid**2))
+        
+        return y
+    
+    def _estimate_peak_width_for_batch(self, wavenumbers, intensities, peak_idx):
+        """Estimate peak width for batch processing."""
+        try:
+            # Look at points around the peak
+            window = min(20, len(intensities) // 4)  # Adaptive window
+            start_idx = max(0, peak_idx - window)
+            end_idx = min(len(intensities), peak_idx + window + 1)
+            
+            local_intensities = intensities[start_idx:end_idx]
+            local_wavenumbers = wavenumbers[start_idx:end_idx]
+            
+            peak_intensity = intensities[peak_idx]
+            half_max = peak_intensity / 2
+            
+            # Find FWHM
+            above_half = local_intensities > half_max
+            if np.any(above_half):
+                indices = np.where(above_half)[0]
+                if len(indices) > 1:
+                    fwhm_indices = [indices[0], indices[-1]]
+                    fwhm = abs(local_wavenumbers[fwhm_indices[1]] - local_wavenumbers[fwhm_indices[0]])
+                    # Convert FWHM to Gaussian sigma
+                    width = fwhm / (2 * np.sqrt(2 * np.log(2)))
+                    return max(width, 5.0)
+            
+            # Fallback: estimate based on wavenumber spacing
+            if len(wavenumbers) > 1:
+                wavenumber_spacing = np.mean(np.diff(wavenumbers))
+                return max(10 * wavenumber_spacing, 5.0)
+            
+            return 10.0
+            
+        except Exception:
+            return 10.0
+
+    def _on_batch_cancelled(self):
+        """Handle batch processing cancellation."""
+        self.batch_progress_bar.setVisible(False)
+        QMessageBox.information(self, "Batch Cancelled", "Batch processing was cancelled by user.")
+    
+    def export_batch_results(self):
+        """Export batch results to a pickle file."""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            QMessageBox.warning(self, "No Results", "No batch results to export. Please run batch processing first.")
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Batch Results", "batch_results.pkl", 
+            "Pickle Files (*.pkl);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                import pickle
+                with open(file_path, 'wb') as f:
+                    pickle.dump(self.batch_results, f)
+                
+                QMessageBox.information(self, "Export Complete", f"Batch results exported to {file_path}")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export results: {str(e)}")
+    
+    def export_batch_to_csv(self):
+        """Export batch results to comprehensive CSV files from the batch tab."""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            QMessageBox.warning(self, "No Results", "No batch results to export. Please run batch processing first.")
+            return
+        
+        # Check if the monitor has results
+        if hasattr(self, 'last_batch_monitor') and self.last_batch_monitor:
+            if self.last_batch_monitor.stored_results:
+                # Use the monitor's CSV export functionality
+                self.last_batch_monitor.export_to_csv()
+                return
+        
+        # Fallback: create monitor-style export from batch_results
+        save_dir = QFileDialog.getExistingDirectory(
+            self, "Select Directory for CSV Export", "", 
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        
+        if not save_dir:
+            return
+        
+        try:
+            self._convert_batch_results_to_csv(save_dir)
+            QMessageBox.information(self, "Export Complete", 
+                                  f"CSV files exported successfully to:\n{save_dir}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export CSV: {str(e)}")
+    
+    def _convert_batch_results_to_csv(self, save_dir):
+        """Convert batch_results to CSV format (fallback method)."""
+        save_path = Path(save_dir)
+        
+        peak_data = []
+        summary_data = []
+        
+        for file_result in self.batch_results:
+            filename = file_result['filename']
+            
+            for region_result in file_result['regions']:
+                region_start = region_result['start']
+                region_end = region_result['end']
+                peaks = region_result.get('peaks')
+                fit_params = region_result.get('fit_params')
+                total_r2 = region_result.get('total_r2')
+                
+                n_peaks = len(peaks) if peaks is not None else 0
+                
+                # Add to summary
+                summary_data.append({
+                    'Filename': filename,
+                    'Region_Start': region_start,
+                    'Region_End': region_end,
+                    'Number_of_Peaks': n_peaks,
+                    'Total_R2': total_r2,
+                    'Fitting_Success': 'Yes' if total_r2 is not None else 'No'
+                })
+                
+                # Add peak parameters if available
+                if peaks is not None and fit_params is not None:
+                    for i in range(n_peaks):
+                        if i * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[i * 3]
+                            center = fit_params[i * 3 + 1]
+                            width = fit_params[i * 3 + 2]
+                            
+                            # Calculate FWHM and area
+                            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                            area = amplitude * width * np.sqrt(2 * np.pi)
+                            
+                            peak_data.append({
+                                'Filename': filename,
+                                'Region_Start': region_start,
+                                'Region_End': region_end,
+                                'Peak_Number': i + 1,
+                                'Center_cm-1': center,
+                                'Amplitude': amplitude,
+                                'Width_Sigma': width,
+                                'FWHM': fwhm,
+                                'Area': area,
+                                'Total_R2': total_r2 if i == 0 else ''
+                            })
+        
+        # Save CSV files
+        if peak_data:
+            peak_df = pd.DataFrame(peak_data)
+            peak_df.to_csv(save_path / 'batch_peak_parameters.csv', index=False)
+            print(f"✅ Saved peak parameters: {len(peak_data)} peaks")
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_csv(save_path / 'batch_summary.csv', index=False)
+            print(f"✅ Saved summary: {len(summary_data)} files processed")
+    
+    def reopen_batch_monitor(self):
+        """Reopen the batch processing monitor if available."""
+        if hasattr(self, 'last_batch_monitor') and self.last_batch_monitor:
+            if self.last_batch_monitor.stored_results:
+                # Show the existing monitor
+                self.last_batch_monitor.show()
+                self.last_batch_monitor.raise_()
+                self.last_batch_monitor.activateWindow()
+            else:
+                QMessageBox.information(self, "No Results", 
+                                      "No batch processing results available to view.\n\n"
+                                      "Run batch processing first to view results in the monitor.")
+        else:
+            QMessageBox.information(self, "No Monitor", 
+                                  "No batch processing monitor available.\n\n"
+                                  "Run batch processing first to create a monitor.")
+    
+    # ==================== ADVANCED MODULE LAUNCHERS ====================
+    
+    def select_batch_data_file(self):
+        """Select a pickle file containing batch processing results."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Batch Results File", "", 
+            "Pickle Files (*.pkl);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                import pickle
+                with open(file_path, 'rb') as f:
+                    data = pickle.load(f)
+                
+                # Update label
+                self.data_file_label.setText(Path(file_path).name)
+                self.selected_data_file = file_path
+                
+                # Update preview
+                preview_text = f"Loaded: {Path(file_path).name}\n"
+                preview_text += f"Files: {len(data)}\n"
+                preview_text += f"Total regions: {sum(len(r['regions']) for r in data)}\n"
+                
+                self.data_preview_text.setPlainText(preview_text)
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", f"Failed to load pickle file: {str(e)}")
+    
+    def launch_deconvolution_module(self):
+        """Launch the deconvolution module."""
+        try:
+            # Create a new instance of the deconvolution tab content
+            deconv_dialog = QDialog(self)
+            deconv_dialog.setWindowTitle("Spectral Deconvolution")
+            deconv_dialog.setGeometry(100, 100, 800, 600)
+            
+            layout = QVBoxLayout(deconv_dialog)
+            deconv_content = self.create_deconvolution_tab()
+            layout.addWidget(deconv_content)
+            
+            deconv_dialog.exec()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to launch deconvolution module: {str(e)}")
+    
+    def launch_batch_analysis_module(self):
+        """Launch the batch data analysis module."""
+        try:
+            # Launch the integrated batch processing (already available in this application)
+            QMessageBox.information(self, "Batch Processing", 
+                                  "Batch processing is available in the 'Batch' tab of this application.\n\n"
+                                  "Use the Batch tab to:\n"
+                                  "• Add files or folders for batch processing\n"
+                                  "• Define analysis regions\n"
+                                  "• Configure background correction and peak detection\n"
+                                  "• Export results to pickle files for advanced analysis")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to launch batch analysis module: {str(e)}")
+    
+    def launch_geothermometry_module(self):
+        """Launch the geothermometry analysis module."""
+        try:
+            # Import and launch geothermometry
+            from raman_geothermometry import launch_geothermometry_analysis
+            
+            # Pass selected data file if available
+            data_file = getattr(self, 'selected_data_file', None)
+            launch_geothermometry_analysis(data_file)
+            
+        except ImportError:
+            QMessageBox.warning(self, "Module Not Available", 
+                              "Geothermometry module is not available.\n"
+                              "Please ensure raman_geothermometry.py is accessible.")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to launch geothermometry module: {str(e)}")
+    
+    def launch_density_module(self):
+        """Launch the density analysis module."""
+        try:
+            # Import and launch density analysis
+            from advanced_analysis.density_analysis import launch_density_analysis
+            
+            # Pass selected data file if available
+            data_file = getattr(self, 'selected_data_file', None)
+            launch_density_analysis(data_file)
+            
+        except ImportError:
+            QMessageBox.warning(self, "Module Not Available", 
+                              "Density analysis module is not available.\n"
+                              "Please ensure Density module is accessible.")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to launch density module: {str(e)}")
+    
+    def launch_map_analysis_module(self):
+        """Launch the 2D map analysis module."""
+        try:
+            # Import and launch map analysis
+            from map_analysis_2d.main import launch_map_analysis
+            launch_map_analysis()
+            
+        except ImportError:
+            QMessageBox.warning(self, "Module Not Available", 
+                              "2D Map Analysis module is not available.\n"
+                              "Please ensure map_analysis_2d is accessible.")
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Failed to launch map analysis module: {str(e)}")
 
 
 # Launch function for integration with main app

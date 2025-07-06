@@ -47,22 +47,7 @@ from PySide6.QtGui import QAction, QDesktopServices, QPixmap, QFont
 # Version info
 from version import __version__, __author__, __copyright__
 
-# Import batch peak fitting module (modular version) with enhanced error handling
-try:
-    from batch_peak_fitting.main import launch_batch_peak_fitting
-    BATCH_AVAILABLE = True
-    print("✅ Batch peak fitting module loaded successfully")
-except ImportError as e:
-    BATCH_AVAILABLE = False
-    print(f"⚠️  Warning: Batch peak fitting module not available: {e}")
-    print("   This may be due to:")
-    print("   • Missing core dependencies (run: python check_dependencies.py)")
-    print("   • Incorrect working directory (ensure you're in RamanLab root)")
-    print("   • Missing __init__.py files in batch_peak_fitting subdirectories")
-except Exception as e:
-    BATCH_AVAILABLE = False
-    print(f"❌ Error loading batch peak fitting module: {e}")
-    print("   Run 'python check_dependencies.py' for detailed diagnostics")
+
 
 # Import update checker
 # TEMPORARILY DISABLED to isolate threading issues
@@ -562,7 +547,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         layout.addWidget(auto_bg_group)
         
         # Peak detection group with real-time sliders
-        peak_group = QGroupBox("Peak Detection")
+        peak_group = QGroupBox("Peak Detection - Live Updates")
         peak_layout = QVBoxLayout(peak_group)
         
         # Height parameter
@@ -571,9 +556,12 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.height_slider = QSlider(Qt.Horizontal)
         self.height_slider.setRange(0, 100)
         self.height_slider.setValue(10)
+        self.height_slider.setTracking(True)  # Enable live tracking
         self.height_slider.valueChanged.connect(self.update_peak_detection)
+        self.height_slider.setToolTip("Minimum peak height as percentage of maximum intensity")
         height_layout.addWidget(self.height_slider)
         self.height_label = QLabel("10%")
+        self.height_label.setMinimumWidth(40)
         height_layout.addWidget(self.height_label)
         peak_layout.addLayout(height_layout)
         
@@ -583,9 +571,12 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.distance_slider = QSlider(Qt.Horizontal)
         self.distance_slider.setRange(1, 50)
         self.distance_slider.setValue(10)
+        self.distance_slider.setTracking(True)  # Enable live tracking
         self.distance_slider.valueChanged.connect(self.update_peak_detection)
+        self.distance_slider.setToolTip("Minimum distance between peaks (data points)")
         distance_layout.addWidget(self.distance_slider)
         self.distance_label = QLabel("10")
+        self.distance_label.setMinimumWidth(40)
         distance_layout.addWidget(self.distance_label)
         peak_layout.addLayout(distance_layout)
         
@@ -595,9 +586,12 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.prominence_slider = QSlider(Qt.Horizontal)
         self.prominence_slider.setRange(0, 50)
         self.prominence_slider.setValue(5)
+        self.prominence_slider.setTracking(True)  # Enable live tracking
         self.prominence_slider.valueChanged.connect(self.update_peak_detection)
+        self.prominence_slider.setToolTip("Minimum peak prominence as percentage of maximum intensity")
         prominence_layout.addWidget(self.prominence_slider)
         self.prominence_label = QLabel("5%")
+        self.prominence_label.setMinimumWidth(40)
         prominence_layout.addWidget(self.prominence_label)
         peak_layout.addLayout(prominence_layout)
         
@@ -634,9 +628,36 @@ class RamanAnalysisAppQt6(QMainWindow):
         clear_manual_btn.clicked.connect(self.clear_manual_peaks)
         peak_layout.addWidget(clear_manual_btn)
         
-        # Peak count display
+        # Peak count display with enhanced formatting
         self.peak_count_label = QLabel("Auto peaks: 0 | Manual peaks: 0")
+        self.peak_count_label.setStyleSheet("font-weight: bold; color: #333;")
         peak_layout.addWidget(self.peak_count_label)
+        
+        # Preset buttons for common peak detection settings
+        presets_layout = QHBoxLayout()
+        
+        sensitive_btn = QPushButton("Sensitive")
+        sensitive_btn.clicked.connect(lambda: self.apply_peak_preset(height=5, distance=5, prominence=2))
+        sensitive_btn.setToolTip("Detect more peaks - good for noisy spectra")
+        presets_layout.addWidget(sensitive_btn)
+        
+        balanced_btn = QPushButton("Balanced")
+        balanced_btn.clicked.connect(lambda: self.apply_peak_preset(height=10, distance=10, prominence=5))
+        balanced_btn.setToolTip("Balanced detection - good default settings")
+        presets_layout.addWidget(balanced_btn)
+        
+        strict_btn = QPushButton("Strict")
+        strict_btn.clicked.connect(lambda: self.apply_peak_preset(height=20, distance=20, prominence=10))
+        strict_btn.setToolTip("Detect only prominent peaks")
+        presets_layout.addWidget(strict_btn)
+        
+        peak_layout.addLayout(presets_layout)
+        
+        # Auto-detect toggle
+        self.auto_detect_peaks_checkbox = QCheckBox("Auto-detect peaks when loading spectra")
+        self.auto_detect_peaks_checkbox.setChecked(True)
+        self.auto_detect_peaks_checkbox.setToolTip("Automatically run peak detection when a new spectrum is loaded")
+        peak_layout.addWidget(self.auto_detect_peaks_checkbox)
         
         layout.addWidget(peak_group)
         
@@ -1210,6 +1231,12 @@ class RamanAnalysisAppQt6(QMainWindow):
             self.update_plot()
             self.update_info_display(file_path)
             
+            # Auto-trigger peak detection for newly loaded spectra
+            if (self.processed_intensities is not None and 
+                hasattr(self, 'auto_detect_peaks_checkbox') and 
+                self.auto_detect_peaks_checkbox.isChecked()):
+                self.update_peak_detection()
+            
         except Exception as e:
             raise Exception(f"Error reading file: {str(e)}")
 
@@ -1397,27 +1424,35 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self.ax.plot(self.current_wavenumbers, self.preview_smoothed, 'm-', linewidth=1.5, 
                             label='Smoothed (Preview)', alpha=0.8)
             
-            # Plot automatically detected peaks
+            # Plot automatically detected peaks with enhanced visualization
             if self.detected_peaks is not None and len(self.detected_peaks) > 0:
                 peak_positions = self.current_wavenumbers[self.detected_peaks]
                 peak_intensities = self.processed_intensities[self.detected_peaks]
-                self.ax.plot(peak_positions, peak_intensities, 'ro', markersize=6, 
-                            label=f'Auto Peaks ({len(self.detected_peaks)})')
                 
-                # Add peak position labels for auto peaks
-                for i, (pos, intensity) in enumerate(zip(peak_positions, peak_intensities)):
-                    # Offset the label slightly above the peak
-                    label_y = intensity + 0.08 * (np.max(self.processed_intensities) - np.min(self.processed_intensities))
-                    self.ax.annotate(f'{pos:.1f} cm⁻¹', 
-                                   xy=(pos, intensity), 
-                                   xytext=(pos, label_y),
-                                   ha='center', va='bottom',
-                                   fontsize=9, 
-                                   color='darkred',
-                                   fontweight='bold',
-                                   rotation=45,
-                                   bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow', alpha=0.9, edgecolor='red', linewidth=1.2),
-                                   arrowprops=dict(arrowstyle='->', color='red', lw=1.0, alpha=0.8))
+                # Main peak markers - larger and more prominent
+                self.ax.plot(peak_positions, peak_intensities, 'ro', markersize=8, 
+                            markerfacecolor='red', markeredgecolor='darkred', 
+                            markeredgewidth=2, label=f'Auto Peaks ({len(self.detected_peaks)})',
+                            zorder=5)
+                
+                # Add vertical lines to make peaks more visible
+                for pos, intensity in zip(peak_positions, peak_intensities):
+                    self.ax.axvline(x=pos, color='red', linestyle='--', alpha=0.5, linewidth=1)
+                
+                # Add peak position labels for auto peaks (show only if reasonable number of peaks)
+                if len(self.detected_peaks) <= 20:  # Only show labels if not too many peaks
+                    for i, (pos, intensity) in enumerate(zip(peak_positions, peak_intensities)):
+                        # Offset the label slightly above the peak
+                        label_y = intensity + 0.08 * (np.max(self.processed_intensities) - np.min(self.processed_intensities))
+                        self.ax.annotate(f'{pos:.1f}', 
+                                       xy=(pos, intensity), 
+                                       xytext=(pos, label_y),
+                                       ha='center', va='bottom',
+                                       fontsize=8, 
+                                       color='darkred',
+                                       fontweight='bold',
+                                       bbox=dict(boxstyle='round,pad=0.2', facecolor='lightyellow', alpha=0.9, edgecolor='red', linewidth=1),
+                                       arrowprops=dict(arrowstyle='->', color='red', lw=0.8, alpha=0.8))
             
             # Plot manual peaks
             if self.manual_peaks and len(self.manual_peaks) > 0:
@@ -2094,6 +2129,24 @@ class RamanAnalysisAppQt6(QMainWindow):
         auto_count = len(self.detected_peaks) if self.detected_peaks is not None else 0
         manual_count = len(self.manual_peaks)
         self.peak_count_label.setText(f"Auto peaks: {auto_count} | Manual peaks: {manual_count}")
+    
+    def apply_peak_preset(self, height, distance, prominence):
+        """Apply preset peak detection parameters."""
+        # Set slider values
+        self.height_slider.setValue(height)
+        self.distance_slider.setValue(distance)
+        self.prominence_slider.setValue(prominence)
+        
+        # Update labels
+        self.height_label.setText(f"{height}%")
+        self.distance_label.setText(str(distance))
+        self.prominence_label.setText(f"{prominence}%")
+        
+        # Update peak detection
+        self.update_peak_detection()
+        
+        # Provide feedback
+        self.status_bar.showMessage(f"Applied preset: Height={height}%, Distance={distance}, Prominence={prominence}%")
 
     def show_about(self):
         """Show about dialog."""
@@ -2336,15 +2389,18 @@ class RamanAnalysisAppQt6(QMainWindow):
         distance = self.distance_slider.value()
         prominence_percent = self.prominence_slider.value()
         
-        # Update labels
+        # Update labels with enhanced formatting
         self.height_label.setText(f"{height_percent}%")
         self.distance_label.setText(str(distance))
         self.prominence_label.setText(f"{prominence_percent}%")
         
         # Calculate actual values
         max_intensity = np.max(self.processed_intensities)
+        min_intensity = np.min(self.processed_intensities)
+        intensity_range = max_intensity - min_intensity
+        
         height_threshold = (height_percent / 100.0) * max_intensity if height_percent > 0 else None
-        prominence_threshold = (prominence_percent / 100.0) * max_intensity if prominence_percent > 0 else None
+        prominence_threshold = (prominence_percent / 100.0) * intensity_range if prominence_percent > 0 else None
         
         # Find peaks with current parameters
         try:
@@ -2358,18 +2414,19 @@ class RamanAnalysisAppQt6(QMainWindow):
             # Update peak count display
             self.update_peak_count_display()
             
-            # Debug: Print detected peak positions to console
+            # Update status bar with live feedback
             if len(self.detected_peaks) > 0:
                 peak_positions = self.current_wavenumbers[self.detected_peaks]
-                print(f"DEBUG: Detected {len(self.detected_peaks)} peaks at wavenumbers: {peak_positions}")
+                self.status_bar.showMessage(f"Found {len(self.detected_peaks)} peaks - Live updating...")
             else:
-                print("DEBUG: No peaks detected with current parameters")
+                self.status_bar.showMessage("No peaks detected with current parameters")
             
-            # Update plot
+            # Update plot with enhanced visualization
             self.update_plot()
             
         except Exception as e:
             self.peak_count_label.setText(f"Peak detection error: {str(e)}")
+            self.status_bar.showMessage(f"Peak detection error: {str(e)}")
             print(f"DEBUG: Peak detection error: {str(e)}")
 
     def apply_smoothing(self):
@@ -3805,11 +3862,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         deconvolution_btn.setStyleSheet(dark_blue_style)
         primary_layout.addWidget(deconvolution_btn)
         
-        # Batch peak fitting - always show the button, let dynamic check handle availability
-        batch_peak_fitting_btn = QPushButton("Batch Peak Fitting")
-        batch_peak_fitting_btn.clicked.connect(self.launch_batch_peak_fitting)
-        batch_peak_fitting_btn.setStyleSheet(dark_blue_style)
-        primary_layout.addWidget(batch_peak_fitting_btn)
+
         
 
         
@@ -4022,20 +4075,21 @@ class RamanAnalysisAppQt6(QMainWindow):
 
     def launch_deconvolution(self):
         """Launch spectral deconvolution tool."""
-        if self.current_wavenumbers is None or self.current_intensities is None:
-            QMessageBox.warning(self, "No Data", "Load a spectrum first to perform deconvolution.")
-            return
-            
         try:
             # Import and launch the Qt6 spectral deconvolution module
             from peak_fitting_qt6 import launch_spectral_deconvolution
             
-            # Launch with current spectrum data
-            launch_spectral_deconvolution(
-                self, 
-                self.current_wavenumbers, 
-                self.processed_intensities
-            )
+            # Launch with current spectrum data if available
+            if self.current_wavenumbers is not None and self.current_intensities is not None:
+                launch_spectral_deconvolution(
+                    self, 
+                    self.current_wavenumbers, 
+                    self.processed_intensities if self.processed_intensities is not None 
+                    else self.current_intensities
+                )
+            else:
+                # Launch without initial data - user can load files in the peak fitting interface
+                launch_spectral_deconvolution(self)
             
         except ImportError as e:
             QMessageBox.critical(
@@ -4083,73 +4137,11 @@ class RamanAnalysisAppQt6(QMainWindow):
 
 
 
-    def _check_batch_availability_dynamic(self):
-        """Dynamically check if batch peak fitting is available (re-test the import)."""
-        try:
-            import sys
-            
-            # Clear any cached imports to force fresh test
-            modules_to_clear = []
-            for module_name in sys.modules.keys():
-                if module_name.startswith('batch_peak_fitting'):
-                    modules_to_clear.append(module_name)
-            
-            for module_name in modules_to_clear:
-                if module_name in sys.modules:
-                    del sys.modules[module_name]
-            
-            # Try to import the module fresh
-            from batch_peak_fitting.main import launch_batch_peak_fitting
-            print("✅ Dynamic batch peak fitting import successful")
-            return True, launch_batch_peak_fitting
-        except ImportError as e:
-            print(f"❌ Dynamic batch peak fitting import failed: {e}")
-            return False, None
-        except Exception as e:
-            print(f"❌ Dynamic batch peak fitting import error: {e}")
-            return False, None
 
-    def launch_batch_peak_fitting(self):
-        """Launch the modular batch peak fitting application with dynamic availability check."""
-        # Dynamically check availability rather than relying on startup flag
-        is_available, launch_func = self._check_batch_availability_dynamic()
-        
-        if not is_available:
-            QMessageBox.warning(
-                self, 
-                "Module Not Available", 
-                "Batch peak fitting module is not available.\n\n"
-                "Common causes:\n"
-                "• Missing core dependencies (especially 'chardet')\n"
-                "• Incorrect working directory\n"
-                "• Missing __init__.py files\n"
-                "• Python path configuration issues\n\n"
-                "Solutions:\n"
-                "1. Run 'python check_dependencies.py' in terminal for diagnosis\n"
-                "2. Install missing dependencies: pip install chardet\n"
-                "3. Ensure you launched RamanLab from the root directory\n"
-                "4. If you fixed dependencies, try this button again\n"
-                "5. Restart RamanLab if problems persist"
-            )
-            return
-        
-        try:
-            # Launch batch peak fitting with current spectrum data if available
-            if self.current_wavenumbers is not None and self.current_intensities is not None:
-                launch_func(self, self.current_wavenumbers, 
-                           self.processed_intensities if self.processed_intensities is not None 
-                           else self.current_intensities)
-            else:
-                # Launch without initial data - user can load files in the batch interface
-                launch_func(self)
-                
-        except Exception as e:
-            QMessageBox.critical(
-                self, 
-                "Launch Error", 
-                f"Failed to launch batch peak fitting:\n{str(e)}\n\n"
-                "Run 'python check_dependencies.py' in terminal for diagnosis."
-            )
+
+
+
+
 
     def launch_map_analysis(self):
         """Launch Raman mapping analysis tool."""

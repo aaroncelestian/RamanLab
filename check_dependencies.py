@@ -453,22 +453,19 @@ def check_file_structure():
     ramanlab_root = Path.cwd()
     print(f"🔍 Checking from: {ramanlab_root}")
     
-    # Core files that must exist
+    # Core files that must exist in the new integrated architecture
     required_files = [
         'core/__init__.py',
         'core/config_manager.py',
         'core/peak_fitting.py',
         'core/peak_fitting_ui.py',
-        'batch_peak_fitting/__init__.py',
-        'batch_peak_fitting/main.py',
-        'batch_peak_fitting/core/__init__.py',
-        'batch_peak_fitting/core/data_processor.py',
-        'batch_peak_fitting/ui/__init__.py',
-        'batch_peak_fitting/ui/ui_manager.py',
-        'batch_peak_fitting/ui/tabs/__init__.py',
-        'batch_peak_fitting/ui/visualization/__init__.py',
-        'batch_peak_fitting/analysis/__init__.py',
-        'batch_peak_fitting/utils/__init__.py'
+        'peak_fitting_qt6.py',
+        'advanced_analysis/__init__.py',
+        'advanced_analysis/density_analysis.py',
+        'advanced_analysis/batch_geothermometry_analysis.py',
+        'advanced_analysis/raman_density_analysis.py',
+        'utils/__init__.py',
+        'utils/file_loaders.py'
     ]
     
     missing_files = []
@@ -574,14 +571,14 @@ def test_core_imports():
     return core_success
 
 def test_batch_peak_fitting_imports():
-    """Test if batch peak fitting modules can be imported."""
-    print_section("Batch Peak Fitting Import Test")
+    """Test if integrated peak fitting and advanced analysis modules can be imported."""
+    print_section("Integrated Peak Fitting Import Test")
     
     batch_modules = [
-        ('batch_peak_fitting', 'Main batch peak fitting package'),
-        ('batch_peak_fitting.main', 'Main controller'),
-        ('batch_peak_fitting.core.data_processor', 'Data processing'),
-        ('batch_peak_fitting.ui.ui_manager', 'UI management'),
+        ('peak_fitting_qt6', 'Integrated peak fitting with batch processing'),
+        ('advanced_analysis.density_analysis', 'Density analysis module'),
+        ('advanced_analysis.batch_geothermometry_analysis', 'Geothermometry analysis'),
+        ('advanced_analysis.raman_density_analysis', 'Raman density analysis core'),
     ]
     
     batch_success = True
@@ -601,19 +598,19 @@ def test_batch_peak_fitting_imports():
     return batch_success
 
 def test_launch_function():
-    """Test if the batch peak fitting launch function can be imported and called."""
-    print_section("Launch Function Test")
+    """Test if the integrated peak fitting module can be imported."""
+    print_section("Integrated Peak Fitting Test")
     
     try:
-        from batch_peak_fitting.main import launch_batch_peak_fitting
-        print("✅ launch_batch_peak_fitting function imported successfully")
+        from peak_fitting_qt6 import SpectralDeconvolutionQt6
+        print("✅ Integrated peak fitting module (peak_fitting_qt6) imported successfully")
         
-        # Test if function can be called (but don't actually launch)
-        print("ℹ️  Function is ready to be called")
+        # Test if class can be instantiated (but don't actually launch)
+        print("ℹ️  Module is ready for batch processing")
         return True
         
     except ImportError as e:
-        print(f"❌ Cannot import launch_batch_peak_fitting: {e}")
+        print(f"❌ Cannot import peak_fitting_qt6: {e}")
         return False
     except Exception as e:
         print(f"⚠️  Warning during import: {e}")
@@ -627,7 +624,7 @@ def provide_troubleshooting_tips():
     print("")
     print("1. 📁 Working Directory:")
     print("   • Ensure you're running from the RamanLab root directory")
-    print("   • The directory should contain both 'core' and 'batch_peak_fitting' folders")
+    print("   • The directory should contain 'core', 'advanced_analysis', and 'peak_fitting_qt6.py'")
     print("")
     print("2. 🐍 Python Path:")
     print("   • Run: python -c \"import sys; print(sys.path[0])\"")
@@ -638,7 +635,7 @@ def provide_troubleshooting_tips():
     print("   • For conda: conda install numpy scipy pandas matplotlib")
     print("")
     print("4. 📁 File Permissions:")
-    print("   • Check file permissions: ls -la core/ batch_peak_fitting/")
+    print("   • Check file permissions: ls -la core/ advanced_analysis/")
     print("   • Ensure __init__.py files are readable")
     print("")
     print("5. 🔄 Git Repository:")
@@ -654,7 +651,7 @@ def provide_troubleshooting_tips():
 def main():
     """Run all dependency checks."""
     print_header("RamanLab Dependency Checker")
-    print("This tool checks for common issues with the batch peak fitting module")
+    print("This tool checks for common issues with the integrated peak fitting and analysis modules")
     
     # Run all checks
     checks = [
@@ -662,8 +659,8 @@ def main():
         ("File Structure", check_file_structure),
         ("Python Dependencies", check_python_dependencies),
         ("Core Module Imports", test_core_imports),
-        ("Batch Peak Fitting Imports", test_batch_peak_fitting_imports),
-        ("Launch Function", test_launch_function),
+        ("Integrated Peak Fitting Imports", test_batch_peak_fitting_imports),
+        ("Integrated Peak Fitting", test_launch_function),
     ]
     
     results = []

@@ -3,19 +3,61 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.1.0"
-__version_info__ = (1, 1, 0)
+__version__ = "1.1.1"
+__version_info__ = (1, 1, 1)
 __author__ = "Aaron J. Celestian Ph.D."
+__maintainer__ = "Aaron J. Celestian Ph.D."
+__email__ = "aaron.celestian@gmail.com"
 __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
 __release_date__ = "2025-01-28"
-__release_name__ = "Batch Peak Fitting Module Enhancement"
+__release_name__ = "Major Feature Update: Auto-Update & Advanced Batch Processing"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.1.1": {
+        "date": "2025-01-28",
+        "name": "Major Feature Update: Auto-Update & Advanced Batch Processing",
+        "description": "Revolutionary update introducing automatic background updates and completely redesigned sophisticated batch peak fitting system",
+        "major_features": [
+            "🚀 Automatic background git pull functionality for seamless updates",
+            "🔬 Completely new sophisticated batch peak fitting system with advanced algorithms",
+            "🎯 Enhanced peak detection and fitting algorithms with improved accuracy",
+            "🔄 Streamlined interface with removal of legacy batch processing entry points",
+            "📊 Advanced batch processing capabilities with sophisticated analysis workflows",
+            "🛠️ Improved code architecture and maintainability throughout the system"
+        ],
+        "breaking_changes": [
+            "Legacy batch peak fitting button removed from main interface (replaced with integrated system)",
+            "Old batch processing methods deprecated in favor of new sophisticated implementation"
+        ],
+        "technical_notes": [
+            "Implemented automatic background git pull system for continuous updates",
+            "Completely redesigned batch peak fitting architecture with advanced algorithms",
+            "New sophisticated peak detection and analysis workflows",
+            "Enhanced error handling and robustness in batch processing",
+            "Improved performance and accuracy in peak fitting algorithms",
+            "Removed legacy batch peak fitting button from raman_analysis_app_qt6.py Advanced tab",
+            "Eliminated redundant launch_batch_peak_fitting() method and supporting infrastructure",
+            "Cleaned up obsolete code while maintaining backward compatibility",
+            "Enhanced system architecture for future feature expansion"
+        ],
+        "bug_fixes": [
+            "Eliminated confusion from duplicate batch processing entry points",
+            "Improved system reliability and error handling",
+            "Enhanced overall application consistency and user experience",
+            "Fixed legacy code inconsistencies and maintenance issues"
+        ],
+        "future_roadmap": [
+            "Continued improvements to the new batch peak fitting system",
+            "Additional sophisticated analysis algorithms planned",
+            "Enhanced automation features in development",
+            "Expanded integration capabilities for advanced workflows"
+        ]
+    },
     "1.1.0": {
         "date": "2025-01-28",
         "name": "Batch Peak Fitting Module Enhancement",
@@ -192,6 +234,9 @@ def get_full_version():
         "release_date": __release_date__,
         "release_name": __release_name__,
         "status": __release_status__,
+        "author": __author__,
+        "maintainer": __maintainer__,
+        "email": __email__,
         "python_requires": __python_requires__,
         "qt_version": __qt_version__,
         "platforms": __platforms__

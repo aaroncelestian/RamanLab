@@ -14,8 +14,8 @@ from PySide6.QtWidgets import QMessageBox
 DENSITY_AVAILABLE = False
 try:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Density'))
-    from Density.density_gui_launcher import DensityAnalysisGUI, CustomMaterialDialog
-    from Density.raman_density_analysis import MaterialConfigs
+    from advanced_analysis.density_gui_launcher import DensityAnalysisGUI, CustomMaterialDialog
+    from advanced_analysis.raman_density_analysis import MaterialConfigs
     DENSITY_AVAILABLE = True
     print("✓ Density analysis module loaded successfully")
 except ImportError as e:

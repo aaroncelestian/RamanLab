@@ -27,7 +27,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 
 # Import the density analysis module
 try:
-    from Density.raman_density_analysis import RamanDensityAnalyzer
+    from advanced_analysis.raman_density_analysis import RamanDensityAnalyzer
     DENSITY_AVAILABLE = True
 except ImportError:
     DENSITY_AVAILABLE = False
@@ -84,7 +84,7 @@ class BatchDensityAnalyzer:
             return
         
         try:
-            from Density.raman_density_analysis import MaterialConfigs
+            from advanced_analysis.raman_density_analysis import MaterialConfigs
             
             # Ask user for material type
             material_types = MaterialConfigs.get_available_materials()
@@ -171,7 +171,7 @@ Material-Specific Guidelines:
             return
         
         try:
-            from Density.raman_density_analysis import RamanDensityAnalyzer
+            from advanced_analysis.raman_density_analysis import RamanDensityAnalyzer
             
             # Use default analysis parameters for streamlined batch processing
             material_type = 'Kidney Stones (COM)'
@@ -328,7 +328,7 @@ Material-Specific Guidelines:
             return
             
         try:
-            from Density.raman_density_analysis import RamanDensityAnalyzer
+            from advanced_analysis.raman_density_analysis import RamanDensityAnalyzer
             
             # Get successful density results with valid data
             successful_results = []
