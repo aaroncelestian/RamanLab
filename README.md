@@ -6,7 +6,7 @@
 
 RamanLab is a comprehensive, cross-platform desktop application for analyzing and identifying Raman spectra. Built with PySide6, it provides a modern, professional interface for importing, processing, and matching Raman spectra against databases of known materials with advanced machine learning capabilities and specialized analysis tools.
 
-**Current Version:** 1.1.0  
+**Current Version:** 1.1.2  
 **Release Date:** 2025-06-22  
 **Framework:** Qt6 (PySide6)  
 **Platform Support:** Windows, macOS, Linux  

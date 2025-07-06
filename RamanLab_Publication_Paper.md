@@ -284,4 +284,4 @@ The development of RamanLab has benefited from contributions from the internatio
 
 **Software Availability:** RamanLab is available as open-source software under the MIT License. The latest version and documentation can be accessed at the project repository. Installation instructions and system requirements are provided in the accompanying documentation.
 
-**Version Information:** This paper describes RamanLab version 1.1.0, released January 28, 2025. The software requires Python 3.8+ and is compatible with Windows, macOS, and Linux operating systems. 
+**Version Information:** This paper describes RamanLab version 1.1.2, released January 28, 2025. The software requires Python 3.8+ and is compatible with Windows, macOS, and Linux operating systems. 
