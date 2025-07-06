@@ -2496,24 +2496,728 @@ class SpectralDeconvolutionQt6(QDialog):
         return tab
         
     def create_analysis_tab(self):
-        """Create analysis results tab."""
+        """Create analysis results tab with comprehensive plotting capabilities."""
         tab = QWidget()
-        layout = QVBoxLayout(tab)
+        layout = QHBoxLayout(tab)
         
-        # Information about where analysis results are now located
-        info_group = QGroupBox("Analysis Results Location")
-        info_layout = QVBoxLayout(info_group)
+        # Left panel: Controls
+        controls_panel = QWidget()
+        controls_panel.setMaximumWidth(300)
+        controls_layout = QVBoxLayout(controls_panel)
         
-        info_text = QLabel("Analysis results and export functionality have been moved to the Peak Fitting tab for better workflow integration.")
-        info_text.setStyleSheet("color: #666; font-style: italic; padding: 10px;")
-        info_text.setWordWrap(True)
-        info_layout.addWidget(info_text)
+        # Plot type selection
+        plot_type_group = QGroupBox("📊 Plot Type")
+        plot_type_layout = QVBoxLayout(plot_type_group)
         
-        layout.addWidget(info_group)
-        layout.addStretch()
+        # Create toggle buttons for plot types
+        self.plot_type_buttons = QButtonGroup()
+        
+        self.grid_plot_btn = QPushButton("Peak Features Grid")
+        self.grid_plot_btn.setCheckable(True)
+        self.grid_plot_btn.setChecked(True)
+        self.grid_plot_btn.setToolTip("2x2 grid showing amplitude, position, FWHM, and R² for each spectrum")
+        self.plot_type_buttons.addButton(self.grid_plot_btn, 0)
+        
+        self.waterfall_plot_btn = QPushButton("Waterfall Plot")
+        self.waterfall_plot_btn.setCheckable(True)
+        self.waterfall_plot_btn.setToolTip("Stacked spectra with adjustable offset and colors")
+        self.plot_type_buttons.addButton(self.waterfall_plot_btn, 1)
+        
+        self.heatmap_plot_btn = QPushButton("Heatmap Plot")
+        self.heatmap_plot_btn.setCheckable(True)
+        self.heatmap_plot_btn.setToolTip("2D intensity heatmap of all spectra")
+        self.plot_type_buttons.addButton(self.heatmap_plot_btn, 2)
+        
+        # Style the buttons
+        button_style = """
+            QPushButton {
+                text-align: left;
+                padding: 8px 12px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: #f9f9f9;
+            }
+            QPushButton:checked {
+                background-color: #4CAF50;
+                color: white;
+                border-color: #45a049;
+            }
+            QPushButton:hover {
+                background-color: #e9e9e9;
+            }
+            QPushButton:checked:hover {
+                background-color: #45a049;
+            }
+        """
+        
+        for btn in [self.grid_plot_btn, self.waterfall_plot_btn, self.heatmap_plot_btn]:
+            btn.setStyleSheet(button_style)
+        
+        plot_type_layout.addWidget(self.grid_plot_btn)
+        plot_type_layout.addWidget(self.waterfall_plot_btn)
+        plot_type_layout.addWidget(self.heatmap_plot_btn)
+        
+        controls_layout.addWidget(plot_type_group)
+        
+        # Data source information
+        data_source_group = QGroupBox("📁 Data Source")
+        data_source_layout = QVBoxLayout(data_source_group)
+        
+        self.data_source_label = QLabel("No batch results available")
+        self.data_source_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        self.data_source_label.setWordWrap(True)
+        data_source_layout.addWidget(self.data_source_label)
+        
+        # Refresh button
+        refresh_btn = QPushButton("🔄 Refresh Data")
+        refresh_btn.clicked.connect(self.refresh_analysis_plots)
+        data_source_layout.addWidget(refresh_btn)
+        
+        controls_layout.addWidget(data_source_group)
+        
+        # Plot-specific controls (will be populated dynamically)
+        self.plot_controls_group = QGroupBox("⚙️ Plot Controls")
+        self.plot_controls_layout = QVBoxLayout(self.plot_controls_group)
+        controls_layout.addWidget(self.plot_controls_group)
+        
+        controls_layout.addStretch()
+        
+        # Right panel: Plotting area
+        plotting_panel = QWidget()
+        plotting_layout = QVBoxLayout(plotting_panel)
+        
+        # Create stacked widget for different plot types
+        self.analysis_plots_stack = QStackedWidget()
+        
+        # Create plot widgets
+        self.grid_plot_widget = self.create_grid_plot_widget()
+        self.waterfall_plot_widget = self.create_waterfall_plot_widget()
+        self.heatmap_plot_widget = self.create_heatmap_plot_widget()
+        
+        # Add to stack
+        self.analysis_plots_stack.addWidget(self.grid_plot_widget)
+        self.analysis_plots_stack.addWidget(self.waterfall_plot_widget)
+        self.analysis_plots_stack.addWidget(self.heatmap_plot_widget)
+        
+        plotting_layout.addWidget(self.analysis_plots_stack)
+        
+        # Connect plot type buttons to stack switching
+        self.plot_type_buttons.buttonClicked.connect(self.on_plot_type_changed)
+        
+        # Add panels to main layout
+        layout.addWidget(controls_panel)
+        layout.addWidget(plotting_panel)
+        
+        # Initialize plot controls
+        self.setup_plot_controls()
+        self.update_data_source_info()
         
         return tab
-    
+
+    def create_grid_plot_widget(self):
+        """Create 2x2 grid plot widget for peak features analysis."""
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        import sys
+        import os
+        
+        # Import matplotlib config
+        sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
+        try:
+            from matplotlib_config import configure_compact_ui, CompactNavigationToolbar
+            configure_compact_ui()
+        except ImportError:
+            pass  # Fallback if config not available
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Create matplotlib figure with 2x2 subplots
+        self.grid_figure = Figure(figsize=(12, 8))
+        self.grid_canvas = FigureCanvas(self.grid_figure)
+        
+        # Create 2x2 subplots
+        self.grid_axes = self.grid_figure.subplots(2, 2)
+        self.grid_figure.suptitle('Peak Features Analysis', fontsize=14, fontweight='bold')
+        
+        # Add navigation toolbar
+        try:
+            toolbar = CompactNavigationToolbar(self.grid_canvas, widget)
+        except:
+            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+            toolbar = NavigationToolbar2QT(self.grid_canvas, widget)
+        
+        layout.addWidget(toolbar)
+        layout.addWidget(self.grid_canvas)
+        
+        # Initialize empty plots
+        self.setup_empty_grid_plots()
+        
+        return widget
+
+    def create_waterfall_plot_widget(self):
+        """Create waterfall plot widget for stacked spectra visualization."""
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        import sys
+        import os
+        
+        # Import matplotlib config
+        sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
+        try:
+            from matplotlib_config import configure_compact_ui, CompactNavigationToolbar
+            configure_compact_ui()
+        except ImportError:
+            pass
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Create matplotlib figure
+        self.waterfall_figure = Figure(figsize=(12, 8))
+        self.waterfall_canvas = FigureCanvas(self.waterfall_figure)
+        self.waterfall_ax = self.waterfall_figure.add_subplot(111)
+        
+        # Add navigation toolbar
+        try:
+            toolbar = CompactNavigationToolbar(self.waterfall_canvas, widget)
+        except:
+            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+            toolbar = NavigationToolbar2QT(self.waterfall_canvas, widget)
+        
+        layout.addWidget(toolbar)
+        layout.addWidget(self.waterfall_canvas)
+        
+        # Initialize empty plot
+        self.setup_empty_waterfall_plot()
+        
+        return widget
+
+    def create_heatmap_plot_widget(self):
+        """Create heatmap plot widget for 2D intensity visualization."""
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        import sys
+        import os
+        
+        # Import matplotlib config
+        sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
+        try:
+            from matplotlib_config import configure_compact_ui, CompactNavigationToolbar, add_colorbar_no_shrink
+            configure_compact_ui()
+        except ImportError:
+            pass
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Create matplotlib figure
+        self.heatmap_figure = Figure(figsize=(12, 8))
+        self.heatmap_canvas = FigureCanvas(self.heatmap_figure)
+        self.heatmap_ax = self.heatmap_figure.add_subplot(111)
+        
+        # Add navigation toolbar
+        try:
+            toolbar = CompactNavigationToolbar(self.heatmap_canvas, widget)
+        except:
+            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+            toolbar = NavigationToolbar2QT(self.heatmap_canvas, widget)
+        
+        layout.addWidget(toolbar)
+        layout.addWidget(self.heatmap_canvas)
+        
+        # Initialize empty plot
+        self.setup_empty_heatmap_plot()
+        
+        return widget
+
+    def setup_empty_grid_plots(self):
+        """Setup empty 2x2 grid plots with proper labels."""
+        # Clear all subplots
+        for i in range(2):
+            for j in range(2):
+                self.grid_axes[i, j].clear()
+        
+        # Setup subplot titles and labels
+        titles = ['Peak Amplitude', 'Peak Position', 'FWHM', 'R² Values']
+        ylabels = ['Amplitude (a.u.)', 'Position (cm⁻¹)', 'FWHM (cm⁻¹)', 'R² Value']
+        
+        for idx, (i, j) in enumerate([(0, 0), (0, 1), (1, 0), (1, 1)]):
+            ax = self.grid_axes[i, j]
+            ax.set_title(titles[idx], fontweight='bold')
+            ax.set_xlabel('Spectrum Index')
+            ax.set_ylabel(ylabels[idx])
+            ax.grid(True, alpha=0.3)
+            ax.text(0.5, 0.5, 'No data available\nRun batch processing first', 
+                   transform=ax.transAxes, ha='center', va='center',
+                   fontsize=10, color='gray', style='italic')
+        
+        self.grid_figure.tight_layout()
+        self.grid_canvas.draw()
+
+    def setup_empty_waterfall_plot(self):
+        """Setup empty waterfall plot."""
+        self.waterfall_ax.clear()
+        self.waterfall_ax.set_title('Waterfall Plot - Stacked Spectra', fontweight='bold')
+        self.waterfall_ax.set_xlabel('Wavenumber (cm⁻¹)')
+        self.waterfall_ax.set_ylabel('Intensity + Offset')
+        self.waterfall_ax.grid(True, alpha=0.3)
+        self.waterfall_ax.text(0.5, 0.5, 'No data available\nRun batch processing first', 
+                              transform=self.waterfall_ax.transAxes, ha='center', va='center',
+                              fontsize=12, color='gray', style='italic')
+        self.waterfall_figure.tight_layout()
+        self.waterfall_canvas.draw()
+
+    def setup_empty_heatmap_plot(self):
+        """Setup empty heatmap plot."""
+        self.heatmap_ax.clear()
+        self.heatmap_ax.set_title('Heatmap - Spectral Intensity Map', fontweight='bold')
+        self.heatmap_ax.set_xlabel('Wavenumber (cm⁻¹)')
+        self.heatmap_ax.set_ylabel('Spectrum Index')
+        self.heatmap_ax.text(0.5, 0.5, 'No data available\nRun batch processing first', 
+                            transform=self.heatmap_ax.transAxes, ha='center', va='center',
+                            fontsize=12, color='gray', style='italic')
+        self.heatmap_figure.tight_layout()
+        self.heatmap_canvas.draw()
+
+    def on_plot_type_changed(self, button):
+        """Handle plot type button changes."""
+        plot_index = self.plot_type_buttons.id(button)
+        self.analysis_plots_stack.setCurrentIndex(plot_index)
+        self.setup_plot_controls()
+        self.refresh_current_plot()
+
+    def setup_plot_controls(self):
+        """Setup plot-specific controls based on current plot type."""
+        # Clear existing controls
+        for i in reversed(range(self.plot_controls_layout.count())):
+            child = self.plot_controls_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+        
+        current_plot = self.analysis_plots_stack.currentIndex()
+        
+        if current_plot == 0:  # Grid plot
+            self.setup_grid_plot_controls()
+        elif current_plot == 1:  # Waterfall plot
+            self.setup_waterfall_plot_controls()
+        elif current_plot == 2:  # Heatmap plot
+            self.setup_heatmap_plot_controls()
+
+    def setup_grid_plot_controls(self):
+        """Setup controls for 2x2 grid plot."""
+        # Peak selection for multi-peak spectra
+        peak_selection_layout = QHBoxLayout()
+        peak_selection_layout.addWidget(QLabel("Peak to analyze:"))
+        
+        self.peak_selection_combo = QComboBox()
+        self.peak_selection_combo.addItems(["Peak 1", "Peak 2", "Peak 3", "All Peaks (Average)"])
+        self.peak_selection_combo.setCurrentText("Peak 1")
+        self.peak_selection_combo.currentTextChanged.connect(self.refresh_current_plot)
+        peak_selection_layout.addWidget(self.peak_selection_combo)
+        
+        self.plot_controls_layout.addLayout(peak_selection_layout)
+        
+        # Error bars option
+        self.show_error_bars_check = QCheckBox("Show error bars")
+        self.show_error_bars_check.setChecked(False)
+        self.show_error_bars_check.stateChanged.connect(self.refresh_current_plot)
+        self.plot_controls_layout.addWidget(self.show_error_bars_check)
+
+    def setup_waterfall_plot_controls(self):
+        """Setup controls for waterfall plot."""
+        # Y-offset control
+        offset_layout = QHBoxLayout()
+        offset_layout.addWidget(QLabel("Y-offset:"))
+        
+        self.y_offset_spin = QDoubleSpinBox()
+        self.y_offset_spin.setRange(0, 10000)
+        self.y_offset_spin.setValue(100)
+        self.y_offset_spin.setSuffix(" units")
+        self.y_offset_spin.valueChanged.connect(self.refresh_current_plot)
+        offset_layout.addWidget(self.y_offset_spin)
+        
+        self.plot_controls_layout.addLayout(offset_layout)
+        
+        # Interval skipping
+        interval_layout = QHBoxLayout()
+        interval_layout.addWidget(QLabel("Show every:"))
+        
+        self.interval_spin = QSpinBox()
+        self.interval_spin.setRange(1, 20)
+        self.interval_spin.setValue(1)
+        self.interval_spin.setSuffix(" spectrum")
+        self.interval_spin.valueChanged.connect(self.refresh_current_plot)
+        interval_layout.addWidget(self.interval_spin)
+        
+        self.plot_controls_layout.addLayout(interval_layout)
+        
+        # Colormap selection
+        colormap_layout = QHBoxLayout()
+        colormap_layout.addWidget(QLabel("Colormap:"))
+        
+        self.waterfall_colormap_combo = QComboBox()
+        self.waterfall_colormap_combo.addItems(["viridis", "plasma", "inferno", "magma", "jet", "rainbow", "cool", "hot"])
+        self.waterfall_colormap_combo.setCurrentText("viridis")
+        self.waterfall_colormap_combo.currentTextChanged.connect(self.refresh_current_plot)
+        colormap_layout.addWidget(self.waterfall_colormap_combo)
+        
+        self.plot_controls_layout.addLayout(colormap_layout)
+
+    def setup_heatmap_plot_controls(self):
+        """Setup controls for heatmap plot."""
+        # Colormap selection
+        colormap_layout = QHBoxLayout()
+        colormap_layout.addWidget(QLabel("Colormap:"))
+        
+        self.heatmap_colormap_combo = QComboBox()
+        self.heatmap_colormap_combo.addItems(["viridis", "plasma", "inferno", "magma", "jet", "rainbow", "cool", "hot"])
+        self.heatmap_colormap_combo.setCurrentText("viridis")
+        self.heatmap_colormap_combo.currentTextChanged.connect(self.refresh_current_plot)
+        colormap_layout.addWidget(self.heatmap_colormap_combo)
+        
+        self.plot_controls_layout.addLayout(colormap_layout)
+        
+        # Interpolation method
+        interp_layout = QHBoxLayout()
+        interp_layout.addWidget(QLabel("Interpolation:"))
+        
+        self.interpolation_combo = QComboBox()
+        self.interpolation_combo.addItems(["nearest", "bilinear", "bicubic", "spline16", "spline36"])
+        self.interpolation_combo.setCurrentText("nearest")
+        self.interpolation_combo.currentTextChanged.connect(self.refresh_current_plot)
+        interp_layout.addWidget(self.interpolation_combo)
+        
+        self.plot_controls_layout.addLayout(interp_layout)
+        
+        # Aspect ratio
+        aspect_layout = QHBoxLayout()
+        aspect_layout.addWidget(QLabel("Aspect ratio:"))
+        
+        self.aspect_combo = QComboBox()
+        self.aspect_combo.addItems(["auto", "equal"])
+        self.aspect_combo.setCurrentText("auto")
+        self.aspect_combo.currentTextChanged.connect(self.refresh_current_plot)
+        aspect_layout.addWidget(self.aspect_combo)
+        
+        self.plot_controls_layout.addLayout(aspect_layout)
+
+    def update_data_source_info(self):
+        """Update data source information display."""
+        if hasattr(self, 'batch_results') and self.batch_results:
+            total_files = len(self.batch_results)
+            total_regions = sum(len(r.get('regions', [])) for r in self.batch_results)
+            
+            # Count successful fits
+            successful_fits = 0
+            for file_result in self.batch_results:
+                for region_result in file_result.get('regions', []):
+                    if region_result.get('total_r2') is not None:
+                        successful_fits += 1
+            
+            info_text = f"✓ {total_files} files, {total_regions} regions, {successful_fits} successful fits"
+            self.data_source_label.setText(info_text)
+            self.data_source_label.setStyleSheet("color: #2e7d32; font-weight: bold; padding: 5px;")
+        else:
+            self.data_source_label.setText("No batch results available")
+            self.data_source_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+
+    def refresh_analysis_plots(self):
+        """Refresh all analysis plots with current data."""
+        self.update_data_source_info()
+        self.refresh_current_plot()
+
+    def refresh_current_plot(self):
+        """Refresh the currently visible plot."""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return
+        
+        current_plot = self.analysis_plots_stack.currentIndex()
+        
+        if current_plot == 0:  # Grid plot
+            self.update_grid_plot()
+        elif current_plot == 1:  # Waterfall plot
+            self.update_waterfall_plot()
+        elif current_plot == 2:  # Heatmap plot
+            self.update_heatmap_plot()
+
+    def extract_peak_features_data(self):
+        """Extract peak features data from batch results."""
+        import numpy as np
+        
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return None
+        
+        # Determine which peak to analyze
+        peak_selection = self.peak_selection_combo.currentText() if hasattr(self, 'peak_selection_combo') else "Peak 1"
+        peak_index = 0  # Default to first peak
+        if "Peak 2" in peak_selection:
+            peak_index = 1
+        elif "Peak 3" in peak_selection:
+            peak_index = 2
+        
+        data = {
+            'filenames': [],
+            'amplitudes': [],
+            'positions': [],
+            'fwhms': [],
+            'r2_values': [],
+            'spectrum_indices': []
+        }
+        
+        spectrum_index = 0
+        for file_result in self.batch_results:
+            filename = file_result.get('filename', f'Spectrum_{spectrum_index}')
+            
+            for region_result in file_result.get('regions', []):
+                peaks = region_result.get('peaks')
+                fit_params = region_result.get('fit_params')
+                total_r2 = region_result.get('total_r2')
+                
+                if peaks is not None and fit_params is not None and len(peaks) > peak_index:
+                    # Extract parameters for the selected peak
+                    if peak_index * 3 + 2 < len(fit_params):
+                        amplitude = fit_params[peak_index * 3]
+                        center = fit_params[peak_index * 3 + 1]
+                        width = fit_params[peak_index * 3 + 2]
+                        
+                        # Calculate FWHM
+                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
+                        
+                        data['filenames'].append(filename)
+                        data['amplitudes'].append(amplitude)
+                        data['positions'].append(center)
+                        data['fwhms'].append(fwhm)
+                        data['r2_values'].append(total_r2 if total_r2 is not None else 0)
+                        data['spectrum_indices'].append(spectrum_index)
+                
+                spectrum_index += 1
+        
+        return data if data['filenames'] else None
+
+    def extract_spectral_data(self):
+        """Extract spectral data from batch results for waterfall and heatmap plots."""
+        if not hasattr(self, 'batch_results') or not self.batch_results:
+            return None
+        
+        spectra_data = []
+        filenames = []
+        
+        for file_result in self.batch_results:
+            filename = file_result.get('filename', 'Unknown')
+            
+            for region_result in file_result.get('regions', []):
+                wavenumbers = region_result.get('wavenumbers')
+                intensities = region_result.get('intensities')
+                
+                if wavenumbers is not None and intensities is not None:
+                    spectra_data.append({
+                        'wavenumbers': wavenumbers,
+                        'intensities': intensities,
+                        'filename': filename
+                    })
+                    filenames.append(filename)
+        
+        return spectra_data if spectra_data else None
+
+    def update_grid_plot(self):
+        """Update the 2x2 grid plot with peak features data."""
+        import numpy as np
+        
+        data = self.extract_peak_features_data()
+        if data is None:
+            self.setup_empty_grid_plots()
+            return
+        
+        # Clear all subplots
+        for i in range(2):
+            for j in range(2):
+                self.grid_axes[i, j].clear()
+        
+        # Setup subplot titles and labels
+        titles = ['Peak Amplitude', 'Peak Position', 'FWHM', 'R² Values']
+        ylabels = ['Amplitude (a.u.)', 'Position (cm⁻¹)', 'FWHM (cm⁻¹)', 'R² Value']
+        plot_data = [data['amplitudes'], data['positions'], data['fwhms'], data['r2_values']]
+        
+        x_data = data['spectrum_indices']
+        
+        for idx, (i, j) in enumerate([(0, 0), (0, 1), (1, 0), (1, 1)]):
+            ax = self.grid_axes[i, j]
+            y_data = plot_data[idx]
+            
+            if y_data:
+                # Plot the data
+                ax.plot(x_data, y_data, 'o-', linewidth=2, markersize=6, alpha=0.7)
+                
+                # Add error bars if requested
+                if hasattr(self, 'show_error_bars_check') and self.show_error_bars_check.isChecked():
+                    # Calculate simple standard error
+                    if len(y_data) > 1:
+                        std_err = np.std(y_data) / np.sqrt(len(y_data))
+                        ax.errorbar(x_data, y_data, yerr=std_err, fmt='none', alpha=0.5)
+                
+                # Customize plot
+                ax.set_title(titles[idx], fontweight='bold')
+                ax.set_xlabel('Spectrum Index')
+                ax.set_ylabel(ylabels[idx])
+                ax.grid(True, alpha=0.3)
+                
+                # Add statistics text
+                mean_val = np.mean(y_data)
+                std_val = np.std(y_data)
+                stats_text = f'Mean: {mean_val:.2f}\nStd: {std_val:.2f}'
+                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                       verticalalignment='top', fontsize=8, 
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            else:
+                ax.text(0.5, 0.5, 'No data available', 
+                       transform=ax.transAxes, ha='center', va='center',
+                       fontsize=10, color='gray', style='italic')
+        
+        self.grid_figure.tight_layout()
+        self.grid_canvas.draw()
+
+    def update_waterfall_plot(self):
+        """Update the waterfall plot with spectral data."""
+        import numpy as np
+        import matplotlib.pyplot as plt
+        
+        spectra_data = self.extract_spectral_data()
+        if spectra_data is None:
+            self.setup_empty_waterfall_plot()
+            return
+        
+        self.waterfall_ax.clear()
+        
+        # Get control values
+        y_offset = self.y_offset_spin.value() if hasattr(self, 'y_offset_spin') else 100
+        interval = self.interval_spin.value() if hasattr(self, 'interval_spin') else 1
+        colormap_name = self.waterfall_colormap_combo.currentText() if hasattr(self, 'waterfall_colormap_combo') else 'viridis'
+        
+        # Select spectra based on interval
+        selected_spectra = spectra_data[::interval]
+        
+        # Get colormap
+        colormap = plt.get_cmap(colormap_name)
+        n_spectra = len(selected_spectra)
+        
+        for i, spectrum in enumerate(selected_spectra):
+            wavenumbers = spectrum['wavenumbers']
+            intensities = spectrum['intensities']
+            filename = spectrum['filename']
+            
+            # Apply offset
+            offset_intensities = intensities + (i * y_offset)
+            
+            # Get color from colormap
+            color = colormap(i / max(1, n_spectra - 1))
+            
+            # Plot spectrum
+            self.waterfall_ax.plot(wavenumbers, offset_intensities, 
+                                  color=color, linewidth=1.5, alpha=0.8,
+                                  label=f'{i}: {filename}')
+        
+        # Customize plot
+        self.waterfall_ax.set_title('Waterfall Plot - Stacked Spectra', fontweight='bold')
+        self.waterfall_ax.set_xlabel('Wavenumber (cm⁻¹)')
+        self.waterfall_ax.set_ylabel('Intensity + Offset')
+        self.waterfall_ax.grid(True, alpha=0.3)
+        
+        # Add legend if not too many spectra
+        if n_spectra <= 10:
+            self.waterfall_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+        
+        # Add info text
+        info_text = f'Showing {n_spectra} spectra (every {interval})\nOffset: {y_offset} units'
+        self.waterfall_ax.text(0.02, 0.98, info_text, transform=self.waterfall_ax.transAxes, 
+                              verticalalignment='top', fontsize=9, 
+                              bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        self.waterfall_figure.tight_layout()
+        self.waterfall_canvas.draw()
+
+    def update_heatmap_plot(self):
+        """Update the heatmap plot with spectral data."""
+        import numpy as np
+        import matplotlib.pyplot as plt
+        
+        spectra_data = self.extract_spectral_data()
+        if spectra_data is None:
+            self.setup_empty_heatmap_plot()
+            return
+        
+        self.heatmap_ax.clear()
+        
+        # Get control values
+        colormap_name = self.heatmap_colormap_combo.currentText() if hasattr(self, 'heatmap_colormap_combo') else 'viridis'
+        interpolation = self.interpolation_combo.currentText() if hasattr(self, 'interpolation_combo') else 'nearest'
+        aspect = self.aspect_combo.currentText() if hasattr(self, 'aspect_combo') else 'auto'
+        
+        # Prepare data for heatmap
+        # Find common wavenumber range
+        all_wavenumbers = [spectrum['wavenumbers'] for spectrum in spectra_data]
+        min_wn = max(np.min(wn) for wn in all_wavenumbers)
+        max_wn = min(np.max(wn) for wn in all_wavenumbers)
+        
+        # Create common wavenumber grid
+        n_points = min(500, min(len(wn) for wn in all_wavenumbers))  # Limit for performance
+        common_wavenumbers = np.linspace(min_wn, max_wn, n_points)
+        
+        # Interpolate all spectra onto common grid
+        intensity_matrix = []
+        filenames = []
+        
+        for spectrum in spectra_data:
+            wavenumbers = spectrum['wavenumbers']
+            intensities = spectrum['intensities']
+            filename = spectrum['filename']
+            
+            # Interpolate to common grid
+            interpolated_intensities = np.interp(common_wavenumbers, wavenumbers, intensities)
+            intensity_matrix.append(interpolated_intensities)
+            filenames.append(filename)
+        
+        intensity_matrix = np.array(intensity_matrix)
+        
+        # Create heatmap
+        im = self.heatmap_ax.imshow(intensity_matrix, 
+                                   cmap=colormap_name,
+                                   interpolation=interpolation,
+                                   aspect=aspect,
+                                   extent=[min_wn, max_wn, len(spectra_data), 0])
+        
+        # Add colorbar using the no-shrink function
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
+            from matplotlib_config import add_colorbar_no_shrink
+            add_colorbar_no_shrink(self.heatmap_figure, im, self.heatmap_ax, label='Intensity')
+        except ImportError:
+            # Fallback to regular colorbar
+            self.heatmap_figure.colorbar(im, ax=self.heatmap_ax, label='Intensity')
+        
+        # Customize plot
+        self.heatmap_ax.set_title('Heatmap - Spectral Intensity Map', fontweight='bold')
+        self.heatmap_ax.set_xlabel('Wavenumber (cm⁻¹)')
+        self.heatmap_ax.set_ylabel('Spectrum Index')
+        
+        # Add y-axis labels for filenames (if not too many)
+        if len(filenames) <= 20:
+            y_positions = np.arange(len(filenames))
+            self.heatmap_ax.set_yticks(y_positions)
+            self.heatmap_ax.set_yticklabels([f'{i}: {name[:15]}...' if len(name) > 15 else f'{i}: {name}' 
+                                           for i, name in enumerate(filenames)], fontsize=8)
+        
+        # Add info text
+        info_text = f'Matrix: {intensity_matrix.shape[0]} × {intensity_matrix.shape[1]}\nColormap: {colormap_name}'
+        self.heatmap_ax.text(0.02, 0.98, info_text, transform=self.heatmap_ax.transAxes, 
+                            verticalalignment='top', fontsize=9, 
+                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        self.heatmap_figure.tight_layout()
+        self.heatmap_canvas.draw()
+
     def create_batch_tab(self):
         """Create batch processing tab for processing multiple spectra."""
         tab = QWidget()
@@ -6547,6 +7251,10 @@ class SpectralDeconvolutionQt6(QDialog):
             
             self.batch_results_text.setPlainText(results_text)
             self.batch_progress_bar.setVisible(False)
+            
+            # Refresh analysis plots with new data
+            if hasattr(self, 'refresh_analysis_plots'):
+                self.refresh_analysis_plots()
             
             # Show completion message if not cancelled
             if not (hasattr(self, 'batch_monitor') and self.batch_monitor.is_cancelled):
