@@ -1527,14 +1527,21 @@ class SpectralDeconvolutionQt6(QDialog):
         return panel
         
     def create_visualization_panel(self):
-        """Create the visualization panel."""
+        """Create the visualization panel with tabs for Current Spectrum and Plotting Analysis."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         
-        # Create matplotlib figure
+        # Create tab widget for switching between spectrum view and plotting analysis
+        self.visualization_tabs = QTabWidget()
+        
+        # Tab 1: Current Spectrum (existing functionality)
+        spectrum_tab = QWidget()
+        spectrum_layout = QVBoxLayout(spectrum_tab)
+        
+        # Create matplotlib figure for current spectrum
         self.figure = Figure(figsize=(12, 8))
         self.canvas = FigureCanvas(self.figure)
-        self.toolbar = NavigationToolbar(self.canvas, panel)
+        self.toolbar = NavigationToolbar(self.canvas, spectrum_tab)
         
         # Create subplots with custom height ratios - main plot gets 75%, residual gets 25%
         import matplotlib.gridspec as gridspec
@@ -1544,8 +1551,131 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.figure.tight_layout(pad=3.0)
         
-        layout.addWidget(self.toolbar)
-        layout.addWidget(self.canvas)
+        spectrum_layout.addWidget(self.toolbar)
+        spectrum_layout.addWidget(self.canvas)
+        
+        # Tab 2: Plotting Analysis
+        plotting_tab = QWidget()
+        plotting_layout = QHBoxLayout(plotting_tab)
+        
+        # Left panel: Plot controls
+        plot_controls_panel = QWidget()
+        plot_controls_panel.setMaximumWidth(300)
+        plot_controls_layout = QVBoxLayout(plot_controls_panel)
+        
+        # Plot type selection
+        plot_type_group = QGroupBox("📊 Plot Type")
+        plot_type_layout = QVBoxLayout(plot_type_group)
+        
+        # Create toggle buttons for plot types
+        self.plot_type_buttons = QButtonGroup()
+        
+        self.grid_plot_btn = QPushButton("Peak Features Grid")
+        self.grid_plot_btn.setCheckable(True)
+        self.grid_plot_btn.setChecked(True)
+        self.grid_plot_btn.setToolTip("2x2 grid showing amplitude, position, FWHM, and R² for each spectrum")
+        self.plot_type_buttons.addButton(self.grid_plot_btn, 0)
+        
+        self.waterfall_plot_btn = QPushButton("Waterfall Plot")
+        self.waterfall_plot_btn.setCheckable(True)
+        self.waterfall_plot_btn.setToolTip("Stacked spectra with adjustable offset and colors")
+        self.plot_type_buttons.addButton(self.waterfall_plot_btn, 1)
+        
+        self.heatmap_plot_btn = QPushButton("Heatmap Plot")
+        self.heatmap_plot_btn.setCheckable(True)
+        self.heatmap_plot_btn.setToolTip("2D intensity heatmap of all spectra")
+        self.plot_type_buttons.addButton(self.heatmap_plot_btn, 2)
+        
+        # Style the buttons
+        button_style = """
+            QPushButton {
+                text-align: left;
+                padding: 8px 12px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: #f9f9f9;
+            }
+            QPushButton:checked {
+                background-color: #4CAF50;
+                color: white;
+                border-color: #45a049;
+            }
+            QPushButton:hover {
+                background-color: #e9e9e9;
+            }
+            QPushButton:checked:hover {
+                background-color: #45a049;
+            }
+        """
+        
+        for btn in [self.grid_plot_btn, self.waterfall_plot_btn, self.heatmap_plot_btn]:
+            btn.setStyleSheet(button_style)
+        
+        plot_type_layout.addWidget(self.grid_plot_btn)
+        plot_type_layout.addWidget(self.waterfall_plot_btn)
+        plot_type_layout.addWidget(self.heatmap_plot_btn)
+        
+        plot_controls_layout.addWidget(plot_type_group)
+        
+        # Data source information
+        data_source_group = QGroupBox("📁 Data Source")
+        data_source_layout = QVBoxLayout(data_source_group)
+        
+        self.data_source_label = QLabel("No batch results available")
+        self.data_source_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
+        self.data_source_label.setWordWrap(True)
+        data_source_layout.addWidget(self.data_source_label)
+        
+        # Refresh button
+        refresh_btn = QPushButton("🔄 Refresh Data")
+        refresh_btn.clicked.connect(self.refresh_analysis_plots)
+        data_source_layout.addWidget(refresh_btn)
+        
+        plot_controls_layout.addWidget(data_source_group)
+        
+        # Plot-specific controls (will be populated dynamically)
+        self.plot_controls_group = QGroupBox("⚙️ Plot Controls")
+        self.plot_controls_layout = QVBoxLayout(self.plot_controls_group)
+        plot_controls_layout.addWidget(self.plot_controls_group)
+        
+        plot_controls_layout.addStretch()
+        
+        # Right panel: Plotting area
+        plotting_panel = QWidget()
+        plotting_panel_layout = QVBoxLayout(plotting_panel)
+        
+        # Create stacked widget for different plot types
+        self.analysis_plots_stack = QStackedWidget()
+        
+        # Create plot widgets
+        self.grid_plot_widget = self.create_grid_plot_widget()
+        self.waterfall_plot_widget = self.create_waterfall_plot_widget()
+        self.heatmap_plot_widget = self.create_heatmap_plot_widget()
+        
+        # Add to stack
+        self.analysis_plots_stack.addWidget(self.grid_plot_widget)
+        self.analysis_plots_stack.addWidget(self.waterfall_plot_widget)
+        self.analysis_plots_stack.addWidget(self.heatmap_plot_widget)
+        
+        plotting_panel_layout.addWidget(self.analysis_plots_stack)
+        
+        # Connect plot type buttons to stack switching
+        self.plot_type_buttons.buttonClicked.connect(self.on_plot_type_changed)
+        
+        # Add panels to plotting tab layout
+        plotting_layout.addWidget(plot_controls_panel)
+        plotting_layout.addWidget(plotting_panel)
+        
+        # Add tabs to tab widget
+        self.visualization_tabs.addTab(spectrum_tab, "Current Spectrum")
+        self.visualization_tabs.addTab(plotting_tab, "Plotting Analysis")
+        
+        # Add tab widget to main layout
+        layout.addWidget(self.visualization_tabs)
+        
+        # Initialize plot controls
+        self.setup_plot_controls()
+        self.update_data_source_info()
         
         return panel
         
@@ -2496,123 +2626,78 @@ class SpectralDeconvolutionQt6(QDialog):
         return tab
         
     def create_analysis_tab(self):
-        """Create analysis results tab with comprehensive plotting capabilities."""
+        """Create analysis results tab with plotting information."""
         tab = QWidget()
-        layout = QHBoxLayout(tab)
+        layout = QVBoxLayout(tab)
         
-        # Left panel: Controls
-        controls_panel = QWidget()
-        controls_panel.setMaximumWidth(300)
-        controls_layout = QVBoxLayout(controls_panel)
+        # Information about plotting functionality
+        info_group = QGroupBox("📊 Plotting Analysis")
+        info_layout = QVBoxLayout(info_group)
         
-        # Plot type selection
-        plot_type_group = QGroupBox("📊 Plot Type")
-        plot_type_layout = QVBoxLayout(plot_type_group)
+        info_text = QLabel("""
+        <b>Plotting Analysis Features:</b><br><br>
         
-        # Create toggle buttons for plot types
-        self.plot_type_buttons = QButtonGroup()
+        Comprehensive plotting analysis is now available in the <b>Plotting Analysis</b> tab 
+        in the right panel. Switch between "Current Spectrum" and "Plotting Analysis" tabs 
+        to access advanced visualization tools.<br><br>
         
-        self.grid_plot_btn = QPushButton("Peak Features Grid")
-        self.grid_plot_btn.setCheckable(True)
-        self.grid_plot_btn.setChecked(True)
-        self.grid_plot_btn.setToolTip("2x2 grid showing amplitude, position, FWHM, and R² for each spectrum")
-        self.plot_type_buttons.addButton(self.grid_plot_btn, 0)
+        <b>Available Plot Types:</b><br>
+        • <b>Peak Features Grid:</b> 2×2 plots showing amplitude, position, FWHM, and R² trends<br>
+        • <b>Waterfall Plot:</b> Stacked spectra with customizable colors and offsets<br>
+        • <b>Heatmap Plot:</b> 2D intensity visualization with multiple colormaps<br><br>
         
-        self.waterfall_plot_btn = QPushButton("Waterfall Plot")
-        self.waterfall_plot_btn.setCheckable(True)
-        self.waterfall_plot_btn.setToolTip("Stacked spectra with adjustable offset and colors")
-        self.plot_type_buttons.addButton(self.waterfall_plot_btn, 1)
-        
-        self.heatmap_plot_btn = QPushButton("Heatmap Plot")
-        self.heatmap_plot_btn.setCheckable(True)
-        self.heatmap_plot_btn.setToolTip("2D intensity heatmap of all spectra")
-        self.plot_type_buttons.addButton(self.heatmap_plot_btn, 2)
-        
-        # Style the buttons
-        button_style = """
-            QPushButton {
-                text-align: left;
-                padding: 8px 12px;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                background-color: #f9f9f9;
+        <b>How to Use:</b><br>
+        1. Run batch processing to generate data<br>
+        2. Click the "Plotting Analysis" tab in the right panel<br>
+        3. Choose your plot type and customize settings<br>
+        4. Analyze trends across your spectral dataset
+        """)
+        info_text.setStyleSheet("""
+            QLabel {
+                color: #333;
+                padding: 15px;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                line-height: 1.4;
             }
-            QPushButton:checked {
+        """)
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+        
+        layout.addWidget(info_group)
+        
+        # Quick access button
+        access_group = QGroupBox("🚀 Quick Access")
+        access_layout = QVBoxLayout(access_group)
+        
+        switch_btn = QPushButton("Switch to Plotting Analysis Tab")
+        switch_btn.setStyleSheet("""
+            QPushButton {
                 background-color: #4CAF50;
                 color: white;
-                border-color: #45a049;
+                border: none;
+                padding: 12px 24px;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #e9e9e9;
-            }
-            QPushButton:checked:hover {
                 background-color: #45a049;
             }
-        """
+        """)
+        switch_btn.clicked.connect(self.switch_to_plotting_tab)
+        access_layout.addWidget(switch_btn)
         
-        for btn in [self.grid_plot_btn, self.waterfall_plot_btn, self.heatmap_plot_btn]:
-            btn.setStyleSheet(button_style)
-        
-        plot_type_layout.addWidget(self.grid_plot_btn)
-        plot_type_layout.addWidget(self.waterfall_plot_btn)
-        plot_type_layout.addWidget(self.heatmap_plot_btn)
-        
-        controls_layout.addWidget(plot_type_group)
-        
-        # Data source information
-        data_source_group = QGroupBox("📁 Data Source")
-        data_source_layout = QVBoxLayout(data_source_group)
-        
-        self.data_source_label = QLabel("No batch results available")
-        self.data_source_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
-        self.data_source_label.setWordWrap(True)
-        data_source_layout.addWidget(self.data_source_label)
-        
-        # Refresh button
-        refresh_btn = QPushButton("🔄 Refresh Data")
-        refresh_btn.clicked.connect(self.refresh_analysis_plots)
-        data_source_layout.addWidget(refresh_btn)
-        
-        controls_layout.addWidget(data_source_group)
-        
-        # Plot-specific controls (will be populated dynamically)
-        self.plot_controls_group = QGroupBox("⚙️ Plot Controls")
-        self.plot_controls_layout = QVBoxLayout(self.plot_controls_group)
-        controls_layout.addWidget(self.plot_controls_group)
-        
-        controls_layout.addStretch()
-        
-        # Right panel: Plotting area
-        plotting_panel = QWidget()
-        plotting_layout = QVBoxLayout(plotting_panel)
-        
-        # Create stacked widget for different plot types
-        self.analysis_plots_stack = QStackedWidget()
-        
-        # Create plot widgets
-        self.grid_plot_widget = self.create_grid_plot_widget()
-        self.waterfall_plot_widget = self.create_waterfall_plot_widget()
-        self.heatmap_plot_widget = self.create_heatmap_plot_widget()
-        
-        # Add to stack
-        self.analysis_plots_stack.addWidget(self.grid_plot_widget)
-        self.analysis_plots_stack.addWidget(self.waterfall_plot_widget)
-        self.analysis_plots_stack.addWidget(self.heatmap_plot_widget)
-        
-        plotting_layout.addWidget(self.analysis_plots_stack)
-        
-        # Connect plot type buttons to stack switching
-        self.plot_type_buttons.buttonClicked.connect(self.on_plot_type_changed)
-        
-        # Add panels to main layout
-        layout.addWidget(controls_panel)
-        layout.addWidget(plotting_panel)
-        
-        # Initialize plot controls
-        self.setup_plot_controls()
-        self.update_data_source_info()
+        layout.addWidget(access_group)
+        layout.addStretch()
         
         return tab
+    
+    def switch_to_plotting_tab(self):
+        """Switch to the Plotting Analysis tab in the visualization panel."""
+        if hasattr(self, 'visualization_tabs'):
+            self.visualization_tabs.setCurrentIndex(1)  # Switch to Plotting Analysis tab
 
     def create_grid_plot_widget(self):
         """Create 2x2 grid plot widget for peak features analysis."""
