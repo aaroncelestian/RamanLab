@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (
     QGroupBox, QSplitter, QMessageBox, QProgressBar, QSpinBox, 
     QDoubleSpinBox, QFormLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QScrollArea, QFrame, QGridLayout, QListWidget, QListWidgetItem,
-    QMenuBar, QMenu, QFileDialog, QStatusBar, QApplication
+    QMenuBar, QMenu, QFileDialog, QStatusBar, QApplication, QStackedWidget,
+    QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QAction
@@ -216,17 +217,19 @@ class BatchProcessingMonitor(QDialog):
         
         # Create optimized layout: plots fill most space, legend on the side
         # Left column: spectrum and residuals, Right column: legend spanning full height
-        gs = self.figure.add_gridspec(2, 2, height_ratios=[3, 1], width_ratios=[5, 1], 
-                                    hspace=0.2, wspace=0.2)
+        # Increased height ratio for main plot and reduced spacing
+        gs = self.figure.add_gridspec(2, 2, height_ratios=[4, 1], width_ratios=[5, 1], 
+                                    hspace=0.05, wspace=0.2)
         self.ax_main = self.figure.add_subplot(gs[0, 0])      # Main spectrum plot (clean, no legend)
         self.ax_progress = self.figure.add_subplot(gs[1, 0], sharex=self.ax_main)  # Residuals plot
         self.ax_legend = self.figure.add_subplot(gs[:, 1])    # Legend area spanning full right column
         
-        # Configure main plot - clean without legend
-        self.ax_main.set_xlabel("Wavenumber (cm⁻¹)")
+        # Configure main plot - clean without legend and x-axis label
         self.ax_main.set_ylabel("Intensity (a.u.)")
         self.ax_main.set_title("Current Spectrum")
         self.ax_main.grid(True, alpha=0.3)
+        # Remove x-axis labels for main plot since residuals plot has them
+        self.ax_main.tick_params(axis='x', labelbottom=False)
         
         # Configure residuals plot - clean and minimal
         self.ax_progress.set_xlabel("Wavenumber (cm⁻¹)")
@@ -271,22 +274,6 @@ class BatchProcessingMonitor(QDialog):
         """)
         layout.addWidget(self.toolbar)
         
-        # Add info label about interactive features
-        info_label = QLabel("💡 Use toolbar above to zoom and pan plots. Both spectrum and residuals will stay synchronized!")
-        info_label.setStyleSheet("""
-            QLabel {
-                background-color: #e8f4fd;
-                border: 1px solid #bee5eb;
-                border-radius: 4px;
-                padding: 8px;
-                color: #0c5460;
-                font-size: 11px;
-                font-style: italic;
-            }
-        """)
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
         # Initialize data storage for progress tracking
         self.file_indices = []
         self.peaks_counts = []
@@ -326,14 +313,6 @@ class BatchProcessingMonitor(QDialog):
         self.current_file_label.setWordWrap(True)
         file_info_layout.addWidget(self.current_file_label)
         status_layout.addLayout(file_info_layout)
-        
-        # Processing statistics
-        stats_layout = QVBoxLayout()
-        stats_layout.addWidget(QLabel("Statistics:"))
-        self.stats_text = QLabel("Files: 0/0\nPeaks: 0\nTime: 0s")
-        self.stats_text.setAlignment(Qt.AlignTop)
-        stats_layout.addWidget(self.stats_text)
-        status_layout.addLayout(stats_layout)
         
         # Current region info
         region_layout = QVBoxLayout()
@@ -547,13 +526,9 @@ class BatchProcessingMonitor(QDialog):
         self.peaks_counts.append(peaks_found)
         self.processing_times.append(processing_time)
         
-        # Update stats text
+        # Statistics display has been removed to give more space to plots
+        # Statistics are still tracked internally for export purposes
         avg_time = sum(self.processing_times) / len(self.processing_times) if self.processing_times else 0
-        stats_text = f"Files: {file_index + 1}/{total_files}\n"
-        stats_text += f"Total Peaks: {total_peaks}\n"
-        stats_text += f"Avg Time: {avg_time:.2f}s\n"
-        stats_text += f"Current: {peaks_found} peaks"
-        self.stats_text.setText(stats_text)
         
         # Processing stats are now shown in the status area below plots
         # No need for separate stats plot area
@@ -1579,19 +1554,9 @@ class SpectralDeconvolutionQt6(QDialog):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         
-        if CENTRALIZED_AVAILABLE:
-            # Use unified background controls
-            try:
-                self.background_controls = BackgroundControlsWidget()
-                self.background_controls.parameters_changed.connect(self._trigger_background_update)
-                self.background_controls.background_method_changed.connect(self.on_bg_method_changed)
-                layout.addWidget(self.background_controls)
-            except Exception as e:
-                print(f"Warning: Could not create BackgroundControlsWidget: {e}")
-                self._create_fallback_background_controls(layout)
-        else:
-            # Fallback to basic controls
-            self._create_fallback_background_controls(layout)
+        # Always use enhanced fallback controls to ensure new Moving Average and Spline options are available
+        print("🎛️ Creating enhanced background controls with Moving Average and Spline support")
+        self._create_fallback_background_controls(layout)
         
         # Action buttons (tool-specific functionality)
         button_layout = QHBoxLayout()
@@ -1619,25 +1584,316 @@ class SpectralDeconvolutionQt6(QDialog):
         method_layout = QVBoxLayout(method_group)
         
         self.bg_method_combo = QComboBox()
-        self.bg_method_combo.addItems(["ALS", "Linear", "Polynomial"])
+        self.bg_method_combo.addItems(["ALS", "Linear", "Polynomial", "Moving Average", "Spline"])
+        self.bg_method_combo.currentTextChanged.connect(self._on_bg_method_changed)
         method_layout.addWidget(self.bg_method_combo)
         
         layout.addWidget(method_group)
         
-        # Basic ALS parameters
-        als_group = QGroupBox("ALS Parameters")
-        als_layout = QFormLayout(als_group)
+        # Create a stacked widget to hold different parameter groups
+        self.bg_params_stack = QStackedWidget()
         
-        self.lambda_input = QLineEdit("100000")
-        als_layout.addRow("Lambda:", self.lambda_input)
+        # ALS parameters
+        als_widget = QWidget()
+        als_layout = QFormLayout(als_widget)
         
-        self.p_input = QLineEdit("0.01")
-        als_layout.addRow("P:", self.p_input)
+        # Lambda slider (log scale: 10^3 to 10^7)
+        self.lambda_slider = QSlider(Qt.Horizontal)
+        self.lambda_slider.setRange(30, 70)  # 3.0 to 7.0 in log10 scale
+        self.lambda_slider.setValue(50)  # 10^5 = 100,000
+        self.lambda_slider.setToolTip("Smoothness parameter (higher = smoother baseline)")
+        self.lambda_slider.valueChanged.connect(self._update_lambda_label)
+        self.lambda_slider.valueChanged.connect(self._trigger_background_update)
         
-        self.niter_input = QLineEdit("10")
-        als_layout.addRow("Iterations:", self.niter_input)
+        self.lambda_label = QLabel("100,000")
+        lambda_layout = QHBoxLayout()
+        lambda_layout.addWidget(self.lambda_slider)
+        lambda_layout.addWidget(self.lambda_label)
+        als_layout.addRow("Lambda:", lambda_layout)
         
-        layout.addWidget(als_group)
+        # P slider (0.001 to 0.1)
+        self.p_slider = QSlider(Qt.Horizontal)
+        self.p_slider.setRange(1, 100)  # 0.001 to 0.1 scaled by 1000
+        self.p_slider.setValue(10)  # 0.01
+        self.p_slider.setToolTip("Asymmetry parameter (0.001-0.1, lower = more asymmetric)")
+        self.p_slider.valueChanged.connect(self._update_p_label)
+        self.p_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.p_label = QLabel("0.01")
+        p_layout = QHBoxLayout()
+        p_layout.addWidget(self.p_slider)
+        p_layout.addWidget(self.p_label)
+        als_layout.addRow("P:", p_layout)
+        
+        # Iterations slider (5 to 20)
+        self.niter_slider = QSlider(Qt.Horizontal)
+        self.niter_slider.setRange(5, 20)
+        self.niter_slider.setValue(10)
+        self.niter_slider.setToolTip("Number of iterations (5-20 typically)")
+        self.niter_slider.valueChanged.connect(self._update_niter_label)
+        self.niter_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.niter_label = QLabel("10")
+        niter_layout = QHBoxLayout()
+        niter_layout.addWidget(self.niter_slider)
+        niter_layout.addWidget(self.niter_label)
+        als_layout.addRow("Iterations:", niter_layout)
+        
+        self.bg_params_stack.addWidget(als_widget)
+        
+        # Linear parameters
+        linear_widget = QWidget()
+        linear_layout = QFormLayout(linear_widget)
+        
+        # Start Weight slider (0.1 to 2.0)
+        self.start_weight_slider = QSlider(Qt.Horizontal)
+        self.start_weight_slider.setRange(1, 20)  # 0.1 to 2.0 scaled by 10
+        self.start_weight_slider.setValue(10)  # 1.0
+        self.start_weight_slider.setToolTip("Weight for start point (0.1-2.0, higher = more emphasis)")
+        self.start_weight_slider.valueChanged.connect(self._update_start_weight_label)
+        self.start_weight_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.start_weight_label = QLabel("1.0")
+        start_weight_layout = QHBoxLayout()
+        start_weight_layout.addWidget(self.start_weight_slider)
+        start_weight_layout.addWidget(self.start_weight_label)
+        linear_layout.addRow("Start Weight:", start_weight_layout)
+        
+        # End Weight slider (0.1 to 2.0)
+        self.end_weight_slider = QSlider(Qt.Horizontal)
+        self.end_weight_slider.setRange(1, 20)  # 0.1 to 2.0 scaled by 10
+        self.end_weight_slider.setValue(10)  # 1.0
+        self.end_weight_slider.setToolTip("Weight for end point (0.1-2.0, higher = more emphasis)")
+        self.end_weight_slider.valueChanged.connect(self._update_end_weight_label)
+        self.end_weight_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.end_weight_label = QLabel("1.0")
+        end_weight_layout = QHBoxLayout()
+        end_weight_layout.addWidget(self.end_weight_slider)
+        end_weight_layout.addWidget(self.end_weight_label)
+        linear_layout.addRow("End Weight:", end_weight_layout)
+        
+        self.bg_params_stack.addWidget(linear_widget)
+        
+        # Polynomial parameters
+        poly_widget = QWidget()
+        poly_layout = QFormLayout(poly_widget)
+        
+        # Polynomial Order slider (1 to 6)
+        self.poly_order_slider = QSlider(Qt.Horizontal)
+        self.poly_order_slider.setRange(1, 6)
+        self.poly_order_slider.setValue(2)  # quadratic
+        self.poly_order_slider.setToolTip("Polynomial order (1=linear, 2=quadratic, 3=cubic, etc.)")
+        self.poly_order_slider.valueChanged.connect(self._update_poly_order_label)
+        self.poly_order_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.poly_order_label = QLabel("2 (Quadratic)")
+        poly_order_layout = QHBoxLayout()
+        poly_order_layout.addWidget(self.poly_order_slider)
+        poly_order_layout.addWidget(self.poly_order_label)
+        poly_layout.addRow("Order:", poly_order_layout)
+        
+        self.poly_method_combo = QComboBox()
+        self.poly_method_combo.addItems(["Least Squares", "Robust"])
+        self.poly_method_combo.setToolTip("Least Squares: standard fitting, Robust: reduces outlier influence")
+        self.poly_method_combo.currentTextChanged.connect(self._trigger_background_update)
+        poly_layout.addRow("Method:", self.poly_method_combo)
+        
+        self.bg_params_stack.addWidget(poly_widget)
+        
+        # Moving Average parameters
+        mavg_widget = QWidget()
+        mavg_layout = QFormLayout(mavg_widget)
+        
+        self.window_percent_slider = QSlider(Qt.Horizontal)
+        self.window_percent_slider.setRange(5, 50)
+        self.window_percent_slider.setValue(15)
+        self.window_percent_slider.setToolTip("Window size as percentage of spectrum length (5-50%)")
+        self.window_percent_slider.valueChanged.connect(self._update_window_percent_label)
+        self.window_percent_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.window_percent_label = QLabel("15%")
+        window_percent_layout = QHBoxLayout()
+        window_percent_layout.addWidget(self.window_percent_slider)
+        window_percent_layout.addWidget(self.window_percent_label)
+        
+        mavg_layout.addRow("Window Size:", window_percent_layout)
+        
+        self.window_type_combo = QComboBox()
+        self.window_type_combo.addItems(["Uniform", "Gaussian", "Hann", "Hamming"])
+        self.window_type_combo.setToolTip("Window type: Uniform=box, Gaussian=smooth, Hann/Hamming=tapered")
+        self.window_type_combo.currentTextChanged.connect(self._trigger_background_update)
+        mavg_layout.addRow("Window Type:", self.window_type_combo)
+        
+        self.bg_params_stack.addWidget(mavg_widget)
+        
+        # Spline parameters
+        spline_widget = QWidget()
+        spline_layout = QFormLayout(spline_widget)
+        
+        self.n_knots_slider = QSlider(Qt.Horizontal)
+        self.n_knots_slider.setRange(3, 20)
+        self.n_knots_slider.setValue(10)
+        self.n_knots_slider.setToolTip("Number of spline knots (3-20, more = more flexible)")
+        self.n_knots_slider.valueChanged.connect(self._update_n_knots_label)
+        self.n_knots_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.n_knots_label = QLabel("10")
+        knots_layout = QHBoxLayout()
+        knots_layout.addWidget(self.n_knots_slider)
+        knots_layout.addWidget(self.n_knots_label)
+        
+        spline_layout.addRow("Number of Knots:", knots_layout)
+        
+        self.smoothing_slider = QSlider(Qt.Horizontal)
+        self.smoothing_slider.setRange(1, 1000)
+        self.smoothing_slider.setValue(100)
+        self.smoothing_slider.setToolTip("Smoothing factor (1-1000, higher = smoother spline)")
+        self.smoothing_slider.valueChanged.connect(self._update_smoothing_label)
+        self.smoothing_slider.valueChanged.connect(self._trigger_background_update)
+        
+        self.smoothing_label = QLabel("100")
+        smoothing_layout = QHBoxLayout()
+        smoothing_layout.addWidget(self.smoothing_slider)
+        smoothing_layout.addWidget(self.smoothing_label)
+        
+        spline_layout.addRow("Smoothing:", smoothing_layout)
+        
+        self.spline_degree_combo = QComboBox()
+        self.spline_degree_combo.addItems(["1", "2", "3"])
+        self.spline_degree_combo.setCurrentText("3")
+        self.spline_degree_combo.setToolTip("Spline degree (1=linear, 2=quadratic, 3=cubic)")
+        self.spline_degree_combo.currentTextChanged.connect(self._trigger_background_update)
+        spline_layout.addRow("Degree:", self.spline_degree_combo)
+        
+        self.bg_params_stack.addWidget(spline_widget)
+        
+        # Add the stack to the layout
+        bg_params_group = QGroupBox("Parameters")
+        bg_params_group_layout = QVBoxLayout(bg_params_group)
+        bg_params_group_layout.addWidget(self.bg_params_stack)
+        
+        layout.addWidget(bg_params_group)
+        
+        # Set initial stack index and log setup
+        self.bg_params_stack.setCurrentIndex(0)
+        
+        # Initialize all slider labels with default values
+        self._update_lambda_label()
+        self._update_p_label()
+        self._update_niter_label()
+        self._update_start_weight_label()
+        self._update_end_weight_label()
+        self._update_poly_order_label()
+        self._update_window_percent_label()
+        self._update_n_knots_label()
+        self._update_smoothing_label()
+        
+        print(f"✅ Enhanced background controls created successfully!")
+        print(f"   📋 Available methods: {[self.bg_method_combo.itemText(i) for i in range(self.bg_method_combo.count())]}")
+        print(f"   🔢 Parameter panels: {self.bg_params_stack.count()} (ALS, Linear, Polynomial, Moving Average, Spline)")
+        print(f"   🎯 Currently showing: {self.bg_method_combo.currentText()} parameters")
+        print(f"   🎛️ All controls now use sliders for consistent user experience!")
+    
+    def _on_bg_method_changed(self):
+        """Handle background method change and update parameter display."""
+        if not hasattr(self, 'bg_params_stack'):
+            print("⚠️ bg_params_stack not found - background controls may not be initialized properly")
+            return
+        
+        method = self.bg_method_combo.currentText()
+        print(f"🔄 Background method changed to: {method}")
+        
+        # Update the stacked widget to show appropriate parameters
+        if method == "ALS":
+            self.bg_params_stack.setCurrentIndex(0)
+            print("📊 Showing ALS parameters")
+        elif method == "Linear":
+            self.bg_params_stack.setCurrentIndex(1)
+            print("📊 Showing Linear parameters")
+        elif method == "Polynomial":
+            self.bg_params_stack.setCurrentIndex(2)
+            print("📊 Showing Polynomial parameters")
+        elif method == "Moving Average":
+            self.bg_params_stack.setCurrentIndex(3)
+            print("📊 Showing Moving Average parameters (Window Size, Window Type)")
+        elif method == "Spline":
+            self.bg_params_stack.setCurrentIndex(4)
+            print("📊 Showing Spline parameters (Knots, Smoothing, Degree)")
+        else:
+            print(f"⚠️ Unknown background method: {method}")
+        
+        # Trigger background update after method change
+        self._trigger_background_update()
+    
+    def _update_window_percent_label(self):
+        """Update the window percent label for moving average."""
+        if hasattr(self, 'window_percent_slider') and hasattr(self, 'window_percent_label'):
+            value = self.window_percent_slider.value()
+            self.window_percent_label.setText(f"{value}%")
+    
+    def _update_n_knots_label(self):
+        """Update the number of knots label for spline."""
+        if hasattr(self, 'n_knots_slider') and hasattr(self, 'n_knots_label'):
+            value = self.n_knots_slider.value()
+            self.n_knots_label.setText(str(value))
+    
+    def _update_smoothing_label(self):
+        """Update the smoothing label for spline."""
+        if hasattr(self, 'smoothing_slider') and hasattr(self, 'smoothing_label'):
+            value = self.smoothing_slider.value()
+            self.smoothing_label.setText(str(value))
+    
+    def _update_lambda_label(self):
+        """Update the lambda label for ALS (log scale)."""
+        if hasattr(self, 'lambda_slider') and hasattr(self, 'lambda_label'):
+            value = self.lambda_slider.value()
+            # Convert from log scale (30-70) to actual value (10^3 to 10^7)
+            lambda_val = 10 ** (value / 10.0)
+            if lambda_val >= 1000000:
+                self.lambda_label.setText(f"{lambda_val/1000000:.1f}M")
+            elif lambda_val >= 1000:
+                self.lambda_label.setText(f"{lambda_val/1000:.0f}K")
+            else:
+                self.lambda_label.setText(f"{lambda_val:.0f}")
+    
+    def _update_p_label(self):
+        """Update the p label for ALS."""
+        if hasattr(self, 'p_slider') and hasattr(self, 'p_label'):
+            value = self.p_slider.value()
+            # Convert from slider value (1-100) to actual p value (0.001-0.1)
+            p_val = value / 1000.0
+            self.p_label.setText(f"{p_val:.3f}")
+    
+    def _update_niter_label(self):
+        """Update the iterations label for ALS."""
+        if hasattr(self, 'niter_slider') and hasattr(self, 'niter_label'):
+            value = self.niter_slider.value()
+            self.niter_label.setText(str(value))
+    
+    def _update_start_weight_label(self):
+        """Update the start weight label for Linear."""
+        if hasattr(self, 'start_weight_slider') and hasattr(self, 'start_weight_label'):
+            value = self.start_weight_slider.value()
+            # Convert from slider value (1-20) to actual weight (0.1-2.0)
+            weight_val = value / 10.0
+            self.start_weight_label.setText(f"{weight_val:.1f}")
+    
+    def _update_end_weight_label(self):
+        """Update the end weight label for Linear."""
+        if hasattr(self, 'end_weight_slider') and hasattr(self, 'end_weight_label'):
+            value = self.end_weight_slider.value()
+            # Convert from slider value (1-20) to actual weight (0.1-2.0)
+            weight_val = value / 10.0
+            self.end_weight_label.setText(f"{weight_val:.1f}")
+    
+    def _update_poly_order_label(self):
+        """Update the polynomial order label."""
+        if hasattr(self, 'poly_order_slider') and hasattr(self, 'poly_order_label'):
+            value = self.poly_order_slider.value()
+            order_names = {1: "Linear", 2: "Quadratic", 3: "Cubic", 4: "Quartic", 5: "Quintic", 6: "Sextic"}
+            name = order_names.get(value, f"Order {value}")
+            self.poly_order_label.setText(f"{value} ({name})")
     
     def get_fallback_background_parameters(self):
         """Get background parameters from fallback controls."""
@@ -1645,11 +1901,46 @@ class SpectralDeconvolutionQt6(QDialog):
             method = self.bg_method_combo.currentText() if hasattr(self, 'bg_method_combo') else "ALS"
             
             if method == "ALS":
+                # Get values from sliders
+                lambda_val = 10 ** (self.lambda_slider.value() / 10.0) if hasattr(self, 'lambda_slider') else 1e5
+                p_val = self.p_slider.value() / 1000.0 if hasattr(self, 'p_slider') else 0.01
+                niter_val = self.niter_slider.value() if hasattr(self, 'niter_slider') else 10
                 return {
                     'method': 'ALS',
-                    'lambda': float(self.lambda_input.text()) if hasattr(self, 'lambda_input') else 1e5,
-                    'p': float(self.p_input.text()) if hasattr(self, 'p_input') else 0.01,
-                    'niter': int(self.niter_input.text()) if hasattr(self, 'niter_input') else 10
+                    'lambda': lambda_val,
+                    'p': p_val,
+                    'niter': niter_val
+                }
+            elif method == "Linear":
+                # Get values from sliders
+                start_weight = self.start_weight_slider.value() / 10.0 if hasattr(self, 'start_weight_slider') else 1.0
+                end_weight = self.end_weight_slider.value() / 10.0 if hasattr(self, 'end_weight_slider') else 1.0
+                return {
+                    'method': 'Linear',
+                    'start_weight': start_weight,
+                    'end_weight': end_weight
+                }
+            elif method == "Polynomial":
+                # Get values from slider and combo
+                order = self.poly_order_slider.value() if hasattr(self, 'poly_order_slider') else 2
+                poly_method = self.poly_method_combo.currentText() if hasattr(self, 'poly_method_combo') else "Least Squares"
+                return {
+                    'method': 'Polynomial',
+                    'order': order,
+                    'poly_method': poly_method
+                }
+            elif method == "Moving Average":
+                return {
+                    'method': 'Moving Average',
+                    'window_percent': self.window_percent_slider.value() if hasattr(self, 'window_percent_slider') else 15,
+                    'window_type': self.window_type_combo.currentText() if hasattr(self, 'window_type_combo') else "Uniform"
+                }
+            elif method == "Spline":
+                return {
+                    'method': 'Spline',
+                    'n_knots': self.n_knots_slider.value() if hasattr(self, 'n_knots_slider') else 10,
+                    'smoothing': self.smoothing_slider.value() if hasattr(self, 'smoothing_slider') else 100,
+                    'degree': int(self.spline_degree_combo.currentText()) if hasattr(self, 'spline_degree_combo') else 3
                 }
             else:
                 return {
@@ -2303,25 +2594,43 @@ class SpectralDeconvolutionQt6(QDialog):
         settings_layout = QVBoxLayout()
         
         # Add explanatory text
-        settings_info = QLabel("✓ Background correction and peak detection are automatically applied to all files")
+        settings_info = QLabel("Background correction will be used during batch processing")
         settings_info.setStyleSheet("color: #666; font-style: italic; font-size: 11px; padding: 5px;")
         settings_layout.addWidget(settings_info)
         
-        checkbox_layout = QHBoxLayout()
+        # Peak source selection (radio buttons for exclusive choice)
+        peak_source_group = QGroupBox("Peak Source Selection")
+        peak_source_layout = QVBoxLayout(peak_source_group)
         
-        self.batch_background_checkbox = QCheckBox("Apply Background Correction")
-        self.batch_background_checkbox.setChecked(True)
-        self.batch_background_checkbox.setEnabled(False)  # Disable checkbox - always required
-        self.batch_background_checkbox.setToolTip("Background correction is essential for accurate peak detection")
-        checkbox_layout.addWidget(self.batch_background_checkbox)
+        # Create radio button group
+        self.peak_source_group = QButtonGroup()
         
-        self.batch_auto_peaks_checkbox = QCheckBox("Auto-detect Peaks")
-        self.batch_auto_peaks_checkbox.setChecked(True)
-        self.batch_auto_peaks_checkbox.setEnabled(False)  # Disable checkbox - always required
-        self.batch_auto_peaks_checkbox.setToolTip("Peak detection is the core function of batch processing")
-        checkbox_layout.addWidget(self.batch_auto_peaks_checkbox)
+        radio_layout = QHBoxLayout()
         
-        settings_layout.addLayout(checkbox_layout)
+        self.batch_auto_peaks_radio = QRadioButton("Auto-detect Peaks")
+        self.batch_auto_peaks_radio.setChecked(True)
+        self.batch_auto_peaks_radio.setToolTip("Automatically detect peaks in each spectrum using peak detection parameters")
+        self.peak_source_group.addButton(self.batch_auto_peaks_radio, 0)
+        radio_layout.addWidget(self.batch_auto_peaks_radio)
+        
+        self.batch_found_peaks_radio = QRadioButton("Use Find Peaks Results")
+        self.batch_found_peaks_radio.setChecked(False)
+        self.batch_found_peaks_radio.setToolTip("Use peaks found in the Find Peaks tab (if available)")
+        self.peak_source_group.addButton(self.batch_found_peaks_radio, 1)
+        radio_layout.addWidget(self.batch_found_peaks_radio)
+        
+        self.batch_manual_peaks_radio = QRadioButton("Use Manual Peaks")
+        self.batch_manual_peaks_radio.setChecked(False)
+        self.batch_manual_peaks_radio.setToolTip("Use manually selected peaks from the main interface (if available)")
+        self.peak_source_group.addButton(self.batch_manual_peaks_radio, 2)
+        radio_layout.addWidget(self.batch_manual_peaks_radio)
+        
+        peak_source_layout.addLayout(radio_layout)
+        
+        # Update manual peaks radio button state initially
+        self.update_manual_peaks_radio_state()
+        
+        settings_layout.addWidget(peak_source_group)
         processing_layout.addLayout(settings_layout)
         
         # Progress bar
@@ -2476,6 +2785,46 @@ class SpectralDeconvolutionQt6(QDialog):
         
         layout.addStretch()
         return tab
+    
+    def update_manual_peaks_radio_state(self):
+        """Update the manual peaks and found peaks radio button states based on available peaks."""
+        # Update manual peaks radio button
+        if hasattr(self, 'batch_manual_peaks_radio'):
+            has_manual_peaks = (hasattr(self, 'manual_peaks') and 
+                               self.manual_peaks is not None and 
+                               len(self.manual_peaks) > 0)
+            
+            if has_manual_peaks:
+                count = len(self.manual_peaks)
+                self.batch_manual_peaks_radio.setEnabled(True)
+                self.batch_manual_peaks_radio.setText(f"Use Manual Peaks ({count})")
+                self.batch_manual_peaks_radio.setToolTip(f"Use {count} manually selected peaks from the main interface")
+            else:
+                self.batch_manual_peaks_radio.setEnabled(False)
+                self.batch_manual_peaks_radio.setText("Use Manual Peaks (none available)")
+                self.batch_manual_peaks_radio.setToolTip("No manual peaks available. Select peaks in the main interface first.")
+                # If this radio button was selected but no manual peaks available, switch to auto-detect
+                if self.batch_manual_peaks_radio.isChecked():
+                    self.batch_auto_peaks_radio.setChecked(True)
+        
+        # Update found peaks radio button
+        if hasattr(self, 'batch_found_peaks_radio'):
+            has_found_peaks = (hasattr(self, 'peaks') and 
+                              self.peaks is not None and 
+                              len(self.peaks) > 0)
+            
+            if has_found_peaks:
+                count = len(self.peaks)
+                self.batch_found_peaks_radio.setEnabled(True)
+                self.batch_found_peaks_radio.setText(f"Use Find Peaks Results ({count})")
+                self.batch_found_peaks_radio.setToolTip(f"Use {count} peaks found in the Find Peaks tab")
+            else:
+                self.batch_found_peaks_radio.setEnabled(False)
+                self.batch_found_peaks_radio.setText("Use Find Peaks Results (none available)")
+                self.batch_found_peaks_radio.setToolTip("No peaks found yet. Use Find Peaks tab to detect peaks first.")
+                # If this radio button was selected but no found peaks available, switch to auto-detect
+                if self.batch_found_peaks_radio.isChecked():
+                    self.batch_auto_peaks_radio.setChecked(True)
 
     # Implementation methods
     def initial_plot(self):
@@ -2588,11 +2937,63 @@ class SpectralDeconvolutionQt6(QDialog):
         elif method == "Polynomial":
             return self._calculate_polynomial_background(
                 params.get('order', 2), 
-                params.get('method', "Least Squares")
+                params.get('poly_method', "Least Squares")
+            )
+        elif method == "Moving Average":
+            return self._calculate_moving_average_background(
+                params.get('window_percent', 15),
+                params.get('window_type', "Uniform")
+            )
+        elif method == "Spline":
+            return self._calculate_spline_background_for_subtraction(
+                params.get('n_knots', 10),
+                params.get('smoothing', 100),
+                params.get('degree', 3)
             )
         else:
             # Default to ALS
             return self._get_baseline_fitter().baseline_als(self.original_intensities)
+    
+    def _calculate_background_for_batch(self, intensities, method, params):
+        """Calculate background for batch processing using specified method and parameters.
+        
+        Args:
+            intensities: Input intensities (numpy array)
+            method: Background method name
+            params: Parameter dictionary
+            
+        Returns:
+            numpy array: Background values
+        """
+        if method == "Linear":
+            return self._calculate_linear_background_for_batch(intensities, 
+                params.get('start_weight', 1.0), 
+                params.get('end_weight', 1.0)
+            )
+        elif method == "Polynomial":
+            return self._calculate_polynomial_background_for_batch(intensities,
+                params.get('order', 2), 
+                params.get('poly_method', "Least Squares")
+            )
+        elif method == "Moving Average":
+            return self._calculate_moving_average_background_for_batch(intensities,
+                params.get('window_percent', 15),
+                params.get('window_type', "Uniform")
+            )
+        elif method == "Spline":
+            return self._calculate_spline_background_for_batch(intensities,
+                params.get('n_knots', 10),
+                params.get('smoothing', 100),
+                params.get('degree', 3)
+            )
+        else:
+            # Default to ALS
+            return self._get_baseline_fitter().baseline_als(
+                intensities,
+                params.get('lambda', 1e5),
+                params.get('p', 0.01),
+                params.get('niter', 10)
+            )
     
     def _calculate_linear_background(self, start_weight, end_weight):
         """Calculate linear background between weighted endpoints."""
@@ -2605,34 +3006,218 @@ class SpectralDeconvolutionQt6(QDialog):
             print(f"Linear background calculation error: {str(e)}")
             return np.linspace(y[0], y[-1], len(y))
     
+    def _calculate_linear_background_for_batch(self, intensities, start_weight, end_weight):
+        """Calculate linear background for batch processing."""
+        try:
+            start_val = intensities[0] * start_weight
+            end_val = intensities[-1] * end_weight
+            return np.linspace(start_val, end_val, len(intensities))
+        except Exception as e:
+            print(f"Linear background calculation error: {str(e)}")
+            return np.linspace(intensities[0], intensities[-1], len(intensities))
+    
     def _calculate_polynomial_background(self, order, method):
-        """Calculate polynomial background fit."""
+        """Calculate polynomial background fit using proper baseline estimation."""
         try:
             y = self.original_intensities
             x = np.arange(len(y))
             
-            # Fit polynomial to the data
+            # Step 1: Apply minimum filtering to identify baseline regions
+            from scipy import ndimage
+            window_size = max(len(y) // 20, 5)
+            y_min_filtered = ndimage.minimum_filter1d(y, size=window_size)
+            
+            # Step 2: Use iterative approach to fit polynomial to baseline
             if method == "Robust":
-                # Simple robust fitting approach
-                coeffs = np.polyfit(x, y, min(order, len(y)-1))
-                background = np.polyval(coeffs, x)
+                # Robust baseline estimation
+                current_background = y_min_filtered.copy()
                 
-                # Apply one round of robust reweighting
-                residuals = np.abs(y - background)
-                weights = 1.0 / (1.0 + residuals / (np.median(residuals) + 1e-10))
-                coeffs = np.polyfit(x, y, min(order, len(y)-1), w=weights)
-                background = np.polyval(coeffs, x)
+                for iteration in range(3):  # Multiple iterations for refinement
+                    # Fit polynomial to current baseline estimate
+                    coeffs = np.polyfit(x, current_background, min(order, len(y)-1))
+                    fitted_background = np.polyval(coeffs, x)
+                    
+                    # Identify points that are likely background (below fitted curve)
+                    residuals = y - fitted_background
+                    threshold = np.percentile(residuals, 25)  # Use lower quartile
+                    baseline_mask = residuals <= threshold
+                    
+                    if np.sum(baseline_mask) < order + 1:  # Need enough points
+                        break
+                    
+                    # Weighted fit with higher weights for baseline points
+                    weights = np.ones_like(y)
+                    weights[baseline_mask] = 2.0  # Higher weight for baseline
+                    weights[~baseline_mask] = 0.1  # Lower weight for peaks
+                    
+                    # Robust reweighting
+                    if iteration > 0:
+                        abs_residuals = np.abs(y - fitted_background)
+                        median_residual = np.median(abs_residuals)
+                        robust_weights = 1.0 / (1.0 + abs_residuals / (median_residual + 1e-10))
+                        weights *= robust_weights
+                    
+                    coeffs = np.polyfit(x, y, min(order, len(y)-1), w=weights)
+                    current_background = np.polyval(coeffs, x)
+                    
+                    # Ensure background doesn't go above original data
+                    current_background = np.minimum(current_background, y)
+                
+                background = current_background
+                
             else:
-                # Standard least squares
-                coeffs = np.polyfit(x, y, min(order, len(y)-1))
-                background = np.polyval(coeffs, x)
+                # Standard baseline estimation
+                # Start with minimum filtered data
+                baseline_points = y_min_filtered.copy()
+                
+                # Iteratively refine baseline
+                for iteration in range(2):
+                    # Fit polynomial to baseline points
+                    coeffs = np.polyfit(x, baseline_points, min(order, len(y)-1))
+                    fitted_background = np.polyval(coeffs, x)
+                    
+                    # Update baseline points - use minimum of fitted curve and original data
+                    baseline_points = np.minimum(fitted_background, y)
+                    
+                    # Further constrain to lower envelope
+                    residuals = y - baseline_points
+                    threshold = np.percentile(residuals, 30)
+                    mask = residuals <= threshold
+                    
+                    if np.sum(mask) >= order + 1:
+                        # Fit only to points identified as baseline
+                        coeffs = np.polyfit(x[mask], y[mask], min(order, len(y)-1))
+                        baseline_points = np.polyval(coeffs, x)
+                        baseline_points = np.minimum(baseline_points, y)
+                
+                background = baseline_points
+            
+            # Final constraint: ensure background is below original data
+            background = np.minimum(background, y)
             
             return background
+            
+        except ImportError:
+            print("scipy not available, using simple polynomial baseline estimation")
+            # Simple fallback without scipy
+            x = np.arange(len(y))
+            
+            # Simple approach: fit polynomial to lower envelope
+            window_size = max(len(y) // 10, 3)
+            y_smooth = np.array([np.min(y[max(0, i-window_size):min(len(y), i+window_size+1)]) 
+                               for i in range(len(y))])
+            
+            # Fit polynomial to smoothed minimum
+            coeffs = np.polyfit(x, y_smooth, min(order, len(y)-1))
+            background = np.polyval(coeffs, x)
+            
+            return np.minimum(background, y)
             
         except Exception as e:
             print(f"Polynomial background calculation error: {str(e)}")
             # Fallback to linear
             return np.linspace(y[0], y[-1], len(y))
+    
+    def _calculate_polynomial_background_for_batch(self, intensities, order, method):
+        """Calculate polynomial background for batch processing using proper baseline estimation."""
+        try:
+            x = np.arange(len(intensities))
+            
+            # Step 1: Apply minimum filtering to identify baseline regions
+            from scipy import ndimage
+            window_size = max(len(intensities) // 20, 5)
+            y_min_filtered = ndimage.minimum_filter1d(intensities, size=window_size)
+            
+            # Step 2: Use iterative approach to fit polynomial to baseline
+            if method == "Robust":
+                # Robust baseline estimation
+                current_background = y_min_filtered.copy()
+                
+                for iteration in range(3):  # Multiple iterations for refinement
+                    # Fit polynomial to current baseline estimate
+                    coeffs = np.polyfit(x, current_background, min(order, len(intensities)-1))
+                    fitted_background = np.polyval(coeffs, x)
+                    
+                    # Identify points that are likely background (below fitted curve)
+                    residuals = intensities - fitted_background
+                    threshold = np.percentile(residuals, 25)  # Use lower quartile
+                    baseline_mask = residuals <= threshold
+                    
+                    if np.sum(baseline_mask) < order + 1:  # Need enough points
+                        break
+                    
+                    # Weighted fit with higher weights for baseline points
+                    weights = np.ones_like(intensities)
+                    weights[baseline_mask] = 2.0  # Higher weight for baseline
+                    weights[~baseline_mask] = 0.1  # Lower weight for peaks
+                    
+                    # Robust reweighting
+                    if iteration > 0:
+                        abs_residuals = np.abs(intensities - fitted_background)
+                        median_residual = np.median(abs_residuals)
+                        robust_weights = 1.0 / (1.0 + abs_residuals / (median_residual + 1e-10))
+                        weights *= robust_weights
+                    
+                    coeffs = np.polyfit(x, intensities, min(order, len(intensities)-1), w=weights)
+                    current_background = np.polyval(coeffs, x)
+                    
+                    # Ensure background doesn't go above original data
+                    current_background = np.minimum(current_background, intensities)
+                
+                background = current_background
+                
+            else:
+                # Standard baseline estimation
+                # Start with minimum filtered data
+                baseline_points = y_min_filtered.copy()
+                
+                # Iteratively refine baseline
+                for iteration in range(2):
+                    # Fit polynomial to baseline points
+                    coeffs = np.polyfit(x, baseline_points, min(order, len(intensities)-1))
+                    fitted_background = np.polyval(coeffs, x)
+                    
+                    # Update baseline points - use minimum of fitted curve and original data
+                    baseline_points = np.minimum(fitted_background, intensities)
+                    
+                    # Further constrain to lower envelope
+                    residuals = intensities - baseline_points
+                    threshold = np.percentile(residuals, 30)
+                    mask = residuals <= threshold
+                    
+                    if np.sum(mask) >= order + 1:
+                        # Fit only to points identified as baseline
+                        coeffs = np.polyfit(x[mask], intensities[mask], min(order, len(intensities)-1))
+                        baseline_points = np.polyval(coeffs, x)
+                        baseline_points = np.minimum(baseline_points, intensities)
+                
+                background = baseline_points
+            
+            # Final constraint: ensure background is below original data
+            background = np.minimum(background, intensities)
+            
+            return background
+            
+        except ImportError:
+            print("scipy not available, using simple polynomial baseline estimation")
+            # Simple fallback without scipy
+            x = np.arange(len(intensities))
+            
+            # Simple approach: fit polynomial to lower envelope
+            window_size = max(len(intensities) // 10, 3)
+            y_smooth = np.array([np.min(intensities[max(0, i-window_size):min(len(intensities), i+window_size+1)]) 
+                               for i in range(len(intensities))])
+            
+            # Fit polynomial to smoothed minimum
+            coeffs = np.polyfit(x, y_smooth, min(order, len(intensities)-1))
+            background = np.polyval(coeffs, x)
+            
+            return np.minimum(background, intensities)
+            
+        except Exception as e:
+            print(f"Polynomial background calculation error: {str(e)}")
+            # Fallback to linear
+            return np.linspace(intensities[0], intensities[-1], len(intensities))
     
     def _update_peak_detection(self):
         """Perform live peak detection using centralized or fallback methods."""
@@ -2678,6 +3263,9 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.peaks, properties = find_peaks(self.processed_intensities, **peak_kwargs)
             
             self.update_peak_count_display()
+            
+            # Update batch radio buttons state
+            self.update_manual_peaks_radio_state()
             
             # Efficient plot update - only update peak markers
             self._update_peak_markers()
@@ -3300,6 +3888,7 @@ class SpectralDeconvolutionQt6(QDialog):
         self.residuals = None
         self.update_peak_count_display()
         self.update_peak_list()  # Update the peak list widget
+        self.update_manual_peaks_radio_state()  # Update batch radio buttons state
         self.update_plot()
     
     def update_peak_count_display(self):
@@ -3420,6 +4009,8 @@ class SpectralDeconvolutionQt6(QDialog):
             # Use efficient updates for interactive changes
             self._update_peak_markers()
             self._update_manual_peak_markers()
+            # Update batch radio buttons state
+            self.update_manual_peaks_radio_state()
             
         except Exception as e:
             print(f"Error in interactive peak selection: {e}")
@@ -3429,6 +4020,8 @@ class SpectralDeconvolutionQt6(QDialog):
         self.manual_peaks = np.array([])
         self.update_peak_count_display()
         self._update_manual_peak_markers()
+        # Update batch radio buttons state
+        self.update_manual_peaks_radio_state()
 
     def combine_peaks(self):
         """Combine automatic and manual peaks into the main peaks list."""
@@ -3459,6 +4052,9 @@ class SpectralDeconvolutionQt6(QDialog):
         # Show confirmation
         QMessageBox.information(self, "Peaks Combined", 
                               f"Combined peaks into main list.\nTotal peaks: {len(self.peaks)}")
+        
+        # Update batch radio buttons state
+        self.update_manual_peaks_radio_state()
 
     # Peak fitting methods
     def on_model_changed(self):
@@ -3502,11 +4098,18 @@ class SpectralDeconvolutionQt6(QDialog):
     def multi_peak_model(self, x, *params):
         """Multi-peak model function."""
         
-        if not hasattr(self, 'peaks') or self.peaks is None or len(self.peaks) == 0:
+        # Use fitted peaks indices if available (during fitting), otherwise use original peaks
+        peaks_to_use = None
+        if hasattr(self, 'fitted_peaks_indices') and self.fitted_peaks_indices is not None and len(self.fitted_peaks_indices) > 0:
+            peaks_to_use = self.fitted_peaks_indices
+        elif hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
+            peaks_to_use = self.peaks
+            
+        if peaks_to_use is None or len(peaks_to_use) == 0:
             return np.zeros_like(x)
         
         # Validate peaks before using them
-        validated_peaks = self.validate_peak_indices(self.peaks)
+        validated_peaks = self.validate_peak_indices(peaks_to_use)
         
         if len(validated_peaks) == 0:
             return np.zeros_like(x)
@@ -3553,8 +4156,8 @@ class SpectralDeconvolutionQt6(QDialog):
                                   "Use 'Combine Auto + Manual' button to merge peak lists if needed.")
                 return
             
-            # Store peaks for the model function
-            self.peaks = np.array(all_peaks)
+            # Store peaks for the model function (don't overwrite original peak detection results)
+            self.fitted_peaks_indices = np.array(all_peaks)
             
             # Create initial parameter guesses
             initial_params = []
@@ -3689,6 +4292,10 @@ class SpectralDeconvolutionQt6(QDialog):
                 
         except Exception as e:
             QMessageBox.critical(self, "Fitting Error", f"Peak fitting failed: {str(e)}")
+        finally:
+            # Always clean up temporary fitting peaks array
+            if hasattr(self, 'fitted_peaks_indices'):
+                delattr(self, 'fitted_peaks_indices')
     
     def estimate_peak_width(self, peak_idx):
         """Estimate peak width based on local data around peak."""
@@ -4715,6 +5322,164 @@ class SpectralDeconvolutionQt6(QDialog):
             # Final fallback
             y = self.original_intensities
             return np.full_like(y, np.min(y))
+    
+    def _calculate_moving_average_background_for_batch(self, intensities, window_percent, window_type):
+        """Calculate moving average background for batch processing."""
+        try:
+            from scipy import ndimage
+            
+            # Calculate window size as percentage of spectrum length
+            window_size = max(int(len(intensities) * window_percent / 100.0), 3)
+            
+            # Step 1: Apply minimum filtering to get baseline candidate
+            min_window = max(window_size // 2, 3)
+            y_min_filtered = ndimage.minimum_filter1d(intensities, size=min_window)
+            
+            # Step 2: Apply the specified moving average filter to the minimum filtered data
+            if window_type == "Uniform":
+                background = ndimage.uniform_filter1d(y_min_filtered, size=window_size)
+            elif window_type == "Gaussian":
+                sigma = window_size / 4.0  # Standard deviation
+                background = ndimage.gaussian_filter1d(y_min_filtered, sigma=sigma)
+            elif window_type in ["Hann", "Hamming"]:
+                # Apply windowed convolution to minimum filtered data
+                if window_type == "Hann":
+                    window = np.hanning(window_size)
+                else:  # Hamming
+                    window = np.hamming(window_size)
+                
+                window = window / np.sum(window)  # Normalize
+                background = np.convolve(y_min_filtered, window, mode='same')
+            else:
+                # Default to Gaussian
+                sigma = window_size / 4.0
+                background = ndimage.gaussian_filter1d(y_min_filtered, sigma=sigma)
+            
+            # Step 3: Additional constraint - ensure it stays below original data
+            background = np.minimum(background, intensities)
+            
+            # Step 4: Optional second pass for better baseline fitting
+            tolerance = np.std(intensities - background) * 0.5
+            baseline_mask = (intensities - background) <= tolerance
+            
+            if np.sum(baseline_mask) > window_size:
+                # Apply the filter again, but only to baseline regions
+                baseline_points = intensities.copy()
+                baseline_points[~baseline_mask] = background[~baseline_mask]
+                
+                if window_type == "Uniform":
+                    refined_background = ndimage.uniform_filter1d(baseline_points, size=window_size)
+                elif window_type == "Gaussian":
+                    sigma = window_size / 4.0
+                    refined_background = ndimage.gaussian_filter1d(baseline_points, sigma=sigma)
+                else:
+                    refined_background = background
+                
+                background = np.minimum(refined_background, intensities)
+            
+            return background
+            
+        except ImportError:
+            # Fallback without scipy
+            window_size = max(int(len(intensities) * window_percent / 100.0), 3)
+            
+            # Simple moving minimum approach
+            background = np.array([np.min(intensities[max(0, i-window_size//2):min(len(intensities), i+window_size//2+1)]) 
+                                 for i in range(len(intensities))])
+            
+            # Simple smoothing
+            for _ in range(2):
+                smoothed = background.copy()
+                for i in range(1, len(background)-1):
+                    smoothed[i] = (background[i-1] + background[i] + background[i+1]) / 3
+                background = smoothed
+            
+            return np.minimum(background, intensities)
+            
+        except Exception as e:
+            print(f"Moving average background calculation error: {str(e)}")
+            return np.full_like(intensities, np.min(intensities))
+    
+    def _calculate_spline_background_for_batch(self, intensities, n_knots, smoothing, degree):
+        """Calculate spline background for batch processing."""
+        try:
+            from scipy.interpolate import UnivariateSpline
+            
+            # Create x values (indices)
+            x = np.arange(len(intensities))
+            
+            # Step 1: Apply minimum filtering to identify baseline regions
+            from scipy import ndimage
+            window_size = max(len(intensities) // 20, 5)
+            y_min_filtered = ndimage.minimum_filter1d(intensities, size=window_size)
+            
+            # Step 2: Create initial baseline estimate
+            if n_knots <= 2:
+                n_knots = 3  # Minimum for spline
+            
+            # For background subtraction, use higher smoothing to avoid fitting peaks
+            background_smoothing = max(smoothing, len(intensities) / 10)
+            
+            try:
+                # Fit spline to minimum filtered data for initial background estimate
+                spline = UnivariateSpline(x, y_min_filtered, s=background_smoothing, k=min(degree, 3))
+                initial_background = spline(x)
+                
+                # Step 3: Iterative refinement - only use points below or near the background
+                current_background = initial_background.copy()
+                
+                for iteration in range(3):  # Limited iterations
+                    # Identify points that are likely background
+                    threshold = np.percentile(intensities - current_background, 20)
+                    mask = (intensities - current_background) <= threshold
+                    
+                    if np.sum(mask) < n_knots:  # Need enough points
+                        break
+                    
+                    # Fit spline only to identified background points
+                    spline = UnivariateSpline(x[mask], intensities[mask], s=background_smoothing, k=min(degree, 3))
+                    current_background = spline(x)
+                    
+                    # Ensure background doesn't go above data unrealistically
+                    current_background = np.minimum(current_background, intensities)
+                
+                # Final constraint: background should be below the data
+                background = np.minimum(current_background, intensities)
+                
+                return background
+                
+            except Exception:
+                # Fallback: use simple Savitzky-Golay filter
+                from scipy.signal import savgol_filter
+                
+                # Use Savitzky-Golay filter on minimum filtered data
+                window_length = min(len(intensities) // 5, 51)
+                if window_length % 2 == 0:
+                    window_length += 1  # Must be odd
+                
+                background = savgol_filter(y_min_filtered, window_length, polyorder=min(degree, 3))
+                return np.minimum(background, intensities)
+                
+        except ImportError:
+            # If scipy is not available, fallback to simple polynomial
+            print("scipy not available, using polynomial fallback for spline background")
+            
+            # Simple approach: fit polynomial to lower envelope
+            window_size = max(len(intensities) // 10, 3)
+            y_smooth = np.array([np.min(intensities[max(0, i-window_size):min(len(intensities), i+window_size+1)]) 
+                               for i in range(len(intensities))])
+            
+            x = np.arange(len(intensities))
+            coeffs = np.polyfit(x, y_smooth, min(degree, 3))
+            background = np.polyval(coeffs, x)
+            
+            return np.minimum(background, intensities)
+            
+        except Exception as e:
+            print(f"Spline background calculation error: {str(e)}")
+            # Final fallback: simple linear baseline
+            background = np.linspace(intensities[0], intensities[-1], len(intensities))
+            return np.minimum(background, intensities)
 
     def update_background_options_dropdown(self):
         """Update the background options dropdown."""
@@ -4816,75 +5581,93 @@ class SpectralDeconvolutionQt6(QDialog):
     def _update_manual_controls_from_params(self, method, params):
         """Update manual parameter controls to match the selected option."""
         try:
-            # Update method combo box
-            method_mapping = {
-                "ALS": "ALS (Asymmetric Least Squares)",
-                "Linear": "Linear",
-                "Polynomial": "Polynomial",
-                "Moving Average": "Moving Average",
-                "Spline": "Spline"
-            }
-            
-            if method in method_mapping:
-                combo_text = method_mapping[method]
-                index = self.bg_method_combo.findText(combo_text)
+            # Update method combo box - first check if using fallback controls
+            if hasattr(self, 'bg_method_combo'):
+                # Find and set the method
+                index = self.bg_method_combo.findText(method)
                 if index >= 0:
                     self.bg_method_combo.setCurrentIndex(index)
-                    self.on_bg_method_changed()  # Update visibility of parameter widgets
-            
-            # Update method-specific parameters
-            if method == "ALS":
-                if "lambda" in params:
-                    lambda_val = params["lambda"]
-                    log_val = int(np.log10(lambda_val))
-                    self.lambda_slider.setValue(max(3, min(7, log_val)))
-                    self.update_lambda_label()
+                    self._on_bg_method_changed()  # Update visibility of parameter widgets
                 
-                if "p" in params:
-                    p_val = params["p"]
-                    slider_val = int(p_val * 1000)
-                    self.p_slider.setValue(max(1, min(50, slider_val)))
-                    self.update_p_label()
-                
-                if "niter" in params:
-                    niter_val = params["niter"]
-                    self.niter_slider.setValue(max(5, min(30, niter_val)))
-                    self.update_niter_label()
+                # Update method-specific parameters for fallback controls
+                if method == "ALS":
+                    if hasattr(self, 'lambda_slider') and "lambda" in params:
+                        lambda_val = params["lambda"]
+                        # Convert to log scale (3.0 to 7.0)
+                        log_val = np.log10(lambda_val) * 10
+                        slider_val = max(30, min(70, int(log_val)))
+                        self.lambda_slider.setValue(slider_val)
+                        self._update_lambda_label()
                     
-            elif method == "Linear":
-                if "start_weight" in params:
-                    start_val = int(params["start_weight"] * 10)
-                    self.start_weight_slider.setValue(max(1, min(20, start_val)))
-                    self.update_start_weight_label()
-                
-                if "end_weight" in params:
-                    end_val = int(params["end_weight"] * 10)
-                    self.end_weight_slider.setValue(max(1, min(20, end_val)))
-                    self.update_end_weight_label()
+                    if hasattr(self, 'p_slider') and "p" in params:
+                        p_val = params["p"]
+                        # Convert to slider scale (1-100)
+                        slider_val = max(1, min(100, int(p_val * 1000)))
+                        self.p_slider.setValue(slider_val)
+                        self._update_p_label()
                     
-            elif method == "Polynomial":
-                if "order" in params:
-                    order_val = params["order"]
-                    self.poly_order_slider.setValue(max(1, min(6, order_val)))
-                    self.update_poly_order_label()
-                
-                if "method" in params:
-                    method_type = params["method"]
-                    index = self.poly_method_combo.findText(method_type)
-                    if index >= 0:
-                        self.poly_method_combo.setCurrentIndex(index)
+                    if hasattr(self, 'niter_slider') and "niter" in params:
+                        niter_val = params["niter"]
+                        slider_val = max(5, min(20, int(niter_val)))
+                        self.niter_slider.setValue(slider_val)
+                        self._update_niter_label()
                         
-            elif method == "Moving Average":
-                if "window_percent" in params:
-                    window_val = params["window_percent"]
-                    self.window_size_slider.setValue(max(1, min(50, window_val)))
-                    self.update_window_size_label()
-                
-                if "window_type" in params:
-                    window_type = params["window_type"]
-                    index = self.window_type_combo.findText(window_type)
-                    if index >= 0:
-                        self.window_type_combo.setCurrentIndex(index)
+                elif method == "Linear":
+                    if hasattr(self, 'start_weight_slider') and "start_weight" in params:
+                        weight_val = params["start_weight"]
+                        # Convert to slider scale (1-20)
+                        slider_val = max(1, min(20, int(weight_val * 10)))
+                        self.start_weight_slider.setValue(slider_val)
+                        self._update_start_weight_label()
+                    
+                    if hasattr(self, 'end_weight_slider') and "end_weight" in params:
+                        weight_val = params["end_weight"]
+                        # Convert to slider scale (1-20)
+                        slider_val = max(1, min(20, int(weight_val * 10)))
+                        self.end_weight_slider.setValue(slider_val)
+                        self._update_end_weight_label()
+                        
+                elif method == "Polynomial":
+                    if hasattr(self, 'poly_order_slider') and "order" in params:
+                        order_val = params["order"]
+                        slider_val = max(1, min(6, int(order_val)))
+                        self.poly_order_slider.setValue(slider_val)
+                        self._update_poly_order_label()
+                    
+                    if hasattr(self, 'poly_method_combo') and "poly_method" in params:
+                        method_type = params["poly_method"]
+                        index = self.poly_method_combo.findText(method_type)
+                        if index >= 0:
+                            self.poly_method_combo.setCurrentIndex(index)
+                            
+                elif method == "Moving Average":
+                    if hasattr(self, 'window_percent_slider') and "window_percent" in params:
+                        window_val = params["window_percent"]
+                        self.window_percent_slider.setValue(max(5, min(50, window_val)))
+                        self._update_window_percent_label()
+                    
+                    if hasattr(self, 'window_type_combo') and "window_type" in params:
+                        window_type = params["window_type"]
+                        index = self.window_type_combo.findText(window_type)
+                        if index >= 0:
+                            self.window_type_combo.setCurrentIndex(index)
+                            
+                elif method == "Spline":
+                    if hasattr(self, 'n_knots_slider') and "n_knots" in params:
+                        knots_val = params["n_knots"]
+                        self.n_knots_slider.setValue(max(3, min(20, knots_val)))
+                        self._update_n_knots_label()
+                    
+                    if hasattr(self, 'smoothing_slider') and "smoothing" in params:
+                        smoothing_val = params["smoothing"]
+                        self.smoothing_slider.setValue(max(1, min(1000, smoothing_val)))
+                        self._update_smoothing_label()
+                    
+                    if hasattr(self, 'spline_degree_combo') and "degree" in params:
+                        degree_val = str(params["degree"])
+                        index = self.spline_degree_combo.findText(degree_val)
+                        if index >= 0:
+                            self.spline_degree_combo.setCurrentIndex(index)
             
         except Exception as e:
             print(f"Error updating manual controls: {str(e)}")
@@ -5540,8 +6323,16 @@ class SpectralDeconvolutionQt6(QDialog):
                         original_region_int = region_int.copy()
                         background = None
                         
-                        # Apply background correction if requested
-                        if self.batch_background_checkbox.isChecked():
+                        # Apply background correction (always enabled)
+                        # Use the same background method selected in the background tab
+                        method = bg_params.get('method', 'ALS')
+                        try:
+                            background = self._calculate_background_for_batch(region_int, method, bg_params)
+                            region_int = region_int - background
+                            print(f"✅ Applied {method} background correction to {Path(file_path).name}")
+                        except Exception as e:
+                            print(f"⚠️ Background correction failed for {Path(file_path).name}: {str(e)}")
+                            # Fall back to ALS if the selected method fails
                             baseline_fitter = self._get_baseline_fitter()
                             background = baseline_fitter.baseline_als(
                                 region_int, 
@@ -5550,15 +6341,100 @@ class SpectralDeconvolutionQt6(QDialog):
                                 bg_params.get('niter', 10)
                             )
                             region_int = region_int - background
+                            print(f"⚠️ Fell back to ALS background correction")
                         
-                        # Auto-detect peaks if requested
+                        # Determine peaks to use
                         peaks = None
                         fitted_peaks = None
                         residuals = None
                         fit_params = None
                         total_r2 = None
                         
-                        if self.batch_auto_peaks_checkbox.isChecked():
+                        # Check for manual peaks first
+                        use_manual_peaks = False
+                        if (self.batch_manual_peaks_radio.isChecked() and 
+                            hasattr(self, 'manual_peaks') and 
+                            self.manual_peaks is not None and 
+                            len(self.manual_peaks) > 0):
+                            
+                            try:
+                                # Convert manual peaks (wavenumber indices) to region indices
+                                manual_peaks_in_region = []
+                                print(f"🔍 Converting {len(self.manual_peaks)} manual peaks for region {start}-{end} cm⁻¹")
+                                
+                                for i, peak_idx in enumerate(self.manual_peaks):
+                                    # Ensure peak_idx is an integer for numpy indexing
+                                    peak_idx = int(peak_idx)
+                                    if 0 <= peak_idx < len(self.wavenumbers):
+                                        peak_wavenumber = self.wavenumbers[peak_idx]
+                                        # Find closest point in region
+                                        if start <= peak_wavenumber <= end:
+                                            region_idx = np.argmin(np.abs(region_wave - peak_wavenumber))
+                                            manual_peaks_in_region.append(int(region_idx))
+                                            print(f"  ✓ Manual peak {i+1}: {peak_wavenumber:.1f} cm⁻¹ → region index {int(region_idx)}")
+                                        else:
+                                            print(f"  ⚠ Manual peak {i+1}: {peak_wavenumber:.1f} cm⁻¹ outside region")
+                                    else:
+                                        print(f"  ⚠ Manual peak {i+1}: index {peak_idx} out of bounds")
+                                
+                                if manual_peaks_in_region:
+                                    peaks = np.array(manual_peaks_in_region, dtype=int)
+                                    use_manual_peaks = True
+                                    print(f"📍 Using {len(peaks)} manual peaks in {Path(file_path).name}")
+                                else:
+                                    print(f"⚠️ No manual peaks found in region {start}-{end} cm⁻¹")
+                                    
+                            except Exception as e:
+                                print(f"❌ Error processing manual peaks: {str(e)}")
+                                print(f"   Manual peaks array: {self.manual_peaks}")
+                                print(f"   Manual peaks type: {type(self.manual_peaks)}")
+                                # Fall back to auto-detection on error
+                        
+                        # Check for found peaks if not using manual peaks
+                        use_found_peaks = False
+                        if (not use_manual_peaks and 
+                            self.batch_found_peaks_radio.isChecked() and 
+                            hasattr(self, 'peaks') and 
+                            self.peaks is not None and 
+                            len(self.peaks) > 0):
+                            
+                            try:
+                                # Convert found peaks (wavenumber indices) to region indices
+                                found_peaks_in_region = []
+                                print(f"🔍 Converting {len(self.peaks)} found peaks for region {start}-{end} cm⁻¹")
+                                
+                                for i, peak_idx in enumerate(self.peaks):
+                                    # Ensure peak_idx is an integer for numpy indexing
+                                    peak_idx = int(peak_idx)
+                                    if 0 <= peak_idx < len(self.wavenumbers):
+                                        peak_wavenumber = self.wavenumbers[peak_idx]
+                                        # Find closest point in region
+                                        if start <= peak_wavenumber <= end:
+                                            region_idx = np.argmin(np.abs(region_wave - peak_wavenumber))
+                                            found_peaks_in_region.append(int(region_idx))
+                                            print(f"  ✓ Found peak {i+1}: {peak_wavenumber:.1f} cm⁻¹ → region index {int(region_idx)}")
+                                        else:
+                                            print(f"  ⚠ Found peak {i+1}: {peak_wavenumber:.1f} cm⁻¹ outside region")
+                                    else:
+                                        print(f"  ⚠ Found peak {i+1}: index {peak_idx} out of bounds")
+                                
+                                if found_peaks_in_region:
+                                    peaks = np.array(found_peaks_in_region, dtype=int)
+                                    use_found_peaks = True
+                                    print(f"📍 Using {len(peaks)} found peaks in {Path(file_path).name}")
+                                else:
+                                    print(f"⚠️ No found peaks in region {start}-{end} cm⁻¹")
+                                    
+                            except Exception as e:
+                                print(f"❌ Error processing found peaks: {str(e)}")
+                                print(f"   Found peaks array: {self.peaks}")
+                                print(f"   Found peaks type: {type(self.peaks)}")
+                                # Fall back to auto-detection on error
+                        
+                        # Auto-detect peaks if requested and no manual/found peaks used
+                        if (not use_manual_peaks and 
+                            not use_found_peaks and 
+                            self.batch_auto_peaks_radio.isChecked()):
                             peaks, _ = find_peaks(
                                 region_int, 
                                 height=peak_params.get('height', 0.1) * np.max(region_int),
@@ -5566,18 +6442,21 @@ class SpectralDeconvolutionQt6(QDialog):
                                 prominence=peak_params.get('prominence', 0.05) * np.max(region_int)
                             )
                             if peaks is not None and len(peaks) > 0:
-                                file_peaks_count += len(peaks)
-                                
-                                # PERFORM PEAK FITTING (not just detection)
-                                try:
-                                    fitted_peaks, fit_params, total_r2, residuals = self._fit_peaks_for_batch(
-                                        region_wave, region_int, peaks, peak_params
-                                    )
-                                    print(f"✅ Fitted {len(peaks)} peaks in {Path(file_path).name}, R² = {total_r2:.3f}")
-                                except Exception as e:
-                                    print(f"⚠️ Peak fitting failed for {Path(file_path).name}: {str(e)}")
-                                    fitted_peaks = None
-                                    residuals = region_int.copy()  # No fitting, show original
+                                print(f"🔍 Auto-detected {len(peaks)} peaks in {Path(file_path).name}")
+                        
+                        # Perform peak fitting if we have peaks
+                        if peaks is not None and len(peaks) > 0:
+                            file_peaks_count += len(peaks)
+                            
+                            try:
+                                fitted_peaks, fit_params, total_r2, residuals = self._fit_peaks_for_batch(
+                                    region_wave, region_int, peaks, peak_params
+                                )
+                                print(f"✅ Fitted {len(peaks)} peaks in {Path(file_path).name}, R² = {total_r2:.3f}")
+                            except Exception as e:
+                                print(f"⚠️ Peak fitting failed for {Path(file_path).name}: {str(e)}")
+                                fitted_peaks = None
+                                residuals = region_int.copy()  # No fitting, show original
                         
                         # Update real-time plot with fitted peaks and residuals
                         self.batch_monitor.update_spectrum_plot(
@@ -5696,6 +6575,8 @@ class SpectralDeconvolutionQt6(QDialog):
         bounds_upper = []
         
         for peak_idx in peaks:
+            # Ensure peak_idx is an integer for numpy indexing
+            peak_idx = int(peak_idx)
             if 0 <= peak_idx < len(intensities):
                 # Amplitude: Use actual intensity at peak
                 amp = intensities[peak_idx]
