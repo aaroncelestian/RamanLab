@@ -31,9 +31,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QMessageBox, QTextEdit, QSplitter, QGroupBox,
                                QTabWidget, QComboBox, QSpinBox, QDoubleSpinBox,
                                QCheckBox, QProgressBar, QStatusBar, QDialog, 
-                               QScrollArea, QFrame)
+                               QScrollArea, QFrame, QLineEdit, QInputDialog)
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
-from PySide6.QtGui import QFont, QIcon, QPixmap
+from PySide6.QtGui import QFont, QIcon, QPixmap, QClipboard
 
 # Try to import Jupyter console components
 try:
@@ -64,8 +64,71 @@ class RamanLabDataProcessor:
             raise ValueError(f"Failed to load pickle data: {str(e)}")
     
     @staticmethod
+    def standardize_dataframe_columns(df, df_type='peaks'):
+        """
+        Standardize DataFrame column names to ensure consistent access patterns.
+        
+        Args:
+            df: pandas DataFrame to standardize
+            df_type: 'peaks' or 'summary' to determine which standardization to apply
+            
+        Returns:
+            DataFrame with standardized column names
+        """
+        if df.empty:
+            return df
+            
+        df_copy = df.copy()
+        
+        if df_type == 'peaks':
+            # Define mapping from possible column names to standard names
+            column_mappings = {
+                # Position/wavenumber mappings
+                'position': ['position', 'peak_position', 'center', 'peak_center', 'wavenumber', 'wn', 'freq', 'frequency'],
+                # Height/intensity mappings  
+                'height': ['height', 'amplitude', 'intensity', 'amp', 'peak_height', 'peak_amplitude', 'peak_intensity'],
+                # Width mappings
+                'width': ['width', 'fwhm', 'sigma', 'peak_width', 'full_width_half_max'],
+                # Area mappings
+                'area': ['area', 'peak_area', 'integrated_area', 'integration'],
+                # R² mappings
+                'r2': ['r2', 'r_squared', 'r_sq', 'fit_quality', 'goodness_of_fit', 'correlation'],
+                # File identification
+                'filename': ['filename', 'file', 'name', 'file_name', 'spectrum_name'],
+                'file_index': ['file_index', 'index', 'file_id', 'spectrum_index'],
+                'peak_index': ['peak_index', 'peak_id', 'peak_number', 'peak_num']
+            }
+            
+        elif df_type == 'summary':
+            column_mappings = {
+                'filename': ['filename', 'file', 'name', 'file_name', 'spectrum_name'],
+                'file_index': ['file_index', 'index', 'file_id', 'spectrum_index'],
+                'n_peaks': ['n_peaks', 'num_peaks', 'peak_count', 'peaks_found', 'number_of_peaks'],
+                'total_r2': ['total_r2', 'r2', 'r_squared', 'overall_r2', 'fit_quality'],
+                'processing_time': ['processing_time', 'time', 'duration', 'elapsed_time']
+            }
+        else:
+            return df_copy
+            
+        # Apply mappings
+        current_columns = df_copy.columns.tolist()
+        rename_dict = {}
+        
+        for standard_name, possible_names in column_mappings.items():
+            for possible_name in possible_names:
+                if possible_name in current_columns and standard_name not in current_columns:
+                    rename_dict[possible_name] = standard_name
+                    break  # Use first match found
+        
+        if rename_dict:
+            df_copy = df_copy.rename(columns=rename_dict)
+            print(f"📋 Standardized columns: {rename_dict}")
+            
+        return df_copy
+
+    @staticmethod
     def convert_to_pandas(batch_data):
-        """Convert batch results to pandas DataFrames."""
+        """Convert batch results to pandas DataFrames with standardized columns."""
         results = {
             'summary': [],
             'peaks': [],
@@ -76,29 +139,30 @@ class RamanLabDataProcessor:
             if not isinstance(result, dict):
                 continue
                 
-            # Extract summary information
+            # Extract summary information with flexible field names
             summary_row = {
                 'file_index': i,
                 'filename': result.get('filename', f'spectrum_{i}'),
                 'n_peaks': len(result.get('peaks', [])),
-                'total_r2': result.get('total_r2', None),
-                'processing_time': result.get('processing_time', None)
+                'total_r2': result.get('total_r2', result.get('r2', result.get('r_squared', None))),
+                'processing_time': result.get('processing_time', result.get('time', None))
             }
             results['summary'].append(summary_row)
             
-            # Extract peak information
+            # Extract peak information with flexible field names
             peaks = result.get('peaks', [])
             for j, peak in enumerate(peaks):
                 if isinstance(peak, dict):
+                    # Try multiple possible field names for each parameter
                     peak_row = {
                         'file_index': i,
                         'filename': result.get('filename', f'spectrum_{i}'),
                         'peak_index': j,
-                        'position': peak.get('position', None),
-                        'height': peak.get('height', None),
-                        'width': peak.get('width', None),
-                        'area': peak.get('area', None),
-                        'r2': peak.get('r2', None)
+                        'position': peak.get('position', peak.get('center', peak.get('peak_position', peak.get('wavenumber', None)))),
+                        'height': peak.get('height', peak.get('amplitude', peak.get('intensity', peak.get('amp', None)))),
+                        'width': peak.get('width', peak.get('fwhm', peak.get('sigma', None))),
+                        'area': peak.get('area', peak.get('peak_area', None)),
+                        'r2': peak.get('r2', peak.get('r_squared', peak.get('fit_quality', None)))
                     }
                     results['peaks'].append(peak_row)
             
@@ -114,6 +178,10 @@ class RamanLabDataProcessor:
         # Convert to DataFrames
         summary_df = pd.DataFrame(results['summary'])
         peaks_df = pd.DataFrame(results['peaks'])
+        
+        # Apply column standardization
+        summary_df = RamanLabDataProcessor.standardize_dataframe_columns(summary_df, 'summary')
+        peaks_df = RamanLabDataProcessor.standardize_dataframe_columns(peaks_df, 'peaks')
         
         return summary_df, peaks_df, results['spectra']
 
@@ -192,7 +260,7 @@ Use Tab for auto-completion and Shift+Tab for function signatures.
         self.setFont(font)
     
     def inject_ramanlab_data(self, summary_df, peaks_df, spectra_dict, batch_data):
-        """Inject RamanLab data into the kernel namespace."""
+        """Inject RamanLab data into the kernel namespace using the proven Analysis tab approach."""
         if not self.kernel_client:
             return
             
@@ -203,7 +271,7 @@ Use Tab for auto-completion and Shift+Tab for function signatures.
             self._spectra_dict = spectra_dict
             self._batch_data = batch_data
             
-            # Prepare data injection code
+            # Prepare initial setup code
             code_lines = [
                 "# RamanLab data injection",
                 "import numpy as np",
@@ -222,71 +290,74 @@ Use Tab for auto-completion and Shift+Tab for function signatures.
             # Execute initial setup
             self.execute('\n'.join(code_lines), hidden=False)
             
-            # Convert DataFrames to JSON for transmission to kernel
-            summary_json = summary_df.to_json(orient='records')
-            peaks_json = peaks_df.to_json(orient='records')
+            # Calculate basic statistics
+            n_spectra = len(summary_df)
+            n_peaks_total = len(peaks_df)
+            n_spectra_with_data = len(spectra_dict)
+            avg_peaks = summary_df['n_peaks'].mean() if 'n_peaks' in summary_df.columns else 0
+            avg_r2 = summary_df['total_r2'].mean() if 'total_r2' in summary_df.columns else 0
             
-            # Inject the DataFrames
-            df_injection_code = f"""
-# Load DataFrames from JSON
-import json
-summary_data = json.loads('''{summary_json}''')
-peaks_data = json.loads('''{peaks_json}''')
-
-summary_df = pd.DataFrame(summary_data)
-peaks_df = pd.DataFrame(peaks_data)
+            # Use the proven approach from Analysis tab - inject pandas DataFrames directly
+            # Convert DataFrames to string representation for execution
+            
+            # Inject summary DataFrame
+            summary_csv = summary_df.to_csv(index=False)
+            summary_injection = f"""
+# Create summary DataFrame using CSV approach (same as Analysis tab)
+from io import StringIO
+summary_csv_data = '''{summary_csv}'''
+summary_df = pd.read_csv(StringIO(summary_csv_data))
 """
+            self.execute(summary_injection, hidden=True)
             
-            self.execute(df_injection_code, hidden=False)
-            
-            # Inject spectral data dictionary
-            spectra_code_lines = ["# Load spectral data", "spectra_dict = {}"]
-            for filename, spectrum_data in spectra_dict.items():
-                # Convert numpy arrays to lists for JSON serialization
-                wavenumbers_list = spectrum_data['wavenumbers'].tolist()
-                intensities_list = spectrum_data['intensities'].tolist()
-                background_list = spectrum_data['background'].tolist() if len(spectrum_data['background']) > 0 else []
-                
-                spectra_code_lines.append(f"""
-spectra_dict['{filename}'] = {{
-    'wavenumbers': np.array({wavenumbers_list}),
-    'intensities': np.array({intensities_list}),
-    'background': np.array({background_list}),
-    'fitted_peaks': {spectrum_data.get('fitted_peaks', None)}
-}}""")
-            
-            self.execute('\n'.join(spectra_code_lines), hidden=False)
-            
-            # Store raw batch data (simplified)
-            batch_data_code = f"""
-# Raw batch data (simplified - access via spectra_dict for full data)
-batch_data = {len(batch_data)} # Number of processed spectra
+            # Inject peaks DataFrame  
+            peaks_csv = peaks_df.to_csv(index=False)
+            peaks_injection = f"""
+# Create peaks DataFrame using CSV approach (same as Analysis tab)
+peaks_csv_data = '''{peaks_csv}'''
+peaks_df = pd.read_csv(StringIO(peaks_csv_data))
 """
+            self.execute(peaks_injection, hidden=True)
             
-            self.execute(batch_data_code, hidden=False)
-            
-            # Create summary message
-            summary_code = f"""
-# Data summary
-n_spectra = len(summary_df)
-n_peaks_total = len(peaks_df)
-n_spectra_with_data = len(spectra_dict)
+            # Inject basic spectral information and show completion message
+            filenames_list = list(spectra_dict.keys())
+            completion_injection = f"""
+# Create spectra dictionary with filenames (same as Analysis tab)
+spectra_dict = {dict.fromkeys(filenames_list, 'Available in console')}
+batch_data = {len(batch_data)}  # Number of processed spectra
 
-print(f'✅ Data loaded successfully!')
+# Basic statistics
+n_spectra = {n_spectra}
+n_peaks_total = {n_peaks_total}
+n_spectra_with_data = {n_spectra_with_data}
+avg_peaks_per_spectrum = {avg_peaks:.1f}
+avg_r2 = {avg_r2:.3f}
+
+print('✅ RamanLab data ready!')
 print(f'📈 {{n_spectra}} spectra processed')
 print(f'🔍 {{n_peaks_total}} peaks detected')
 print(f'📊 {{n_spectra_with_data}} spectra with full data')
+print(f'⚡ Average: {{avg_peaks_per_spectrum}} peaks/spectrum')
+print(f'📐 Average R²: {{avg_r2:.3f}}')
 print()
-print('Available variables:')
-print('• summary_df    - Summary statistics DataFrame')
-print('• peaks_df      - Peak parameters DataFrame') 
-print('• spectra_dict  - Dictionary of spectral data')
-print('• batch_data    - Number of processed spectra')
+print('💡 Your data is now available as:')
+print(f'• summary_df - Summary statistics DataFrame ({{len(summary_df)}} rows)')
+print(f'• peaks_df - Peak parameters DataFrame ({{len(peaks_df)}} rows)')
+print(f'• spectra_dict - Dictionary of spectrum filenames ({{len(spectra_dict)}} files)')
+print('• batch_data - Number of processed spectra')
 print()
-print('Try: summary_df.head() or peaks_df.describe()')
+print('📋 Standardized column names:')
+print(f'• summary_df columns: {{list(summary_df.columns)}}')
+print(f'• peaks_df columns: {{list(peaks_df.columns)}}')
+print()
+print('🎯 Ready-to-use examples:')
+print('>>> summary_df.head()')
+print('>>> peaks_df.describe()')
+print('>>> peaks_df.groupby("filename").size()')
+print('>>> peaks_df[peaks_df["r2"] >= 0.7]  # Good quality peaks')
 """
             
-            self.execute(summary_code, hidden=False)
+            self.execute(completion_injection, hidden=False)
             
         except Exception as e:
             error_msg = f"Failed to inject data: {str(e)}"
@@ -495,7 +566,7 @@ class AdvancedJupyterConsole(QMainWindow):
         """Setup matplotlib configuration."""
         try:
             # Try to import and use the RamanLab matplotlib config
-            from matplotlib_config import setup_matplotlib_style
+            from polarization_ui.matplotlib_config import setup_matplotlib_style
             setup_matplotlib_style()
         except ImportError:
             # Fallback matplotlib configuration
@@ -601,95 +672,526 @@ class AdvancedJupyterConsole(QMainWindow):
 
 
 class PythonExamplesWindow(QDialog):
-    """Persistent window showing Python examples for Raman spectroscopy."""
+    """Window showing Python examples with custom example management."""
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("RamanLab Python Examples - Your Guide to Spectral Analysis")
-        self.setGeometry(200, 200, 1200, 800)
-        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        self.parent = parent
+        self.setWindowTitle("RamanLab Analysis Examples")
+        self.setModal(False)
+        self.resize(900, 700)
         
-        # Make the window persistent
-        self.setAttribute(Qt.WA_DeleteOnClose, False)
+        # Path for custom examples file
+        from pathlib import Path
+        self.custom_examples_file = Path.home() / '.ramanlab' / 'custom_examples.json'
+        self.custom_examples_file.parent.mkdir(exist_ok=True)
         
+        # Load custom examples
+        self.custom_examples = self.load_custom_examples()
+        
+        # Set up UI
         self.setup_ui()
         
-        # Use matplotlib config for consistency
-        try:
-            from polarization_ui.matplotlib_config import setup_matplotlib
-            setup_matplotlib()
-        except ImportError:
-            pass
+        # Timer for copy feedback
+        self.copy_timer = QTimer()
+        self.copy_timer.timeout.connect(self.show_copy_feedback)
+        self.copy_timer.setSingleShot(True)
     
     def setup_ui(self):
-        """Setup the user interface."""
+        """Set up the examples window UI with custom examples integration."""
         layout = QVBoxLayout(self)
         
-        # Header
-        header = QLabel("🐍 Python Examples for Raman Spectroscopy & Batch Processing")
-        header.setStyleSheet("""
-            QLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: #2E7D32;
-                padding: 10px;
-                background-color: #E8F5E8;
-                border-radius: 5px;
-                margin: 5px;
-            }
-        """)
-        header.setAlignment(Qt.AlignCenter)
-        layout.addWidget(header)
+        # Header with title and add example button
+        header_layout = QHBoxLayout()
+        title_label = QLabel("RamanLab Analysis Examples")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50; margin: 10px;")
+        header_layout.addWidget(title_label)
         
-        # Info label
-        info_label = QLabel("💡 Click examples to copy to clipboard, then paste into console!")
-        info_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
-        info_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(info_label)
+        header_layout.addStretch()
         
-        # Create tabs
-        self.tabs = QTabWidget()
-        
-        # Tab 1: Basic Data Exploration
-        self.tabs.addTab(self.create_basic_tab(), "📊 Basic Data Exploration")
-        
-        # Tab 2: Peak Analysis
-        self.tabs.addTab(self.create_peak_analysis_tab(), "🔍 Peak Analysis")
-        
-        # Tab 3: Plotting & Visualization
-        self.tabs.addTab(self.create_plotting_tab(), "📈 Plotting & Visualization")
-        
-        # Tab 4: Batch Processing
-        self.tabs.addTab(self.create_batch_tab(), "⚙️ Batch Processing")
-        
-        # Tab 5: Advanced Analysis
-        self.tabs.addTab(self.create_advanced_tab(), "🎯 Advanced Analysis")
-        
-        # Tab 6: Export & Save
-        self.tabs.addTab(self.create_export_tab(), "💾 Export & Save")
-        
-        layout.addWidget(self.tabs)
-        
-        # Close button
-        close_btn = QPushButton("Close Examples Window")
-        close_btn.clicked.connect(self.hide)
-        close_btn.setStyleSheet("""
+        # Add example button
+        add_example_btn = QPushButton("➕ Add Custom Example")
+        add_example_btn.setStyleSheet("""
             QPushButton {
-                background-color: #f44336;
+                background-color: #3498db;
                 color: white;
-                font-weight: bold;
+                border: none;
                 padding: 8px 16px;
                 border-radius: 4px;
-                margin: 5px;
+                font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #da190b;
+                background-color: #2980b9;
             }
         """)
-        layout.addWidget(close_btn)
+        add_example_btn.clicked.connect(self.show_add_example_dialog)
+        header_layout.addWidget(add_example_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Tab widget for different categories
+        self.tab_widget = QTabWidget()
+        self.tab_widget.addTab(self.create_basic_tab(), "📊 Basic")
+        self.tab_widget.addTab(self.create_peak_analysis_tab(), "🔍 Peak Analysis") 
+        self.tab_widget.addTab(self.create_plotting_tab(), "📈 Plotting")
+        
+        # Add custom tabs for each custom category
+        for category in self.custom_examples.keys():
+            tab = self.create_custom_tab(category)
+            self.tab_widget.addTab(tab, f"⭐ {category}")
+        
+        layout.addWidget(self.tab_widget)
+        
+        # Footer with info
+        footer_label = QLabel("💡 Tip: Click ➕ to save your own code snippets for later use!")
+        footer_label.setStyleSheet("color: #7f8c8d; font-style: italic; margin: 5px;")
+        layout.addWidget(footer_label)
     
+    def load_custom_examples(self):
+        """Load custom examples from JSON file."""
+        import json
+        try:
+            if self.custom_examples_file.exists():
+                with open(self.custom_examples_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                return {}
+        except Exception as e:
+            print(f"Warning: Could not load custom examples: {e}")
+            return {}
+    
+    def save_custom_examples(self):
+        """Save custom examples to JSON file."""
+        import json
+        try:
+            with open(self.custom_examples_file, 'w', encoding='utf-8') as f:
+                json.dump(self.custom_examples, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"Error saving custom examples: {e}")
+            return False
+    
+    def add_custom_example(self, category, title, code, description=""):
+        """Add a new custom example."""
+        if category not in self.custom_examples:
+            self.custom_examples[category] = []
+        
+        # Check if example already exists
+        for example in self.custom_examples[category]:
+            if example['title'] == title:
+                # Update existing example
+                example['code'] = code
+                example['description'] = description
+                self.save_custom_examples()
+                return True
+        
+        # Add new example
+        self.custom_examples[category].append({
+            'title': title,
+            'code': code,
+            'description': description,
+            'created': pd.Timestamp.now().isoformat()
+        })
+        
+        if self.save_custom_examples():
+            self.refresh_tabs()
+            return True
+        return False
+    
+    def delete_custom_example(self, category, title):
+        """Delete a custom example."""
+        if category in self.custom_examples:
+            self.custom_examples[category] = [
+                ex for ex in self.custom_examples[category] 
+                if ex['title'] != title
+            ]
+            if not self.custom_examples[category]:
+                del self.custom_examples[category]
+            self.save_custom_examples()
+            self.refresh_tabs()
+    
+    def show_add_example_dialog(self):
+        """Show dialog to add a new custom example."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Custom Example")
+        dialog.setModal(True)
+        dialog.resize(600, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Category selection
+        cat_layout = QHBoxLayout()
+        cat_layout.addWidget(QLabel("Category:"))
+        category_combo = QComboBox()
+        category_combo.addItems(["Basic Analysis", "Peak Analysis", "Plotting", "Custom"])
+        category_combo.setEditable(True)
+        cat_layout.addWidget(category_combo)
+        layout.addLayout(cat_layout)
+        
+        # Title input
+        title_layout = QHBoxLayout()
+        title_layout.addWidget(QLabel("Title:"))
+        title_edit = QLineEdit()
+        title_edit.setPlaceholderText("My Analysis Example")
+        title_layout.addWidget(title_edit)
+        layout.addLayout(title_layout)
+        
+        # Description input
+        desc_layout = QVBoxLayout()
+        desc_layout.addWidget(QLabel("Description (optional):"))
+        desc_edit = QTextEdit()
+        desc_edit.setMaximumHeight(80)
+        desc_edit.setPlaceholderText("Brief description of what this example does...")
+        desc_layout.addWidget(desc_edit)
+        layout.addLayout(desc_layout)
+        
+        # Code input
+        code_layout = QVBoxLayout()
+        code_layout.addWidget(QLabel("Code:"))
+        code_edit = QTextEdit()
+        code_edit.setPlaceholderText("# Your Python code here...\nprint('Hello RamanLab!')")
+        
+        # Set up code editor styling
+        font = QFont()
+        font.setFamily('Consolas')
+        font.setPointSize(10)
+        code_edit.setFont(font)
+        
+        code_layout.addWidget(code_edit)
+        layout.addLayout(code_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        save_btn = QPushButton("💾 Save Example")
+        cancel_btn = QPushButton("❌ Cancel")
+        
+        save_btn.clicked.connect(lambda: self.save_from_dialog(
+            dialog, category_combo.currentText(), title_edit.text(), 
+            code_edit.toPlainText(), desc_edit.toPlainText()
+        ))
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        button_layout.addWidget(save_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
+    def save_from_dialog(self, dialog, category, title, code, description):
+        """Save example from dialog input."""
+        if not title.strip():
+            QMessageBox.warning(dialog, "Missing Title", "Please enter a title for your example.")
+            return
+        
+        if not code.strip():
+            QMessageBox.warning(dialog, "Missing Code", "Please enter some code for your example.")
+            return
+        
+        if self.add_custom_example(category, title.strip(), code.strip(), description.strip()):
+            QMessageBox.information(dialog, "Success", f"Example '{title}' saved successfully!")
+            dialog.accept()
+        else:
+            QMessageBox.warning(dialog, "Error", "Failed to save example. Please try again.")
+    
+    def refresh_tabs(self):
+        """Refresh all tabs to show updated custom examples."""
+        # Clear and rebuild tabs
+        self.tab_widget.clear()
+        self.tab_widget.addTab(self.create_basic_tab(), "📊 Basic")
+        self.tab_widget.addTab(self.create_peak_analysis_tab(), "🔍 Peak Analysis") 
+        self.tab_widget.addTab(self.create_plotting_tab(), "📈 Plotting")
+        
+        # Add custom tabs for each custom category
+        for category in self.custom_examples.keys():
+            tab = self.create_custom_tab(category)
+            self.tab_widget.addTab(tab, f"⭐ {category}")
+    
+    def create_custom_tab(self, category):
+        """Create tab for custom examples in a specific category."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Header with add/manage buttons
+        header_layout = QHBoxLayout()
+        header_label = QLabel(f"Custom Examples: {category}")
+        header_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+        header_layout.addWidget(header_label)
+        
+        header_layout.addStretch()
+        
+        add_btn = QPushButton("➕ Add Example")
+        add_btn.clicked.connect(self.show_add_example_dialog)
+        header_layout.addWidget(add_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Scroll area for examples
+        scroll = QScrollArea()
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # Add examples for this category
+        if category in self.custom_examples:
+            for example in self.custom_examples[category]:
+                example_widget = self.create_custom_example_widget(
+                    category, example['title'], example['code'], example.get('description', '')
+                )
+                scroll_layout.addWidget(example_widget)
+        
+        # Add spacing at the end
+        scroll_layout.addStretch()
+        
+        scroll.setWidget(scroll_widget)
+        scroll.setWidgetResizable(True)
+        layout.addWidget(scroll)
+        
+        return widget
+    
+    def create_custom_example_widget(self, category, title, code, description=""):
+        """Create widget for a custom example with delete option."""
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Box)
+        frame.setStyleSheet("QFrame { border: 1px solid #ccc; border-radius: 5px; margin: 2px; }")
+        
+        layout = QVBoxLayout(frame)
+        
+        # Header with title and controls
+        header_layout = QHBoxLayout()
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # Control buttons
+        copy_btn = QPushButton("📋")
+        copy_btn.setToolTip("Copy to clipboard")
+        copy_btn.setMaximumWidth(30)
+        copy_btn.clicked.connect(lambda: self.copy_to_clipboard(code))
+        
+        edit_btn = QPushButton("✏️")
+        edit_btn.setToolTip("Edit example")
+        edit_btn.setMaximumWidth(30)
+        edit_btn.clicked.connect(lambda: self.edit_custom_example(category, title, code, description))
+        
+        delete_btn = QPushButton("🗑️")
+        delete_btn.setToolTip("Delete example")
+        delete_btn.setMaximumWidth(30)
+        delete_btn.clicked.connect(lambda: self.confirm_delete_example(category, title))
+        
+        header_layout.addWidget(copy_btn)
+        header_layout.addWidget(edit_btn)
+        header_layout.addWidget(delete_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Description if available
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setStyleSheet("color: #7f8c8d; font-style: italic; margin-bottom: 5px;")
+            desc_label.setWordWrap(True)
+            layout.addWidget(desc_label)
+        
+        # Code display
+        code_display = QTextEdit()
+        code_display.setPlainText(code)
+        code_display.setReadOnly(True)
+        code_display.setMaximumHeight(150)
+        
+        # Set up font
+        font = QFont()
+        font.setFamily('Consolas')
+        font.setPointSize(9)
+        code_display.setFont(font)
+        code_display.setStyleSheet("background-color: #f8f9fa; border: 1px solid #e9ecef;")
+        
+        layout.addWidget(code_display)
+        
+        return frame
+    
+    def edit_custom_example(self, category, title, code, description):
+        """Edit an existing custom example."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Edit Example: {title}")
+        dialog.setModal(True)
+        dialog.resize(600, 500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Title (read-only for editing)
+        title_layout = QHBoxLayout()
+        title_layout.addWidget(QLabel("Title:"))
+        title_edit = QLineEdit(title)
+        title_layout.addWidget(title_edit)
+        layout.addLayout(title_layout)
+        
+        # Description
+        desc_layout = QVBoxLayout()
+        desc_layout.addWidget(QLabel("Description:"))
+        desc_edit = QTextEdit()
+        desc_edit.setPlainText(description)
+        desc_edit.setMaximumHeight(80)
+        desc_layout.addWidget(desc_edit)
+        layout.addLayout(desc_layout)
+        
+        # Code
+        code_layout = QVBoxLayout()
+        code_layout.addWidget(QLabel("Code:"))
+        code_edit = QTextEdit()
+        code_edit.setPlainText(code)
+        
+        font = QFont()
+        font.setFamily('Consolas')
+        font.setPointSize(10)
+        code_edit.setFont(font)
+        
+        code_layout.addWidget(code_edit)
+        layout.addLayout(code_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        save_btn = QPushButton("💾 Save Changes")
+        cancel_btn = QPushButton("❌ Cancel")
+        
+        def save_changes():
+            new_title = title_edit.text().strip()
+            new_code = code_edit.toPlainText().strip()
+            new_desc = desc_edit.toPlainText().strip()
+            
+            if not new_title or not new_code:
+                QMessageBox.warning(dialog, "Missing Information", "Title and code cannot be empty.")
+                return
+            
+            # Delete old example if title changed
+            if new_title != title:
+                self.delete_custom_example(category, title)
+            
+            if self.add_custom_example(category, new_title, new_code, new_desc):
+                QMessageBox.information(dialog, "Success", "Example updated successfully!")
+                dialog.accept()
+            else:
+                QMessageBox.warning(dialog, "Error", "Failed to update example.")
+        
+        save_btn.clicked.connect(save_changes)
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        button_layout.addWidget(save_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
+    def confirm_delete_example(self, category, title):
+        """Confirm deletion of custom example."""
+        reply = QMessageBox.question(
+            self, "Delete Example", 
+            f"Are you sure you want to delete the example '{title}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.delete_custom_example(category, title)
+            QMessageBox.information(self, "Deleted", f"Example '{title}' has been deleted.")
+    
+    def copy_to_clipboard(self, text):
+        """Copy text to clipboard."""
+        try:
+            import sys
+            if hasattr(sys, 'platform'):
+                from PySide6.QtGui import QClipboard
+                clipboard = QApplication.clipboard()
+                clipboard.setText(text)
+                self.copy_timer.start(2000)  # Show feedback for 2 seconds
+        except Exception as e:
+            print(f"Could not copy to clipboard: {e}")
+    
+    def show_copy_feedback(self):
+        """Show brief feedback that text was copied."""
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Code copied to clipboard!", 2000)
+        else:
+            print("✓ Code copied to clipboard!")
+    
+    def create_example_widget(self, title, code):
+        """Create a widget for displaying built-in examples (maintains compatibility)."""
+        frame = QFrame()
+        frame.setFrameStyle(QFrame.Box)
+        frame.setStyleSheet("QFrame { border: 1px solid #ccc; border-radius: 5px; margin: 2px; }")
+        
+        layout = QVBoxLayout(frame)
+        
+        # Header with title and copy button
+        header_layout = QHBoxLayout()
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-weight: bold; color: #2c3e50;")
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # Copy button
+        copy_btn = QPushButton("📋 Copy")
+        copy_btn.clicked.connect(lambda: self.copy_to_clipboard(code))
+        copy_btn.setMaximumWidth(70)
+        
+        # Quick save button for built-in examples
+        save_btn = QPushButton("💾 Save")
+        save_btn.setToolTip("Save as custom example")
+        save_btn.clicked.connect(lambda: self.quick_save_example(title, code))
+        save_btn.setMaximumWidth(70)
+        
+        header_layout.addWidget(save_btn)
+        header_layout.addWidget(copy_btn)
+        
+        layout.addLayout(header_layout)
+        
+        # Code display
+        code_display = QTextEdit()
+        code_display.setPlainText(code)
+        code_display.setReadOnly(True)
+        code_display.setMaximumHeight(150)
+        
+        # Set up font
+        font = QFont()
+        font.setFamily('Consolas')
+        font.setPointSize(9)
+        code_display.setFont(font)
+        code_display.setStyleSheet("background-color: #f8f9fa; border: 1px solid #e9ecef;")
+        
+        layout.addWidget(code_display)
+        
+        return frame
+    
+    def quick_save_example(self, title, code):
+        """Quick save a built-in example as a custom example."""
+        # Show simplified save dialog
+        category, ok = QInputDialog.getItem(
+            self, "Save Example", "Choose category for this example:",
+            ["Basic Analysis", "Peak Analysis", "Plotting", "My Examples"], 
+            0, True
+        )
+        
+        if ok and category:
+            new_title, ok2 = QInputDialog.getText(
+                self, "Example Title", "Enter a title for your saved example:",
+                text=f"My {title}"
+            )
+            
+            if ok2 and new_title.strip():
+                if self.add_custom_example(category, new_title.strip(), code):
+                    QMessageBox.information(self, "Saved!", f"Example saved as '{new_title}' in {category}")
+                else:
+                    QMessageBox.warning(self, "Error", "Could not save example. Please try again.")
+    
+    def closeEvent(self, event):
+        """Handle close event by hiding instead of closing."""
+        event.ignore()
+        self.hide()
+
     def create_basic_tab(self):
-        """Create basic data exploration tab."""
+        """Create basic data exploration tab with safe examples."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
@@ -698,91 +1200,178 @@ class PythonExamplesWindow(QDialog):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         examples = [
-            ("View loaded data summary", """
-# Check what data is available
-print("Summary DataFrame:")
-print(summary_df.head())
-print(f"Shape: {summary_df.shape}")
+            ("Check available data (Safe)", """
+# Safe data availability check
+import pandas as pd
+import numpy as np
 
-print("\\nPeaks DataFrame:")
-print(peaks_df.head())
-print(f"Shape: {peaks_df.shape}")
+print("=== RamanLab Data Availability Check ===")
 
-print("\\nSpectra available:")
-print(list(spectra_dict.keys())[:5])  # First 5 spectra
-"""),
-            
-            ("Basic statistics", """
-# Summary statistics for all spectra
-print("Summary Statistics:")
-print(summary_df.describe())
+# Check if main variables exist
+variables_to_check = ['summary_df', 'peaks_df', 'spectra_dict', 'batch_data']
+available_vars = []
 
-print("\\nPeak Position Statistics:")
-# Handle both old and new column names
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
-if position_col in peaks_df.columns:
-    print(peaks_df[position_col].describe())
-else:
-    print("No peak position data available")
-
-print("\\nR² Statistics:")
-r2_col = 'total_r2' if 'total_r2' in peaks_df.columns else 'r2'
-if r2_col in peaks_df.columns:
-    print(peaks_df[r2_col].describe())
-else:
-    print("No R² data available")
-"""),
-            
-            ("Find spectra with most peaks", """
-# Find files with the most peaks
-top_spectra = summary_df.nlargest(10, 'n_peaks')
-print("Spectra with most peaks:")
-print(top_spectra[['filename', 'n_peaks', 'total_r2']])
-"""),
-            
-            ("View specific spectrum data", """
-# Access spectral data for a specific file
-filename = list(spectra_dict.keys())[0]  # First spectrum
-spectrum_data = spectra_dict[filename]
-
-print(f"Spectrum: {filename}")
-print(f"Wavenumber range: {spectrum_data['wavenumbers'].min():.1f} - {spectrum_data['wavenumbers'].max():.1f} cm⁻¹")
-print(f"Data points: {len(spectrum_data['wavenumbers'])}")
-
-# Show what data components are available
-print("\\nAvailable data components:")
-for key in spectrum_data.keys():
-    if key not in ['filename', 'region_start', 'region_end']:
-        data_array = spectrum_data[key]
-        if hasattr(data_array, '__len__'):
-            print(f"  {key}: {len(data_array)} points")
+for var_name in variables_to_check:
+    if var_name in globals():
+        available_vars.append(var_name)
+        var_data = globals()[var_name]
+        if hasattr(var_data, '__len__'):
+            print(f"✓ {var_name}: Available ({len(var_data)} items)")
         else:
-            print(f"  {key}: {data_array}")
+            print(f"✓ {var_name}: Available")
+    else:
+        print(f"✗ {var_name}: Not available")
 
-# Show data ranges
-if 'original_intensities' in spectrum_data:
-    print(f"\\nOriginal intensity range: {spectrum_data['original_intensities'].min():.1f} - {spectrum_data['original_intensities'].max():.1f}")
-print(f"Background-corrected range: {spectrum_data['intensities'].min():.1f} - {spectrum_data['intensities'].max():.1f}")
-if 'background' in spectrum_data:
-    print(f"Background range: {spectrum_data['background'].min():.1f} - {spectrum_data['background'].max():.1f}")
+if 'summary_df' in available_vars:
+    print(f"\\nSummary DataFrame shape: {summary_df.shape}")
+    print(f"Summary columns: {list(summary_df.columns)}")
+
+if 'peaks_df' in available_vars:
+    print(f"\\nPeaks DataFrame shape: {peaks_df.shape}")
+    print(f"Peaks columns: {list(peaks_df.columns)}")
+
+if 'spectra_dict' in available_vars:
+    print(f"\\nSpectra dictionary: {len(spectra_dict)} spectra available")
+    if len(spectra_dict) > 0:
+        first_key = list(spectra_dict.keys())[0]
+        first_spectrum = spectra_dict[first_key]
+        print(f"First spectrum keys: {list(first_spectrum.keys())}")
+
+print("\\n=== Data Check Complete ===")
 """),
+
+            ("View data safely", """
+# Safe data viewing with error handling
+try:
+    if 'summary_df' in globals() and len(summary_df) > 0:
+        print("Summary DataFrame (first 5 rows):")
+        print(summary_df.head())
+        print(f"\\nShape: {summary_df.shape}")
+    else:
+        print("Summary DataFrame not available or empty")
+        
+    if 'peaks_df' in globals() and len(peaks_df) > 0:
+        print("\\nPeaks DataFrame (first 5 rows):")
+        print(peaks_df.head())
+        print(f"\\nShape: {peaks_df.shape}")
+    else:
+        print("\\nPeaks DataFrame not available or empty")
+        
+    if 'spectra_dict' in globals() and len(spectra_dict) > 0:
+        print(f"\\nSpectra available: {len(spectra_dict)}")
+        print("First 3 spectrum names:")
+        for i, name in enumerate(list(spectra_dict.keys())[:3]):
+            print(f"  {i+1}. {name}")
+    else:
+        print("\\nNo spectra dictionary available")
+        
+except Exception as e:
+    print(f"Error viewing data: {e}")
+"""),
+
+            ("Safe statistics with smart columns", """
+# Safe statistics with intelligent column detection
+def get_safe_statistics():
+    try:
+        if 'summary_df' not in globals() or len(summary_df) == 0:
+            print("No summary data available")
+            return
             
-            ("Filter data by criteria", """
-# Filter spectra by number of peaks
-high_peak_spectra = summary_df[summary_df['n_peaks'] >= 5]
-print(f"Spectra with ≥5 peaks: {len(high_peak_spectra)}")
+        print("=== RamanLab Statistics Summary ===")
+        print(f"Total files processed: {len(summary_df)}")
+        
+        # Smart column detection for peaks
+        peak_cols = [col for col in summary_df.columns if 'peak' in col.lower() and ('count' in col.lower() or 'n_' in col.lower())]
+        if not peak_cols:
+            peak_cols = [col for col in summary_df.columns if col in ['n_peaks', 'num_peaks', 'peak_count']]
+        
+        if peak_cols:
+            peak_col = peak_cols[0]
+            total_peaks = summary_df[peak_col].sum()
+            avg_peaks = summary_df[peak_col].mean()
+            print(f"Total peaks detected: {total_peaks}")
+            print(f"Average peaks per spectrum: {avg_peaks:.1f}")
+            
+            # Success rate
+            success_count = len(summary_df[summary_df[peak_col] > 0])
+            success_rate = (success_count / len(summary_df)) * 100
+            print(f"Success rate: {success_rate:.1f}% ({success_count}/{len(summary_df)} files)")
+        else:
+            print("Peak count information not available")
+            
+        # Smart R² detection
+        r2_cols = [col for col in summary_df.columns if 'r2' in col.lower() or 'r_squared' in col.lower()]
+        if r2_cols:
+            r2_col = r2_cols[0]
+            avg_r2 = summary_df[r2_col].mean()
+            good_fits = len(summary_df[summary_df[r2_col] >= 0.9])
+            print(f"Average R²: {avg_r2:.3f}")
+            print(f"High quality fits (R² ≥ 0.9): {good_fits}")
+        else:
+            print("R² information not available")
+            
+        print("\\n" + "="*40)
+        
+    except Exception as e:
+        print(f"Error generating statistics: {e}")
 
-# Filter by R² value
-good_fits = summary_df[summary_df['total_r2'] >= 0.9]
-print(f"Spectra with R² ≥ 0.9: {len(good_fits)}")
+# Run the safe statistics
+get_safe_statistics()
+"""),
 
-# Filter peaks by position (e.g., find quartz peak around 464 cm⁻¹)
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
-if position_col in peaks_df.columns:
-    quartz_peaks = peaks_df[(peaks_df[position_col] >= 460) & (peaks_df[position_col] <= 470)]
-    print(f"Peaks near 464 cm⁻¹ (quartz): {len(quartz_peaks)}")
-else:
-    print("No position data available")
+            ("Safe spectrum plotting", """
+# Safe single spectrum plot
+import matplotlib.pyplot as plt
+import numpy as np
+
+def plot_spectrum_safely(spectrum_index=0):
+    try:
+        if 'spectra_dict' not in globals() or len(spectra_dict) == 0:
+            print("No spectra data available for plotting")
+            return
+            
+        filenames = list(spectra_dict.keys())
+        if spectrum_index >= len(filenames):
+            print(f"Index {spectrum_index} too high. Available: 0-{len(filenames)-1}")
+            return
+            
+        filename = filenames[spectrum_index]
+        spectrum_data = spectra_dict[filename]
+        
+        # Check for required data
+        if 'wavenumbers' not in spectrum_data or 'intensities' not in spectrum_data:
+            print(f"Spectrum {filename} missing wavenumbers or intensities")
+            return
+            
+        wavenumbers = np.array(spectrum_data['wavenumbers'])
+        intensities = np.array(spectrum_data['intensities'])
+        
+        # Validate data
+        if len(wavenumbers) == 0 or len(intensities) == 0:
+            print(f"Empty data arrays for {filename}")
+            return
+            
+        if len(wavenumbers) != len(intensities):
+            print(f"Mismatched array lengths")
+            return
+        
+        # Create plot
+        plt.figure(figsize=(10, 6))
+        plt.plot(wavenumbers, intensities, 'b-', linewidth=1)
+        plt.xlabel('Wavenumber (cm⁻¹)')
+        plt.ylabel('Intensity')
+        plt.title(f'Raman Spectrum: {filename}')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+        
+        print(f"Successfully plotted: {filename}")
+        
+    except Exception as e:
+        print(f"Error plotting spectrum: {e}")
+
+# Plot the first available spectrum
+plot_spectrum_safely(0)
 """)
         ]
         
@@ -793,7 +1382,7 @@ else:
         layout.addWidget(scroll)
         
         return widget
-    
+
     def create_peak_analysis_tab(self):
         """Create peak analysis tab."""
         widget = QWidget()
@@ -814,39 +1403,26 @@ peak_ranges = {
     'Pyrite': [(342, 348), (378, 383)]
 }
 
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
-if position_col in peaks_df.columns:
-    for mineral, ranges in peak_ranges.items():
-        print(f"\\n{mineral} peaks:")
-        for min_pos, max_pos in ranges:
-            mineral_peaks = peaks_df[(peaks_df[position_col] >= min_pos) & (peaks_df[position_col] <= max_pos)]
-            print(f"  {min_pos}-{max_pos} cm⁻¹: {len(mineral_peaks)} peaks found")
-            if len(mineral_peaks) > 0:
-                print(f"    Files: {mineral_peaks['filename'].unique()[:3]}")  # First 3 files
-else:
-    print("No position data available for mineral identification")
+for mineral, ranges in peak_ranges.items():
+    print(f"\\n{mineral} peaks:")
+    for min_pos, max_pos in ranges:
+        mineral_peaks = peaks_df[(peaks_df['position'] >= min_pos) & (peaks_df['position'] <= max_pos)]
+        print(f"  {min_pos}-{max_pos} cm⁻¹: {len(mineral_peaks)} peaks found")
+        if len(mineral_peaks) > 0:
+            print(f"    Files: {mineral_peaks['filename'].unique()[:3]}")  # First 3 files
 """),
             
             ("Peak intensity analysis", """
 # Analyze peak intensities
-height_col = 'amplitude' if 'amplitude' in peaks_df.columns else 'height'
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
+print("Peak intensity statistics:")
+print(f"Mean height: {peaks_df['height'].mean():.2f}")
+print(f"Max height: {peaks_df['height'].max():.2f}")
+print(f"Min height: {peaks_df['height'].min():.2f}")
 
-if height_col in peaks_df.columns:
-    print("Peak intensity statistics:")
-    print(f"Mean height: {peaks_df[height_col].mean():.2f}")
-    print(f"Max height: {peaks_df[height_col].max():.2f}")
-    print(f"Min height: {peaks_df[height_col].min():.2f}")
-    
-    # Find strongest peaks
-    strongest_peaks = peaks_df.nlargest(10, height_col)
-    print("\\nStrongest peaks:")
-    cols = ['filename', position_col, height_col]
-    if 'width' in peaks_df.columns:
-        cols.append('width')
-    print(strongest_peaks[cols])
-else:
-    print("No intensity data available")
+# Find strongest peaks
+strongest_peaks = peaks_df.nlargest(10, 'height')
+print("\\nStrongest peaks:")
+print(strongest_peaks[['filename', 'position', 'height', 'width']])
 """),
             
             ("Peak width analysis", """
@@ -865,25 +1441,41 @@ print(f"Broad peaks (>30 cm⁻¹): {len(broad_peaks)}")
             
             ("Peak quality assessment", """
 # Assess peak fitting quality
-r2_col = 'total_r2' if 'total_r2' in peaks_df.columns else 'r2'
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
-height_col = 'amplitude' if 'amplitude' in peaks_df.columns else 'height'
+print("Peak fitting quality:")
+good_peaks = peaks_df[peaks_df['r2'] >= 0.95]
+poor_peaks = peaks_df[peaks_df['r2'] < 0.8]
 
-if r2_col in peaks_df.columns:
-    print("Peak fitting quality:")
-    good_peaks = peaks_df[peaks_df[r2_col] >= 0.95]
-    poor_peaks = peaks_df[peaks_df[r2_col] < 0.8]
-    
-    print(f"High quality peaks (R² ≥ 0.95): {len(good_peaks)}")
-    print(f"Poor quality peaks (R² < 0.8): {len(poor_peaks)}")
-    
-    # Show worst fitting peaks
-    worst_peaks = peaks_df.nsmallest(5, r2_col)
-    print("\\nWorst fitting peaks:")
-    cols = ['filename', position_col, height_col, r2_col]
-    print(worst_peaks[cols])
-else:
-    print("No R² data available for quality assessment")
+print(f"High quality peaks (R² ≥ 0.95): {len(good_peaks)}")
+print(f"Poor quality peaks (R² < 0.8): {len(poor_peaks)}")
+
+# Show worst fitting peaks
+worst_peaks = peaks_df.nsmallest(5, 'r2')
+print("\\nWorst fitting peaks:")
+print(worst_peaks[['filename', 'position', 'height', 'r2']])
+"""),
+            
+            ("Peak clustering by position", """
+# Group peaks by position to find common frequencies
+import numpy as np
+
+# Create position bins (every 10 cm⁻¹)
+bin_width = 10
+min_pos = peaks_df['position'].min()
+max_pos = peaks_df['position'].max()
+bins = np.arange(min_pos, max_pos + bin_width, bin_width)
+
+# Count peaks in each bin
+peak_counts, bin_edges = np.histogram(peaks_df['position'], bins=bins)
+
+# Find most common peak regions
+common_regions = []
+for i, count in enumerate(peak_counts):
+    if count > 5:  # More than 5 peaks in this region
+        common_regions.append((bin_edges[i], bin_edges[i+1], count))
+
+print("Common peak regions:")
+for start, end, count in sorted(common_regions, key=lambda x: x[2], reverse=True):
+    print(f"  {start:.0f}-{end:.0f} cm⁻¹: {count} peaks")
 """)
         ]
         
@@ -894,7 +1486,7 @@ else:
         layout.addWidget(scroll)
         
         return widget
-    
+
     def create_plotting_tab(self):
         """Create plotting and visualization tab."""
         widget = QWidget()
@@ -916,63 +1508,6 @@ plt.xlabel('Wavenumber (cm⁻¹)')
 plt.ylabel('Intensity')
 plt.title(f'Raman Spectrum: {filename}')
 plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
-"""),
-
-            ("Complete spectral analysis plot", """
-# Plot comprehensive spectral analysis for first spectrum
-filename = list(spectra_dict.keys())[0]
-spectrum_data = spectra_dict[filename]
-
-plt.figure(figsize=(15, 10))
-
-# Main spectrum with components
-plt.subplot(2, 2, 1)
-if 'original_intensities' in spectrum_data:
-    plt.plot(spectrum_data['wavenumbers'], spectrum_data['original_intensities'], 'k-', alpha=0.7, label='Original')
-if 'background' in spectrum_data:
-    plt.plot(spectrum_data['wavenumbers'], spectrum_data['background'], 'r--', label='Background')
-plt.plot(spectrum_data['wavenumbers'], spectrum_data['intensities'], 'b-', label='Corrected')
-if 'fitted_peaks' in spectrum_data:
-    plt.plot(spectrum_data['wavenumbers'], spectrum_data['fitted_peaks'], 'g-', label='Fitted')
-plt.xlabel('Wavenumber (cm⁻¹)')
-plt.ylabel('Intensity')
-plt.title(f'Complete Analysis: {filename}')
-plt.legend()
-plt.grid(True, alpha=0.3)
-
-# Background-corrected spectrum only
-plt.subplot(2, 2, 2)
-plt.plot(spectrum_data['wavenumbers'], spectrum_data['intensities'], 'b-', linewidth=1.5)
-plt.xlabel('Wavenumber (cm⁻¹)')
-plt.ylabel('Intensity')
-plt.title('Background-Corrected Spectrum')
-plt.grid(True, alpha=0.3)
-
-# Fitted peaks overlay
-plt.subplot(2, 2, 3)
-plt.plot(spectrum_data['wavenumbers'], spectrum_data['intensities'], 'b-', alpha=0.7, label='Data')
-if 'fitted_peaks' in spectrum_data:
-    plt.plot(spectrum_data['wavenumbers'], spectrum_data['fitted_peaks'], 'r-', linewidth=2, label='Fit')
-plt.xlabel('Wavenumber (cm⁻¹)')
-plt.ylabel('Intensity')
-plt.title('Peak Fitting Results')
-plt.legend()
-plt.grid(True, alpha=0.3)
-
-# Residuals
-plt.subplot(2, 2, 4)
-if 'residuals' in spectrum_data:
-    plt.plot(spectrum_data['wavenumbers'], spectrum_data['residuals'], 'g-', linewidth=1)
-    plt.axhline(y=0, color='k', linestyle='--', alpha=0.5)
-    plt.xlabel('Wavenumber (cm⁻¹)')
-    plt.ylabel('Residuals')
-    plt.title('Fitting Residuals')
-    plt.grid(True, alpha=0.3)
-else:
-    plt.text(0.5, 0.5, 'No residuals available', ha='center', va='center', transform=plt.gca().transAxes)
-
 plt.tight_layout()
 plt.show()
 """),
@@ -998,271 +1533,82 @@ plt.show()
             
             ("Plot peak distribution histogram", """
 # Plot peak position distribution
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
-if position_col in peaks_df.columns:
-    plt.figure(figsize=(12, 6))
-    plt.hist(peaks_df[position_col], bins=50, alpha=0.7, edgecolor='black')
-    plt.xlabel('Peak Position (cm⁻¹)')
-    plt.ylabel('Frequency')
-    plt.title('Distribution of Peak Positions')
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-else:
-    print("No position data available for histogram")
+plt.figure(figsize=(12, 6))
+plt.hist(peaks_df['position'], bins=50, alpha=0.7, edgecolor='black')
+plt.xlabel('Peak Position (cm⁻¹)')
+plt.ylabel('Frequency')
+plt.title('Distribution of Peak Positions')
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
 """),
             
             ("Plot peak intensity vs position", """
 # Scatter plot of peak intensity vs position
-position_col = 'peak_center' if 'peak_center' in peaks_df.columns else 'position'
-height_col = 'amplitude' if 'amplitude' in peaks_df.columns else 'height'
-
-if position_col in peaks_df.columns and height_col in peaks_df.columns:
-    plt.figure(figsize=(12, 6))
-    plt.scatter(peaks_df[position_col], peaks_df[height_col], alpha=0.6, s=30)
-    plt.xlabel('Peak Position (cm⁻¹)')
-    plt.ylabel('Peak Height')
-    plt.title('Peak Intensity vs Position')
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-else:
-    print("Missing position or intensity data for scatter plot")
-""")
-        ]
-        
-        for title, code in examples:
-            scroll_layout.addWidget(self.create_example_widget(title, code))
-        
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-        
-        return widget
-    
-    def create_batch_tab(self):
-        """Create batch processing tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        scroll = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        
-        examples = [
-            ("Processing statistics overview", """
-# Get overview of batch processing results
-print("Batch Processing Summary:")
-print(f"Total files processed: {len(summary_df)}")
-print(f"Total peaks detected: {len(peaks_df)}")
-print(f"Average peaks per spectrum: {summary_df['n_peaks'].mean():.1f}")
-print(f"Average R²: {summary_df['total_r2'].mean():.3f}")
-
-# Processing time statistics
-if 'processing_time' in summary_df.columns:
-    print(f"Average processing time: {summary_df['processing_time'].mean():.2f} seconds")
-    print(f"Total processing time: {summary_df['processing_time'].sum():.1f} seconds")
-"""),
-            
-            ("Find problematic spectra", """
-# Identify spectra that might need attention
-print("Problematic Spectra Analysis:")
-
-# No peaks found
-no_peaks = summary_df[summary_df['n_peaks'] == 0]
-print(f"Spectra with no peaks: {len(no_peaks)}")
-
-# Poor fitting
-poor_fits = summary_df[summary_df['total_r2'] < 0.7]
-print(f"Spectra with poor fits (R² < 0.7): {len(poor_fits)}")
-
-# Too many peaks (might be noise)
-too_many_peaks = summary_df[summary_df['n_peaks'] > 20]
-print(f"Spectra with >20 peaks: {len(too_many_peaks)}")
-
-if len(poor_fits) > 0:
-    print("\\nPoor fitting spectra:")
-    print(poor_fits[['filename', 'n_peaks', 'total_r2']])
-"""),
-            
-            ("Export batch results", """
-# Export processed results to CSV files
-import pandas as pd
-
-# Export summary
-summary_df.to_csv('batch_summary.csv', index=False)
-print("Exported batch_summary.csv")
-
-# Export peaks
-peaks_df.to_csv('batch_peaks.csv', index=False)
-print("Exported batch_peaks.csv")
-
-# Export only high-quality peaks
-high_quality_peaks = peaks_df[peaks_df['r2'] >= 0.9]
-high_quality_peaks.to_csv('high_quality_peaks.csv', index=False)
-print(f"Exported {len(high_quality_peaks)} high-quality peaks to high_quality_peaks.csv")
-""")
-        ]
-        
-        for title, code in examples:
-            scroll_layout.addWidget(self.create_example_widget(title, code))
-        
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-        
-        return widget
-    
-    def create_advanced_tab(self):
-        """Create advanced analysis tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        scroll = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        
-        examples = [
-            ("Principal Component Analysis (PCA)", """
-# Perform PCA on spectral data
-from sklearn.decomposition import PCA
-import numpy as np
-
-# Prepare data matrix
-spectra_list = []
-filenames_list = []
-
-for filename, spectrum_data in spectra_dict.items():
-    spectra_list.append(spectrum_data['intensities'])
-    filenames_list.append(filename)
-
-if len(spectra_list) > 3:
-    # Stack spectra into matrix
-    X = np.vstack(spectra_list)
-    
-    # Perform PCA
-    pca = PCA(n_components=5)
-    pca_result = pca.fit_transform(X)
-    
-    print("PCA Results:")
-    print(f"Explained variance ratio: {pca.explained_variance_ratio_}")
-    print(f"Cumulative explained variance: {np.cumsum(pca.explained_variance_ratio_)}")
-    
-    # Plot PCA results
-    plt.figure(figsize=(12, 5))
-    
-    plt.subplot(1, 2, 1)
-    plt.scatter(pca_result[:, 0], pca_result[:, 1])
-    plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)')
-    plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)')
-    plt.title('PCA Score Plot')
-    
-    plt.subplot(1, 2, 2)
-    plt.plot(pca.explained_variance_ratio_, 'bo-')
-    plt.xlabel('Principal Component')
-    plt.ylabel('Explained Variance Ratio')
-    plt.title('Scree Plot')
-    
-    plt.tight_layout()
-    plt.show()
-else:
-    print("Need at least 4 spectra for PCA analysis")
-"""),
-            
-            ("Spectral similarity analysis", """
-# Calculate spectral similarity using correlation
-import numpy as np
-from scipy.stats import pearsonr
-
-# Get first few spectra for comparison
-filenames = list(spectra_dict.keys())[:5]
-similarity_matrix = np.zeros((len(filenames), len(filenames)))
-
-for i, fname1 in enumerate(filenames):
-    for j, fname2 in enumerate(filenames):
-        if i <= j:
-            spec1 = spectra_dict[fname1]['intensities']
-            spec2 = spectra_dict[fname2]['intensities']
-            
-            # Ensure same length
-            min_len = min(len(spec1), len(spec2))
-            corr, _ = pearsonr(spec1[:min_len], spec2[:min_len])
-            similarity_matrix[i, j] = corr
-            similarity_matrix[j, i] = corr
-
-# Plot similarity matrix
-plt.figure(figsize=(8, 6))
-plt.imshow(similarity_matrix, cmap='coolwarm', vmin=-1, vmax=1)
-plt.colorbar(label='Correlation Coefficient')
-plt.xticks(range(len(filenames)), [f.split('/')[-1][:10] for f in filenames], rotation=45)
-plt.yticks(range(len(filenames)), [f.split('/')[-1][:10] for f in filenames])
-plt.title('Spectral Similarity Matrix')
+plt.figure(figsize=(12, 6))
+plt.scatter(peaks_df['position'], peaks_df['height'], alpha=0.6, s=30)
+plt.xlabel('Peak Position (cm⁻¹)')
+plt.ylabel('Peak Height')
+plt.title('Peak Intensity vs Position')
+plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
-
-print("Similarity Matrix:")
-print(similarity_matrix)
-""")
-        ]
-        
-        for title, code in examples:
-            scroll_layout.addWidget(self.create_example_widget(title, code))
-        
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-        
-        return widget
-    
-    def create_export_tab(self):
-        """Create export and save tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        scroll = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
-        
-        examples = [
-            ("Export data to Excel", """
-# Export all data to Excel with multiple sheets
-with pd.ExcelWriter('ramanlab_analysis.xlsx', engine='openpyxl') as writer:
-    summary_df.to_excel(writer, sheet_name='Summary', index=False)
-    peaks_df.to_excel(writer, sheet_name='Peaks', index=False)
-    
-    # Create summary statistics sheet
-    stats_data = {
-        'Metric': ['Total Files', 'Total Peaks', 'Avg Peaks/File', 'Avg R²', 'Success Rate %'],
-        'Value': [
-            len(summary_df),
-            len(peaks_df),
-            f"{summary_df['n_peaks'].mean():.1f}",
-            f"{summary_df['total_r2'].mean():.3f}",
-            f"{(len(summary_df[summary_df['n_peaks'] > 0]) / len(summary_df) * 100):.1f}"
-        ]
-    }
-    pd.DataFrame(stats_data).to_excel(writer, sheet_name='Statistics', index=False)
-    
-print("Exported ramanlab_analysis.xlsx with multiple sheets")
 """),
             
-            ("Save figures as high-quality images", """
-# Save current figure as high-quality image
-plt.figure(figsize=(12, 8))
+            ("Create a heat map of peak occurrences", """
+# Create heatmap showing peak occurrence across samples
+import numpy as np
 
-# Example plot
-filename = list(spectra_dict.keys())[0]
-spectrum_data = spectra_dict[filename]
-plt.plot(spectrum_data['wavenumbers'], spectrum_data['intensities'], 'b-', linewidth=1)
-plt.xlabel('Wavenumber (cm⁻¹)')
-plt.ylabel('Intensity')
-plt.title(f'Raman Spectrum: {filename}')
-plt.grid(True, alpha=0.3)
+# Get unique filenames and create position bins
+filenames = summary_df['filename'].unique()[:20]  # First 20 files
+pos_bins = np.arange(200, 1800, 20)  # 20 cm⁻¹ bins from 200-1800
 
-# Save in multiple formats
-plt.savefig('raman_spectrum.png', dpi=300, bbox_inches='tight')
-plt.savefig('raman_spectrum.pdf', bbox_inches='tight')
-plt.savefig('raman_spectrum.svg', bbox_inches='tight')
+# Create matrix for heatmap
+heatmap_data = np.zeros((len(filenames), len(pos_bins)-1))
+
+for i, filename in enumerate(filenames):
+    file_peaks = peaks_df[peaks_df['filename'] == filename]
+    if len(file_peaks) > 0:
+        hist, _ = np.histogram(file_peaks['position'], bins=pos_bins)
+        heatmap_data[i, :] = hist
+
+# Plot heatmap
+plt.figure(figsize=(15, 8))
+plt.imshow(heatmap_data, cmap='YlOrRd', aspect='auto')
+plt.colorbar(label='Peak Count')
+plt.xlabel('Wavenumber Bins')
+plt.ylabel('Sample Index')
+plt.title('Peak Occurrence Heatmap')
+
+# Add wavenumber labels
+tick_positions = range(0, len(pos_bins)-1, 10)
+tick_labels = [f"{pos_bins[i]:.0f}" for i in tick_positions]
+plt.xticks(tick_positions, tick_labels, rotation=45)
+
+plt.tight_layout()
 plt.show()
+"""),
+            
+            ("Plot R² quality assessment", """
+# Plot R² distribution and quality assessment
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-print("Saved spectrum as PNG, PDF, and SVG")
+# R² histogram
+ax1.hist(peaks_df['r2'].dropna(), bins=30, alpha=0.7, edgecolor='black')
+ax1.set_xlabel('R² Value')
+ax1.set_ylabel('Frequency')
+ax1.set_title('Peak Fitting Quality Distribution')
+ax1.grid(True, alpha=0.3)
+
+# R² vs peak position
+ax2.scatter(peaks_df['position'], peaks_df['r2'], alpha=0.6, s=30)
+ax2.set_xlabel('Peak Position (cm⁻¹)')
+ax2.set_ylabel('R² Value')
+ax2.set_title('Fitting Quality vs Peak Position')
+ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
 """)
         ]
         
@@ -1273,99 +1619,6 @@ print("Saved spectrum as PNG, PDF, and SVG")
         layout.addWidget(scroll)
         
         return widget
-    
-    def create_example_widget(self, title, code):
-        """Create a widget for a single example."""
-        widget = QFrame()
-        widget.setFrameStyle(QFrame.Box)
-        widget.setStyleSheet("""
-            QFrame {
-                border: 1px solid #ddd;
-                border-radius: 5px;
-                margin: 2px;
-                background-color: #f9f9f9;
-            }
-        """)
-        
-        layout = QVBoxLayout(widget)
-        
-        # Title
-        title_label = QLabel(title)
-        title_label.setStyleSheet("""
-            QLabel {
-                font-weight: bold;
-                color: #2E7D32;
-                padding: 5px;
-                background-color: #E8F5E8;
-                border-radius: 3px;
-            }
-        """)
-        layout.addWidget(title_label)
-        
-        # Code
-        code_text = QTextEdit()
-        code_text.setPlainText(code.strip())
-        code_text.setReadOnly(True)
-        code_text.setMaximumHeight(200)
-        
-        # Code styling - use cross-platform fallback
-        font = QFont()
-        font.setFamily('Monaco')  # Better for Mac
-        if not font.exactMatch():
-            font.setFamily('Courier New')  # Windows fallback
-        if not font.exactMatch():
-            font.setFamily('monospace')  # Generic fallback
-        font.setPointSize(9)
-        code_text.setFont(font)
-        code_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #2b2b2b;
-                color: #f8f8f2;
-                border: 1px solid #555;
-                border-radius: 3px;
-                padding: 5px;
-            }
-        """)
-        
-        layout.addWidget(code_text)
-        
-        # Copy button
-        copy_btn = QPushButton("📋 Copy to Clipboard")
-        copy_btn.clicked.connect(lambda: self.copy_to_clipboard(code.strip()))
-        copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border: none;
-                padding: 5px 10px;
-                border-radius: 3px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
-        layout.addWidget(copy_btn)
-        
-        return widget
-    
-    def copy_to_clipboard(self, text):
-        """Copy text to clipboard."""
-        clipboard = QApplication.clipboard()
-        clipboard.setText(text)
-        
-        # Show temporary feedback
-        self.show_copy_feedback()
-    
-    def show_copy_feedback(self):
-        """Show temporary feedback that text was copied."""
-        # This could be enhanced with a popup or status message
-        pass
-    
-    def closeEvent(self, event):
-        """Handle close event by hiding instead of closing."""
-        event.ignore()
-        self.hide()
 
 
 def main():
