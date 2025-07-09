@@ -4083,11 +4083,20 @@ class RamanAnalysisAppQt6(QMainWindow):
     def launch_data_conversion_tools(self):
         """Launch advanced data conversion tools."""
         try:
-            # Create data conversion dialog
+            # Import the data conversion dialog
+            from core.data_conversion_dialog import DataConversionDialog
+            
+            # Create and show the dialog
             dialog = DataConversionDialog(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # User confirmed the conversion
-                pass
+            dialog.exec()
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Could not import data conversion tools:\n{str(e)}\n\n"
+                "Please ensure core/data_conversion_dialog.py is available."
+            )
         except Exception as e:
             QMessageBox.critical(
                 self,

@@ -337,8 +337,12 @@ python peak_fitting_qt6.py
 # Batch Peak Fitting
 python batch_peak_fitting_qt6.py
 
-# Line Scan Analysis
-python launch_line_scan_splitter.py
+# Data Conversion Tools (Including Line Scan Analysis)
+# Method 1: From Advanced tab in main app (Recommended)
+python raman_analysis_app_qt6.py  # Go to Advanced tab → Advanced Data Conversion
+
+# Method 2: Standalone launcher
+python launch_data_conversion.py
 ```
 
 ---
