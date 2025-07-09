@@ -8,15 +8,90 @@ reliable component identification and percentage estimates from your Raman maps.
 
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import matplotlib.pyplot as plt
 from analysis.quantitative_analysis import RobustQuantitativeAnalyzer, ComponentResult
 
-# Simple matplotlib configuration
-plt.style.use('default')
-plt.rcParams.update({'figure.figsize': (10, 6), 'font.size': 10})
+# Import safe file handling
+from pkl_utils import get_workspace_root, get_example_data_paths, print_available_example_files, get_example_spectrum_file
+from utils.file_loaders import load_spectrum_file
+from pathlib import Path
+
+def setup_matplotlib_config():
+    """Set up matplotlib configuration using the workspace config."""
+    try:
+        # Try to import the matplotlib config
+        workspace_root = get_workspace_root()
+        polarization_ui_dir = workspace_root / "polarization_ui"
+        
+        if (polarization_ui_dir / "matplotlib_config.py").exists():
+            import sys
+            sys.path.insert(0, str(polarization_ui_dir))
+            import matplotlib_config
+            print("✅ Using RamanLab matplotlib configuration")
+            return True
+        else:
+            # Use default matplotlib settings
+            plt.style.use('default')
+            plt.rcParams.update({'figure.figsize': (10, 6), 'font.size': 10})
+            print("⚠️  Using default matplotlib configuration")
+            return False
+    except Exception as e:
+        print(f"❌ Error setting up matplotlib: {e}")
+        plt.style.use('default')
+        plt.rcParams.update({'figure.figsize': (10, 6), 'font.size': 10})
+        return False
+
+def load_real_map_data():
+    """
+    Load real map data if available.
+    
+    Returns:
+        dict: Dictionary containing real map data or None if not available
+    """
+    try:
+        # Get available example files
+        paths = get_example_data_paths()
+        
+        # Look for pickle files that might contain map data
+        map_data_files = []
+        for key, path in paths.items():
+            if isinstance(path, Path) and path.suffix == '.pkl':
+                if 'batch_results' in key or 'map' in key.lower():
+                    map_data_files.append((key, path))
+        
+        if map_data_files:
+            print(f"📄 Found {len(map_data_files)} potential map data files:")
+            for key, path in map_data_files:
+                print(f"   • {key}: {path.name}")
+            
+            # Try to load the first one
+            key, path = map_data_files[0]
+            print(f"\n📊 Loading map data from: {path.name}")
+            
+            import pickle
+            with open(path, 'rb') as f:
+                data = pickle.load(f)
+            
+            print(f"✅ Successfully loaded map data:")
+            print(f"   • Data type: {type(data)}")
+            if hasattr(data, 'shape'):
+                print(f"   • Shape: {data.shape}")
+            elif isinstance(data, dict):
+                print(f"   • Dictionary keys: {list(data.keys())[:10]}...")  # First 10 keys
+                
+            return data
+            
+        else:
+            print("⚠️  No map data files found")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error loading map data: {e}")
+        return None
 
 def simulate_realistic_data():
     """
@@ -105,7 +180,7 @@ def evaluate_method_performance(data):
     ground_truth = data['ground_truth']
     n_true_positives = np.sum(ground_truth)
     
-    print("INDIVIDUAL METHOD PERFORMANCE")
+    print("🔍 INDIVIDUAL METHOD PERFORMANCE")
     print("=" * 50)
     print(f"Ground truth: {n_true_positives} pixels ({n_true_positives/len(ground_truth)*100:.1f}%) contain component")
     print()
@@ -119,11 +194,11 @@ def evaluate_method_performance(data):
     template_precision = template_tp / (template_tp + template_fp) if (template_tp + template_fp) > 0 else 0
     template_recall = template_tp / (template_tp + template_fn) if (template_tp + template_fn) > 0 else 0
     
-    print(f"Template Method:")
-    print(f"  Detected: {np.sum(template_detections)} pixels ({np.sum(template_detections)/len(ground_truth)*100:.1f}%)")
-    print(f"  True Positives: {template_tp}, False Positives: {template_fp}, False Negatives: {template_fn}")
-    print(f"  Precision: {template_precision:.3f}, Recall: {template_recall:.3f}")
-    print(f"  Issue: Too many false positives (overestimation)")
+    print(f"📊 Template Method:")
+    print(f"   Detected: {np.sum(template_detections)} pixels ({np.sum(template_detections)/len(ground_truth)*100:.1f}%)")
+    print(f"   True Positives: {template_tp}, False Positives: {template_fp}, False Negatives: {template_fn}")
+    print(f"   Precision: {template_precision:.3f}, Recall: {template_recall:.3f}")
+    print(f"   Issue: Too many false positives (overestimation)")
     print()
     
     # NMF method performance
@@ -135,11 +210,11 @@ def evaluate_method_performance(data):
     nmf_precision = nmf_tp / (nmf_tp + nmf_fp) if (nmf_tp + nmf_fp) > 0 else 0
     nmf_recall = nmf_tp / (nmf_tp + nmf_fn) if (nmf_tp + nmf_fn) > 0 else 0
     
-    print(f"NMF Method:")
-    print(f"  Detected: {np.sum(nmf_detections)} pixels ({np.sum(nmf_detections)/len(ground_truth)*100:.1f}%)")
-    print(f"  True Positives: {nmf_tp}, False Positives: {nmf_fp}, False Negatives: {nmf_fn}")
-    print(f"  Precision: {nmf_precision:.3f}, Recall: {nmf_recall:.3f}")
-    print(f"  Issue: Poor recall (underestimation)")
+    print(f"📊 NMF Method:")
+    print(f"   Detected: {np.sum(nmf_detections)} pixels ({np.sum(nmf_detections)/len(ground_truth)*100:.1f}%)")
+    print(f"   True Positives: {nmf_tp}, False Positives: {nmf_fp}, False Negatives: {nmf_fn}")
+    print(f"   Precision: {nmf_precision:.3f}, Recall: {nmf_recall:.3f}")
+    print(f"   Issue: Poor recall (underestimation)")
     print()
     
     # ML method performance
@@ -151,17 +226,17 @@ def evaluate_method_performance(data):
     ml_precision = ml_tp / (ml_tp + ml_fp) if (ml_tp + ml_fp) > 0 else 0
     ml_recall = ml_tp / (ml_tp + ml_fn) if (ml_tp + ml_fn) > 0 else 0
     
-    print(f"ML Method:")
-    print(f"  Detected: {np.sum(ml_detections)} pixels ({np.sum(ml_detections)/len(ground_truth)*100:.1f}%)")
-    print(f"  True Positives: {ml_tp}, False Positives: {ml_fp}, False Negatives: {ml_fn}")
-    print(f"  Precision: {ml_precision:.3f}, Recall: {ml_recall:.3f}")
-    print(f"  Issue: Poor recall due to class imbalance")
+    print(f"📊 ML Method:")
+    print(f"   Detected: {np.sum(ml_detections)} pixels ({np.sum(ml_detections)/len(ground_truth)*100:.1f}%)")
+    print(f"   True Positives: {ml_tp}, False Positives: {ml_fp}, False Negatives: {ml_fn}")
+    print(f"   Precision: {ml_precision:.3f}, Recall: {ml_recall:.3f}")
+    print(f"   Issue: Poor recall due to class imbalance")
     print()
 
 def demonstrate_quantitative_analysis(data):
     """Demonstrate the new quantitative analysis approach."""
     
-    print("ROBUST QUANTITATIVE ANALYSIS")
+    print("🔬 ROBUST QUANTITATIVE ANALYSIS")
     print("=" * 50)
     
     # Initialize analyzer
@@ -202,136 +277,197 @@ def demonstrate_quantitative_analysis(data):
     
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
     
-    print(f"QUANTITATIVE ANALYSIS RESULTS:")
-    print(f"  Component detected in: {np.sum(detected_pixels)} pixels ({np.sum(detected_pixels)/len(ground_truth)*100:.1f}%)")
-    print(f"  True Positives: {tp}, False Positives: {fp}, False Negatives: {fn}")
-    print(f"  Precision: {precision:.3f}, Recall: {recall:.3f}, F1-Score: {f1_score:.3f}")
-    print()
+    print(f"📊 Quantitative Analysis Results:")
+    print(f"   • Component: {result.component_name}")
+    print(f"   • Detected pixels: {np.sum(detected_pixels)} ({np.sum(detected_pixels)/len(ground_truth)*100:.1f}%)")
+    print(f"   • Confidence levels: {len(result.confidence_levels)} levels")
+    print(f"   • Agreement score: {result.agreement_score:.3f}")
+    print(f"   • Precision: {precision:.3f}")
+    print(f"   • Recall: {recall:.3f}")
+    print(f"   • F1-Score: {f1:.3f}")
     
-    # Show detailed statistics
-    print("DETAILED COMPONENT STATISTICS:")
-    for key, value in result.statistics.items():
-        if isinstance(value, float):
-            print(f"  {key}: {value:.3f}")
-        else:
-            print(f"  {key}: {value}")
-    print()
-    
-    # Generate and show summary report
-    report = analyzer.generate_summary_report([result])
-    print("SUMMARY REPORT:")
-    print(report)
-    
-    return result, analyzer
+    return result
 
 def create_comparison_plots(data, result):
-    """Create plots comparing individual methods vs the quantitative approach."""
+    """Create comprehensive comparison plots."""
     
+    print("\n📊 Creating Comparison Plots...")
+    
+    # Setup plotting
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    
-    # Reshape data for visualization (create a square-ish map)
-    n_pixels = len(data['ground_truth'])
-    map_size = int(np.sqrt(n_pixels))
-    if map_size * map_size < n_pixels:
-        map_size += 1
-    
-    # Pad data to make it square
-    pad_size = map_size * map_size - n_pixels
+    fig.suptitle('Quantitative Analysis Comparison', fontsize=16, fontweight='bold')
     
     def reshape_for_plot(arr):
-        padded = np.pad(arr, (0, pad_size), mode='constant', constant_values=0)
-        return padded.reshape(map_size, map_size)
+        """Reshape 1D array to 2D for plotting."""
+        if len(arr) == 16383:
+            # Try to make a roughly square image
+            side = int(np.sqrt(len(arr)))
+            if side * side < len(arr):
+                side += 1
+            padded = np.zeros(side * side)
+            padded[:len(arr)] = arr
+            return padded.reshape(side, side)
+        else:
+            return arr.reshape(-1, 1)
     
-    # Ground truth
-    axes[0, 0].imshow(reshape_for_plot(data['ground_truth'].astype(float)), cmap='Reds')
-    axes[0, 0].set_title('Ground Truth\n(What we want to detect)')
-    axes[0, 0].axis('off')
+    # Plot 1: Ground Truth
+    ax = axes[0, 0]
+    ground_truth_2d = reshape_for_plot(data['ground_truth'])
+    im1 = ax.imshow(ground_truth_2d, cmap='Reds', aspect='auto')
+    ax.set_title('Ground Truth')
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    plt.colorbar(im1, ax=ax, shrink=0.8)
     
-    # Template method
-    template_map = data['template_coefficients'][:, 0]
-    im1 = axes[0, 1].imshow(reshape_for_plot(template_map), cmap='Blues')
-    axes[0, 1].set_title('Template Method\n(Too many detections)')
-    axes[0, 1].axis('off')
-    plt.colorbar(im1, ax=axes[0, 1], shrink=0.8)
+    # Plot 2: Template Method
+    ax = axes[0, 1]
+    template_2d = reshape_for_plot(data['template_coefficients'][:, 0])
+    im2 = ax.imshow(template_2d, cmap='Blues', aspect='auto')
+    ax.set_title('Template Method')
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    plt.colorbar(im2, ax=ax, shrink=0.8)
     
-    # NMF method
-    nmf_map = data['nmf_components'][:, 2]
-    im2 = axes[0, 2].imshow(reshape_for_plot(nmf_map), cmap='Greens')
-    axes[0, 2].set_title('NMF Method\n(Underestimation)')
-    axes[0, 2].axis('off')
-    plt.colorbar(im2, ax=axes[0, 2], shrink=0.8)
+    # Plot 3: NMF Method
+    ax = axes[0, 2]
+    nmf_2d = reshape_for_plot(data['nmf_components'][:, 2])
+    im3 = ax.imshow(nmf_2d, cmap='Greens', aspect='auto')
+    ax.set_title('NMF Method')
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    plt.colorbar(im3, ax=ax, shrink=0.8)
     
-    # ML method
-    ml_map = data['ml_probabilities'][:, 1]  # Component probability
-    im3 = axes[1, 0].imshow(reshape_for_plot(ml_map), cmap='Purples')
-    axes[1, 0].set_title('ML Method\n(Class imbalance issues)')
-    axes[1, 0].axis('off')
-    plt.colorbar(im3, ax=axes[1, 0], shrink=0.8)
+    # Plot 4: ML Method
+    ax = axes[1, 0]
+    ml_2d = reshape_for_plot(data['ml_probabilities'][:, 1])
+    im4 = ax.imshow(ml_2d, cmap='Purples', aspect='auto')
+    ax.set_title('ML Method')
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    plt.colorbar(im4, ax=ax, shrink=0.8)
     
-    # Quantitative analysis - confidence
-    confidence_map = result.confidence_map
-    im4 = axes[1, 1].imshow(reshape_for_plot(confidence_map), cmap='Oranges')
-    axes[1, 1].set_title('Quantitative Analysis\n(Confidence Map)')
-    axes[1, 1].axis('off')
-    plt.colorbar(im4, ax=axes[1, 1], shrink=0.8)
+    # Plot 5: Quantitative Analysis Result
+    ax = axes[1, 1]
+    result_2d = reshape_for_plot(result.detection_map.astype(float))
+    im5 = ax.imshow(result_2d, cmap='Oranges', aspect='auto')
+    ax.set_title('Quantitative Analysis')
+    ax.set_xlabel('X Position')
+    ax.set_ylabel('Y Position')
+    plt.colorbar(im5, ax=ax, shrink=0.8)
     
-    # Quantitative analysis - detection
-    detection_map = result.detection_map.astype(float)
-    axes[1, 2].imshow(reshape_for_plot(detection_map), cmap='Reds')
-    axes[1, 2].set_title('Quantitative Analysis\n(Final Detection)')
-    axes[1, 2].axis('off')
+    # Plot 6: Performance Comparison
+    ax = axes[1, 2]
+    methods = ['Template', 'NMF', 'ML', 'Quantitative']
+    
+    # Calculate F1 scores for each method
+    f1_scores = []
+    
+    for method_data in [data['template_coefficients'][:, 0] > 0.2,
+                       data['nmf_components'][:, 2] > 3.0,
+                       data['ml_predictions'] == 1,
+                       result.detection_map]:
+        
+        tp = np.sum(data['ground_truth'] & method_data)
+        fp = np.sum(~data['ground_truth'] & method_data)
+        fn = np.sum(data['ground_truth'] & ~method_data)
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        f1_scores.append(f1)
+    
+    bars = ax.bar(methods, f1_scores, color=['blue', 'green', 'purple', 'orange'], alpha=0.7)
+    ax.set_title('F1-Score Comparison')
+    ax.set_ylabel('F1-Score')
+    ax.set_ylim(0, 1)
+    
+    # Add value labels on bars
+    for bar, score in zip(bars, f1_scores):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                f'{score:.3f}', ha='center', va='bottom')
     
     plt.tight_layout()
-    plt.suptitle('Comparison: Individual Methods vs Quantitative Analysis', 
-                 fontsize=14, fontweight='bold', y=0.98)
+    
+    # Save the plot
+    workspace_root = get_workspace_root()
+    results_dir = workspace_root / "quantitative_analysis_results"
+    results_dir.mkdir(exist_ok=True)
+    
+    plot_file = results_dir / "quantitative_analysis_comparison.png"
+    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+    print(f"📊 Comparison plot saved to: {plot_file}")
+    
     plt.show()
 
 def main():
     """Main demonstration function."""
+    print("🔬 Quantitative Analysis Demonstration")
+    print("=" * 50)
     
-    print("ROBUST QUANTITATIVE ANALYSIS DEMONSTRATION")
-    print("=" * 60)
-    print("This demonstration shows how the new quantitative analysis approach")
-    print("addresses the issues you're experiencing with individual methods.")
-    print()
+    # Set up matplotlib configuration
+    setup_matplotlib_config()
     
-    # Generate realistic test data
-    print("1. Generating realistic test data (simulating your issues)...")
+    # Show available example files
+    print("\n📁 Available Example Data Files:")
+    print_available_example_files()
+    
+    # Try to load real map data
+    print("\n📊 Loading Real Map Data:")
+    real_data = load_real_map_data()
+    
+    if real_data:
+        print("✅ Real map data loaded successfully!")
+        print("   This demo will use synthetic data for controlled testing,")
+        print("   but the methods can be applied to your real data.")
+    else:
+        print("⚠️  No real map data found, using synthetic data for demonstration.")
+    
+    # Generate synthetic data for demonstration
+    print("\n🧪 Generating Synthetic Data for Controlled Testing:")
     data = simulate_realistic_data()
-    print(f"   Created map with {data['n_pixels']} pixels")
-    print(f"   Ground truth: {np.sum(data['ground_truth'])} pixels contain component")
-    print()
     
-    # Evaluate individual method performance
-    print("2. Evaluating individual method performance...")
+    print(f"   • Total pixels: {data['n_pixels']:,}")
+    print(f"   • True component pixels: {np.sum(data['ground_truth'])} ({np.sum(data['ground_truth'])/data['n_pixels']*100:.1f}%)")
+    print(f"   • Template detections: {np.sum(data['template_coefficients'][:, 0] > 0.2)}")
+    print(f"   • NMF detections: {np.sum(data['nmf_components'][:, 2] > 3.0)}")
+    print(f"   • ML detections: {np.sum(data['ml_predictions'] == 1)}")
+    
+    # Evaluate individual methods
+    print("\n📈 Evaluating Individual Methods:")
     evaluate_method_performance(data)
     
     # Demonstrate quantitative analysis
-    print("3. Applying robust quantitative analysis...")
-    result, analyzer = demonstrate_quantitative_analysis(data)
+    print("\n🔬 Demonstrating Quantitative Analysis:")
+    result = demonstrate_quantitative_analysis(data)
     
-    # Create visualization
-    print("4. Creating comparison plots...")
+    # Create comparison plots
+    print("\n📊 Creating Visualization:")
     create_comparison_plots(data, result)
     
-    print("\n" + "=" * 60)
-    print("KEY INSIGHTS FROM QUANTITATIVE ANALYSIS:")
-    print("=" * 60)
-    print("• Template method alone: High false positive rate (overestimation)")
-    print("• NMF method alone: Poor recall (underestimation)")  
-    print("• ML method alone: Class imbalance issues (too few detections)")
-    print("• Quantitative approach: Combines strengths, reduces weaknesses")
-    print("• Provides confidence measures and reliable percentage estimates")
-    print("• Method weights adjust based on data quality automatically")
-    print()
+    # Save results
+    workspace_root = get_workspace_root()
+    results_dir = workspace_root / "quantitative_analysis_results"
+    results_dir.mkdir(exist_ok=True)
     
-    print("NEXT STEPS FOR YOUR REAL DATA:")
-    print("• Load your actual template, NMF, and ML results")
-    print("• Run quantitative analysis on your component of interest")
-    print("• Use confidence threshold to control detection sensitivity")
-    print("• Get reliable percentage estimates with uncertainty bounds")
+    results_file = results_dir / "quantitative_analysis_results.txt"
+    with open(results_file, 'w') as f:
+        f.write("Quantitative Analysis Results\n")
+        f.write("=" * 50 + "\n\n")
+        f.write(f"Component: {result.component_name}\n")
+        f.write(f"Detected pixels: {np.sum(result.detection_map)}\n")
+        f.write(f"Agreement score: {result.agreement_score:.3f}\n")
+        f.write(f"Confidence levels: {len(result.confidence_levels)}\n")
+    
+    print(f"📄 Results saved to: {results_file}")
+    
+    print("\n✅ Demonstration Complete!")
+    print("   • Individual method analysis: ✅")
+    print("   • Quantitative analysis: ✅")
+    print("   • Comparison plots: ✅")
+    print("   • Results saved: ✅")
 
 if __name__ == "__main__":
     main() 

@@ -197,38 +197,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             
             self.load_spectrum_file = auto_save_wrapper
         
-        # Auto-save after background subtraction
-        if hasattr(self, 'apply_background_subtraction'):
-            original_method = self.apply_background_subtraction
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                save_module_state('raman_analysis_app', "Auto-save: background subtracted")
-                return result
-            
-            self.apply_background_subtraction = auto_save_wrapper
-        
-        # Auto-save after peak detection
-        if hasattr(self, 'find_peaks'):
-            original_method = self.find_peaks
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                save_module_state('raman_analysis_app', "Auto-save: peaks detected")
-                return result
-            
-            self.find_peaks = auto_save_wrapper
-        
-        # Auto-save after smoothing
-        if hasattr(self, 'apply_smoothing'):
-            original_method = self.apply_smoothing
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                save_module_state('raman_analysis_app', "Auto-save: smoothing applied")
-                return result
-            
-            self.apply_smoothing = auto_save_wrapper
+
 
     def setup_ui(self):
         """Set up the main user interface."""
@@ -957,37 +926,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         layout.addWidget(search_tab_widget)
         
-        # Mixed Mineral Analysis section at bottom
-        mixed_mineral_group = QGroupBox("Mixed Mineral Analysis")
-        mixed_mineral_layout = QVBoxLayout(mixed_mineral_group)
-        
-        # Description
-        desc_label = QLabel("Analyze spectra that may contain multiple mineral phases:")
-        desc_label.setWordWrap(True)
-        mixed_mineral_layout.addWidget(desc_label)
-        
-        # Mixed mineral analysis button
-        mixed_mineral_btn = QPushButton("Launch Mixed Mineral Analysis")
-        mixed_mineral_btn.clicked.connect(self.analyze_mixed_minerals)
-        mixed_mineral_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4A90E2;
-                color: white;
-                border: none;
-                padding: 8px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #357ABD;
-            }
-            QPushButton:pressed {
-                background-color: #2E6DA4;
-            }
-        """)
-        mixed_mineral_layout.addWidget(mixed_mineral_btn)
-        
-        layout.addWidget(mixed_mineral_group)
+        # Note: Mixed mineral analysis section removed for clean rebuild
         
         return tab
 
@@ -3897,65 +3836,7 @@ class RamanAnalysisAppQt6(QMainWindow):
 
 
 
-    def analyze_mixed_minerals(self):
-        """Launch the advanced mixed mineral analysis window."""
-        if self.current_wavenumbers is None or self.current_intensities is None:
-            QMessageBox.warning(
-                self, 
-                "No Data", 
-                "Please load a spectrum first before running mixed mineral analysis."
-            )
-            return
-        
-        try:
-            # Import and launch the new Qt6 mixed mineral analysis
-            from mixed_mineral_qt6_interface import launch_mixed_mineral_analysis
-            
-            # Show info dialog first
-            QMessageBox.information(
-                self,
-                "Advanced Mixed Mineral Analysis",
-                "Launching Advanced Mixed Mineral Analysis...\n\n"
-                "This sophisticated analysis tool will:\n\n"
-                "1. Detect the major phase using peak intensity analysis\n"
-                "2. Fit the major phase with physicochemical constraints\n"
-                "3. Analyze residual with weighted overlap correction\n"
-                "4. Detect minor phases in the corrected residual\n"
-                "5. Perform global optimization of all phases\n"
-                "6. Provide quantitative phase analysis with uncertainties\n\n"
-                "This approach minimizes artifacts from overlapping peaks!"
-            )
-            
-            # Use processed intensities if available, otherwise use current intensities
-            intensities_to_use = (self.processed_intensities 
-                                if self.processed_intensities is not None 
-                                else self.current_intensities)
-            
-            # Launch the analysis
-            launch_mixed_mineral_analysis(
-                self,
-                self.current_wavenumbers,
-                intensities_to_use
-            )
-            
-        except ImportError as e:
-            QMessageBox.warning(
-                self,
-                "Mixed Mineral Analysis",
-                f"Advanced mixed mineral analysis module not available.\n\n"
-                f"Error: {str(e)}\n\n"
-                "Please ensure all required dependencies are installed:\n"
-                "- scipy\n"
-                "- scikit-learn (optional, for advanced features)\n"
-                "- matplotlib"
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Error launching mixed mineral analysis:\n{str(e)}\n\n"
-                "Please check the console for detailed error information."
-            )
+    # Note: analyze_mixed_minerals function removed for clean rebuild
 
     def create_advanced_tab(self):
         """Create the advanced analysis tab."""
@@ -4043,6 +3924,12 @@ class RamanAnalysisAppQt6(QMainWindow):
         polarization_analysis_btn.clicked.connect(self.launch_polarization_analysis)
         polarization_analysis_btn.setStyleSheet(spatial_style)
         spatial_layout.addWidget(polarization_analysis_btn)
+        
+        # Mixture analysis
+        mixture_analysis_btn = QPushButton("Mixture Analysis")
+        mixture_analysis_btn.clicked.connect(self.launch_mixture_analysis)
+        mixture_analysis_btn.setStyleSheet(spatial_style)
+        spatial_layout.addWidget(mixture_analysis_btn)
         
         layout.addWidget(spatial_group)
         
@@ -4377,6 +4264,58 @@ class RamanAnalysisAppQt6(QMainWindow):
                 f"Failed to launch polarization analysis:\n{str(e)}"
             )
 
+    def launch_mixture_analysis(self):
+        """Launch mixture analysis tool."""
+        try:
+            # Import and launch the mixture analysis module
+            from raman_mixture_analysis_qt6 import RamanMixtureAnalysisQt6
+            
+            # Create and show the mixture analysis window with parent reference
+            self.mixture_analyzer = RamanMixtureAnalysisQt6(parent_app=self)
+            
+            # If we have current spectrum data, pass it to the mixture analyzer
+            if self.current_wavenumbers is not None and self.current_intensities is not None:
+                # Use processed intensities if available, otherwise use original
+                intensities = (
+                    self.processed_intensities.copy() if self.processed_intensities is not None 
+                    else self.current_intensities.copy()
+                )
+                
+                # Get spectrum name
+                spectrum_name = getattr(self, 'spectrum_file_path', None)
+                if spectrum_name:
+                    spectrum_name = os.path.basename(spectrum_name)
+                else:
+                    spectrum_name = 'Current Spectrum from Main App'
+                
+                # Set spectrum data using the new method
+                self.mixture_analyzer.set_spectrum_from_main_app(
+                    self.current_wavenumbers, intensities, spectrum_name
+                )
+                
+                # Show success message in status bar
+                self.statusBar().showMessage("Mixture Analysis launched with current spectrum")
+            else:
+                # Show message that no spectrum is loaded
+                self.statusBar().showMessage("Mixture Analysis launched - load a spectrum to begin analysis")
+            
+            # Show the window
+            self.mixture_analyzer.show()
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import mixture analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_mixture_analysis_qt6.py is in the same directory."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Mixture Analysis Error",
+                f"Failed to launch mixture analysis:\n{str(e)}"
+            )
+
     def launch_stress_strain_analysis(self):
         """Launch stress/strain analysis tool."""
         if self.current_wavenumbers is None or self.current_intensities is None:
@@ -4516,50 +4455,6 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self,
                 "Chemical Strain Analysis Error",
                 f"Failed to launch chemical strain analysis:\n{str(e)}"
-            )
-    
-    def launch_general_chemical_strain_analysis(self):
-        """Launch general chemical strain analysis tool."""
-        if self.current_wavenumbers is None or self.current_intensities is None:
-            QMessageBox.warning(self, "No Data", "Load a spectrum first to perform chemical strain analysis.")
-            return
-            
-        try:
-            # Import and launch the general chemical strain analysis module
-            from chemical_strain_enhancement import ChemicalStrainAnalyzer
-            
-            QMessageBox.information(
-                self,
-                "General Chemical Strain Analysis",
-                "Launching General Chemical Strain Analysis...\n\n"
-                "This module provides comprehensive chemical strain analysis\n"
-                "for various material systems using the loaded spectrum data."
-            )
-            
-            # TODO: Implement general chemical strain analysis GUI
-            # For now, create a basic analyzer instance
-            analyzer = ChemicalStrainAnalyzer()
-            
-            QMessageBox.information(
-                self,
-                "Chemical Strain Analysis",
-                "Chemical strain analyzer initialized successfully.\n\n"
-                "A full GUI interface for general chemical strain analysis\n"
-                "will be implemented in a future update."
-            )
-            
-        except ImportError as e:
-            QMessageBox.critical(
-                self,
-                "Import Error",
-                f"Failed to import chemical strain analysis module:\n{str(e)}\n\n"
-                "Please ensure chemical_strain_enhancement.py is available."
-            )
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Chemical Strain Analysis Error",
-                f"Failed to launch general chemical strain analysis:\n{str(e)}"
             )
     
     def launch_limn2o4_strain_analysis(self):
@@ -5474,24 +5369,7 @@ class SearchResultsWindow(QDialog):
         controls_group = QGroupBox("Actions")
         controls_layout = QVBoxLayout(controls_group)
         
-        self.metadata_btn = QPushButton("View Metadata")
-        self.metadata_btn.clicked.connect(self.show_metadata)
-        self.metadata_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #5BC0DE;
-                color: white;
-                border: none;
-                padding: 8px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #46B8DA;
-            }
-        """)
-        controls_layout.addWidget(self.metadata_btn)
-        
-        # Normalization options
+        # Normalization options (moved to top)
         norm_group = QGroupBox("Normalization")
         norm_layout = QVBoxLayout(norm_group)
         
@@ -5503,6 +5381,27 @@ class SearchResultsWindow(QDialog):
         norm_layout.addWidget(self.norm_combo)
         
         controls_layout.addWidget(norm_group)
+        
+        # Buttons layout (moved below normalization) - vertically stacked
+        buttons_layout = QVBoxLayout()
+        
+        # Add Constraint to Mixture Analysis button
+        add_constraint_btn = QPushButton("🎯 Add to Mixture Analysis")
+        add_constraint_btn.setToolTip("Add this mineral as a known component constraint for mixture analysis")
+        add_constraint_btn.clicked.connect(self.add_to_mixture_analysis)
+        buttons_layout.addWidget(add_constraint_btn)
+        
+        # Metadata button
+        metadata_btn = QPushButton("📋 Metadata")
+        metadata_btn.clicked.connect(self.show_metadata)
+        buttons_layout.addWidget(metadata_btn)
+        
+        # Mixture analysis button
+        mixture_btn = QPushButton("🔬 Mixture Analysis")
+        mixture_btn.clicked.connect(self.launch_mixture_analysis_from_search)
+        buttons_layout.addWidget(mixture_btn)
+        
+        controls_layout.addLayout(buttons_layout)
         controls_layout.addStretch()
         
         left_layout.addWidget(controls_group)
@@ -5536,8 +5435,8 @@ class SearchResultsWindow(QDialog):
         self.tooltip = None
         self.comparison_overlay = None
         
-        # Metadata window (initially hidden)
-        self.metadata_window = None
+        # Metadata window for auto-updating display
+        self.metadata_dialog = None
     
     def populate_results_table(self):
         """Populate the results table with match data."""
@@ -5575,9 +5474,9 @@ class SearchResultsWindow(QDialog):
             self.selected_match = self.matches[row]
             self.update_comparison_plot()
             
-            # Update metadata window if it's open
-            if self.metadata_window and self.metadata_window.isVisible():
-                self.show_metadata()
+            # Update metadata dialog if it's open
+            if self.metadata_dialog and self.metadata_dialog.isVisible():
+                self.update_metadata_dialog()
     
     def update_comparison_plot(self):
         """Update the spectrum comparison plot with vibrational analysis."""
@@ -5993,94 +5892,296 @@ class SearchResultsWindow(QDialog):
             QMessageBox.warning(self, "No Selection", "Please select a match to view metadata.")
             return
         
-        # Create or update metadata window
-        if self.metadata_window is None:
-            self.metadata_window = MetadataViewerWindow(self)
+        # Create or show existing metadata dialog
+        if self.metadata_dialog is None:
+            self.create_metadata_dialog()
         
-        self.metadata_window.update_metadata(self.selected_match)
-        self.metadata_window.show()
-        self.metadata_window.raise_()
-        self.metadata_window.activateWindow()
-
-
-class MetadataViewerWindow(QDialog):
-    """Window for viewing detailed metadata of selected spectrum."""
+        # Update content and show
+        self.update_metadata_dialog()
+        self.metadata_dialog.show()
+        self.metadata_dialog.raise_()
+        self.metadata_dialog.activateWindow()
     
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Spectrum Metadata")
-        self.setMinimumSize(500, 600)
-        self.resize(600, 700)
+    def create_metadata_dialog(self):
+        """Create the non-modal metadata dialog."""
+        self.metadata_dialog = QDialog(self)
+        self.metadata_dialog.setWindowTitle("Mineral Metadata")
+        self.metadata_dialog.setMinimumSize(500, 600)
+        self.metadata_dialog.resize(600, 700)
+        self.metadata_dialog.setModal(False)  # Make it non-modal
         
-        self.setup_ui()
-    
-    def setup_ui(self):
-        """Set up the metadata viewer UI."""
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout(self.metadata_dialog)
         
-        # Title
-        self.title_label = QLabel("Spectrum Metadata")
-        self.title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
-        layout.addWidget(self.title_label)
-        
-        # Metadata table
-        self.metadata_table = QTableWidget()
-        self.metadata_table.setColumnCount(2)
-        self.metadata_table.setHorizontalHeaderLabels(["Property", "Value"])
-        self.metadata_table.horizontalHeader().setStretchLastSection(True)
-        self.metadata_table.verticalHeader().setVisible(False)
-        self.metadata_table.setAlternatingRowColors(True)
-        
-        # Make the table read-only
-        self.metadata_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        
-        layout.addWidget(self.metadata_table)
+        # Scrollable text area
+        self.metadata_text_edit = QTextEdit()
+        self.metadata_text_edit.setReadOnly(True)
+        self.metadata_text_edit.setFont(QFont("Monaco", 10))  # Monospace font for better formatting
+        layout.addWidget(self.metadata_text_edit)
         
         # Close button
         close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.close)
+        close_btn.clicked.connect(self.metadata_dialog.close)
         layout.addWidget(close_btn)
+        
+        # Handle dialog destruction
+        self.metadata_dialog.destroyed.connect(lambda: setattr(self, 'metadata_dialog', None))
     
-    def update_metadata(self, match_data):
-        """Update the metadata display with new match data."""
+    def update_metadata_dialog(self):
+        """Update the metadata dialog content with the currently selected match."""
+        if not self.metadata_dialog or not self.selected_match:
+            return
+            
+        match_data = self.selected_match
         metadata = match_data.get('metadata', {})
         name = match_data.get('name', 'Unknown')
         
-        # Update title
+        # Create formatted metadata text
         display_name = metadata.get('NAME') or metadata.get('mineral_name') or name
-        self.title_label.setText(f"Metadata: {display_name}")
         
-        # Collect all metadata
-        all_metadata = {
-            'Database Entry': name,
-            'Score': f"{match_data.get('score', 0):.3f}",
-            'Timestamp': match_data.get('timestamp', 'N/A')[:19] if match_data.get('timestamp') else 'N/A',
-            'Number of Peaks': str(len(match_data.get('peaks', [])))
-        }
+        metadata_text = f"🔍 Metadata: {display_name}\n"
+        metadata_text += "="*60 + "\n\n"
         
-        # Add all metadata fields
-        for key, value in metadata.items():
-            if value is not None and str(value).strip():
-                all_metadata[key] = str(value)
+        # Basic information
+        metadata_text += f"Database Entry: {name}\n"
+        metadata_text += f"Score: {match_data.get('score', 0):.3f}\n"
+        metadata_text += f"Timestamp: {match_data.get('timestamp', 'N/A')[:19] if match_data.get('timestamp') else 'N/A'}\n"
+        metadata_text += f"Number of Peaks: {len(match_data.get('peaks', []))}\n\n"
         
-        # Populate table
-        self.metadata_table.setRowCount(len(all_metadata))
-        
-        for i, (key, value) in enumerate(all_metadata.items()):
-            # Property name
-            key_item = QTableWidgetItem(key)
-            key_item.setFont(QFont("Arial", 9, QFont.Bold))
-            self.metadata_table.setItem(i, 0, key_item)
+        # Chemical and physical properties
+        if metadata:
+            metadata_text += "📊 Properties:\n"
+            metadata_text += "-"*30 + "\n"
             
-            # Property value
-            value_item = QTableWidgetItem(str(value))
-            value_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.metadata_table.setItem(i, 1, value_item)
+            # Show key properties
+            key_fields = [
+                ('IDEAL CHEMISTRY', 'Chemical Formula'),
+                ('FORMULA', 'Formula'),
+                ('CRYSTAL SYSTEM', 'Crystal System'),
+                ('SPACE GROUP', 'Space Group'),
+                ('UNIT CELL', 'Unit Cell'),
+                ('COLOR', 'Color'),
+                ('LUSTRE', 'Lustre'),
+                ('HARDNESS', 'Hardness'),
+                ('DENSITY', 'Density'),
+                ('LOCALITY', 'Locality'),
+                ('DESCRIPTION', 'Description')
+            ]
+            
+            for field_key, display_label in key_fields:
+                if field_key in metadata and metadata[field_key]:
+                    value = str(metadata[field_key]).strip()
+                    if value and value.lower() not in ['none', 'n/a', '']:
+                        metadata_text += f"{display_label}: {value}\n"
+            
+            # Show any additional metadata
+            shown_keys = [key for key, _ in key_fields] + ['NAME', 'mineral_name']
+            additional_fields = {k: v for k, v in metadata.items() 
+                               if k not in shown_keys and v and str(v).strip() 
+                               and str(v).lower() not in ['none', 'n/a', '']}
+            
+            if additional_fields:
+                metadata_text += "\n📋 Additional Properties:\n"
+                metadata_text += "-"*30 + "\n"
+                for key, value in additional_fields.items():
+                    metadata_text += f"{key}: {value}\n"
         
-        # Resize columns
-        self.metadata_table.resizeColumnsToContents()
-        self.metadata_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.metadata_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # Update the dialog content and title
+        self.metadata_text_edit.setPlainText(metadata_text)
+        self.metadata_dialog.setWindowTitle(f"Metadata: {display_name}")
+    
+    def launch_mixture_analysis_from_search(self):
+        """Launch mixture analysis using search results as potential components."""
+        if not self.matches:
+            QMessageBox.information(self, "No Matches", "No search results available for mixture analysis.")
+            return
+        
+        # Get the parent's query spectrum
+        if not hasattr(self.parent(), 'current_wavenumbers') or self.parent().current_wavenumbers is None:
+            QMessageBox.warning(self, "No Query Spectrum", 
+                "No query spectrum is loaded in the main application.\n"
+                "Load a spectrum in the main window first to perform mixture analysis.")
+            return
+        
+        try:
+            # Import the mixture analysis module
+            from raman_mixture_analysis_qt6 import RamanMixtureAnalysisQt6
+            
+            # Create mixture analysis window and store reference to prevent garbage collection
+            mixture_analyzer = RamanMixtureAnalysisQt6(parent_app=self.parent())
+            
+            # Store reference in parent to prevent garbage collection
+            if not hasattr(self.parent(), 'mixture_analysis_windows'):
+                self.parent().mixture_analysis_windows = []
+            self.parent().mixture_analysis_windows.append(mixture_analyzer)
+            
+            # Clean up closed windows from the list when this window closes
+            def cleanup_window_reference():
+                if hasattr(self.parent(), 'mixture_analysis_windows'):
+                    try:
+                        self.parent().mixture_analysis_windows.remove(mixture_analyzer)
+                    except ValueError:
+                        pass  # Already removed
+            
+            # Connect cleanup to window close event
+            mixture_analyzer.destroyed.connect(cleanup_window_reference)
+            
+            # Load the query spectrum automatically
+            query_wavenumbers = self.parent().current_wavenumbers
+            query_intensities = self.parent().processed_intensities
+            
+            if query_wavenumbers is not None and query_intensities is not None:
+                # Get spectrum name from parent
+                parent = self.parent()
+                spectrum_name = getattr(parent, 'spectrum_file_path', None)
+                if spectrum_name:
+                    spectrum_name = os.path.basename(spectrum_name)
+                else:
+                    spectrum_name = 'Query Spectrum from Search'
+                
+                # Set spectrum data using the new method
+                mixture_analyzer.set_spectrum_from_main_app(
+                    query_wavenumbers, query_intensities, spectrum_name
+                )
+                
+                # Show a helpful message about using search results
+                num_matches = len(self.matches)
+                selected_match = self.selected_match
+                
+                info_msg = f"Mixture Analysis launched with your query spectrum!\n\n"
+                info_msg += f"📊 {num_matches} search results are available as potential components.\n"
+                
+                if selected_match:
+                    match_name = selected_match.get('name', 'Unknown')
+                    metadata = selected_match.get('metadata', {})
+                    display_name = metadata.get('NAME') or metadata.get('mineral_name') or match_name
+                    score = selected_match.get('score', 0.0)
+                    
+                    info_msg += f"🎯 Currently viewing: {display_name} (Score: {score:.3f})\n\n"
+                
+                info_msg += "💡 Tip: You can load spectra from the RamanLab database in the mixture analysis tool. "
+                info_msg += "The minerals from your search results are good candidates to try!"
+                
+                # Show info after window is displayed to avoid Qt timing issues
+                QTimer.singleShot(500, lambda: QMessageBox.information(self, "Mixture Analysis Launched", info_msg))
+            
+            # Show the mixture analysis window
+            mixture_analyzer.show()
+            mixture_analyzer.raise_()
+            mixture_analyzer.activateWindow()
+            
+            print(f"✅ Mixture analysis window created and shown (reference stored)")
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import mixture analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_mixture_analysis_qt6.py is in the same directory."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Launch Error", 
+                f"Failed to launch mixture analysis:\n{str(e)}"
+            )
+    
+    def add_to_mixture_analysis(self):
+        """Add the selected match as a constraint to mixture analysis."""
+        if not self.selected_match:
+            QMessageBox.warning(self, "No Selection", "Please select a match to add to mixture analysis.")
+            return
+        
+        # Get the parent's query spectrum
+        if not hasattr(self.parent(), 'current_wavenumbers') or self.parent().current_wavenumbers is None:
+            QMessageBox.warning(self, "No Query Spectrum", 
+                "No query spectrum is loaded in the main application.\n"
+                "Load a spectrum in the main window first to perform mixture analysis.")
+            return
+        
+        try:
+            # Import the mixture analysis module
+            from raman_mixture_analysis_qt6 import RamanMixtureAnalysisQt6
+            
+            # Create mixture analysis window and store reference to prevent garbage collection
+            mixture_analyzer = RamanMixtureAnalysisQt6(parent_app=self.parent())
+            
+            # Store reference in parent to prevent garbage collection
+            if not hasattr(self.parent(), 'mixture_analysis_windows'):
+                self.parent().mixture_analysis_windows = []
+            self.parent().mixture_analysis_windows.append(mixture_analyzer)
+            
+            # Clean up closed windows from the list when this window closes
+            def cleanup_window_reference():
+                if hasattr(self.parent(), 'mixture_analysis_windows'):
+                    try:
+                        self.parent().mixture_analysis_windows.remove(mixture_analyzer)
+                    except ValueError:
+                        pass  # Already removed
+            
+            # Connect cleanup to window close event
+            mixture_analyzer.destroyed.connect(cleanup_window_reference)
+            
+            # Load the query spectrum automatically
+            query_wavenumbers = self.parent().current_wavenumbers
+            query_intensities = self.parent().processed_intensities
+            
+            if query_wavenumbers is not None and query_intensities is not None:
+                # Get spectrum name from parent
+                parent = self.parent()
+                spectrum_name = getattr(parent, 'spectrum_file_path', None)
+                if spectrum_name:
+                    spectrum_name = os.path.basename(spectrum_name)
+                else:
+                    spectrum_name = 'Query Spectrum from Search'
+                
+                # Set spectrum data using the new method
+                mixture_analyzer.set_spectrum_from_main_app(
+                    query_wavenumbers, query_intensities, spectrum_name
+                )
+                
+                # Add the selected match as a constraint
+                selected_match = self.selected_match
+                if selected_match:
+                    match_name = selected_match.get('name', 'Unknown')
+                    metadata = selected_match.get('metadata', {})
+                    display_name = metadata.get('NAME') or metadata.get('mineral_name') or match_name
+                    score = selected_match.get('score', 0.0)
+                    
+                    info_msg = f"Added {display_name} (Score: {score:.3f}) as a known component constraint.\n\n"
+                    info_msg += "💡 Tip: You can load spectra from the RamanLab database in the mixture analysis tool. "
+                    info_msg += "The minerals from your search results are good candidates to try!"
+                    
+                    QMessageBox.information(self, "Added to Mixture Analysis", info_msg)
+                    
+                    # Add the selected match as a constraint (deferred to allow UI to fully initialize)
+                    def add_constraint_deferred():
+                        mixture_analyzer.add_constraint_from_search(
+                            display_name, score, metadata
+                        )
+                    
+                    # Use QTimer to defer constraint addition by 200ms
+                    QTimer.singleShot(200, add_constraint_deferred)
+            
+            # Show the mixture analysis window
+            mixture_analyzer.show()
+            mixture_analyzer.raise_()
+            mixture_analyzer.activateWindow()
+            
+            print(f"✅ Mixture analysis window created and shown (reference stored)")
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import mixture analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_mixture_analysis_qt6.py is in the same directory."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Launch Error", 
+                f"Failed to launch mixture analysis:\n{str(e)}"
+            )
 
 
 class RamanMapImportWorker(QThread):
@@ -6336,363 +6437,6 @@ class RamanMapImportWorker(QThread):
             
         except Exception as e:
             raise Exception(f"Error parsing Raman spectral map: {str(e)}")
-
-
-class DataConversionDialog(QDialog):
-    """Dialog for advanced data conversion tools, specifically for Horiba format files."""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_app = parent
-        self.input_file_path = None
-        self.output_directory = None
-        self.file_data = None
-        self.raman_shifts = None
-        self.spectra_data = []
-        self.sequence_numbers = []
-        
-        self.setWindowTitle("Advanced Data Conversion - Horiba Format")
-        self.setModal(True)
-        self.resize(800, 600)
-        
-        self.setup_ui()
-        
-    def setup_ui(self):
-        """Set up the user interface."""
-        layout = QVBoxLayout(self)
-        
-        # Title and description
-        title_label = QLabel("Advanced Data Conversion - Horiba Format")
-        title_label.setFont(QFont("", 14, QFont.Weight.Bold))
-        layout.addWidget(title_label)
-        
-        description = QLabel(
-            "This tool processes Horiba format Raman linescan files where:\n"
-            "• Row 1 contains Raman shift values (cm⁻¹)\n"
-            "• Column 1 contains data sequence numbers\n"
-            "• All other cells contain intensity values\n\n"
-            "The tool will split the data into individual spectrum files."
-        )
-        description.setWordWrap(True)
-        layout.addWidget(description)
-        
-        # File selection section
-        file_group = QGroupBox("File Selection")
-        file_layout = QVBoxLayout(file_group)
-        
-        # Input file selection
-        input_layout = QHBoxLayout()
-        input_layout.addWidget(QLabel("Input File:"))
-        self.input_file_label = QLabel("No file selected")
-        self.input_file_label.setStyleSheet("color: gray; font-style: italic;")
-        input_layout.addWidget(self.input_file_label)
-        input_layout.addStretch()
-        
-        self.browse_input_btn = QPushButton("Browse...")
-        self.browse_input_btn.clicked.connect(self.browse_input_file)
-        input_layout.addWidget(self.browse_input_btn)
-        
-        file_layout.addLayout(input_layout)
-        
-        # Output directory selection
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel("Output Directory:"))
-        self.output_dir_label = QLabel("Same as input file")
-        self.output_dir_label.setStyleSheet("color: gray; font-style: italic;")
-        output_layout.addWidget(self.output_dir_label)
-        output_layout.addStretch()
-        
-        self.browse_output_btn = QPushButton("Browse...")
-        self.browse_output_btn.clicked.connect(self.browse_output_directory)
-        output_layout.addWidget(self.browse_output_btn)
-        
-        file_layout.addLayout(output_layout)
-        
-        layout.addWidget(file_group)
-        
-        # Preview section
-        preview_group = QGroupBox("File Preview")
-        preview_layout = QVBoxLayout(preview_group)
-        
-        self.preview_text = QTextEdit()
-        self.preview_text.setMaximumHeight(200)
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setPlainText("Load a file to see preview...")
-        preview_layout.addWidget(self.preview_text)
-        
-        layout.addWidget(preview_group)
-        
-        # Conversion options
-        options_group = QGroupBox("Conversion Options")
-        options_layout = QFormLayout(options_group)
-        
-        self.file_format_combo = QComboBox()
-        self.file_format_combo.addItems(["Tab-separated (.txt)", "Comma-separated (.csv)"])
-        options_layout.addRow("Output Format:", self.file_format_combo)
-        
-        self.include_sequence_check = QCheckBox("Include sequence number in filename")
-        self.include_sequence_check.setChecked(True)
-        options_layout.addRow("", self.include_sequence_check)
-        
-        layout.addWidget(options_group)
-        
-        # Progress section
-        self.progress_group = QGroupBox("Conversion Progress")
-        progress_layout = QVBoxLayout(self.progress_group)
-        
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        progress_layout.addWidget(self.progress_bar)
-        
-        self.status_label = QLabel("")
-        self.status_label.setVisible(False)
-        progress_layout.addWidget(self.status_label)
-        
-        layout.addWidget(self.progress_group)
-        self.progress_group.setVisible(False)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        
-        self.convert_btn = QPushButton("Convert")
-        self.convert_btn.clicked.connect(self.perform_conversion)
-        self.convert_btn.setEnabled(False)
-        button_layout.addWidget(self.convert_btn)
-        
-        self.close_btn = QPushButton("Close")
-        self.close_btn.clicked.connect(self.reject)
-        button_layout.addWidget(self.close_btn)
-        
-        layout.addLayout(button_layout)
-        
-    def browse_input_file(self):
-        """Browse for input file."""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Horiba Format File",
-            "",
-            "Text files (*.txt);;All files (*.*)"
-        )
-        
-        if file_path:
-            self.input_file_path = file_path
-            self.input_file_label.setText(os.path.basename(file_path))
-            self.input_file_label.setStyleSheet("color: black;")
-            
-            # Try to load and preview the file
-            self.load_file_preview()
-            
-    def browse_output_directory(self):
-        """Browse for output directory."""
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Output Directory",
-            os.path.dirname(self.input_file_path) if self.input_file_path else ""
-        )
-        
-        if directory:
-            self.output_directory = directory
-            self.output_dir_label.setText(directory)
-            self.output_dir_label.setStyleSheet("color: black;")
-            
-    def load_file_preview(self):
-        """Load and preview the selected file."""
-        if not self.input_file_path:
-            return
-            
-        try:
-            # Parse the Horiba format file
-            self.parse_horiba_file()
-            
-            # Create preview text
-            preview_lines = []
-            preview_lines.append(f"File: {os.path.basename(self.input_file_path)}")
-            preview_lines.append(f"Total lines: {len(self.file_data)}")
-            
-            if self.raman_shifts is not None:
-                preview_lines.append(f"Raman shifts: {len(self.raman_shifts)} values from {self.raman_shifts[0]:.1f} to {self.raman_shifts[-1]:.1f} cm⁻¹")
-            
-            if self.sequence_numbers:
-                preview_lines.append(f"Sequence numbers: {len(self.sequence_numbers)} spectra from {min(self.sequence_numbers)} to {max(self.sequence_numbers)}")
-            
-            preview_lines.append("\nFile structure preview:")
-            
-            # Show first few lines of the file
-            for i, line in enumerate(self.file_data[:5]):
-                if i == 0:
-                    # Header line
-                    parts = line.strip().split('\t')
-                    if len(parts) > 10:
-                        preview_line = f"Line {i+1}: [Header] {parts[0]}\t{parts[1]}\t{parts[2]}\t...\t{parts[-1]} ({len(parts)} columns)"
-                    else:
-                        preview_line = f"Line {i+1}: [Header] {line.strip()}"
-                else:
-                    # Data line
-                    parts = line.strip().split('\t')
-                    if len(parts) > 10:
-                        preview_line = f"Line {i+1}: [Seq {parts[0]}] {parts[1]}\t{parts[2]}\t...\t{parts[-1]} ({len(parts)} values)"
-                    else:
-                        preview_line = f"Line {i+1}: [Seq {parts[0]}] {' '.join(parts[1:])}"
-                
-                preview_lines.append(preview_line)
-            
-            if len(self.file_data) > 5:
-                preview_lines.append("...")
-            
-            self.preview_text.setPlainText('\n'.join(preview_lines))
-            
-            # Enable convert button if file loaded successfully
-            self.convert_btn.setEnabled(True)
-            
-        except Exception as e:
-            self.preview_text.setPlainText(f"Error loading file:\n{str(e)}")
-            self.convert_btn.setEnabled(False)
-            QMessageBox.warning(self, "File Error", f"Could not load file:\n{str(e)}")
-            
-    def parse_horiba_file(self):
-        """Parse the Horiba format file."""
-        if not self.input_file_path:
-            raise ValueError("No input file selected")
-            
-        with open(self.input_file_path, 'r', encoding='utf-8') as f:
-            self.file_data = f.readlines()
-            
-        if len(self.file_data) < 2:
-            raise ValueError("File must have at least 2 lines (header + data)")
-            
-        # Parse header line (Raman shifts)
-        header_line = self.file_data[0].strip()
-        header_parts = header_line.split('\t')
-        
-        # Skip first element if it's empty (common in Horiba files)
-        if header_parts[0] == '' and len(header_parts) > 1:
-            self.raman_shifts = np.array([float(x) for x in header_parts[1:]])
-        else:
-            self.raman_shifts = np.array([float(x) for x in header_parts])
-            
-        # Parse data lines
-        self.sequence_numbers = []
-        self.spectra_data = []
-        
-        for i, line in enumerate(self.file_data[1:], 1):
-            line = line.strip()
-            if not line:
-                continue
-                
-            parts = line.split('\t')
-            if len(parts) < 2:
-                continue
-                
-            try:
-                # First column is sequence number
-                seq_num = int(float(parts[0]))  # Convert via float to handle decimal notation
-                self.sequence_numbers.append(seq_num)
-                
-                # Remaining columns are intensity values
-                intensities = np.array([float(x) for x in parts[1:]])
-                
-                # Ensure we have the right number of intensities
-                if len(intensities) != len(self.raman_shifts):
-                    # Pad or truncate as needed
-                    if len(intensities) < len(self.raman_shifts):
-                        padded = np.zeros(len(self.raman_shifts))
-                        padded[:len(intensities)] = intensities
-                        intensities = padded
-                    else:
-                        intensities = intensities[:len(self.raman_shifts)]
-                        
-                self.spectra_data.append(intensities)
-                
-            except (ValueError, IndexError) as e:
-                print(f"Skipping line {i+1}: {e}")
-                continue
-                
-        if not self.sequence_numbers:
-            raise ValueError("No valid data rows found in file")
-            
-    def perform_conversion(self):
-        """Perform the data conversion."""
-        if not self.input_file_path or not self.file_data:
-            QMessageBox.warning(self, "No Data", "Please select and load a file first.")
-            return
-            
-        try:
-            # Show progress
-            self.progress_group.setVisible(True)
-            self.progress_bar.setVisible(True)
-            self.status_label.setVisible(True)
-            self.progress_bar.setRange(0, len(self.sequence_numbers))
-            self.progress_bar.setValue(0)
-            
-            # Determine output directory
-            if self.output_directory:
-                output_dir = self.output_directory
-            else:
-                output_dir = os.path.dirname(self.input_file_path)
-                
-            # Create subfolder
-            base_filename = os.path.splitext(os.path.basename(self.input_file_path))[0]
-            subfolder_name = f"split_{base_filename}"
-            subfolder_path = os.path.join(output_dir, subfolder_name)
-            
-            os.makedirs(subfolder_path, exist_ok=True)
-            
-            # Determine file extension
-            if self.file_format_combo.currentText().startswith("Comma"):
-                extension = ".csv"
-                delimiter = ","
-            else:
-                extension = ".txt"
-                delimiter = "\t"
-                
-            # Convert each spectrum
-            self.status_label.setText("Converting spectra...")
-            QApplication.processEvents()
-            
-            for i, (seq_num, intensities) in enumerate(zip(self.sequence_numbers, self.spectra_data)):
-                # Create filename
-                if self.include_sequence_check.isChecked():
-                    filename = f"{base_filename}_seq_{seq_num:+d}{extension}"
-                else:
-                    filename = f"{base_filename}_{i+1:03d}{extension}"
-                    
-                filepath = os.path.join(subfolder_path, filename)
-                
-                # Write spectrum file
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    # Write header
-                    f.write(f"Wavenumber (cm-1){delimiter}Intensity (a.u.)\n")
-                    
-                    # Write data
-                    for wavenumber, intensity in zip(self.raman_shifts, intensities):
-                        f.write(f"{wavenumber:.3f}{delimiter}{intensity:.6f}\n")
-                        
-                # Update progress
-                self.progress_bar.setValue(i + 1)
-                self.status_label.setText(f"Converted {i+1}/{len(self.sequence_numbers)} spectra...")
-                QApplication.processEvents()
-                
-            # Show completion message
-            self.status_label.setText("Conversion complete!")
-            QMessageBox.information(
-                self,
-                "Conversion Complete",
-                f"Successfully converted {len(self.sequence_numbers)} spectra.\n\n"
-                f"Output folder: {subfolder_path}\n"
-                f"Files: {self.sequence_numbers[0]} to {self.sequence_numbers[-1]}"
-            )
-            
-            # Ask if user wants to close dialog
-            if QMessageBox.question(self, "Complete", "Conversion finished. Close dialog?") == QMessageBox.StandardButton.Yes:
-                self.accept()
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Conversion Error", f"Error during conversion:\n{str(e)}")
-            
-        finally:
-            # Hide progress
-            self.progress_group.setVisible(False)
 
 
 # Main entry point (if running as standalone)

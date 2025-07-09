@@ -64,6 +64,8 @@ class MultiSpectrumManagerQt6(QMainWindow):
             'line_width': 1.5,
             'waterfall_mode': False,
             'waterfall_spacing': 1.0,
+            'heatmap_mode': False,
+            'heatmap_spacing': 1.0,
             'colormap': 'tab10'
         }
         
@@ -81,6 +83,8 @@ class MultiSpectrumManagerQt6(QMainWindow):
         # Setup state management after UI is created
         if STATE_MANAGEMENT_AVAILABLE:
             self.setup_state_management()
+            # Add auto-save hooks after all methods are defined
+            self._add_auto_save_hooks()
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -114,9 +118,6 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self.save_session_state = lambda notes="": save_module_state('multi_spectrum_manager', notes)
             self.load_session_state = lambda: load_module_state('multi_spectrum_manager')
             
-            # Hook auto-save into critical methods
-            self._add_auto_save_hooks()
-            
             # Track session start time
             import time
             self._session_start_time = time.time()
@@ -130,24 +131,22 @@ class MultiSpectrumManagerQt6(QMainWindow):
     def _add_auto_save_hooks(self):
         """Add auto-save functionality to critical methods."""
         
-        # Auto-save after loading spectra
-        if hasattr(self, 'load_spectrum_file_for_multi'):
-            original_method = self.load_spectrum_file_for_multi
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                if result:  # Only save if loading was successful
-                    save_module_state('multi_spectrum_manager', "Auto-save: spectrum loaded")
-                return result
-            
-            self.load_spectrum_file_for_multi = auto_save_wrapper
+        # MEMORY RULE: Never use auto-save wrappers on methods that:
+        # 1. Are called by Qt signals (like button clicks, checkbox toggles)
+        # 2. Are called during data loading/removing/clearing operations
+        # 3. Have signature conflicts with Qt signal arguments
+        
+        # Safe methods for auto-save (no Qt signal conflicts):
+        # - add_selected_from_database: called by button clicks, but we use lambda
+        # - add_current_spectrum: called by button clicks, but we use lambda
         
         # Auto-save after adding from database
         if hasattr(self, 'add_selected_from_database'):
             original_method = self.add_selected_from_database
             
             def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
+                # add_selected_from_database takes no arguments, so ignore Qt signal arguments
+                result = original_method()
                 save_module_state('multi_spectrum_manager', "Auto-save: spectrum added from database")
                 return result
             
@@ -158,46 +157,21 @@ class MultiSpectrumManagerQt6(QMainWindow):
             original_method = self.add_current_spectrum
             
             def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
+                # add_current_spectrum takes no arguments, so ignore Qt signal arguments
+                result = original_method()
                 save_module_state('multi_spectrum_manager', "Auto-save: current spectrum added")
                 return result
             
             self.add_current_spectrum = auto_save_wrapper
         
-        # Auto-save after removing spectra
-        if hasattr(self, 'remove_spectrum_by_name'):
-            original_method = self.remove_spectrum_by_name
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                save_module_state('multi_spectrum_manager', "Auto-save: spectrum removed")
-                return result
-            
-            self.remove_spectrum_by_name = auto_save_wrapper
+        # UNSAFE methods (DO NOT WRAP):
+        # - load_spectrum_file_for_multi: called during file loading, can have timing issues
+        # - remove_spectrum_by_name: called during removal operations
+        # - clear_all_multi_spectra: called by button clicks with Qt signal arguments
+        # - update_multi_plot: called frequently by Qt signals (checkbox, slider changes)
         
-        # Auto-save after clearing all spectra
-        if hasattr(self, 'clear_all_multi_spectra'):
-            original_method = self.clear_all_multi_spectra
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                save_module_state('multi_spectrum_manager', "Auto-save: all spectra cleared")
-                return result
-            
-            self.clear_all_multi_spectra = auto_save_wrapper
-        
-        # Auto-save after global settings changes
-        if hasattr(self, 'update_multi_plot'):
-            original_method = self.update_multi_plot
-            
-            def auto_save_wrapper(*args, **kwargs):
-                result = original_method(*args, **kwargs)
-                # Update global settings from UI
-                self._update_global_settings()
-                save_module_state('multi_spectrum_manager', "Auto-save: settings changed")
-                return result
-            
-            self.update_multi_plot = auto_save_wrapper
+        print("✅ Auto-save enabled for safe methods only")
+        print("📝 Memory: No wrappers on data loading/removing/clearing methods")
     
     def _update_global_settings(self):
         """Update global settings from UI controls."""
@@ -211,6 +185,10 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self.global_settings['waterfall_mode'] = self.waterfall_check.isChecked()
         if hasattr(self, 'waterfall_spacing_slider'):
             self.global_settings['waterfall_spacing'] = self.waterfall_spacing_slider.value() / 10.0
+        if hasattr(self, 'heatmap_check'):
+            self.global_settings['heatmap_mode'] = self.heatmap_check.isChecked()
+        if hasattr(self, 'heatmap_spacing_slider'):
+            self.global_settings['heatmap_spacing'] = self.heatmap_spacing_slider.value() / 10.0
         if hasattr(self, 'line_width_slider'):
             self.global_settings['line_width'] = self.line_width_slider.value() / 10.0
         if hasattr(self, 'colormap_combo'):
@@ -238,7 +216,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
         quick_buttons.addWidget(remove_btn)
         
         clear_all_btn = QPushButton("Clear All")
-        clear_all_btn.clicked.connect(self.clear_all_multi_spectra)
+        clear_all_btn.clicked.connect(lambda: self.clear_all_multi_spectra())
         quick_buttons.addWidget(clear_all_btn)
         
         spectra_layout.addLayout(quick_buttons)
@@ -364,17 +342,17 @@ class MultiSpectrumManagerQt6(QMainWindow):
         display_row1 = QHBoxLayout()
         self.normalize_check = QCheckBox("Normalize Spectra")
         self.normalize_check.setChecked(self.global_settings['normalize'])
-        self.normalize_check.toggled.connect(self.update_multi_plot)
+        self.normalize_check.toggled.connect(lambda: self.update_multi_plot())
         display_row1.addWidget(self.normalize_check)
         
         self.legend_check = QCheckBox("Show Legend")
         self.legend_check.setChecked(self.global_settings['show_legend'])
-        self.legend_check.toggled.connect(self.update_multi_plot)
+        self.legend_check.toggled.connect(lambda: self.update_multi_plot())
         display_row1.addWidget(self.legend_check)
         
         self.grid_check = QCheckBox("Show Grid")
         self.grid_check.setChecked(self.global_settings['grid'])
-        self.grid_check.toggled.connect(self.update_multi_plot)
+        self.grid_check.toggled.connect(lambda: self.update_multi_plot())
         display_row1.addWidget(self.grid_check)
         global_layout.addLayout(display_row1)
         
@@ -382,19 +360,37 @@ class MultiSpectrumManagerQt6(QMainWindow):
         waterfall_row = QHBoxLayout()
         self.waterfall_check = QCheckBox("Waterfall Plot")
         self.waterfall_check.setChecked(self.global_settings['waterfall_mode'])
-        self.waterfall_check.toggled.connect(self.update_multi_plot)
+        self.waterfall_check.toggled.connect(lambda: self.update_multi_plot())
         waterfall_row.addWidget(self.waterfall_check)
         
         waterfall_row.addWidget(QLabel("Spacing:"))
         self.waterfall_spacing_slider = QSlider(Qt.Horizontal)
         self.waterfall_spacing_slider.setRange(1, 50)  # 0.1 to 5.0 (multiplied by 10)
         self.waterfall_spacing_slider.setValue(int(self.global_settings['waterfall_spacing'] * 10))
-        self.waterfall_spacing_slider.valueChanged.connect(self.update_multi_plot)
+        self.waterfall_spacing_slider.valueChanged.connect(lambda: self.update_multi_plot())
         waterfall_row.addWidget(self.waterfall_spacing_slider)
         
         self.waterfall_spacing_label = QLabel(f"{self.global_settings['waterfall_spacing']:.1f}")
         waterfall_row.addWidget(self.waterfall_spacing_label)
         global_layout.addLayout(waterfall_row)
+        
+        # Heatmap mode
+        heatmap_row = QHBoxLayout()
+        self.heatmap_check = QCheckBox("Heatmap Plot")
+        self.heatmap_check.setChecked(self.global_settings['heatmap_mode'])
+        self.heatmap_check.toggled.connect(lambda: self.update_multi_plot())
+        heatmap_row.addWidget(self.heatmap_check)
+        
+        heatmap_row.addWidget(QLabel("Spacing:"))
+        self.heatmap_spacing_slider = QSlider(Qt.Horizontal)
+        self.heatmap_spacing_slider.setRange(1, 50)  # 0.1 to 5.0 (multiplied by 10)
+        self.heatmap_spacing_slider.setValue(int(self.global_settings['heatmap_spacing'] * 10))
+        self.heatmap_spacing_slider.valueChanged.connect(lambda: self.update_multi_plot())
+        heatmap_row.addWidget(self.heatmap_spacing_slider)
+        
+        self.heatmap_spacing_label = QLabel(f"{self.global_settings['heatmap_spacing']:.1f}")
+        heatmap_row.addWidget(self.heatmap_spacing_label)
+        global_layout.addLayout(heatmap_row)
         
         # Line width control
         line_width_layout = QHBoxLayout()
@@ -402,7 +398,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
         self.line_width_slider = QSlider(Qt.Horizontal)
         self.line_width_slider.setRange(5, 50)  # 0.5 to 5.0 (multiplied by 10)
         self.line_width_slider.setValue(int(self.global_settings['line_width'] * 10))
-        self.line_width_slider.valueChanged.connect(self.update_multi_plot)
+        self.line_width_slider.valueChanged.connect(lambda: self.update_multi_plot())
         line_width_layout.addWidget(self.line_width_slider)
         
         self.line_width_label = QLabel(f"{self.global_settings['line_width']:.1f}")
@@ -420,7 +416,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
             'coolwarm', 'RdYlBu', 'spectral', 'rainbow'
         ])
         self.colormap_combo.setCurrentText(self.global_settings['colormap'])
-        self.colormap_combo.currentTextChanged.connect(self.update_multi_plot)
+        self.colormap_combo.currentTextChanged.connect(lambda: self.update_multi_plot())
         colormap_layout.addWidget(self.colormap_combo)
         
         # Reset colors button
@@ -538,13 +534,18 @@ class MultiSpectrumManagerQt6(QMainWindow):
         waterfall_spacing = self.waterfall_spacing_slider.value() / 10.0
         self.waterfall_spacing_label.setText(f"{waterfall_spacing:.1f}")
         
+        heatmap_spacing = self.heatmap_spacing_slider.value() / 10.0
+        self.heatmap_spacing_label.setText(f"{heatmap_spacing:.1f}")
+        
         # Update global settings
-        self.global_settings['normalize'] = self.normalize_checkbox.isChecked()
-        self.global_settings['show_legend'] = self.legend_checkbox.isChecked()
-        self.global_settings['grid'] = self.grid_checkbox.isChecked()
+        self.global_settings['normalize'] = self.normalize_check.isChecked()
+        self.global_settings['show_legend'] = self.legend_check.isChecked()
+        self.global_settings['grid'] = self.grid_check.isChecked()
         self.global_settings['line_width'] = line_width
-        self.global_settings['waterfall_mode'] = self.waterfall_checkbox.isChecked()
+        self.global_settings['waterfall_mode'] = self.waterfall_check.isChecked()
         self.global_settings['waterfall_spacing'] = waterfall_spacing
+        self.global_settings['heatmap_mode'] = self.heatmap_check.isChecked()
+        self.global_settings['heatmap_spacing'] = heatmap_spacing
         self.global_settings['colormap'] = self.colormap_combo.currentText()
         
         # Get colors from colormap
@@ -552,53 +553,116 @@ class MultiSpectrumManagerQt6(QMainWindow):
         
         # Plot all spectra
         y_offset = 0
-        for i, (spectrum_name, spectrum_data) in enumerate(self.loaded_spectra.items()):
-            wavenumbers, intensities = spectrum_data
+        
+        if self.global_settings['heatmap_mode']:
+            # Heatmap mode: create a 2D array for heatmap visualization
+            spectrum_names = list(self.loaded_spectra.keys())
+            all_wavenumbers = []
+            all_intensities = []
             
-            # Get individual spectrum settings
-            custom_color = self.get_spectrum_setting(spectrum_name, 'color', None)
-            y_offset_individual = self.get_spectrum_setting(spectrum_name, 'y_offset', 0.0)
-            x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
+            # Collect all data
+            for spectrum_name, spectrum_data in self.loaded_spectra.items():
+                wavenumbers, intensities = spectrum_data
+                x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
+                plot_wavenumbers = wavenumbers + x_offset_individual
+                plot_intensities = intensities.copy()
+                
+                # Normalize if requested
+                if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
+                    plot_intensities = plot_intensities / np.max(plot_intensities)
+                
+                all_wavenumbers.append(plot_wavenumbers)
+                all_intensities.append(plot_intensities)
             
-            # Apply offsets
-            plot_wavenumbers = wavenumbers + x_offset_individual
-            plot_intensities = intensities.copy()
+            # Find common wavenumber range
+            min_wavenumber = max([np.min(wn) for wn in all_wavenumbers])
+            max_wavenumber = min([np.max(wn) for wn in all_wavenumbers])
             
-            # Normalize if requested
-            if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
-                plot_intensities = plot_intensities / np.max(plot_intensities)
+            # Create heatmap data
+            heatmap_data = []
+            for i, (wavenumbers, intensities) in enumerate(zip(all_wavenumbers, all_intensities)):
+                # Interpolate to common wavenumber grid
+                mask = (wavenumbers >= min_wavenumber) & (wavenumbers <= max_wavenumber)
+                if np.any(mask):
+                    heatmap_data.append(intensities[mask])
             
-            # Apply y-offset (individual + waterfall)
-            if self.global_settings['waterfall_mode']:
-                plot_intensities += y_offset + y_offset_individual
-                y_offset += waterfall_spacing
-            else:
-                plot_intensities += y_offset_individual
-            
-            # Use custom color if set, otherwise use colormap
-            color = custom_color if custom_color else colors[i % len(colors)]
-            
-            self.multi_ax.plot(plot_wavenumbers, plot_intensities, 
-                             color=color, 
-                             linewidth=self.global_settings['line_width'],
-                             label=spectrum_name)
+            if heatmap_data:
+                # Create heatmap
+                heatmap_array = np.array(heatmap_data)
+                extent = [min_wavenumber, max_wavenumber, 0, len(spectrum_names)]
+                
+                im = self.multi_ax.imshow(heatmap_array, 
+                                        aspect='auto', 
+                                        extent=extent,
+                                        cmap=self.global_settings['colormap'],
+                                        origin='lower')
+                
+                # Add colorbar
+                self.multi_figure.colorbar(im, ax=self.multi_ax, label='Intensity (a.u.)')
+                
+                # Set y-axis labels
+                self.multi_ax.set_yticks(range(len(spectrum_names)))
+                self.multi_ax.set_yticklabels(spectrum_names)
+                
+        else:
+            # Regular line plot mode (with waterfall option)
+            for i, (spectrum_name, spectrum_data) in enumerate(self.loaded_spectra.items()):
+                wavenumbers, intensities = spectrum_data
+                
+                # Get individual spectrum settings
+                custom_color = self.get_spectrum_setting(spectrum_name, 'color', None)
+                y_offset_individual = self.get_spectrum_setting(spectrum_name, 'y_offset', 0.0)
+                x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
+                
+                # Apply offsets
+                plot_wavenumbers = wavenumbers + x_offset_individual
+                plot_intensities = intensities.copy()
+                
+                # Normalize if requested
+                if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
+                    plot_intensities = plot_intensities / np.max(plot_intensities)
+                
+                # Apply y-offset (individual + waterfall)
+                if self.global_settings['waterfall_mode']:
+                    plot_intensities += y_offset + y_offset_individual
+                    y_offset += waterfall_spacing
+                else:
+                    plot_intensities += y_offset_individual
+                
+                # Use custom color if set, otherwise use colormap
+                color = custom_color if custom_color else colors[i % len(colors)]
+                
+                self.multi_ax.plot(plot_wavenumbers, plot_intensities, 
+                                 color=color, 
+                                 linewidth=self.global_settings['line_width'],
+                                 label=spectrum_name)
         
         # Apply settings
-        if self.global_settings['show_legend'] and self.loaded_spectra:
-            self.multi_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        if not self.global_settings['heatmap_mode']:
+            # Only show legend for line plots, not heatmaps
+            if self.global_settings['show_legend'] and self.loaded_spectra:
+                self.multi_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            # Properly handle grid visibility for line plots
+            if self.global_settings['grid']:
+                self.multi_ax.grid(True, alpha=0.3)
+            else:
+                self.multi_ax.grid(False)
         
-        # Properly handle grid visibility
-        if self.global_settings['grid']:
-            self.multi_ax.grid(True, alpha=0.3)
-        else:
-            self.multi_ax.grid(False)
-        
+        # Set axis labels and title
         self.multi_ax.set_xlabel("Wavenumber (cm⁻¹)")
-        ylabel = "Intensity (a.u.)"
-        if self.global_settings['waterfall_mode']:
-            ylabel += " (Offset)"
-        self.multi_ax.set_ylabel(ylabel)
-        self.multi_ax.set_title("Multi-Spectrum Analysis")
+        
+        if self.global_settings['heatmap_mode']:
+            self.multi_ax.set_ylabel("Spectrum")
+            title = "Multi-Spectrum Heatmap Analysis"
+        else:
+            ylabel = "Intensity (a.u.)"
+            if self.global_settings['waterfall_mode']:
+                ylabel += " (Offset)"
+            self.multi_ax.set_ylabel(ylabel)
+            title = "Multi-Spectrum Analysis"
+        
+        self.multi_ax.set_title(title)
         
         self.multi_figure.tight_layout()
         self.multi_canvas.draw()
@@ -867,6 +931,13 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 wavenumbers = data[:, 0]
                 intensities = data[:, 1]
                 
+                # Validate data
+                if len(wavenumbers) == 0 or len(intensities) == 0:
+                    raise ValueError("File contains no data points")
+                
+                if np.any(np.isnan(wavenumbers)) or np.any(np.isnan(intensities)):
+                    raise ValueError("File contains invalid (NaN) values")
+                
                 # Generate unique name
                 filename = Path(file_path).stem
                 display_name = filename
@@ -885,12 +956,16 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 self.update_multi_plot()
                 
                 self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
+                return True
                 
-            else:
-                QMessageBox.warning(self, "Invalid Format", f"File must contain at least two columns: {Path(file_path).name}")
-                
+            elif data.ndim == 1 or data.shape[1] < 2:
+                raise ValueError(f"File must contain at least two columns (wavenumber, intensity). Found {data.shape[1] if data.ndim == 2 else 1} column(s)")
+            
         except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Failed to load {Path(file_path).name}:\n{str(e)}")
+            # Re-raise the exception to be handled by the calling method
+            raise Exception(f"Failed to load {Path(file_path).name}: {str(e)}")
+        
+        return False
     
     def load_multiple_files(self):
         """Load multiple spectrum files."""
@@ -903,15 +978,24 @@ class MultiSpectrumManagerQt6(QMainWindow):
         
         if file_paths:
             success_count = 0
+            failed_files = []
             for file_path in file_paths:
                 try:
                     self.load_spectrum_file_for_multi(file_path)
                     success_count += 1
-                except:
-                    pass  # Error already handled in load_spectrum_file_for_multi
+                except Exception as e:
+                    failed_files.append(f"{Path(file_path).name}: {str(e)}")
             
+            # Show results to user
             if success_count > 0:
-                QMessageBox.information(self, "Success", f"Successfully loaded {success_count} of {len(file_paths)} files.")
+                message = f"Successfully loaded {success_count} of {len(file_paths)} files."
+                if failed_files:
+                    message += f"\n\nFailed files:\n" + "\n".join(failed_files[:5])
+                    if len(failed_files) > 5:
+                        message += f"\n... and {len(failed_files) - 5} more"
+                QMessageBox.information(self, "Load Results", message)
+            elif failed_files:
+                QMessageBox.warning(self, "Load Failed", f"Failed to load any files:\n" + "\n".join(failed_files[:3]))
     
     def add_single_file(self):
         """Add a single spectrum file."""
@@ -923,7 +1007,10 @@ class MultiSpectrumManagerQt6(QMainWindow):
         )
         
         if file_path:
-            self.load_spectrum_file_for_multi(file_path)
+            try:
+                self.load_spectrum_file_for_multi(file_path)
+            except Exception as e:
+                QMessageBox.critical(self, "Load Error", str(e))
     
     def add_from_database(self):
         """Add a spectrum from the database (legacy method for backward compatibility)."""

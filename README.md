@@ -176,6 +176,28 @@ You will notice that a lot of groundwork is already implemented in RamanLab to b
 #### More specialized modules to come
 ---
 
+## 🧪 **Advanced Mixture Analysis** *(NEW)*
+
+### **Iterative Spectral Decomposition:**
+- **Multi-Component Analysis:** Identify up to 10 mineral components in complex spectra
+- **Advanced Peak Profiles:** Gaussian, Lorentzian, Voigt, and asymmetric profile fitting
+- **Database Integration:** Leverage 6900+ mineral spectra for component identification
+- **Uncertainty Quantification:** Bootstrap resampling and Monte Carlo analysis for confidence estimates
+
+### **Enhanced Analysis Features:**
+- **Real-time Processing:** Background analysis with progress monitoring
+- **Interactive Visualization:** Four-panel plotting system with component highlighting
+- **Convergence Monitoring:** Multiple criteria including R², χ², and residual analysis
+- **Comprehensive Export:** Detailed results with uncertainty intervals
+
+### **Technical Capabilities:**
+- **Iterative Refinement:** Progressive component identification and global optimization
+- **Correlation Thresholding:** Customizable matching criteria for component acceptance
+- **Session Integration:** Full state management and result database storage
+- **Professional Interface:** Consistent Qt6 styling with matplotlib integration
+
+---
+
 ## 📊 **Advanced Group & Cluster Analysis**
 
 ### **Hierarchical Clustering:**
@@ -305,6 +327,9 @@ python launch_orientation_optimizer.py
 
 # Cluster Analysis
 python raman_cluster_analysis_qt6.py
+
+# Mixture Analysis (NEW)
+python launch_mixture_analysis.py
 
 # Peak Fitting (Standalone)
 python peak_fitting_qt6.py

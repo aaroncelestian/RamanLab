@@ -484,7 +484,7 @@ class PythonExamplesWindow(QDialog):
         layout.addWidget(close_btn)
     
     def create_basic_tab(self):
-        """Create basic data exploration tab."""
+        """Create basic data exploration tab with safe examples."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
@@ -493,62 +493,215 @@ class PythonExamplesWindow(QDialog):
         scroll_layout = QVBoxLayout(scroll_widget)
         
         examples = [
-            ("View loaded data summary", """
-# Check what data is available
-print("Summary DataFrame:")
-print(summary_df.head())
-print(f"Shape: {summary_df.shape}")
+            ("Check available data (Safe)", """
+# Safe data availability check
+import pandas as pd
+import numpy as np
 
-print("\\nPeaks DataFrame:")
-print(peaks_df.head())
-print(f"Shape: {peaks_df.shape}")
+print("=== RamanLab Data Availability Check ===")
 
-print("\\nSpectra available:")
-print(list(spectra_dict.keys())[:5])  # First 5 spectra
+# Check if main variables exist
+variables_to_check = ['summary_df', 'peaks_df', 'spectra_dict', 'batch_data']
+available_vars = []
+
+for var_name in variables_to_check:
+    if var_name in globals():
+        available_vars.append(var_name)
+        var_data = globals()[var_name]
+        if hasattr(var_data, '__len__'):
+            print(f"✓ {var_name}: Available ({len(var_data)} items)")
+        else:
+            print(f"✓ {var_name}: Available")
+    else:
+        print(f"✗ {var_name}: Not available")
+
+if 'summary_df' in available_vars:
+    print(f"\\nSummary DataFrame shape: {summary_df.shape}")
+    print(f"Summary columns: {list(summary_df.columns)}")
+
+if 'peaks_df' in available_vars:
+    print(f"\\nPeaks DataFrame shape: {peaks_df.shape}")
+    print(f"Peaks columns: {list(peaks_df.columns)}")
+
+if 'spectra_dict' in available_vars:
+    print(f"\\nSpectra dictionary: {len(spectra_dict)} spectra available")
+    if len(spectra_dict) > 0:
+        first_key = list(spectra_dict.keys())[0]
+        first_spectrum = spectra_dict[first_key]
+        print(f"First spectrum keys: {list(first_spectrum.keys())}")
+
+print("\\n=== Data Check Complete ===")
 """),
-            
-            ("Basic statistics", """
-# Summary statistics for all spectra
-print("Summary Statistics:")
-print(summary_df.describe())
 
-print("\\nPeak Position Statistics:")
-print(peaks_df['position'].describe())
-
-print("\\nR² Statistics:")
-print(peaks_df['r2'].describe())
+            ("View data safely", """
+# Safe data viewing with error handling
+try:
+    if 'summary_df' in globals() and len(summary_df) > 0:
+        print("Summary DataFrame (first 5 rows):")
+        print(summary_df.head())
+        print(f"\\nShape: {summary_df.shape}")
+    else:
+        print("Summary DataFrame not available or empty")
+        
+    if 'peaks_df' in globals() and len(peaks_df) > 0:
+        print("\\nPeaks DataFrame (first 5 rows):")
+        print(peaks_df.head())
+        print(f"\\nShape: {peaks_df.shape}")
+    else:
+        print("\\nPeaks DataFrame not available or empty")
+        
+    if 'spectra_dict' in globals() and len(spectra_dict) > 0:
+        print(f"\\nSpectra available: {len(spectra_dict)}")
+        print("First 3 spectrum names:")
+        for i, name in enumerate(list(spectra_dict.keys())[:3]):
+            print(f"  {i+1}. {name}")
+    else:
+        print("\\nNo spectra dictionary available")
+        
+except Exception as e:
+    print(f"Error viewing data: {e}")
 """),
+
+            ("Safe statistics with smart columns", """
+# Safe statistics with intelligent column detection
+def get_safe_statistics():
+    try:
+        if 'summary_df' not in globals() or len(summary_df) == 0:
+            print("No summary data available")
+            return
             
-            ("Find spectra with most peaks", """
-# Find files with the most peaks
-top_spectra = summary_df.nlargest(10, 'n_peaks')
-print("Spectra with most peaks:")
-print(top_spectra[['filename', 'n_peaks', 'total_r2']])
+        print("=== RamanLab Statistics Summary ===")
+        print(f"Total files processed: {len(summary_df)}")
+        
+        # Smart column detection for peaks
+        peak_cols = [col for col in summary_df.columns if 'peak' in col.lower() and ('count' in col.lower() or 'n_' in col.lower())]
+        if not peak_cols:
+            peak_cols = [col for col in summary_df.columns if col in ['n_peaks', 'num_peaks', 'peak_count']]
+        
+        if peak_cols:
+            peak_col = peak_cols[0]
+            total_peaks = summary_df[peak_col].sum()
+            avg_peaks = summary_df[peak_col].mean()
+            print(f"Total peaks detected: {total_peaks}")
+            print(f"Average peaks per spectrum: {avg_peaks:.1f}")
+            
+            # Success rate
+            success_count = len(summary_df[summary_df[peak_col] > 0])
+            success_rate = (success_count / len(summary_df)) * 100
+            print(f"Success rate: {success_rate:.1f}% ({success_count}/{len(summary_df)} files)")
+        else:
+            print("Peak count information not available")
+            
+        # Smart R² detection
+        r2_cols = [col for col in summary_df.columns if 'r2' in col.lower() or 'r_squared' in col.lower()]
+        if r2_cols:
+            r2_col = r2_cols[0]
+            avg_r2 = summary_df[r2_col].mean()
+            good_fits = len(summary_df[summary_df[r2_col] >= 0.9])
+            print(f"Average R²: {avg_r2:.3f}")
+            print(f"High quality fits (R² ≥ 0.9): {good_fits}")
+        else:
+            print("R² information not available")
+            
+        print("\\n" + "="*40)
+        
+    except Exception as e:
+        print(f"Error generating statistics: {e}")
+
+# Run the safe statistics
+get_safe_statistics()
 """),
-            
-            ("View specific spectrum data", """
-# Access spectral data for a specific file
-filename = list(spectra_dict.keys())[0]  # First spectrum
-spectrum_data = spectra_dict[filename]
 
-print(f"Spectrum: {filename}")
-print(f"Wavenumber range: {spectrum_data['wavenumbers'].min():.1f} - {spectrum_data['wavenumbers'].max():.1f} cm⁻¹")
-print(f"Intensity range: {spectrum_data['intensities'].min():.1f} - {spectrum_data['intensities'].max():.1f}")
-print(f"Data points: {len(spectrum_data['wavenumbers'])}")
+            ("Safe spectrum plotting", """
+# Safe single spectrum plot
+import matplotlib.pyplot as plt
+import numpy as np
+
+def plot_spectrum_safely(spectrum_index=0):
+    try:
+        if 'spectra_dict' not in globals() or len(spectra_dict) == 0:
+            print("No spectra data available for plotting")
+            return
+            
+        filenames = list(spectra_dict.keys())
+        if spectrum_index >= len(filenames):
+            print(f"Index {spectrum_index} too high. Available: 0-{len(filenames)-1}")
+            return
+            
+        filename = filenames[spectrum_index]
+        spectrum_data = spectra_dict[filename]
+        
+        # Check for required data
+        if 'wavenumbers' not in spectrum_data or 'intensities' not in spectrum_data:
+            print(f"Spectrum {filename} missing wavenumbers or intensities")
+            return
+            
+        wavenumbers = np.array(spectrum_data['wavenumbers'])
+        intensities = np.array(spectrum_data['intensities'])
+        
+        # Validate data
+        if len(wavenumbers) == 0 or len(intensities) == 0:
+            print(f"Empty data arrays for {filename}")
+            return
+            
+        if len(wavenumbers) != len(intensities):
+            print(f"Mismatched array lengths")
+            return
+        
+        # Create plot
+        plt.figure(figsize=(10, 6))
+        plt.plot(wavenumbers, intensities, 'b-', linewidth=1)
+        plt.xlabel('Wavenumber (cm⁻¹)')
+        plt.ylabel('Intensity')
+        plt.title(f'Raman Spectrum: {filename}')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+        
+        print(f"Successfully plotted: {filename}")
+        
+    except Exception as e:
+        print(f"Error plotting spectrum: {e}")
+
+# Plot the first available spectrum
+plot_spectrum_safely(0)
 """),
+
+            ("Safe data export", """
+# Safe data export with validation
+def export_data_safely():
+    try:
+        import pandas as pd
+        from datetime import datetime
+        
+        # Create timestamp for file naming
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        print("=== Safe Data Export ===")
+        
+        # Export summary data
+        if 'summary_df' in globals() and len(summary_df) > 0:
+            summary_filename = f"ramanlab_summary_{timestamp}.csv"
+            summary_df.to_csv(summary_filename, index=False)
+            print(f"✓ Exported summary data: {summary_filename} ({len(summary_df)} rows)")
+        else:
+            print("✗ No summary data to export")
             
-            ("Filter data by criteria", """
-# Filter spectra by number of peaks
-high_peak_spectra = summary_df[summary_df['n_peaks'] >= 5]
-print(f"Spectra with ≥5 peaks: {len(high_peak_spectra)}")
+        # Export peaks data
+        if 'peaks_df' in globals() and len(peaks_df) > 0:
+            peaks_filename = f"ramanlab_peaks_{timestamp}.csv"
+            peaks_df.to_csv(peaks_filename, index=False)
+            print(f"✓ Exported peaks data: {peaks_filename} ({len(peaks_df)} rows)")
+        else:
+            print("✗ No peaks data to export")
+            
+        print(f"\\nFiles saved with timestamp: {timestamp}")
+        
+    except Exception as e:
+        print(f"Error during export: {e}")
 
-# Filter by R² value
-good_fits = summary_df[summary_df['total_r2'] >= 0.9]
-print(f"Spectra with R² ≥ 0.9: {len(good_fits)}")
-
-# Filter peaks by position (e.g., find quartz peak around 464 cm⁻¹)
-quartz_peaks = peaks_df[(peaks_df['position'] >= 460) & (peaks_df['position'] <= 470)]
-print(f"Peaks near 464 cm⁻¹ (quartz): {len(quartz_peaks)}")
+# Run safe export
+export_data_safely()
 """)
         ]
         

@@ -12,6 +12,7 @@ import pandas as pd
 import os
 from scipy.spatial.distance import pdist
 import glob
+from datetime import datetime
 from sklearn.cluster import KMeans
 from sklearn.cluster import SpectralClustering
 from sklearn.decomposition import PCA
@@ -49,7 +50,8 @@ from PySide6.QtWidgets import (
     QGroupBox, QSplitter, QFileDialog, QMessageBox, QProgressBar,
     QSpinBox, QDoubleSpinBox, QFrame, QScrollArea, QTableWidget,
     QTableWidgetItem, QHeaderView, QDialog, QFormLayout, QDialogButtonBox,
-    QListWidget, QListWidgetItem, QInputDialog, QApplication, QGridLayout
+    QListWidget, QListWidgetItem, QInputDialog, QApplication, QGridLayout,
+    QProgressDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
 from PySide6.QtGui import QAction, QFont, QPixmap
@@ -1135,6 +1137,48 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.viz_toolbar = NavigationToolbar(self.viz_canvas, scatter_widget)
         layout.addWidget(self.viz_toolbar)
         
+        # Add cluster export controls
+        export_frame = QFrame()
+        export_layout = QVBoxLayout(export_frame)
+        
+        # Export section title
+        export_title = QLabel("Cluster Export Options")
+        export_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #333; padding: 4px;")
+        export_layout.addWidget(export_title)
+        
+        # Export buttons row
+        export_buttons_row = QHBoxLayout()
+        
+        # Export to folders button
+        self.export_folders_btn = QPushButton("Export to Folders")
+        self.export_folders_btn.setToolTip("Export each cluster's spectra to separate folders for individual analysis")
+        self.export_folders_btn.clicked.connect(self.export_clusters_to_folders)
+        self.export_folders_btn.setEnabled(False)
+        export_buttons_row.addWidget(self.export_folders_btn)
+        
+        # Export summed spectra button
+        self.export_summed_btn = QPushButton("Export Summed Spectra")
+        self.export_summed_btn.setToolTip("Export summed/averaged spectra for each cluster as a single plot")
+        self.export_summed_btn.clicked.connect(self.export_summed_cluster_spectra)
+        self.export_summed_btn.setEnabled(False)
+        export_buttons_row.addWidget(self.export_summed_btn)
+        
+        # Export cluster overview button
+        self.export_overview_btn = QPushButton("Export Cluster Overview")
+        self.export_overview_btn.setToolTip("Export a comprehensive overview with all clusters in a grid layout")
+        self.export_overview_btn.clicked.connect(self.export_cluster_overview)
+        self.export_overview_btn.setEnabled(False)
+        export_buttons_row.addWidget(self.export_overview_btn)
+        
+        export_layout.addLayout(export_buttons_row)
+        
+        # Export status
+        self.export_status = QLabel("No clusters available for export")
+        self.export_status.setStyleSheet("color: #666; font-size: 9px; padding: 2px;")
+        export_layout.addWidget(self.export_status)
+        
+        layout.addWidget(export_frame)
+        
         self.viz_tab_widget.addTab(scatter_widget, "Scatter Plot")
 
     def update_visualization_params(self):
@@ -1293,6 +1337,13 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             self.viz_fig.tight_layout()
             self.viz_canvas.draw()
+            
+            # Enable export buttons if clusters are available
+            if hasattr(self, 'export_folders_btn') and unique_labels is not None:
+                self.export_folders_btn.setEnabled(True)
+                self.export_summed_btn.setEnabled(True)
+                self.export_overview_btn.setEnabled(True)
+                self.export_status.setText(f"Ready to export {len(unique_labels)} clusters")
             
         except Exception as e:
             print(f"Error updating scatter plot: {str(e)}")
@@ -8056,6 +8107,478 @@ Stability Assessment:"""
             
         except Exception as e:
             print(f"Error plotting stability analysis: {str(e)}")
+
+    def export_clusters_to_folders(self):
+        """Export each cluster's spectra to separate folders."""
+        if (self.cluster_data['labels'] is None or 
+            self.cluster_data['intensities'] is None or
+            self.cluster_data['spectrum_metadata'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get export directory
+            export_dir = QFileDialog.getExistingDirectory(
+                self, "Select Export Directory", "",
+                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            )
+            
+            if not export_dir:
+                return
+            
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            wavenumbers = self.cluster_data['wavenumbers']
+            metadata = self.cluster_data['spectrum_metadata']
+            unique_labels = np.unique(labels)
+            
+            # Create progress dialog
+            progress = QProgressDialog("Exporting clusters to folders...", "Cancel", 0, len(unique_labels), self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setAutoClose(True)
+            
+            exported_clusters = 0
+            
+            for i, cluster_id in enumerate(unique_labels):
+                if progress.wasCanceled():
+                    break
+                
+                progress.setValue(i)
+                progress.setLabelText(f"Exporting cluster {cluster_id}...")
+                
+                # Create cluster folder
+                cluster_folder = os.path.join(export_dir, f"Cluster_{cluster_id}")
+                os.makedirs(cluster_folder, exist_ok=True)
+                
+                # Get spectra for this cluster
+                cluster_mask = labels == cluster_id
+                cluster_intensities = intensities[cluster_mask]
+                cluster_metadata = [metadata[j] for j in range(len(metadata)) if cluster_mask[j]]
+                
+                # Export individual spectra
+                for j, (spectrum_intensity, spectrum_metadata) in enumerate(zip(cluster_intensities, cluster_metadata)):
+                    filename = spectrum_metadata.get('filename', f'spectrum_{j}.txt')
+                    # Clean filename
+                    clean_filename = "".join(c for c in filename if c.isalnum() or c in (' ', '-', '_', '.')).rstrip()
+                    if not clean_filename.endswith('.txt'):
+                        clean_filename += '.txt'
+                    
+                    filepath = os.path.join(cluster_folder, clean_filename)
+                    
+                    # Write spectrum data
+                    with open(filepath, 'w') as f:
+                        # Write metadata header
+                        f.write(f"# Cluster: {cluster_id}\n")
+                        f.write(f"# Original file: {filename}\n")
+                        for key, value in spectrum_metadata.items():
+                            if key != 'filename':
+                                f.write(f"# {key}: {value}\n")
+                        f.write("# Wavenumber\tIntensity\n")
+                        
+                        # Write spectrum data
+                        for wavenumber, intensity in zip(wavenumbers, spectrum_intensity):
+                            f.write(f"{wavenumber:.2f}\t{intensity:.6f}\n")
+                
+                # Create cluster summary file
+                summary_file = os.path.join(cluster_folder, f"cluster_{cluster_id}_summary.txt")
+                with open(summary_file, 'w') as f:
+                    f.write(f"Cluster {cluster_id} Summary\n")
+                    f.write("=" * 50 + "\n")
+                    f.write(f"Number of spectra: {len(cluster_intensities)}\n")
+                    f.write(f"Export date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                    f.write("Spectra files:\n")
+                    for j, spectrum_metadata in enumerate(cluster_metadata):
+                        filename = spectrum_metadata.get('filename', f'spectrum_{j}.txt')
+                        f.write(f"  {j+1}. {filename}\n")
+                
+                exported_clusters += 1
+            
+            progress.setValue(len(unique_labels))
+            
+            QMessageBox.information(
+                self, "Export Complete", 
+                f"Successfully exported {exported_clusters} clusters to:\n{export_dir}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting clusters: {str(e)}")
+            print(f"Export error: {str(e)}")
+
+    def export_summed_cluster_spectra(self):
+        """Export high-quality summed spectra for each cluster as individual files and plot."""
+        if (self.cluster_data['labels'] is None or 
+            self.cluster_data['intensities'] is None or
+            self.cluster_data['wavenumbers'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get export directory for summed spectra files
+            export_dir = QFileDialog.getExistingDirectory(
+                self, "Select Export Directory for Summed Spectra", "",
+                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            )
+            
+            if not export_dir:
+                return
+            
+            # Get plot file path
+            plot_filepath, _ = QFileDialog.getSaveFileName(
+                self, "Save Summed Spectra Plot", 
+                "cluster_summed_spectra.png",
+                "PNG files (*.png);;PDF files (*.pdf);;All files (*)"
+            )
+            
+            if not plot_filepath:
+                return
+            
+            # Import matplotlib config
+            try:
+                from polarization_ui.matplotlib_config import apply_theme
+                apply_theme('publication')
+            except ImportError:
+                pass  # Use default matplotlib settings
+            
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            wavenumbers = self.cluster_data['wavenumbers']
+            unique_labels = np.unique(labels)
+            
+            # Create progress dialog
+            progress = QProgressDialog("Processing summed spectra...", "Cancel", 0, len(unique_labels), self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setAutoClose(True)
+            
+            # Store processed spectra for plotting
+            processed_spectra = {}
+            
+            for i, cluster_id in enumerate(unique_labels):
+                if progress.wasCanceled():
+                    break
+                
+                progress.setValue(i)
+                progress.setLabelText(f"Processing cluster {cluster_id}...")
+                
+                # Get spectra for this cluster
+                cluster_mask = labels == cluster_id
+                cluster_intensities = intensities[cluster_mask]
+                
+                # Step 1: Preprocessing and normalization
+                processed_cluster_spectra = self._preprocess_cluster_spectra(cluster_intensities, wavenumbers)
+                
+                # Step 2: Create high-quality summed spectrum
+                summed_spectrum = self._create_summed_spectrum(processed_cluster_spectra, wavenumbers)
+                
+                # Step 3: Save individual summed spectrum file
+                spectrum_filename = f"cluster_{cluster_id}_summed_spectrum.txt"
+                spectrum_filepath = os.path.join(export_dir, spectrum_filename)
+                
+                with open(spectrum_filepath, 'w') as f:
+                    f.write(f"# Cluster {cluster_id} Summed Spectrum\n")
+                    f.write(f"# Number of spectra combined: {len(cluster_intensities)}\n")
+                    f.write(f"# Processing date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"# Processing method: Advanced signal enhancement with normalization\n")
+                    f.write(f"# Signal-to-noise improvement: ~{np.sqrt(len(cluster_intensities)):.1f}x\n")
+                    f.write("# Wavenumber (cm⁻¹)\tIntensity\tStd_Deviation\n")
+                    
+                    # Calculate standard deviation for each point
+                    std_values = np.std(processed_cluster_spectra, axis=0)
+                    
+                    for j, (wavenumber, intensity, std_val) in enumerate(zip(wavenumbers, summed_spectrum, std_values)):
+                        f.write(f"{wavenumber:.2f}\t{intensity:.6f}\t{std_val:.6f}\n")
+                
+                # Store for plotting
+                processed_spectra[cluster_id] = {
+                    'summed': summed_spectrum,
+                    'individual': processed_cluster_spectra,
+                    'std': std_values,
+                    'count': len(cluster_intensities)
+                }
+            
+            progress.setValue(len(unique_labels))
+            
+            # Create visualization
+            self._create_summed_spectra_plot(processed_spectra, wavenumbers, plot_filepath)
+            
+            QMessageBox.information(
+                self, "Export Complete", 
+                f"Summed spectra exported to:\n{export_dir}\n\nPlot saved to:\n{plot_filepath}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting summed spectra: {str(e)}")
+            print(f"Export error: {str(e)}")
+
+    def _preprocess_cluster_spectra(self, cluster_intensities, wavenumbers):
+        """Preprocess cluster spectra for optimal summation."""
+        processed_spectra = []
+        
+        for spectrum in cluster_intensities:
+            # Step 1: Remove baseline using polynomial fitting
+            baseline_corrected = self._remove_baseline(spectrum, wavenumbers)
+            
+            # Step 2: Normalize by area under curve
+            area_normalized = self._normalize_by_area(baseline_corrected)
+            
+            # Step 3: Apply smoothing to reduce noise
+            smoothed = self._smooth_spectrum(area_normalized)
+            
+            processed_spectra.append(smoothed)
+        
+        return np.array(processed_spectra)
+
+    def _remove_baseline(self, spectrum, wavenumbers, degree=3):
+        """Remove baseline using polynomial fitting."""
+        try:
+            # Fit polynomial to spectrum
+            coeffs = np.polyfit(wavenumbers, spectrum, degree)
+            baseline = np.polyval(coeffs, wavenumbers)
+            
+            # Subtract baseline
+            corrected = spectrum - baseline
+            
+            # Ensure non-negative values
+            corrected = np.maximum(corrected, 0)
+            
+            return corrected
+        except:
+            # Fallback: simple minimum subtraction
+            return spectrum - np.min(spectrum)
+
+    def _normalize_by_area(self, spectrum):
+        """Normalize spectrum by area under the curve."""
+        area = np.trapz(spectrum)
+        if area > 0:
+            return spectrum / area
+        else:
+            return spectrum
+
+    def _smooth_spectrum(self, spectrum, window_size=5):
+        """Apply Savitzky-Golay smoothing to reduce noise."""
+        try:
+            from scipy.signal import savgol_filter
+            # Use odd window size
+            if window_size % 2 == 0:
+                window_size += 1
+            return savgol_filter(spectrum, window_size, 2)
+        except ImportError:
+            # Fallback: simple moving average
+            kernel = np.ones(window_size) / window_size
+            return np.convolve(spectrum, kernel, mode='same')
+
+    def _create_summed_spectrum(self, processed_spectra, wavenumbers):
+        """Create high-quality summed spectrum with signal enhancement."""
+        # Step 1: Calculate mean spectrum
+        mean_spectrum = np.mean(processed_spectra, axis=0)
+        
+        # Step 2: Apply outlier rejection (remove spectra that deviate too much)
+        std_spectrum = np.std(processed_spectra, axis=0)
+        threshold = 2.0  # Standard deviations
+        
+        # Calculate deviation for each spectrum
+        deviations = []
+        for spectrum in processed_spectra:
+            deviation = np.mean(np.abs(spectrum - mean_spectrum) / (std_spectrum + 1e-10))
+            deviations.append(deviation)
+        
+        # Keep spectra within threshold
+        good_indices = [i for i, dev in enumerate(deviations) if dev < threshold]
+        
+        if len(good_indices) > 0:
+            # Recalculate mean with good spectra only
+            filtered_spectra = processed_spectra[good_indices]
+            mean_spectrum = np.mean(filtered_spectra, axis=0)
+        
+        # Step 3: Apply final smoothing for optimal signal
+        final_spectrum = self._smooth_spectrum(mean_spectrum, window_size=7)
+        
+        return final_spectrum
+
+    def _create_summed_spectra_plot(self, processed_spectra, wavenumbers, filepath):
+        """Create visualization of summed spectra."""
+        n_clusters = len(processed_spectra)
+        n_cols = min(3, n_clusters)  # Max 3 columns
+        n_rows = (n_clusters + n_cols - 1) // n_cols
+        
+        # Create figure
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5 * n_rows))
+        if n_clusters == 1:
+            axes = [axes]
+        elif n_rows == 1:
+            axes = axes.reshape(1, -1)
+        
+        # Get colormap
+        colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Set1'
+        try:
+            colormap = plt.cm.get_cmap(colormap_name)
+            colors = colormap(np.linspace(0, 1, len(processed_spectra)))
+        except:
+            colors = plt.cm.Set1(np.linspace(0, 1, len(processed_spectra)))
+        
+        for i, (cluster_id, data) in enumerate(processed_spectra.items()):
+            row = i // n_cols
+            col = i % n_cols
+            ax = axes[row, col] if n_rows > 1 else axes[col]
+            
+            # Plot individual spectra (very transparent)
+            for spectrum in data['individual']:
+                ax.plot(wavenumbers, spectrum, alpha=0.1, color=colors[i], linewidth=0.3)
+            
+            # Plot summed spectrum (bold)
+            ax.plot(wavenumbers, data['summed'], color=colors[i], linewidth=3, 
+                   label=f'Summed (n={data["count"]})')
+            
+            # Add confidence interval
+            ax.fill_between(wavenumbers, 
+                          data['summed'] - data['std'], 
+                          data['summed'] + data['std'], 
+                          alpha=0.2, color=colors[i])
+            
+            # Add SNR improvement info
+            snr_improvement = np.sqrt(data['count'])
+            ax.text(0.02, 0.98, f'SNR improvement: ~{snr_improvement:.1f}x', 
+                   transform=ax.transAxes, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            ax.set_xlabel('Wavenumber (cm⁻¹)')
+            ax.set_ylabel('Normalized Intensity')
+            ax.set_title(f'Cluster {cluster_id} - High-Quality Summed Spectrum')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+        
+        # Hide empty subplots
+        for i in range(n_clusters, n_rows * n_cols):
+            row = i // n_cols
+            col = i % n_cols
+            ax = axes[row, col] if n_rows > 1 else axes[col]
+            ax.set_visible(False)
+        
+        plt.tight_layout()
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def export_cluster_overview(self):
+        """Export a comprehensive overview with all clusters in a grid layout."""
+        if (self.cluster_data['labels'] is None or 
+            self.cluster_data['intensities'] is None or
+            self.cluster_data['wavenumbers'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get export file path
+            filepath, _ = QFileDialog.getSaveFileName(
+                self, "Save Cluster Overview", 
+                "cluster_overview.png",
+                "PNG files (*.png);;PDF files (*.pdf);;All files (*)"
+            )
+            
+            if not filepath:
+                return
+            
+            # Import matplotlib config
+            try:
+                from polarization_ui.matplotlib_config import apply_theme
+                apply_theme('publication')
+            except ImportError:
+                pass  # Use default matplotlib settings
+            
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            wavenumbers = self.cluster_data['wavenumbers']
+            unique_labels = np.unique(labels)
+            
+            # Create comprehensive overview
+            fig = plt.figure(figsize=(16, 12))
+            
+            # Main plot: All clusters overlaid
+            ax1 = plt.subplot(2, 2, 1)
+            colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Set1'
+            try:
+                colormap = plt.cm.get_cmap(colormap_name)
+                colors = colormap(np.linspace(0, 1, len(unique_labels)))
+            except:
+                colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+            
+            for i, cluster_id in enumerate(unique_labels):
+                cluster_mask = labels == cluster_id
+                cluster_intensities = intensities[cluster_mask]
+                mean_spectrum = np.mean(cluster_intensities, axis=0)
+                std_spectrum = np.std(cluster_intensities, axis=0)
+                
+                ax1.plot(wavenumbers, mean_spectrum, color=colors[i], linewidth=2, 
+                        label=f'Cluster {cluster_id} (n={len(cluster_intensities)})')
+                ax1.fill_between(wavenumbers, 
+                               mean_spectrum - std_spectrum, 
+                               mean_spectrum + std_spectrum, 
+                               alpha=0.2, color=colors[i])
+            
+            ax1.set_xlabel('Wavenumber (cm⁻¹)')
+            ax1.set_ylabel('Intensity')
+            ax1.set_title('All Clusters Overlaid')
+            ax1.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            ax1.grid(True, alpha=0.3)
+            
+            # Cluster size distribution
+            ax2 = plt.subplot(2, 2, 2)
+            cluster_sizes = [np.sum(labels == label) for label in unique_labels]
+            bars = ax2.bar(range(len(unique_labels)), cluster_sizes, color=colors)
+            ax2.set_xlabel('Cluster ID')
+            ax2.set_ylabel('Number of Spectra')
+            ax2.set_title('Cluster Size Distribution')
+            ax2.set_xticks(range(len(unique_labels)))
+            ax2.set_xticklabels([f'Cluster {label}' for label in unique_labels])
+            
+            # Add value labels on bars
+            for bar, size in zip(bars, cluster_sizes):
+                height = bar.get_height()
+                ax2.text(bar.get_x() + bar.get_width()/2., height + 0.5,
+                        f'{size}', ha='center', va='bottom')
+            
+            # Individual cluster plots (2x2 grid for remaining clusters)
+            n_remaining = len(unique_labels)
+            if n_remaining > 0:
+                # Calculate subplot layout
+                n_cols = min(2, n_remaining)
+                n_rows = (n_remaining + n_cols - 1) // n_cols
+                
+                for i, cluster_id in enumerate(unique_labels):
+                    if i < 4:  # Only show first 4 clusters in overview
+                        row = 2 + (i // 2)
+                        col = 1 + (i % 2)
+                        ax = plt.subplot(2, 2, col + 2)
+                        
+                        cluster_mask = labels == cluster_id
+                        cluster_intensities = intensities[cluster_mask]
+                        
+                        # Plot individual spectra
+                        for spectrum in cluster_intensities:
+                            ax.plot(wavenumbers, spectrum, alpha=0.3, color=colors[i], linewidth=0.5)
+                        
+                        # Plot mean
+                        mean_spectrum = np.mean(cluster_intensities, axis=0)
+                        ax.plot(wavenumbers, mean_spectrum, color=colors[i], linewidth=2, 
+                               label=f'Mean (n={len(cluster_intensities)})')
+                        
+                        ax.set_xlabel('Wavenumber (cm⁻¹)')
+                        ax.set_ylabel('Intensity')
+                        ax.set_title(f'Cluster {cluster_id} Details')
+                        ax.legend()
+                        ax.grid(True, alpha=0.3)
+                        break  # Only show first cluster in detail view
+            
+            plt.tight_layout()
+            plt.savefig(filepath, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            QMessageBox.information(
+                self, "Export Complete", 
+                f"Cluster overview saved to:\n{filepath}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting cluster overview: {str(e)}")
+            print(f"Export error: {str(e)}")
 
 
 def launch_cluster_analysis(parent, raman_app):

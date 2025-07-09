@@ -12,6 +12,54 @@ from PySide6.QtWidgets import QApplication
 
 # Import the enhanced cluster analysis module
 from raman_cluster_analysis_qt6 import RamanClusterAnalysisQt6
+# Import safe file handling
+from pkl_utils import get_example_data_paths, get_example_spectrum_file, print_available_example_files
+from utils.file_loaders import load_spectrum_file
+
+
+def load_real_example_data():
+    """
+    Load real example data from the RamanLab workspace.
+    
+    Returns:
+        dict: Dictionary containing real spectrum data or None if not available
+    """
+    try:
+        # Get available example files
+        paths = get_example_data_paths()
+        
+        # Look for multiple mineral samples
+        mineral_samples = ['quartz', 'calcite', 'muscovite', 'feldspar', 'anatase']
+        loaded_data = {}
+        
+        for mineral in mineral_samples:
+            file_path = get_example_spectrum_file(mineral)
+            if file_path and file_path.exists():
+                print(f"📄 Loading {mineral} spectrum from: {file_path.name}")
+                
+                # Load spectrum data
+                wavenumbers, intensities, metadata = load_spectrum_file(str(file_path))
+                
+                if wavenumbers is not None and intensities is not None:
+                    loaded_data[mineral] = {
+                        'wavenumbers': wavenumbers,
+                        'intensities': intensities,
+                        'metadata': metadata
+                    }
+                    print(f"✅ Successfully loaded {mineral}: {len(wavenumbers)} data points")
+                else:
+                    print(f"❌ Failed to load {mineral} spectrum")
+        
+        if loaded_data:
+            return loaded_data
+        else:
+            print("⚠️  No real example data found, will generate synthetic data")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error loading real data: {e}")
+        print("⚠️  Will generate synthetic data instead")
+        return None
 
 
 def create_synthetic_mineral_data(system_type="hilairite"):
@@ -38,6 +86,46 @@ def create_synthetic_mineral_data(system_type="hilairite"):
         return create_clay_exchange_data()
     else:
         return create_hilairite_exchange_data()  # Default
+
+def create_real_data_from_loaded(loaded_data):
+    """
+    Create analysis-ready data from loaded real spectra.
+    
+    Args:
+        loaded_data: Dictionary of loaded spectrum data
+        
+    Returns:
+        Tuple of (wavenumbers, spectra_array, labels, metadata)
+    """
+    all_spectra = []
+    all_labels = []
+    all_metadata = []
+    wavenumbers = None
+    
+    for idx, (mineral, data) in enumerate(loaded_data.items()):
+        spectrum_wavenumbers = data['wavenumbers']
+        spectrum_intensities = data['intensities']
+        
+        # Use the first spectrum's wavenumbers as reference
+        if wavenumbers is None:
+            wavenumbers = spectrum_wavenumbers
+        
+        # Interpolate to common wavenumber range if needed
+        if not np.array_equal(spectrum_wavenumbers, wavenumbers):
+            spectrum_intensities = np.interp(wavenumbers, spectrum_wavenumbers, spectrum_intensities)
+        
+        # Normalize spectrum
+        spectrum_intensities = spectrum_intensities / np.max(spectrum_intensities)
+        
+        all_spectra.append(spectrum_intensities)
+        all_labels.append(idx + 1)
+        all_metadata.append({
+            'mineral': mineral,
+            'file_path': data['metadata'].get('filepath', 'unknown'),
+            'data_points': len(spectrum_intensities)
+        })
+    
+    return wavenumbers, np.array(all_spectra), np.array(all_labels), all_metadata
 
 
 def create_hilairite_exchange_data():
@@ -334,117 +422,75 @@ def generate_clay_spectrum(wavenumbers, hydration_level):
 
 
 def demonstrate_advanced_analysis():
-    """Demonstrate the advanced cluster analysis workflow."""
+    """
+    Demonstrate advanced cluster analysis using available data.
+    """
+    print("🔬 Advanced Cluster Analysis Demo")
+    print("=" * 50)
     
-    print("=== RamanLab Advanced Cluster Analysis Demo ===\n")
-    print("🔬 General-Purpose Mineral Analysis Tool")
-    print("   Supports any ion exchange, cation substitution, or structural transition\n")
+    # Show available example files
+    print("\n📁 Available Example Data Files:")
+    print_available_example_files()
     
-    # Let user choose system or use default
-    print("Available Mineral Systems:")
-    systems = {
-        '1': ('hilairite', 'Hilairite - Y-for-Na ion exchange'),
-        '2': ('zeolite', 'Zeolites - Multi-cation exchange (Na/K/Ca/Mg)'),
-        '3': ('feldspar', 'Feldspars - Al-Si ordering transitions'),
-        '4': ('pyroxene', 'Pyroxenes - Fe-Mg substitution'),
-        '5': ('clay', 'Clay minerals - Interlayer cation exchange')
-    }
+    # Try to load real data first
+    print("\n📊 Loading Data for Analysis:")
+    loaded_data = load_real_example_data()
     
-    for key, (_, description) in systems.items():
-        print(f"   {key}. {description}")
+    if loaded_data:
+        print(f"✅ Using real data with {len(loaded_data)} mineral samples")
+        wavenumbers, spectra, labels, metadata = create_real_data_from_loaded(loaded_data)
+        analysis_type = "real_mineral_data"
+    else:
+        print("⚠️  Using synthetic data for demonstration")
+        # Create synthetic data as fallback
+        wavenumbers, spectra, labels, time_data = create_synthetic_mineral_data("hilairite")
+        analysis_type = "synthetic_hilairite"
     
-    print("\nUsing Hilairite example (default)...")
-    system_type = "hilairite"  # Can be changed to any system
+    print(f"\n📈 Analysis Setup:")
+    print(f"   • Wavenumber range: {wavenumbers[0]:.1f} - {wavenumbers[-1]:.1f} cm⁻¹")
+    print(f"   • Number of spectra: {len(spectra)}")
+    print(f"   • Data points per spectrum: {len(wavenumbers)}")
+    print(f"   • Analysis type: {analysis_type}")
     
-    # Create synthetic data
-    print(f"\n1. Generating synthetic {system_type} data...")
-    wavenumbers, spectra, labels, time_data = create_synthetic_mineral_data(system_type)
-    
-    print(f"   - Generated {len(spectra)} spectra across {len(np.unique(labels))} stages")
-    print(f"   - Wavenumber range: {wavenumbers[0]:.0f}-{wavenumbers[-1]:.0f} cm⁻¹")
-    print(f"   - Parameter range: {time_data.min():.1f}-{time_data.max():.1f}")
-    
-    # Initialize Qt Application
+    # Create Qt application
     app = QApplication(sys.argv)
     
-    # Create the advanced cluster analysis window
-    print("\n2. Launching Advanced Cluster Analysis Interface...")
-    cluster_window = RamanClusterAnalysisQt6()
+    # Create cluster analysis widget
+    cluster_widget = RamanClusterAnalysisQt6()
     
-    # Load the synthetic data directly
-    cluster_window.cluster_data['wavenumbers'] = wavenumbers
-    cluster_window.cluster_data['intensities'] = spectra
-    cluster_window.cluster_data['labels'] = labels
-    cluster_window.cluster_data['temporal_data'] = time_data
+    # Load data into the widget
+    cluster_widget.wavenumbers = wavenumbers
+    cluster_widget.spectra = spectra
+    cluster_widget.spectrum_labels = labels
     
-    # Extract and scale features
-    from sklearn.preprocessing import StandardScaler
-    features = cluster_window.extract_vibrational_features(spectra, wavenumbers)
-    scaler = StandardScaler()
-    features_scaled = scaler.fit_transform(features)
+    if loaded_data:
+        cluster_widget.spectrum_metadata = metadata
+        cluster_widget.data_source = "Real RamanLab Example Data"
+    else:
+        cluster_widget.data_source = "Synthetic Demo Data"
     
-    cluster_window.cluster_data['features'] = features
-    cluster_window.cluster_data['features_scaled'] = features_scaled
+    # Show the widget
+    cluster_widget.show()
     
-    print("   ✓ Data loaded successfully")
-    print("   ✓ Features extracted and scaled")
+    print("\n🎯 Analysis Features Available:")
+    print("   • K-means clustering")
+    print("   • Hierarchical clustering")
+    print("   • PCA dimensionality reduction")
+    print("   • t-SNE visualization")
+    print("   • Spectral comparison tools")
+    print("   • Export capabilities")
     
-    # Update UI to reflect loaded data
-    cluster_window.update_ui_after_import(len(spectra))
+    if loaded_data:
+        print(f"\n🔍 Loaded Minerals:")
+        for mineral, data in loaded_data.items():
+            print(f"   • {mineral.title()}: {data['metadata'].get('data_points', 'unknown')} points")
     
-    # Show the window
-    cluster_window.show()
-    
-    print("\n3. 🎯 NEW: Universal Mineral System Support")
-    print("   📋 Preset Systems Available:")
-    print("      - Hilairite (Y-for-Na Exchange)")
-    print("      - Zeolites (Cation Exchange)")
-    print("      - Feldspars (Al-Si Ordering)")
-    print("      - Pyroxenes (Fe-Mg Substitution)")
-    print("      - Clay Minerals (Interlayer Exchange)")
-    print("      - Olivine (Fe-Mg Exchange)")
-    print("      - Garnet (Cation Substitution)")
-    print("      - Carbonates (Mg-Ca Exchange)")
-    print("      - Spinels (Cation Ordering)")
-    print("      - Custom Configuration")
-    
-    print("\n   🔧 Dynamic Region Management:")
-    print("      - Add/remove spectral regions of interest")
-    print("      - Customize region names and wavenumber ranges")
-    print("      - Chemical/structural descriptions for each region")
-    print("      - Save/load custom configurations")
-    
-    print("\n4. Enhanced Structural Analysis Tab Features:")
-    print("   🎛️  Preset Selection: Choose from 9+ predefined mineral systems")
-    print("   ➕ Add Regions: Dynamic addition of custom spectral regions")
-    print("   ❌ Remove Regions: Select and delete unwanted regions")
-    print("   💾 Save/Load: Export and import custom configurations")
-    print("   📝 Custom Descriptions: Add chemical context to each region")
-    
-    print("\n5. 📊 Complete Analysis Workflow:")
-    print("   1. Select system preset or create custom configuration")
-    print("   2. Run clustering analysis")
-    print("   3. Analyze ion exchange progression")
-    print("   4. Fit kinetic models")
-    print("   5. Perform structural characterization")
-    print("   6. Validate with statistical tests")
-    print("   7. Generate publication-ready results")
-    
-    print("\n6. 🎯 Applications Beyond Hilairite:")
-    print("   - Any ion exchange process")
-    print("   - Cation ordering/disordering")
-    print("   - Phase transitions")
-    print("   - Solid-state reactions")
-    print("   - Compositional gradients")
-    print("   - Hydration/dehydration processes")
-    
-    print("\n🚀 Universal Analysis Tool Ready!")
-    print("   Go to 'Structural Analysis' tab to explore system presets")
-    print("   Customize regions for your specific mineral system")
+    print("\n🚀 Demo window is now open. Close it to exit.")
     
     # Run the application
-    sys.exit(app.exec())
+    return app.exec()
 
 
 if __name__ == "__main__":
-    demonstrate_advanced_analysis() 
+    exit_code = demonstrate_advanced_analysis()
+    sys.exit(exit_code) 

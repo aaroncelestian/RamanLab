@@ -73,11 +73,11 @@ class MineralDatabase:
         
         return [
             'mineral_database.pkl',
-            'mineral_database.py',
+            # Skip mineral_database.py to avoid legacy stub warnings
             os.path.join(script_dir, 'mineral_database.pkl'),
-            os.path.join(script_dir, 'mineral_database.py'),
+            # os.path.join(script_dir, 'mineral_database.py'),  # Skip legacy stub
             os.path.join(parent_dir, 'mineral_database.pkl'),
-            os.path.join(parent_dir, 'mineral_database.py'),
+            # os.path.join(parent_dir, 'mineral_database.py'),  # Skip legacy stub
         ]
     
     def _load_pickle_database(self, file_path: str) -> bool:

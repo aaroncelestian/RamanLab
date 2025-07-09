@@ -8969,22 +8969,16 @@ class SpectralDeconvolutionQt6(QDialog):
                         # Launch with the selected pickle file
                         subprocess.Popen([sys.executable, console_file, selected_pickle_file])
                         
-                        # Get file info for the message
+                        # Get file info for the message (without loading the entire pickle file)
                         file_name = Path(selected_pickle_file).name
-                        try:
-                            import pickle
-                            with open(selected_pickle_file, 'rb') as f:
-                                data = pickle.load(f)
-                            n_spectra = len(data) if isinstance(data, list) else "Unknown"
-                        except:
-                            n_spectra = "Unknown"
+                        file_size = os.path.getsize(selected_pickle_file) / (1024 * 1024)  # Size in MB
                         
                         console_type = "Advanced" if console_file.startswith('advanced') else "Simplified"
                         QMessageBox.information(self, "Console Launched", 
                                               f"{console_type} Jupyter Console launched with selected data file.\n\n"
                                               f"• File: {file_name}\n"
-                                              f"• Spectra: {n_spectra}\n"
-                                              f"• Data available as pandas DataFrames\n"
+                                              f"• Size: {file_size:.1f} MB\n"
+                                              f"• Data will be loaded in console\n"
                                               f"• Console type: {console_type}\n\n"
                                               f"The console runs independently - you can continue using RamanLab.")
                     else:

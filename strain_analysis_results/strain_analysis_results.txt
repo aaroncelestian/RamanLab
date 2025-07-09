@@ -1,0 +1,28 @@
+Strain Tensor Analysis Results
+==================================================
+
+True Strain Tensor:
+  [ 0.015  0.015 -0.008  0.     0.     0.   ]
+
+Fitted Strain Tensor:
+  [ 0.01486062  0.01486062 -0.00782915  0.          0.          0.        ]
+
+Fitted Strain Gradients:
+  [0.00057687 0.00057687 0.00064884 0.         0.         0.        ]
+
+Fitting Statistics:
+  R² = 0.998905
+  χ² = 6.52e-01
+
+Strain Errors:
+  ε1 error: 0.000139
+  ε2 error: 0.000139
+  ε3 error: 0.000171
+  ε4 error: 0.000000
+  ε5 error: 0.000000
+  ε6 error: 0.000000
+
+Physical Interpretation:
+  Volume strain (ΔV/V): 0.021892
+  Principal strains: [ 0.01486062  0.01486062 -0.00782915]
+  → Net volume expansion
