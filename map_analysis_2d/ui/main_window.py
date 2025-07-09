@@ -3968,7 +3968,7 @@ class MapAnalysisMainWindow(QMainWindow):
             # Add the parent directory to access polarization_ui.matplotlib_config from the main RamanLab folder
             sys.path.insert(0, str(Path(__file__).parent.parent.parent))
             try:
-                from polarization_ui.matplotlib_config import configure_compact_ui
+                from core.matplotlib_config import configure_compact_ui
                 configure_compact_ui()
             except ImportError:
                 # Fallback if matplotlib_config not found
@@ -5516,7 +5516,7 @@ All spectra have been processed and cleaned data is now available for analysis."
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from polarization_ui.matplotlib_config import apply_theme, CompactNavigationToolbar
+        from core.matplotlib_config import apply_theme, CompactNavigationToolbar
         apply_theme('compact')  # Apply compact theme for consistent styling
         
         self.cre_test_figure = Figure(figsize=(12, 8))

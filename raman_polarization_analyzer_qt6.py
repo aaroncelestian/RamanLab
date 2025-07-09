@@ -48,8 +48,8 @@ matplotlib.use('QtAgg')  # Use QtAgg backend which works with PySide6
 # Import compact UI configuration and toolbar
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
-    from polarization_ui.matplotlib_config import apply_theme, configure_compact_ui
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import apply_theme, configure_compact_ui
     COMPACT_UI_AVAILABLE = True
 except ImportError:
     # Fallback for environments without ui.matplotlib_config
@@ -895,7 +895,7 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         """Setup the enhanced Orientation Optimization tab with trilogy implementation."""
         # Import matplotlib config
         try:
-            from polarization_ui.matplotlib_config import configure_compact_ui, CompactNavigationToolbar
+            from core.matplotlib_config import configure_compact_ui, CompactNavigationToolbar
             configure_compact_ui()
         except ImportError:
             pass

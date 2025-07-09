@@ -34,7 +34,7 @@ from PySide6.QtGui import QFont, QPalette, QColor
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from .matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 from scipy.signal import find_peaks
 
 # Try to import core modules

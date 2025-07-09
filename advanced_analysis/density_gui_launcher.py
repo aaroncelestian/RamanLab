@@ -26,7 +26,7 @@ from pathlib import Path
 # Add parent directory to path to access polarization_ui
 parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
-from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
+from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
 
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, 

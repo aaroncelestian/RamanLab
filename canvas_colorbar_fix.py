@@ -13,7 +13,7 @@ import logging
 
 # Import the matplotlib configuration
 try:
-    from polarization_ui.matplotlib_config import configure_compact_ui, apply_theme
+    from core.matplotlib_config import configure_compact_ui, apply_theme
     configure_compact_ui()
 except ImportError:
     print("Warning: Could not import matplotlib_config, using default settings")

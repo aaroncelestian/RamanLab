@@ -54,16 +54,17 @@ try:
 except ImportError:
     EMCEE_AVAILABLE = False
 
+# Sklearn import
 try:
     from sklearn.gaussian_process import GaussianProcessRegressor
-    from sklearn.gaussian_process.kernels import RBF, ConstantKernel
+    from sklearn.gaussian_process.kernels import RBF, ConstantKernel as C, WhiteKernel
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
 
 # Load matplotlib configuration if available
 try:
-    from .matplotlib_config import configure_compact_ui, CompactNavigationToolbar
+    from core.matplotlib_config import configure_compact_ui, CompactNavigationToolbar
     configure_compact_ui()
     COMPACT_UI_AVAILABLE = True
 except ImportError:
@@ -270,7 +271,7 @@ Execution Time: {exec_time:.2f} seconds
 OPTIMAL ORIENTATION:
 α (degrees): {orientation[0]:.2f}
 β (degrees): {orientation[1]:.2f}
-γ (degrees): {orientation[2]:.2f}
+γ (degrees): {orientation[2]:.2f}°
 
 QUALITY METRICS:
 Overall Score: {quality:.3f}

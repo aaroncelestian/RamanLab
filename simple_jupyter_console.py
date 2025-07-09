@@ -411,7 +411,7 @@ class PythonExamplesWindow(QDialog):
         
         # Use matplotlib config for consistency
         try:
-            from polarization_ui.matplotlib_config import setup_matplotlib
+            from core.matplotlib_config import setup_matplotlib
             setup_matplotlib()
         except ImportError:
             pass

@@ -566,7 +566,7 @@ class AdvancedJupyterConsole(QMainWindow):
         """Setup matplotlib configuration."""
         try:
             # Try to import and use the RamanLab matplotlib config
-            from polarization_ui.matplotlib_config import setup_matplotlib_style
+            from core.matplotlib_config import setup_matplotlib_style
             setup_matplotlib_style()
         except ImportError:
             # Fallback matplotlib configuration

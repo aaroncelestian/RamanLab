@@ -16,13 +16,13 @@ from matplotlib.figure import Figure
 # Import Qt6-compatible matplotlib backends and UI toolbar
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
     # Fallback for older matplotlib versions
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
-from polarization_ui.matplotlib_config import configure_compact_ui, apply_theme
+from core.matplotlib_config import configure_compact_ui, apply_theme
 
 from scipy.signal import find_peaks
 

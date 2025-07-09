@@ -13,7 +13,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from polarization_ui.matplotlib_config import CompactNavigationToolbar, configure_compact_ui, apply_theme
+from core.matplotlib_config import CompactNavigationToolbar, configure_compact_ui, apply_theme
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 import logging
@@ -135,7 +135,7 @@ class MapPlotWidget(BasePlotWidget):
         # Add new colorbar using the permanent no-shrink solution
         try:
             # Import the permanent colorbar solution
-            from polarization_ui.matplotlib_config import add_colorbar_no_shrink
+            from core.matplotlib_config import add_colorbar_no_shrink
             self.colorbar = add_colorbar_no_shrink(self.figure, im, self.ax)
             
             if self.colorbar is None:

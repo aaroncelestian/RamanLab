@@ -19,7 +19,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 try:
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
     MATPLOTLIB_CONFIG_AVAILABLE = True
 except ImportError:
     from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar

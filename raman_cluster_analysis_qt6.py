@@ -37,11 +37,11 @@ from matplotlib.figure import Figure
 # Import Qt6-compatible matplotlib backends
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
     # Fallback for older matplotlib versions
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
 # Qt6 imports
 from PySide6.QtWidgets import (
@@ -8234,7 +8234,7 @@ Stability Assessment:"""
             
             # Import matplotlib config
             try:
-                from polarization_ui.matplotlib_config import apply_theme
+                from core.matplotlib_config import apply_theme
                 apply_theme('publication')
             except ImportError:
                 pass  # Use default matplotlib settings
@@ -8478,7 +8478,7 @@ Stability Assessment:"""
             
             # Import matplotlib config
             try:
-                from polarization_ui.matplotlib_config import apply_theme
+                from core.matplotlib_config import apply_theme
                 apply_theme('publication')
             except ImportError:
                 pass  # Use default matplotlib settings

@@ -259,7 +259,7 @@ class OrientationOptimizationWidget(QWidget):
     def setup_matplotlib(self):
         """Setup matplotlib configuration."""
         try:
-            from polarization_ui.matplotlib_config import configure_compact_ui
+            from core.matplotlib_config import configure_compact_ui
             configure_compact_ui()
         except ImportError:
             pass

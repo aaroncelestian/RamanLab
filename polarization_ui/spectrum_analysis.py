@@ -24,7 +24,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 # Import our custom toolbar configuration
-from .matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
 try:
     from core.polarization_analyzer import PolarizationAnalyzer

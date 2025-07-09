@@ -22,7 +22,7 @@ from PySide6.QtGui import QFont
 import matplotlib
 matplotlib.use('Qt5Agg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 from matplotlib.figure import Figure
 
 # Import core modules

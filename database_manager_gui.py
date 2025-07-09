@@ -31,7 +31,7 @@ from PySide6.QtGui import QFont, QIcon, QPixmap
 
 # Import matplotlib config as per user rules
 try:
-    from polarization_ui.matplotlib_config import configure_compact_ui
+    from core.matplotlib_config import configure_compact_ui
     configure_compact_ui()
 except ImportError:
     pass

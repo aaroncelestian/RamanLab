@@ -20,13 +20,13 @@ from matplotlib.figure import Figure
 # Import PySide6-compatible matplotlib backends and UI toolbar
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 except ImportError:
     # Fallback for older matplotlib versions - still works with PySide6
     from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+    from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
-from polarization_ui.matplotlib_config import configure_compact_ui, apply_theme
+from core.matplotlib_config import configure_compact_ui, apply_theme
 
 from scipy.signal import find_peaks, savgol_filter
 import pandas as pd
@@ -4274,15 +4274,21 @@ class RamanAnalysisAppQt6(QMainWindow):
             )
 
     def launch_mixture_analysis(self):
-        """Launch mixture analysis tool."""
+        """Launch mixture analysis tool - NEW Interactive Version."""
         try:
-            # Import and launch the mixture analysis module
-            from raman_mixture_analysis_qt6 import RamanMixtureAnalysisQt6
+            # Import and launch the NEW interactive mixture analysis module
+            from raman_mixture_analysis_interactive import InteractiveMixtureAnalyzer
             
-            # Create and show the mixture analysis window with parent reference
-            self.mixture_analyzer = RamanMixtureAnalysisQt6(parent_app=self)
+            # Create QApplication instance if needed (for standalone launch)
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
             
-            # If we have current spectrum data, pass it to the mixture analyzer
+            # Create and show the interactive mixture analysis window
+            self.mixture_analyzer = InteractiveMixtureAnalyzer()
+            
+            # If we have current spectrum data, set it in the interactive analyzer
             if self.current_wavenumbers is not None and self.current_intensities is not None:
                 # Use processed intensities if available, otherwise use original
                 intensities = (
@@ -4290,23 +4296,30 @@ class RamanAnalysisAppQt6(QMainWindow):
                     else self.current_intensities.copy()
                 )
                 
+                # Set spectrum data directly in the interactive analyzer
+                self.mixture_analyzer.user_wavenumbers = self.current_wavenumbers.copy()
+                self.mixture_analyzer.user_spectrum = intensities.copy()
+                self.mixture_analyzer.original_spectrum = intensities.copy()
+                self.mixture_analyzer.current_residual = intensities.copy()
+                
                 # Get spectrum name
-                spectrum_name = getattr(self, 'spectrum_file_path', None)
-                if spectrum_name:
-                    spectrum_name = os.path.basename(spectrum_name)
+                from pathlib import Path
+                spectrum_name = getattr(self, 'spectrum_file_path', 'Current Spectrum from Main App')
+                if hasattr(spectrum_name, '__fspath__') or isinstance(spectrum_name, (str, Path)):
+                    spectrum_name = os.path.basename(str(spectrum_name))
                 else:
                     spectrum_name = 'Current Spectrum from Main App'
                 
-                # Set spectrum data using the new method
-                self.mixture_analyzer.set_spectrum_from_main_app(
-                    self.current_wavenumbers, intensities, spectrum_name
-                )
+                # Use QTimer to update UI elements after window is shown
+                QTimer.singleShot(200, lambda: self._update_mixture_analyzer_ui(
+                    self.mixture_analyzer, len(self.current_wavenumbers), spectrum_name, 
+                    self.current_wavenumbers[0], self.current_wavenumbers[-1]))
                 
                 # Show success message in status bar
-                self.statusBar().showMessage("Mixture Analysis launched with current spectrum")
+                self.statusBar().showMessage("NEW Interactive Mixture Analysis launched with current spectrum")
             else:
                 # Show message that no spectrum is loaded
-                self.statusBar().showMessage("Mixture Analysis launched - load a spectrum to begin analysis")
+                self.statusBar().showMessage("NEW Interactive Mixture Analysis launched - use 'Load Spectrum Data' or demo data")
             
             # Show the window
             self.mixture_analyzer.show()
@@ -4315,15 +4328,55 @@ class RamanAnalysisAppQt6(QMainWindow):
             QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Failed to import mixture analysis module:\n{str(e)}\n\n"
-                "Please ensure raman_mixture_analysis_qt6.py is in the same directory."
+                f"Failed to import NEW interactive mixture analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_mixture_analysis_interactive.py is in the same directory.\n"
+                "For the old version, use: python raman_mixture_analysis_qt6.py"
             )
         except Exception as e:
             QMessageBox.critical(
                 self,
-                "Mixture Analysis Error",
-                f"Failed to launch mixture analysis:\n{str(e)}"
+                "Interactive Mixture Analysis Error",
+                f"Failed to launch NEW interactive mixture analysis:\n{str(e)}"
             )
+    
+    def _update_mixture_analyzer_ui(self, mixture_analyzer, num_points, spectrum_name, wn_min, wn_max):
+        """Helper method to update mixture analyzer UI elements after window is shown."""
+        try:
+            # Update data status
+            mixture_analyzer.data_status_label.setText(f"Loaded from main app: {num_points} points")
+            mixture_analyzer.search_btn.setEnabled(True)
+            
+            # Log the data loading
+            mixture_analyzer.log_status(f"✅ Loaded spectrum from main app: {spectrum_name}")
+            mixture_analyzer.log_status(f"   Range: {wn_min:.1f} - {wn_max:.1f} cm⁻¹")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not update mixture analyzer UI: {e}")
+    
+    def _update_mixture_analyzer_search_ui(self, mixture_analyzer, num_points, spectrum_name, wn_min, wn_max):
+        """Helper method to update mixture analyzer UI for search results."""
+        try:
+            # Update data status
+            mixture_analyzer.data_status_label.setText(f"Loaded from search: {num_points} points")
+            mixture_analyzer.search_btn.setEnabled(True)
+            
+            # Log the data loading
+            mixture_analyzer.log_status(f"✅ Loaded spectrum from search window: {spectrum_name}")
+            mixture_analyzer.log_status(f"   Range: {wn_min:.1f} - {wn_max:.1f} cm⁻¹")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not update mixture analyzer search UI: {e}")
+    
+    def _update_mixture_analyzer_constraint_ui(self, mixture_analyzer, num_points, spectrum_name, wn_min, wn_max):
+        """Helper method to update mixture analyzer UI for constraint analysis."""
+        try:
+            # Update data status
+            mixture_analyzer.data_status_label.setText(f"Loaded from search: {num_points} points")
+            mixture_analyzer.search_btn.setEnabled(True)
+            
+            # Log the data loading
+            mixture_analyzer.log_status(f"✅ Loaded spectrum from search window: {spectrum_name}")
+            mixture_analyzer.log_status(f"   Range: {wn_min:.1f} - {wn_max:.1f} cm⁻¹")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not update mixture analyzer constraint UI: {e}")
 
     def launch_stress_strain_analysis(self):
         """Launch stress/strain analysis tool."""
@@ -5999,7 +6052,7 @@ class SearchResultsWindow(QDialog):
         self.metadata_dialog.setWindowTitle(f"Metadata: {display_name}")
     
     def launch_mixture_analysis_from_search(self):
-        """Launch mixture analysis using search results as potential components."""
+        """Launch NEW interactive mixture analysis using search results as potential components."""
         if not self.matches:
             QMessageBox.information(self, "No Matches", "No search results available for mixture analysis.")
             return
@@ -6012,11 +6065,17 @@ class SearchResultsWindow(QDialog):
             return
         
         try:
-            # Import the mixture analysis module
-            from raman_mixture_analysis_qt6 import RamanMixtureAnalysisQt6
+            # Import the NEW interactive mixture analysis module
+            from raman_mixture_analysis_interactive import InteractiveMixtureAnalyzer
             
-            # Create mixture analysis window and store reference to prevent garbage collection
-            mixture_analyzer = RamanMixtureAnalysisQt6(parent_app=self.parent())
+            # Create QApplication instance if needed
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Create interactive mixture analysis window and store reference to prevent garbage collection
+            mixture_analyzer = InteractiveMixtureAnalyzer()
             
             # Store reference in parent to prevent garbage collection
             if not hasattr(self.parent(), 'mixture_analysis_windows'):
@@ -6047,16 +6106,22 @@ class SearchResultsWindow(QDialog):
                 else:
                     spectrum_name = 'Query Spectrum from Search'
                 
-                # Set spectrum data using the new method
-                mixture_analyzer.set_spectrum_from_main_app(
-                    query_wavenumbers, query_intensities, spectrum_name
-                )
+                # Set spectrum data directly in the interactive analyzer
+                mixture_analyzer.user_wavenumbers = query_wavenumbers.copy()
+                mixture_analyzer.user_spectrum = query_intensities.copy()
+                mixture_analyzer.original_spectrum = query_intensities.copy()
+                mixture_analyzer.current_residual = query_intensities.copy()
+                
+                # Use QTimer to update UI elements after window is shown
+                QTimer.singleShot(200, lambda: self._update_mixture_analyzer_search_ui(
+                    mixture_analyzer, len(query_wavenumbers), spectrum_name, 
+                    query_wavenumbers[0], query_wavenumbers[-1]))
                 
                 # Show a helpful message about using search results
                 num_matches = len(self.matches)
                 selected_match = self.selected_match
                 
-                info_msg = f"Mixture Analysis launched with your query spectrum!\n\n"
+                info_msg = f"NEW Interactive Mixture Analysis launched with your query spectrum!\n\n"
                 info_msg += f"📊 {num_matches} search results are available as potential components.\n"
                 
                 if selected_match:
@@ -6067,11 +6132,12 @@ class SearchResultsWindow(QDialog):
                     
                     info_msg += f"🎯 Currently viewing: {display_name} (Score: {score:.3f})\n\n"
                 
-                info_msg += "💡 Tip: You can load spectra from the RamanLab database in the mixture analysis tool. "
+                info_msg += "💡 The NEW interactive version allows you to click peaks to select them!\n"
+                info_msg += "Use 'Search Database' to find matching minerals, then click peaks in the overlay plot.\n"
                 info_msg += "The minerals from your search results are good candidates to try!"
                 
                 # Show info after window is displayed to avoid Qt timing issues
-                QTimer.singleShot(500, lambda: QMessageBox.information(self, "Mixture Analysis Launched", info_msg))
+                QTimer.singleShot(500, lambda: QMessageBox.information(self, "NEW Interactive Mixture Analysis Launched", info_msg))
             
             # Show the mixture analysis window
             mixture_analyzer.show()
@@ -6084,18 +6150,19 @@ class SearchResultsWindow(QDialog):
             QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Failed to import mixture analysis module:\n{str(e)}\n\n"
-                "Please ensure raman_mixture_analysis_qt6.py is in the same directory."
+                f"Failed to import NEW interactive mixture analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_mixture_analysis_interactive.py is in the same directory.\n"
+                "For the old version, use: python raman_mixture_analysis_qt6.py"
             )
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Launch Error", 
-                f"Failed to launch mixture analysis:\n{str(e)}"
+                f"Failed to launch NEW interactive mixture analysis:\n{str(e)}"
             )
     
     def add_to_mixture_analysis(self):
-        """Add the selected match as a constraint to mixture analysis."""
+        """Add the selected match as a starting point for NEW interactive mixture analysis."""
         if not self.selected_match:
             QMessageBox.warning(self, "No Selection", "Please select a match to add to mixture analysis.")
             return
@@ -6108,11 +6175,17 @@ class SearchResultsWindow(QDialog):
             return
         
         try:
-            # Import the mixture analysis module
-            from raman_mixture_analysis_qt6 import RamanMixtureAnalysisQt6
+            # Import the NEW interactive mixture analysis module
+            from raman_mixture_analysis_interactive import InteractiveMixtureAnalyzer
             
-            # Create mixture analysis window and store reference to prevent garbage collection
-            mixture_analyzer = RamanMixtureAnalysisQt6(parent_app=self.parent())
+            # Create QApplication instance if needed
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is None:
+                app = QApplication([])
+            
+            # Create interactive mixture analysis window and store reference to prevent garbage collection
+            mixture_analyzer = InteractiveMixtureAnalyzer()
             
             # Store reference in parent to prevent garbage collection
             if not hasattr(self.parent(), 'mixture_analysis_windows'):
@@ -6143,12 +6216,25 @@ class SearchResultsWindow(QDialog):
                 else:
                     spectrum_name = 'Query Spectrum from Search'
                 
-                # Set spectrum data using the new method
-                mixture_analyzer.set_spectrum_from_main_app(
-                    query_wavenumbers, query_intensities, spectrum_name
-                )
+                # Set spectrum data directly in the interactive analyzer
+                mixture_analyzer.user_wavenumbers = query_wavenumbers.copy()
+                mixture_analyzer.user_spectrum = query_intensities.copy()
+                mixture_analyzer.original_spectrum = query_intensities.copy()
+                mixture_analyzer.current_residual = query_intensities.copy()
                 
-                # Add the selected match as a constraint
+                # Pass the spectrum data to the plot canvas and display it
+                mixture_analyzer.plot_canvas.user_wavenumbers = query_wavenumbers.copy()
+                mixture_analyzer.plot_canvas.user_spectrum = query_intensities.copy()
+                
+                # Display the spectrum immediately after setting data
+                QTimer.singleShot(100, mixture_analyzer.plot_canvas.display_user_spectrum)
+                
+                # Use QTimer to update UI elements after window is shown
+                QTimer.singleShot(200, lambda: self.parent()._update_mixture_analyzer_constraint_ui(
+                    mixture_analyzer, len(query_wavenumbers), spectrum_name, 
+                    query_wavenumbers[0], query_wavenumbers[-1]))
+                
+                # Get information about the selected match for manual searching
                 selected_match = self.selected_match
                 if selected_match:
                     match_name = selected_match.get('name', 'Unknown')
@@ -6156,20 +6242,23 @@ class SearchResultsWindow(QDialog):
                     display_name = metadata.get('NAME') or metadata.get('mineral_name') or match_name
                     score = selected_match.get('score', 0.0)
                     
-                    info_msg = f"Added {display_name} (Score: {score:.3f}) as a known component constraint.\n\n"
-                    info_msg += "💡 Tip: You can load spectra from the RamanLab database in the mixture analysis tool. "
-                    info_msg += "The minerals from your search results are good candidates to try!"
+                    # Pre-select the exact mineral data the user selected (not just by name)
+                    QTimer.singleShot(300, lambda: mixture_analyzer.preselect_exact_mineral(selected_match))
                     
-                    QMessageBox.information(self, "Added to Mixture Analysis", info_msg)
+                    info_msg = f"NEW Interactive Mixture Analysis launched with {display_name} (Score: {score:.3f}) ready for analysis!\n\n"
+                    info_msg += "📝 The mineral has been pre-selected and is displayed in the overlay plot.\n\n"
+                    info_msg += "💡 How to use the NEW interactive version:\n"
+                    info_msg += "1. The best match '{display_name}' is already selected for you\n"
+                    info_msg += "2. Click peaks in the overlay plot to select them\n"
+                    info_msg += "3. Click 'Fit Selected Peaks' to create synthetic components\n"
+                    info_msg += "4. Search for more minerals and repeat to build up your mixture!\n\n"
+                    info_msg += f"🎯 Start by selecting peaks from '{display_name}' in the overlay plot!"
                     
-                    # Add the selected match as a constraint (deferred to allow UI to fully initialize)
-                    def add_constraint_deferred():
-                        mixture_analyzer.add_constraint_from_search(
-                            display_name, score, metadata
-                        )
+                    QMessageBox.information(self, "NEW Interactive Mixture Analysis Ready", info_msg)
                     
-                    # Use QTimer to defer constraint addition by 200ms
-                    QTimer.singleShot(200, add_constraint_deferred)
+                    # Log the pre-selected mineral
+                    mixture_analyzer.log_status(f"🎯 Pre-selected mineral from search: {display_name}")
+                    mixture_analyzer.log_status(f"   Search confidence: {score:.3f}")
             
             # Show the mixture analysis window
             mixture_analyzer.show()
@@ -6182,14 +6271,15 @@ class SearchResultsWindow(QDialog):
             QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Failed to import mixture analysis module:\n{str(e)}\n\n"
-                "Please ensure raman_mixture_analysis_qt6.py is in the same directory."
+                f"Failed to import NEW interactive mixture analysis module:\n{str(e)}\n\n"
+                "Please ensure raman_mixture_analysis_interactive.py is in the same directory.\n"
+                "For the old version, use: python raman_mixture_analysis_qt6.py"
             )
         except Exception as e:
             QMessageBox.critical(
                 self,
                 "Launch Error", 
-                f"Failed to launch mixture analysis:\n{str(e)}"
+                f"Failed to launch NEW interactive mixture analysis:\n{str(e)}"
             )
 
 

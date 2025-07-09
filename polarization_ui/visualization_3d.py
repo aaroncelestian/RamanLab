@@ -25,7 +25,7 @@ import os
 
 # Import matplotlib config if available
 try:
-    from .matplotlib_config import configure_compact_ui, CompactNavigationToolbar
+    from core.matplotlib_config import configure_compact_ui, CompactNavigationToolbar
     configure_compact_ui()
     COMPACT_UI_AVAILABLE = True
 except ImportError:

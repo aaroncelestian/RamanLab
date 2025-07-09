@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the matplotlib config if available (following user rules)
 try:
-    from polarization_ui.matplotlib_config import *
+    from core.matplotlib_config import *
 except ImportError:
     # Fallback to standard matplotlib settings
     plt.style.use('default')

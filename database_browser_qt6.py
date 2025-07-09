@@ -17,7 +17,7 @@ import matplotlib
 matplotlib.use("QtAgg")
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from polarization_ui.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
 # Qt6 imports
 from PySide6.QtWidgets import (
