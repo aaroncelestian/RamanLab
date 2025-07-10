@@ -9,6 +9,7 @@ import pickle
 import os
 import time
 import hashlib
+import re
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Callable, Union
@@ -21,6 +22,123 @@ from PySide6.QtWidgets import QSplitter
 
 # Version for backward compatibility
 STATE_MANAGER_VERSION = "1.0.0"
+
+def sanitize_path_for_windows(path_str: str) -> str:
+    """
+    Sanitize a path string for Windows compatibility.
+    
+    Args:
+        path_str: The path string to sanitize
+        
+    Returns:
+        Sanitized path string safe for Windows
+    """
+    if not isinstance(path_str, str):
+        return path_str
+    
+    # Handle special SQLite memory databases
+    if path_str == ":memory:" or path_str.startswith(":memory:"):
+        return path_str  # Keep memory databases as-is
+    
+    # Handle other special database URIs (must be proper URIs with //)
+    if (path_str.startswith("file://") or 
+        path_str.startswith("sqlite://") or 
+        path_str.startswith("http://") or 
+        path_str.startswith("https://")):
+        return path_str  # Keep URI schemes as-is
+    
+    # Replace problematic characters for Windows
+    # But preserve drive letters (C:, D:, etc.)
+    if len(path_str) >= 2 and path_str[1] == ':' and path_str[0].isalpha():
+        # This is a Windows drive path, keep the drive colon
+        drive_part = path_str[:2]
+        rest_part = path_str[2:]
+        # Sanitize only the rest of the path (including any additional colons)
+        sanitized_rest = re.sub(r'[<>:"|?*]', '_', rest_part)
+        return drive_part + sanitized_rest
+    else:
+        # No drive letter, sanitize all reserved characters including colons
+        # Replace reserved characters for Windows
+        sanitized = re.sub(r'[<>:"|?*]', '_', path_str)
+        return sanitized
+
+def is_memory_database(path_str: str) -> bool:
+    """
+    Check if a path string represents an in-memory database.
+    
+    Args:
+        path_str: The path string to check
+        
+    Returns:
+        True if this is a memory database path
+    """
+    if not isinstance(path_str, str):
+        return False
+    
+    return (path_str == ":memory:" or 
+            path_str.startswith(":memory:") or
+            "memory:" in path_str.lower())
+
+def validate_and_sanitize_database_path(db_path: Any) -> Optional[str]:
+    """
+    Validate and sanitize a database path for cross-platform compatibility.
+    
+    Args:
+        db_path: Database path (can be string, Path, or None)
+        
+    Returns:
+        Sanitized path string or None if invalid
+    """
+    if db_path is None:
+        return None
+    
+    # Convert Path objects to strings
+    if isinstance(db_path, Path):
+        db_path_str = str(db_path)
+    elif isinstance(db_path, str):
+        db_path_str = db_path
+    else:
+        # Convert other types to string
+        db_path_str = str(db_path)
+    
+    # Handle empty strings
+    if not db_path_str.strip():
+        return None
+    
+    # Check for memory databases (these should not be file operations)
+    if is_memory_database(db_path_str):
+        return db_path_str  # Return as-is for memory databases
+    
+    # Sanitize for Windows compatibility
+    sanitized_path = sanitize_path_for_windows(db_path_str)
+    
+    return sanitized_path
+
+def safe_path_join(*args) -> str:
+    """
+    Safely join path components with cross-platform compatibility.
+    
+    Args:
+        *args: Path components to join
+        
+    Returns:
+        Joined path string
+    """
+    # Filter out None values and convert all to strings
+    clean_args = []
+    for arg in args:
+        if arg is not None:
+            if isinstance(arg, Path):
+                clean_args.append(str(arg))
+            else:
+                clean_args.append(str(arg))
+    
+    if not clean_args:
+        return ""
+    
+    # Use pathlib for cross-platform path joining
+    result_path = Path(*clean_args)
+    return str(result_path)
 
 @dataclass
 class StateMetadata:
@@ -436,7 +554,7 @@ class ClusterAnalysisSerializer(StateSerializerInterface):
                 'undo_stack': getattr(module_instance, 'undo_stack', [])[-5:],
                 
                 # Database configuration
-                'custom_db_path': getattr(module_instance, 'custom_db_path', None),
+                'custom_db_path': validate_and_sanitize_database_path(getattr(module_instance, 'custom_db_path', None)),
             }
             
             return state
@@ -452,9 +570,27 @@ class ClusterAnalysisSerializer(StateSerializerInterface):
                 return False
             
             # Restore basic configuration
-            for attr in ['selected_folder', 'visualization_method', 'n_subclusters', 'split_method', 'custom_db_path']:
+            for attr in ['selected_folder', 'visualization_method', 'n_subclusters', 'split_method']:
                 if attr in state_data:
                     setattr(module_instance, attr, state_data[attr])
+            
+            # Handle database path specially with validation
+            if 'custom_db_path' in state_data:
+                db_path = state_data['custom_db_path']
+                if db_path is not None and not is_memory_database(str(db_path)):
+                    # Only set if it's not a memory database or if the path exists
+                    try:
+                        path_obj = Path(db_path)
+                        if path_obj.exists() or is_memory_database(str(db_path)):
+                            setattr(module_instance, 'custom_db_path', db_path)
+                        else:
+                            print(f"Warning: Database path {db_path} does not exist, skipping restore")
+                            setattr(module_instance, 'custom_db_path', None)
+                    except (OSError, ValueError) as e:
+                        print(f"Warning: Invalid database path {db_path}: {e}")
+                        setattr(module_instance, 'custom_db_path', None)
+                else:
+                    setattr(module_instance, 'custom_db_path', db_path)
             
             # Restore cluster data
             if 'cluster_data' in state_data:
@@ -570,7 +706,10 @@ class MapAnalysisSerializer(StateSerializerInterface):
                 
                 # Map data - basic info only due to size
                 'has_map_data': hasattr(module_instance, 'map_data') and module_instance.map_data is not None,
-                'map_data_path': getattr(module_instance.map_data, 'data_path', None) if hasattr(module_instance, 'map_data') and module_instance.map_data else None,
+                'map_data_path': validate_and_sanitize_database_path(
+                    getattr(module_instance.map_data, 'data_path', None) 
+                    if hasattr(module_instance, 'map_data') and module_instance.map_data else None
+                ),
                 
                 # Analysis state
                 'current_feature': getattr(module_instance, 'current_feature', 'Integrated Intensity'),
@@ -1243,9 +1382,27 @@ class UniversalStateManager:
     """
     
     def __init__(self, base_directory: str = None):
-        """Initialize the universal state manager"""
-        self.base_directory = Path(base_directory) if base_directory else Path.home() / "RamanLab_Projects"
-        self.base_directory.mkdir(exist_ok=True)
+        """
+        Initialize the universal state manager with cross-platform path handling.
+        
+        Args:
+            base_directory: Base directory for state storage. If None, uses ~/RamanLab_Projects
+        """
+        if base_directory:
+            # Sanitize the provided base directory
+            sanitized_base = sanitize_path_for_windows(base_directory)
+            self.base_directory = Path(sanitized_base)
+        else:
+            self.base_directory = Path.home() / "RamanLab_Projects"
+        
+        # Create directory with proper error handling
+        try:
+            self.base_directory.mkdir(exist_ok=True, parents=True)
+        except (OSError, PermissionError) as e:
+            print(f"Warning: Could not create state directory {self.base_directory}: {e}")
+            # Fallback to a temporary directory in the current working directory
+            self.base_directory = Path.cwd() / "RamanLab_State_Temp"
+            self.base_directory.mkdir(exist_ok=True)
         
         # Module registration
         self._active_modules = {}
@@ -1324,16 +1481,18 @@ class UniversalStateManager:
                     'state_data': state_data
                 }
                 
-                # Determine save location
+                # Determine save location with proper path sanitization
                 if self._current_project:
-                    save_dir = self.base_directory / self._current_project
+                    sanitized_project = sanitize_path_for_windows(self._current_project)
+                    save_dir = self.base_directory / sanitized_project
                 else:
                     save_dir = self.base_directory / "auto_saves"
                 
                 save_dir.mkdir(exist_ok=True)
                 
-                # Save state
-                state_file = save_dir / f"{module_name}_state.pkl"
+                # Save state with sanitized filename
+                sanitized_module_name = sanitize_path_for_windows(module_name)
+                state_file = save_dir / f"{sanitized_module_name}_state.pkl"
                 with open(state_file, 'wb') as f:
                     pickle.dump(state_package, f, protocol=pickle.HIGHEST_PROTOCOL)
                 
@@ -1363,14 +1522,20 @@ class UniversalStateManager:
             print(f"No serializer registered for module {module_name}")
             return False
         
-        # Determine state file location
+        # Determine state file location with proper path sanitization
         if not state_file:
+            sanitized_module_name = sanitize_path_for_windows(module_name)
             if self._current_project:
-                state_file = self.base_directory / self._current_project / f"{module_name}_state.pkl"
+                sanitized_project = sanitize_path_for_windows(self._current_project)
+                state_file = self.base_directory / sanitized_project / f"{sanitized_module_name}_state.pkl"
             else:
-                state_file = self.base_directory / "auto_saves" / f"{module_name}_state.pkl"
+                state_file = self.base_directory / "auto_saves" / f"{sanitized_module_name}_state.pkl"
         else:
-            state_file = Path(state_file)
+            # Validate the provided state file path
+            if isinstance(state_file, str) and not is_memory_database(state_file):
+                state_file = Path(sanitize_path_for_windows(state_file))
+            else:
+                state_file = Path(state_file)
         
         if not state_file.exists():
             print(f"State file not found: {state_file}")
@@ -1407,13 +1572,16 @@ class UniversalStateManager:
             return False
     
     def create_project(self, project_name: str, description: str = "") -> str:
-        """Create a new analysis project"""
-        project_dir = self.base_directory / project_name
+        """Create a new analysis project with Windows-safe naming"""
+        # Sanitize project name for cross-platform compatibility
+        sanitized_project_name = sanitize_path_for_windows(project_name)
+        project_dir = self.base_directory / sanitized_project_name
         project_dir.mkdir(exist_ok=True)
         
         # Create project metadata
         metadata = {
-            'name': project_name,
+            'name': project_name,  # Keep original name in metadata
+            'sanitized_name': sanitized_project_name,  # Track sanitized version
             'description': description,
             'created': datetime.now(timezone.utc).isoformat(),
             'last_modified': datetime.now(timezone.utc).isoformat(),
@@ -1425,10 +1593,10 @@ class UniversalStateManager:
         with open(metadata_file, 'w') as f:
             json.dump(metadata, f, indent=2)
         
-        self._current_project = project_name
+        self._current_project = sanitized_project_name  # Store sanitized name
         self._project_metadata = metadata
         
-        print(f"Created project: {project_name} at {project_dir}")
+        print(f"Created project: {project_name} (sanitized: {sanitized_project_name}) at {project_dir}")
         return str(project_dir)
     
     def auto_save_module(self, module_name: str, force: bool = False):
@@ -1446,6 +1614,42 @@ class UniversalStateManager:
         """Calculate hash of data for integrity checking"""
         data_str = json.dumps(data, sort_keys=True, default=str)
         return hashlib.sha256(data_str.encode()).hexdigest()
+    
+    def validate_paths(self) -> Dict[str, Any]:
+        """
+        Validate all paths used by the state manager for cross-platform compatibility.
+        
+        Returns:
+            Dictionary with validation results
+        """
+        results = {
+            'base_directory': {
+                'path': str(self.base_directory),
+                'exists': self.base_directory.exists(),
+                'writable': os.access(self.base_directory, os.W_OK) if self.base_directory.exists() else False,
+                'is_memory_db': is_memory_database(str(self.base_directory))
+            },
+            'current_project': None,
+            'auto_saves_directory': None
+        }
+        
+        if self._current_project:
+            project_dir = self.base_directory / self._current_project
+            results['current_project'] = {
+                'name': self._current_project,
+                'path': str(project_dir),
+                'exists': project_dir.exists(),
+                'writable': os.access(project_dir, os.W_OK) if project_dir.exists() else False
+            }
+        
+        auto_saves_dir = self.base_directory / "auto_saves"
+        results['auto_saves_directory'] = {
+            'path': str(auto_saves_dir),
+            'exists': auto_saves_dir.exists(),
+            'writable': os.access(auto_saves_dir, os.W_OK) if auto_saves_dir.exists() else False
+        }
+        
+        return results
 
 # Global state manager instance
 _global_state_manager = None
@@ -1493,19 +1697,54 @@ def integrate_with_batch_peak_fitting(batch_peak_fitting_instance):
     return state_manager
 
 if __name__ == "__main__":
-    # Example usage
-    with UniversalStateManager() as state_manager:
-        # Create a project
-        project_path = state_manager.create_project("My_Raman_Analysis", "Comprehensive analysis of mineral samples")
-        
-        # Register modules (this would be done by each module)
-        # state_manager.register_module('batch_peak_fitting', batch_instance)
-        # state_manager.register_module('polarization_analysis', polarization_instance)
-        
-        # Save states
-        # state_manager.save_module_state('batch_peak_fitting', "After manual adjustments")
-        
-        # List projects
-        projects = state_manager.list_projects()
-        for project in projects:
-            print(f"Project: {project['name']} - {project['description']}") 
+    # Example usage and testing
+    print("Testing Universal State Manager with Windows compatibility fixes...")
+    
+    # Test path sanitization functions
+    test_paths = [
+        ":memory:",
+        ":memory:test",
+        "C:\\Users\\Test:File.db",
+        "regular_file.pkl",
+        "file<with>invalid|chars?.txt",
+        "sqlite://test.db"
+    ]
+    
+    print("\nTesting path sanitization:")
+    for path in test_paths:
+        sanitized = sanitize_path_for_windows(path)
+        is_memory = is_memory_database(path)
+        validated = validate_and_sanitize_database_path(path)
+        print(f"  Original: {path}")
+        print(f"  Sanitized: {sanitized}")
+        print(f"  Is memory DB: {is_memory}")
+        print(f"  Validated: {validated}")
+        print()
+    
+    # Test state manager
+    state_manager = UniversalStateManager()
+    
+    # Validate paths
+    path_validation = state_manager.validate_paths()
+    print("Path validation results:")
+    for key, value in path_validation.items():
+        if value:
+            print(f"  {key}: {value}")
+    
+    # Test project creation with special characters
+    test_project_names = [
+        "My Raman Analysis",
+        "Project:With:Colons",
+        "Project<With>Invalid|Chars?",
+        "Normal_Project_Name"
+    ]
+    
+    print("\nTesting project creation:")
+    for project_name in test_project_names:
+        try:
+            project_path = state_manager.create_project(project_name, f"Test project: {project_name}")
+            print(f"  ✓ Created: {project_name} -> {project_path}")
+        except Exception as e:
+            print(f"  ✗ Failed: {project_name} -> {e}")
+    
+    print("\nUniversal State Manager Windows compatibility test completed!") 
