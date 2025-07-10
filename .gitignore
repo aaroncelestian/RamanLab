@@ -3,6 +3,11 @@
 *.sqlite
 *.db
 
+# Problematic files
+*:memory:*
+*.h5
+*.parquet
+
 # Python cache
 __pycache__/
 *.py[cod]
