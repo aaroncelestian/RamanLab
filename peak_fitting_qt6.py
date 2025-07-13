@@ -3040,16 +3040,10 @@ class SpectralDeconvolutionQt6(QDialog):
         """Create 2x2 grid plot widget for peak features analysis."""
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
         from matplotlib.figure import Figure
-        import sys
-        import os
+        from core.matplotlib_config import CompactNavigationToolbar, configure_compact_ui
         
-        # Import matplotlib config
-        sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
-        try:
-            from matplotlib_config import configure_compact_ui, CompactNavigationToolbar
-            configure_compact_ui()
-        except ImportError:
-            pass  # Fallback if config not available
+        # Apply compact UI configuration
+        configure_compact_ui()
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -3062,12 +3056,8 @@ class SpectralDeconvolutionQt6(QDialog):
         self.grid_axes = self.grid_figure.subplots(2, 2)
         self.grid_figure.suptitle('Peak Features Analysis', fontsize=14, fontweight='bold')
         
-        # Add navigation toolbar
-        try:
-            toolbar = CompactNavigationToolbar(self.grid_canvas, widget)
-        except:
-            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-            toolbar = NavigationToolbar2QT(self.grid_canvas, widget)
+        # Add compact navigation toolbar using matplotlib config
+        toolbar = CompactNavigationToolbar(self.grid_canvas, widget)
         
         layout.addWidget(toolbar)
         layout.addWidget(self.grid_canvas)
@@ -3081,16 +3071,10 @@ class SpectralDeconvolutionQt6(QDialog):
         """Create waterfall plot widget for stacked spectra visualization."""
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
         from matplotlib.figure import Figure
-        import sys
-        import os
+        from core.matplotlib_config import CompactNavigationToolbar, configure_compact_ui
         
-        # Import matplotlib config
-        sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
-        try:
-            from matplotlib_config import configure_compact_ui, CompactNavigationToolbar
-            configure_compact_ui()
-        except ImportError:
-            pass
+        # Apply compact UI configuration
+        configure_compact_ui()
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -3100,12 +3084,8 @@ class SpectralDeconvolutionQt6(QDialog):
         self.waterfall_canvas = FigureCanvas(self.waterfall_figure)
         self.waterfall_ax = self.waterfall_figure.add_subplot(111)
         
-        # Add navigation toolbar
-        try:
-            toolbar = CompactNavigationToolbar(self.waterfall_canvas, widget)
-        except:
-            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-            toolbar = NavigationToolbar2QT(self.waterfall_canvas, widget)
+        # Add compact navigation toolbar using matplotlib config
+        toolbar = CompactNavigationToolbar(self.waterfall_canvas, widget)
         
         layout.addWidget(toolbar)
         layout.addWidget(self.waterfall_canvas)
@@ -3119,16 +3099,10 @@ class SpectralDeconvolutionQt6(QDialog):
         """Create heatmap plot widget for 2D intensity visualization."""
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
         from matplotlib.figure import Figure
-        import sys
-        import os
+        from core.matplotlib_config import CompactNavigationToolbar, configure_compact_ui, add_colorbar_no_shrink
         
-        # Import matplotlib config
-        sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
-        try:
-            from matplotlib_config import configure_compact_ui, CompactNavigationToolbar, add_colorbar_no_shrink
-            configure_compact_ui()
-        except ImportError:
-            pass
+        # Apply compact UI configuration
+        configure_compact_ui()
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -3138,12 +3112,8 @@ class SpectralDeconvolutionQt6(QDialog):
         self.heatmap_canvas = FigureCanvas(self.heatmap_figure)
         self.heatmap_ax = self.heatmap_figure.add_subplot(111)
         
-        # Add navigation toolbar
-        try:
-            toolbar = CompactNavigationToolbar(self.heatmap_canvas, widget)
-        except:
-            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-            toolbar = NavigationToolbar2QT(self.heatmap_canvas, widget)
+        # Add compact navigation toolbar using matplotlib config
+        toolbar = CompactNavigationToolbar(self.heatmap_canvas, widget)
         
         layout.addWidget(toolbar)
         layout.addWidget(self.heatmap_canvas)
@@ -3923,16 +3893,8 @@ class SpectralDeconvolutionQt6(QDialog):
                                    aspect=aspect,
                                    extent=[min_wn, max_wn, len(spectra_data), 0])
         
-        # Add colorbar using the no-shrink function
-        try:
-            import sys
-            import os
-            sys.path.append(os.path.join(os.path.dirname(__file__), 'polarization_ui'))
-            from matplotlib_config import add_colorbar_no_shrink
-            add_colorbar_no_shrink(self.heatmap_figure, im, self.heatmap_ax, label='Intensity')
-        except ImportError:
-            # Fallback to regular colorbar
-            self.heatmap_figure.colorbar(im, ax=self.heatmap_ax, label='Intensity')
+        # Add colorbar using the no-shrink function from matplotlib config
+        add_colorbar_no_shrink(self.heatmap_figure, im, self.heatmap_ax, label='Intensity')
         
         # Customize plot
         self.heatmap_ax.set_title('Heatmap - Spectral Intensity Map', fontweight='bold')
