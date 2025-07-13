@@ -75,7 +75,7 @@ class Advanced3DVisualizationWidget(QWidget):
         # Title
         title = QLabel("Advanced 3D Visualization")
         title.setFont(QFont("Arial", 12, QFont.Bold))
-        title.setAlignment(Qt_AlignCenter)
+        title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
         
         # Tensor selection

@@ -10,6 +10,7 @@ Includes:
 """
 
 import numpy as np
+import os
 import sys
 from pathlib import Path
 
@@ -4178,16 +4179,12 @@ class SpectralDeconvolutionQt6(QDialog):
         deconv_btn.clicked.connect(self.launch_deconvolution_module)
         modules_layout.addWidget(deconv_btn)
         
-        # Batch data analysis launcher
-        batch_analysis_btn = QPushButton("📈 Batch Data Analysis")
-        batch_analysis_btn.setToolTip("Analyze batch processing results with advanced statistics")
-        batch_analysis_btn.clicked.connect(self.launch_batch_analysis_module)
-        modules_layout.addWidget(batch_analysis_btn)
-        
         # Geothermometry launcher
         geotherm_btn = QPushButton("🌡️ Geothermometry Analysis")
         geotherm_btn.setToolTip("Temperature analysis based on Raman spectra")
-        geotherm_btn.clicked.connect(self.launch_geothermometry_module)
+        geotherm_btn.clicked.connect(lambda: self.launch_geothermometry_module(
+            getattr(self, 'selected_data_file', None)
+        ))
         modules_layout.addWidget(geotherm_btn)
         
         # Density analysis launcher
@@ -4195,12 +4192,6 @@ class SpectralDeconvolutionQt6(QDialog):
         density_btn.setToolTip("Fluid density analysis from Raman spectra")
         density_btn.clicked.connect(self.launch_density_module)
         modules_layout.addWidget(density_btn)
-        
-        # Map analysis launcher
-        map_analysis_btn = QPushButton("🗺️ 2D Map Analysis")
-        map_analysis_btn.setToolTip("Analyze 2D Raman mapping data")
-        map_analysis_btn.clicked.connect(self.launch_map_analysis_module)
-        modules_layout.addWidget(map_analysis_btn)
         
         # Advanced Jupyter Console launcher
         jupyter_console_btn = QPushButton("🐍 Advanced Jupyter Console")
@@ -8900,22 +8891,105 @@ class SpectralDeconvolutionQt6(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Launch Error", f"Failed to launch batch analysis module: {str(e)}")
     
-    def launch_geothermometry_module(self):
-        """Launch the geothermometry analysis module."""
+    def launch_geothermometry_module(self, pkl_file=None):
+        """Launch the geothermometry analysis module.
+        
+        Args:
+            pkl_file (str, optional): Path to a PKL file containing batch results.
+        """
         try:
-            # Import and launch geothermometry
-            from raman_geothermometry import launch_geothermometry_analysis
+            print(f"DEBUG: Launching geothermometry with pkl_file: {pkl_file}")
             
-            # Pass selected data file if available
-            data_file = getattr(self, 'selected_data_file', None)
-            launch_geothermometry_analysis(data_file)
+            # Import the new GeothermometryAnalysisDialog
+            from geothermometry_analysis import GeothermometryAnalysisDialog
             
-        except ImportError:
-            QMessageBox.warning(self, "Module Not Available", 
-                              "Geothermometry module is not available.\n"
-                              "Please ensure raman_geothermometry.py is accessible.")
+            # If no PKL file is provided, try to get it from the UI
+            if not pkl_file and hasattr(self, 'selected_data_file') and self.selected_data_file:
+                pkl_file = self.selected_data_file
+                print(f"DEBUG: Using selected_data_file: {pkl_file}")
+            
+            # If still no file, prompt the user
+            if not pkl_file:
+                reply = QMessageBox.question(
+                    self, 'No Data File Selected',
+                    'No data file is currently selected. Would you like to select one now?',
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                )
+                if reply == QMessageBox.Yes:
+                    file_path, _ = QFileDialog.getOpenFileName(
+                        self,
+                        'Select Batch Results File',
+                        '',
+                        'Pickle Files (*.pkl);;All Files (*)'
+                    )
+                    if file_path:
+                        pkl_file = file_path
+                    else:
+                        return  # User cancelled file selection
+                else:
+                    return  # User chose not to select a file
+                    
+            # Debug: Print PKL file contents
+            print(f"DEBUG: Loading PKL file: {pkl_file}")
+            try:
+                import pickle
+                with open(pkl_file, 'rb') as f:
+                    data = pickle.load(f)
+                    print(f"DEBUG: PKL file type: {type(data)}")
+                    if isinstance(data, list):
+                        print(f"DEBUG: PKL contains {len(data)} items")
+                        if data:
+                            print(f"DEBUG: First item type: {type(data[0])}")
+                            print(f"DEBUG: First item keys: {data[0].keys() if hasattr(data[0], 'keys') else 'N/A'}")
+                            if 'fitted_peaks' in data[0]:
+                                print(f"DEBUG: First item has fitted_peaks: {type(data[0]['fitted_peaks'])}")
+                    elif isinstance(data, dict):
+                        print(f"DEBUG: PKL dict keys: {data.keys()}")
+            except Exception as e:
+                print(f"DEBUG: Error inspecting PKL file: {str(e)}")
+            
+            # Load results if PKL file is provided
+            results = []
+            if pkl_file and os.path.exists(pkl_file):
+                import pickle
+                with open(pkl_file, 'rb') as f:
+                    loaded_data = pickle.load(f)
+                    # Convert to the expected format if needed
+                    if isinstance(loaded_data, dict):
+                        if 'batch_results' in loaded_data:
+                            results = loaded_data['batch_results']
+                        elif 'results' in loaded_data:
+                            results = loaded_data['results']
+                        else:
+                            results = [loaded_data]
+                    elif isinstance(loaded_data, list):
+                        results = loaded_data
+                    else:
+                        results = [loaded_data]
+                
+                # Add metadata if not present
+                for i, result in enumerate(results):
+                    if 'metadata' not in result:
+                        result['metadata'] = {}
+                    if 'filename' not in result['metadata']:
+                        result['metadata']['filename'] = f"Sample {i+1}"
+            
+            # Create and show the dialog
+            dialog = GeothermometryAnalysisDialog(self, results=results)
+            dialog.exec_()
+            
+        except ImportError as e:
+            error_msg = ("Failed to import geothermometry module. "
+                        "Please ensure all required dependencies are installed.\n\n"
+                        f"Error: {str(e)}")
+            print(f"ERROR: {error_msg}")
+            QMessageBox.critical(self, "Import Error", error_msg)
         except Exception as e:
-            QMessageBox.critical(self, "Launch Error", f"Failed to launch geothermometry module: {str(e)}")
+            import traceback
+            error_details = f"{str(e)}\n\n{traceback.format_exc()}"
+            print(f"ERROR: {error_details}")
+            QMessageBox.critical(self, "Launch Error", 
+                              f"Failed to launch geothermometry module:\n{str(e)}")
     
     def launch_density_module(self):
         """Launch the density analysis module."""

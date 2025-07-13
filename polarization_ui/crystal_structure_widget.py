@@ -20,13 +20,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QColor
 
-# Matplotlib for 3D visualization
-import matplotlib
-matplotlib.use('QtAgg')
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from mpl_toolkits.mplot3d import Axes3D
-import matplotlib.pyplot as plt
+# PyVista for 3D visualization
+import pyvista as pv
+from pyvistaqt import QtInteractor
 
 # Try to import pymatgen for professional CIF parsing
 try:
@@ -58,19 +54,21 @@ class CrystalStructureWidget(QWidget):
         self.current_structure = None
         self.pymatgen_structure = None
         self.bonds = []
+        self.drawn_bonds = []  # Track bonds that are actually drawn
         self.supercell_size = [1, 1, 1]
+        # Default visualization settings
         self.visualization_settings = {
+            'show_atoms': True,
             'show_bonds': True,
             'show_unit_cell': True,
             'show_axes': True,
-            'label_atoms': False,
-            'label_bonds': False,
-            'atom_scale': 1.0,
-            'bond_thickness': 1.0,
-            'transparency': 0.8,
+            'atom_scale': 0.3,  # Reduced from 0.5 to make atoms smaller
+            'bond_radius': 0.05,  # Reduced bond thickness
+            'transparency': 0.3,  # Reduced from 0.8 to make less transparent
             'color_scheme': 'element',
-            'render_quality': 'High',
-            'preserve_geometry': True
+            'label_atoms': False,
+            'supercell': [1, 1, 1],
+            'bond_tolerance': 0.3  # Added tolerance for bond detection
         }
         
         # 3D view settings
@@ -539,6 +537,16 @@ class CrystalStructureWidget(QWidget):
         self.bond_thickness_slider.valueChanged.connect(self.update_bond_thickness)
         layout.addWidget(self.bond_thickness_slider)
         
+        # Transparency slider
+        layout.addWidget(QLabel("Transparency:"))
+        self.transparency_slider = QSlider(Qt.Horizontal)
+        self.transparency_slider.setRange(0, 100)
+        self.transparency_slider.setValue(30)  # Default to 0.3 opacity (1 - 0.7)
+        self.transparency_slider.valueChanged.connect(
+            lambda value: self.update_visualization_settings('transparency', 1 - value/100.0)
+        )
+        layout.addWidget(self.transparency_slider)
+        
         # Color scheme
         layout.addWidget(QLabel("Color Scheme:"))
         self.color_scheme_combo = QComboBox()
@@ -694,21 +702,9 @@ class CrystalStructureWidget(QWidget):
         
         layout = QVBoxLayout(viz_frame)
         
-        # Create matplotlib figure and 3D axis with larger size
-        self.fig = Figure(figsize=(10, 8))
-        self.canvas = FigureCanvas(self.fig)
-        
-        # Adjust subplot parameters for better space utilization
-        self.fig.subplots_adjust(left=0.02, right=0.98, top=0.95, bottom=0.05)
-        
-        # Create 3D axis
-        self.ax = self.fig.add_subplot(111, projection='3d')
-        self.ax.set_xlabel('Crystal a-axis')
-        self.ax.set_ylabel('Crystal b-axis')
-        self.ax.set_zlabel('Crystal c-axis')
-        self.ax.set_title('Crystal Structure Visualization')
-        
-        layout.addWidget(self.canvas)
+        # Create PyVista QtInteractor for 3D visualization
+        self.pv_widget = QtInteractor(viz_frame)
+        layout.addWidget(self.pv_widget)
         
         # Initialize empty plot
         self.update_3d_plot()
@@ -908,8 +904,15 @@ class CrystalStructureWidget(QWidget):
     
     def generate_equivalent_sites(self):
         """Generate all symmetrically equivalent sites."""
-        if not self.current_structure or not self.current_structure.get('symmetry_operations'):
+        if not self.current_structure:
+            print("No current structure to generate equivalent sites")
             return
+            
+        if not self.current_structure.get('symmetry_operations'):
+            print("No symmetry operations found in structure")
+            return
+            
+        print(f"Generating equivalent sites for {len(self.current_structure['sites'])} unique sites")
         
         symm_ops = self.current_structure['symmetry_operations']
         original_sites = self.current_structure['sites'].copy()
@@ -948,7 +951,8 @@ class CrystalStructureWidget(QWidget):
             equivalent_sites[site_idx] = equivalent_positions
         
         self.current_structure['equivalent_sites'] = equivalent_sites
-        print(f"✓ Generated equivalent sites for {len(original_sites)} atoms using {len(symm_ops)} symmetry operations")
+        total_sites = sum(len(sites) for sites in equivalent_sites.values())
+        print(f"✓ Generated {total_sites} equivalent sites from {len(original_sites)} unique sites using {len(symm_ops)} symmetry operations")
     
     def group_wyckoff_positions(self):
         """Group sites by their Wyckoff positions."""
@@ -1076,908 +1080,398 @@ class CrystalStructureWidget(QWidget):
         self.stats_label.setText(f"Statistics: {stats_text}")
     
     def calculate_bonds(self):
-        """Calculate bonds between atoms considering symmetrically equivalent sites."""
+        """Calculate bonds between atoms using pymatgen's neighbor list with nearest neighbors only."""
         if not self.pymatgen_structure:
-            return
-        
-        try:
-            # Use enhanced bond calculation considering symmetry
-            self.bonds = []
-            bond_distances = []
+            return []
             
-            # Get bond distance constraints
-            max_distance = getattr(self, 'global_bond_cutoff_spin', None)
-            min_distance = getattr(self, 'global_min_cutoff_spin', None)
-            
-            if max_distance is None:
-                max_distance = 3.0  # Default fallback
-            else:
-                max_distance = max_distance.value()
-                
-            if min_distance is None:
-                min_distance = 0.5  # Default fallback
-            else:
-                min_distance = min_distance.value()
-            
-            # Calculate bonds using both CrystalNN and symmetry-enhanced distance calculation
-            method = getattr(self, 'bond_method_combo', None)
-            if method and hasattr(method, 'currentText'):
-                bond_method = method.currentText()
-            else:
-                bond_method = "CrystalNN"
-            
-            if bond_method == "CrystalNN" and PYMATGEN_AVAILABLE:
-                self.calculate_bonds_crystalnn(min_distance, max_distance, bond_distances)
-            else:
-                self.calculate_bonds_distance_only(min_distance, max_distance, bond_distances)
-            
-            # Update bond statistics
-            self.update_bond_statistics(bond_distances)
-            
-            # Update visualization
-            self.update_3d_plot()
-            
-            # Emit signal
-            self.bond_calculated.emit({'bonds': self.bonds, 'count': len(self.bonds)})
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Error calculating bonds:\n{str(e)}")
-    
-    def calculate_bonds_crystalnn(self, min_distance, max_distance, bond_distances):
-        """Calculate bonds using CrystalNN method with debugging."""
         try:
             from pymatgen.analysis.local_env import CrystalNN
-            nn = CrystalNN()
             
-            # Check if debug is enabled
-            debug_enabled = getattr(self, 'debug_crystalnn_cb', None)
-            debug_mode = debug_enabled.isChecked() if debug_enabled else False
+            # Use CrystalNN with more strict cutoff parameters
+            cnn = CrystalNN(
+                search_cutoff=3.0,  # Maximum distance to search for neighbors
+                distance_cutoffs=(0.1, 0.5),  # Min and max bond distance as fraction of sum of radii
+                x_diff_weight=-1,  # Don't weight by x-difference
+                porous_adjustment=False  # Don't adjust for porous structures
+            )
             
-            if debug_mode:
-                print("\n🔍 CrystalNN Debug Information:")
+            bonds = []
+            bonded_pairs = set()  # Track bonded pairs to avoid duplicates
             
-            # Calculate bonds for each site
             for i, site in enumerate(self.pymatgen_structure):
                 try:
-                    # Get nearest neighbors
-                    neighbors = nn.get_nn_info(self.pymatgen_structure, i)
-                    
-                    element_i = self.current_structure['sites'][i]['element']
-                    if debug_mode:
-                        print(f"\nSite {i} ({element_i}):")
+                    # Get only the nearest neighbors
+                    neighbors = cnn.get_nn_info(self.pymatgen_structure, i)
                     
                     for neighbor in neighbors:
                         j = neighbor['site_index']
-                        
-                        # Debug: Print what CrystalNN returns
-                        if debug_mode:
-                            print(f"  Neighbor data: {neighbor}")
-                        
-                        # CrystalNN 'weight' might not be distance - let's calculate actual distance
-                        actual_distance = self.calculate_actual_distance_between_sites(i, j)
-                        
-                        # Check if 'weight' matches actual distance
-                        crystalnn_weight = neighbor.get('weight', actual_distance)
-                        
-                        if debug_mode:
-                            print(f"  -> Site {j}: CrystalNN weight={crystalnn_weight:.3f}, Actual distance={actual_distance:.3f}")
-                        
-                        element_j = self.current_structure['sites'][j]['element']
-                        
-                        # Use actual distance instead of CrystalNN weight
-                        if self.validate_and_add_bond(i, j, actual_distance, min_distance, max_distance, bond_distances):
-                            if debug_mode:
-                                print(f"  ✓ Added bond {element_i}{i}-{element_j}{j}: {actual_distance:.3f}Å")
-                
+                        # Add bond only if not already added (i < j ensures no duplicates)
+                        if i < j:
+                            bond_key = tuple(sorted((i, j)))
+                            if bond_key not in bonded_pairs:
+                                bonds.append((i, j, neighbor['weight']))
+                                bonded_pairs.add(bond_key)
+                                
                 except Exception as e:
-                    # If CrystalNN fails for this site, continue
-                    if debug_mode:
-                        print(f"  ❌ CrystalNN failed for site {i}: {e}")
+                    print(f"Error finding neighbors for site {i}: {str(e)}")
                     continue
             
-            if debug_mode:
-                print(f"\n🔗 CrystalNN found {len(self.bonds)} bonds total")
-                    
+            # Sort bonds by distance (weight in the CrystalNN result)
+            bonds.sort(key=lambda x: x[2])
+            
+            # Only keep the shortest bonds (nearest neighbors)
+            # First, find the minimum distance for each atom
+            min_distances = {}
+            for i, j, dist in bonds:
+                if i not in min_distances or dist < min_distances[i]:
+                    min_distances[i] = dist
+                if j not in min_distances or dist < min_distances[j]:
+                    min_distances[j] = dist
+            
+            # Filter bonds to keep only those within tolerance of the minimum distance
+            tolerance = self.visualization_settings.get('bond_tolerance', 0.3)
+            filtered_bonds = []
+            for i, j, dist in bonds:
+                min_dist = min(min_distances[i], min_distances[j])
+                if dist <= min_dist * (1 + tolerance):
+                    filtered_bonds.append((i, j))
+            
+            print(f"Bonds calculated: {len(filtered_bonds)} (filtered from {len(bonds)} initial bonds)")
+            return filtered_bonds
+            
         except ImportError:
-            print("CrystalNN not available, falling back to distance-only method")
-            self.calculate_bonds_distance_only(min_distance, max_distance, bond_distances)
+            print("pymatgen not available for bond calculation")
+            return []           
     
-    def calculate_bonds_distance_only(self, min_distance, max_distance, bond_distances):
-        """Calculate bonds using distance-only method with symmetry consideration."""
-        # Get all possible atomic positions including equivalent sites
-        all_positions = self.get_all_atomic_positions_for_bonding()
+    def update_visualization_settings(self, setting_name=None, value=None):
+        """Update visualization settings and refresh the 3D plot."""
+        if setting_name is not None and value is not None:
+            self.visualization_settings[setting_name] = value
         
-        for i, pos1 in enumerate(all_positions):
-            for j, pos2 in enumerate(all_positions):
-                if i >= j:  # Avoid duplicates and self-bonds
-                    continue
-                
-                # Skip if same parent atom (symmetrically equivalent)
-                if pos1['parent_index'] == pos2['parent_index']:
-                    continue
-                
-                # Calculate distance considering periodic boundary conditions
-                distance = self.calculate_periodic_distance(pos1['frac_coords'], pos2['frac_coords'])
-                
-                if min_distance <= distance <= max_distance:
-                    # Validate and add bond
-                    self.validate_and_add_bond(
-                        pos1['parent_index'], pos2['parent_index'], 
-                        distance, min_distance, max_distance, bond_distances,
-                        pos1_coords=pos1['frac_coords'], pos2_coords=pos2['frac_coords']
-                    )
-    
-    def get_all_atomic_positions_for_bonding(self):
-        """Get all atomic positions including symmetrically equivalent sites for bond calculation."""
-        all_positions = []
-        
-        # Add original unit cell positions
-        for site in self.current_structure['sites']:
-            all_positions.append({
-                'parent_index': site['index'],
-                'element': site['element'],
-                'frac_coords': np.array(site['frac_coords']),
-                'wyckoff_symbol': site.get('wyckoff_symbol', 'a'),
-                'is_equivalent': False
-            })
-        
-        # Add symmetrically equivalent positions within a reasonable range
-        if self.current_structure.get('equivalent_sites'):
-            for parent_idx, equiv_sites in self.current_structure['equivalent_sites'].items():
-                parent_element = self.current_structure['sites'][parent_idx]['element']
-                wyckoff_symbol = self.current_structure['sites'][parent_idx].get('wyckoff_symbol', 'a')
-                
-                for equiv_site in equiv_sites:
-                    # Skip if it's the identity operation
-                    if equiv_site['symmetry_op_index'] == 0:
-                        continue
-                    
-                    all_positions.append({
-                        'parent_index': parent_idx,
-                        'element': parent_element,
-                        'frac_coords': np.array(equiv_site['frac_coords']),
-                        'wyckoff_symbol': wyckoff_symbol,
-                        'is_equivalent': True,
-                        'symmetry_op_index': equiv_site['symmetry_op_index']
-                    })
-        
-        return all_positions
-    
-    def calculate_periodic_distance(self, frac_coords1, frac_coords2):
-        """Calculate distance between two points considering periodic boundary conditions."""
-        if not self.pymatgen_structure:
-            # Fallback to simple Euclidean distance
-            return np.linalg.norm(np.array(frac_coords1) - np.array(frac_coords2))
-        
-        # Convert to Cartesian coordinates
-        cart1 = self.pymatgen_structure.lattice.get_cartesian_coords(frac_coords1)
-        cart2 = self.pymatgen_structure.lattice.get_cartesian_coords(frac_coords2)
-        
-        # Consider periodic images within a reasonable range
-        min_distance = float('inf')
-        
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                for dz in [-1, 0, 1]:
-                    # Add lattice translation
-                    translated_frac2 = frac_coords2 + np.array([dx, dy, dz])
-                    translated_cart2 = self.pymatgen_structure.lattice.get_cartesian_coords(translated_frac2)
-                    
-                    # Calculate distance
-                    distance = np.linalg.norm(cart1 - translated_cart2)
-                    min_distance = min(min_distance, distance)
-        
-        return min_distance
-    
-    def validate_and_add_bond(self, i, j, distance, min_distance, max_distance, bond_distances, pos1_coords=None, pos2_coords=None):
-        """Validate and add a bond if it meets all criteria."""
-        # Get element types
-        element1 = self.current_structure['sites'][i]['element']
-        element2 = self.current_structure['sites'][j]['element']
-        
-        # Check element-specific distance constraints
-        pair_key = f"{min(element1, element2)}-{max(element1, element2)}"
-        
-        # Get specific constraints for this element pair
-        if hasattr(self, 'element_bond_controls') and pair_key in self.element_bond_controls:
-            element_min = self.element_bond_controls[pair_key]['min_distance']
-            element_max = self.element_bond_controls[pair_key]['max_distance']
-            element_enabled = self.element_bond_controls[pair_key]['enabled']
+        # Update UI elements to match current settings
+        if hasattr(self, 'show_bonds_cb') and 'show_bonds' in self.visualization_settings:
+            self.show_bonds_cb.setChecked(self.visualization_settings['show_bonds'])
             
-            if not element_enabled:
-                return False  # Skip this element pair if disabled
-        else:
-            # Use global constraints
-            element_min = min_distance
-            element_max = max_distance
-        
-        # Check distance constraints
-        if element_min <= distance <= element_max:
-            # Check if this bond already exists (avoid duplicates)
-            for existing_bond in self.bonds:
-                if ((existing_bond['atom1_idx'] == i and existing_bond['atom2_idx'] == j) or
-                    (existing_bond['atom1_idx'] == j and existing_bond['atom2_idx'] == i)):
-                    # Bond already exists, check if this one is shorter
-                    if distance < existing_bond['distance']:
-                        # Update with shorter distance
-                        existing_bond['distance'] = distance
-                        if pos1_coords is not None and pos2_coords is not None:
-                            existing_bond['pos1_coords'] = pos1_coords.tolist()
-                            existing_bond['pos2_coords'] = pos2_coords.tolist()
-                    return False
+        if hasattr(self, 'show_unit_cell_cb') and 'show_unit_cell' in self.visualization_settings:
+            self.show_unit_cell_cb.setChecked(self.visualization_settings['show_unit_cell'])
             
-            # Add new bond
-            bond_info = {
-                'atom1_idx': i,
-                'atom2_idx': j,
-                'distance': distance,
-                'atom1_element': element1,
-                'atom2_element': element2,
-                'bond_type': pair_key,
-                'constraints_used': f"min:{element_min:.2f}, max:{element_max:.2f}",
-                'wyckoff_info': f"{self.current_structure['sites'][i].get('wyckoff_symbol', 'a')}-{self.current_structure['sites'][j].get('wyckoff_symbol', 'a')}"
-            }
+        if hasattr(self, 'show_axes_cb') and 'show_axes' in self.visualization_settings:
+            self.show_axes_cb.setChecked(self.visualization_settings['show_axes'])
             
-            # Add position information if available
-            if pos1_coords is not None and pos2_coords is not None:
-                bond_info['pos1_coords'] = pos1_coords.tolist()
-                bond_info['pos2_coords'] = pos2_coords.tolist()
+        if hasattr(self, 'atom_scale_slider') and 'atom_scale' in self.visualization_settings:
+            self.atom_scale_slider.setValue(int(self.visualization_settings['atom_scale'] * 100))
             
-            self.bonds.append(bond_info)
-            bond_distances.append(distance)
-            return True
+        if hasattr(self, 'transparency_slider') and 'transparency' in self.visualization_settings:
+            self.transparency_slider.setValue(int((1 - self.visualization_settings['transparency']) * 100))
         
-        return False
-    
-    def analyze_drawn_bonds(self):
-        """Analyze and display information about bonds actually drawn in the visualization."""
-        if not hasattr(self, 'drawn_bonds') or not self.drawn_bonds:
-            self.bond_debug_info.setText("No drawn bonds to analyze. Update visualization first.")
-            return
-        
-        # Analyze drawn bonds
-        total_drawn = len(self.drawn_bonds)
-        calculated_bonds = len(self.bonds)
-        
-        # Group by bond type and analyze distances
-        drawn_by_type = {}
-        distance_errors = []
-        
-        for drawn_bond in self.drawn_bonds:
-            atom1_element = self.current_structure['sites'][drawn_bond['atom1_idx']]['element']
-            atom2_element = self.current_structure['sites'][drawn_bond['atom2_idx']]['element']
-            bond_type = f"{min(atom1_element, atom2_element)}-{max(atom1_element, atom2_element)}"
-            
-            if bond_type not in drawn_by_type:
-                drawn_by_type[bond_type] = {
-                    'count': 0,
-                    'distances': [],
-                    'errors': []
-                }
-            
-            drawn_by_type[bond_type]['count'] += 1
-            drawn_by_type[bond_type]['distances'].append(drawn_bond['drawn_distance'])
-            
-            # Calculate error between drawn and calculated distance
-            error = abs(drawn_bond['drawn_distance'] - drawn_bond['original_distance'])
-            drawn_by_type[bond_type]['errors'].append(error)
-            distance_errors.append(error)
-        
-        # Create analysis text
-        analysis_text = f"Drawn Bonds Analysis:\n"
-        analysis_text += f"Total drawn: {total_drawn}\n"
-        analysis_text += f"Calculated bonds: {calculated_bonds}\n"
-        analysis_text += f"Ratio: {total_drawn/calculated_bonds:.1f}x\n\n"
-        
-        if distance_errors:
-            max_error = max(distance_errors)
-            avg_error = np.mean(distance_errors)
-            analysis_text += f"Distance Errors:\n"
-            analysis_text += f"Max: {max_error:.3f} Å\n"
-            analysis_text += f"Avg: {avg_error:.3f} Å\n\n"
-        
-        # Show breakdown by bond type
-        analysis_text += "By bond type:\n"
-        for bond_type, data in drawn_by_type.items():
-            avg_distance = np.mean(data['distances'])
-            avg_error = np.mean(data['errors'])
-            analysis_text += f"{bond_type}: {data['count']} bonds\n"
-            analysis_text += f"  Avg distance: {avg_distance:.3f} Å\n"
-            analysis_text += f"  Avg error: {avg_error:.3f} Å\n"
-        
-        self.bond_debug_info.setText(analysis_text)
-        
-        # Also show detailed analysis in console
-        print("\n" + "="*50)
-        print("BOND VISUALIZATION ANALYSIS")
-        print("="*50)
-        print(analysis_text)
-        
-        # Show problematic bonds (large errors)
-        problem_threshold = 0.2  # Angstrom
-        problem_bonds = [bond for bond in self.drawn_bonds 
-                        if abs(bond['drawn_distance'] - bond['original_distance']) > problem_threshold]
-        
-        if problem_bonds:
-            print(f"\nPROBLEMATIC BONDS (error > {problem_threshold} Å):")
-            for bond in problem_bonds:
-                atom1_element = self.current_structure['sites'][bond['atom1_idx']]['element']
-                atom2_element = self.current_structure['sites'][bond['atom2_idx']]['element']
-                print(f"{atom1_element}{bond['atom1_idx']}-{atom2_element}{bond['atom2_idx']}: "
-                      f"drawn={bond['drawn_distance']:.3f} Å, "
-                      f"calculated={bond['original_distance']:.3f} Å, "
-                      f"error={abs(bond['drawn_distance'] - bond['original_distance']):.3f} Å")
-                print(f"  Unit cell: {bond['unit_cell']}")
-                print(f"  Positions: {bond['pos1']} -> {bond['pos2']}")
-        
-        print("="*50)
-    
-    def update_3d_plot(self):
-        """Update the 3D structure visualization."""
+        # Update the 3D plot with new settings
+        self.update_3d_plot()
+
+    def debug_structure_info(self):
+        """Print debug information about the current structure."""
         if not self.current_structure:
-            # Clear plot and show placeholder
-            self.ax.clear()
-            
-            # Turn off all grid elements and axes for empty plot too
-            self.ax.grid(False)
-            self.ax.xaxis.pane.fill = False
-            self.ax.yaxis.pane.fill = False
-            self.ax.zaxis.pane.fill = False
-            self.ax.xaxis.pane.set_alpha(0)
-            self.ax.yaxis.pane.set_alpha(0) 
-            self.ax.zaxis.pane.set_alpha(0)
-            
-            # Turn off ticks and axis lines for empty plot
-            self.ax.set_xticks([])
-            self.ax.set_yticks([])
-            self.ax.set_zticks([])
-            self.ax.set_xlabel('')
-            self.ax.set_ylabel('')
-            self.ax.set_zlabel('')
-            self.ax.xaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
-            self.ax.yaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
-            self.ax.zaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
-            
-            self.ax.text(0.5, 0.5, 0.5, 'Load a CIF file to view structure', 
-                        transform=self.ax.transAxes, ha='center', va='center',
-                        fontsize=12, alpha=0.6)
-            self.canvas.draw()
+            print("No structure loaded for debugging")
             return
+            
+        print("\n=== Structure Debug Info ===")
+        print(f"Formula: {self.current_structure.get('formula', 'N/A')}")
+        print(f"Space Group: {self.current_structure.get('space_group', 'N/A')}")
+        print(f"Number of sites: {len(self.current_structure.get('sites', []))}")
         
-        # Clear previous plot
-        self.ax.clear()
+        if 'symmetry_operations' in self.current_structure:
+            print(f"Symmetry operations: {len(self.current_structure['symmetry_operations'])}")
+        else:
+            print("No symmetry operations found in structure")
+            
+        if 'equivalent_sites' in self.current_structure:
+            total_equiv = sum(len(sites) for sites in self.current_structure['equivalent_sites'].values())
+            print(f"Total equivalent sites: {total_equiv}")
+        else:
+            print("No equivalent sites generated")
+            
+        print("=" * 30 + "\n")
+
+    def update_3d_plot(self):
+        """Update the 3D structure visualization using PyVista."""
+        if not self.current_structure:
+            self.pv_widget.add_text('Load a CIF file to view structure', position='upper_left', font_size=14, color='gray')
+            self.pv_widget.reset_camera()
+            return
+            
+        print("\n=== Starting 3D Plot Update ===")
+        # Force clear any existing meshes
+        self.pv_widget.clear()
         
-        # Get supercell dimensions
+        # Ensure all equivalent sites are generated
+        print("Generating equivalent sites...")
+        self.generate_equivalent_sites()
+        
+        # If no equivalent sites were generated, ensure we have the original sites
+        if 'equivalent_sites' not in self.current_structure or not self.current_structure['equivalent_sites']:
+            print("No equivalent sites generated, using original sites")
+            self.current_structure['equivalent_sites'] = {
+                i: [{'frac_coords': site['frac_coords']}]
+                for i, site in enumerate(self.current_structure['sites'])
+            }
+        
         na, nb, nc = self.supercell_size
+        self.plot_atoms_pyvista(na, nb, nc)
+        if self.visualization_settings.get('show_bonds', True) and self.bonds:
+            self.plot_bonds_pyvista(na, nb, nc)
+        if self.visualization_settings.get('show_unit_cell', True):
+            self.plot_unit_cell_pyvista(na, nb, nc)
+        if self.visualization_settings.get('show_axes', True):
+            self.plot_crystal_axes_pyvista()
+        self.pv_widget.reset_camera()
+
+    def plot_atoms_pyvista(self, na, nb, nc):
+        """Plot atoms as spheres in the PyVista scene."""
+        if not self.current_structure or not self.pymatgen_structure:
+            print("No structure or pymatgen structure to plot")
+            return
+            
+        print("\n=== Plotting Atoms ===")
+        # Print debug info
+        self.debug_structure_info()
+        print(f"Plotting atoms with supercell {na}x{nb}x{nc}")
+        atom_scale = self.visualization_settings.get('atom_scale', 0.3)
+        transparency = self.visualization_settings.get('transparency', 0.3)
+        color_scheme = self.visualization_settings.get('color_scheme', 'element')
+        label_atoms = self.visualization_settings.get('label_atoms', False)
         
-        # Plot atoms in crystal coordinates
-        self.plot_atoms_crystal_coords(na, nb, nc)
+        lattice = self.pymatgen_structure.lattice
         
-        # Plot bonds if enabled
-        if self.visualization_settings['show_bonds'] and self.bonds:
-            self.plot_bonds_crystal_coords(na, nb, nc)
+        # Get the sites to plot - use equivalent_sites if available, otherwise use original sites
+        if 'equivalent_sites' in self.current_structure and self.current_structure['equivalent_sites']:
+            print(f"Using {sum(len(sites) for sites in self.current_structure['equivalent_sites'].values())} equivalent sites for plotting")
+            sites_to_plot = self.current_structure['equivalent_sites']
+        else:
+            print("No equivalent sites found, using original sites")
+            sites_to_plot = {
+                i: [{'frac_coords': site['frac_coords']}]
+                for i, site in enumerate(self.current_structure['sites'])
+            }
         
-        # Plot unit cell if enabled
-        if self.visualization_settings['show_unit_cell']:
-            self.plot_unit_cell()
+        # Track unique positions to avoid duplicates
+        unique_positions = set()
         
-        # Plot crystal axes if enabled
-        if self.visualization_settings['show_axes']:
-            self.plot_crystal_axes()
+        for site_idx, equiv_sites in sites_to_plot.items():
+            element = self.current_structure['sites'][site_idx % len(self.current_structure['sites'])]['element']
+            atomic_radius = self.current_structure['sites'][site_idx % len(self.current_structure['sites'])].get('radius', 0.5) * atom_scale
+            color = self.get_element_color(element) if color_scheme == 'element' else 'white'
+            
+            for site in equiv_sites:
+                base_frac = np.array(site.get('frac_coords', site.get('cart_coords')))
+                
+                # Apply supercell translations
+                for i in range(na):
+                    for j in range(nb):
+                        for k in range(nc):
+                            supercell_frac = base_frac + np.array([i, j, k])
+                            # Wrap fractional coordinates back into [0,1)
+                            supercell_frac = supercell_frac - np.floor(supercell_frac)
+                            cart_coords = lattice.get_cartesian_coords(supercell_frac)
+                            
+                            # Use position as a key to avoid duplicates
+                            pos_key = tuple(round(x, 6) for x in cart_coords)
+                            if pos_key in unique_positions:
+                                continue
+                            unique_positions.add(pos_key)
+                            
+                            # Add the atom sphere
+                            sphere = pv.Sphere(radius=atomic_radius, 
+                                             center=cart_coords, 
+                                             theta_resolution=32, 
+                                             phi_resolution=32)
+                            self.pv_widget.add_mesh(sphere, 
+                                                  color=color, 
+                                                  opacity=transparency, 
+                                                  name=f"atom_{element}_{len(unique_positions)}")
+                            
+                            # Add label if enabled
+                            if label_atoms:
+                                self.pv_widget.add_point_labels(
+                                    [cart_coords], 
+                                    [element], 
+                                    font_size=10, 
+                                    point_color=color, 
+                                    point_size=0, 
+                                    render_points_as_spheres=False
+                                )
         
-        # Set view
-        self.ax.view_init(elev=self.view_elevation, azim=self.view_azimuth)
+        print(f"Plotted {len(unique_positions)} unique atom positions")
+
+    def analyze_drawn_bonds(self):
+        """Analyze and return information about the bonds currently drawn in the visualization."""
+        if not hasattr(self, 'drawn_bonds') or not self.drawn_bonds:
+            return {
+                'total_bonds': 0,
+                'bond_types': {},
+                'avg_bond_length': 0.0,
+                'min_bond_length': 0.0,
+                'max_bond_length': 0.0
+            }
         
-        # Turn off all grid elements and axes
-        self.ax.grid(False)
+        bond_lengths = []
+        bond_types = {}
         
-        # Turn off axis panes and grid
-        self.ax.xaxis.pane.fill = False
-        self.ax.yaxis.pane.fill = False
-        self.ax.zaxis.pane.fill = False
+        for bond in self.drawn_bonds:
+            # Calculate bond length
+            site1 = self.current_structure['sites'][bond['atom1_idx']]
+            site2 = self.current_structure['sites'][bond['atom2_idx']]
+            cart1 = np.array(site1['cart_coords'])
+            cart2 = np.array(site2['cart_coords'])
+            length = np.linalg.norm(cart2 - cart1)
+            bond_lengths.append(length)
+            
+            # Track bond types
+            elem1 = site1['element']
+            elem2 = site2['element']
+            bond_type = f"{min(elem1, elem2)}-{max(elem1, elem2)}"
+            if bond_type not in bond_types:
+                bond_types[bond_type] = []
+            bond_types[bond_type].append(length)
         
-        # Make panes transparent
-        self.ax.xaxis.pane.set_alpha(0)
-        self.ax.yaxis.pane.set_alpha(0) 
-        self.ax.zaxis.pane.set_alpha(0)
-        
-        # Turn off grid lines
-        self.ax.xaxis._axinfo["grid"]['color'] = (1,1,1,0)
-        self.ax.yaxis._axinfo["grid"]['color'] = (1,1,1,0)
-        self.ax.zaxis._axinfo["grid"]['color'] = (1,1,1,0)
-        
-        # Turn off axis lines and ticks
-        self.ax.set_xticks([])
-        self.ax.set_yticks([])
-        self.ax.set_zticks([])
-        
-        # Remove axis labels
-        self.ax.set_xlabel('')
-        self.ax.set_ylabel('')
-        self.ax.set_zlabel('')
-        
-        # Hide axis lines
-        self.ax.xaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
-        self.ax.yaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
-        self.ax.zaxis.line.set_color((1.0, 1.0, 1.0, 0.0))
-        
-        formula = self.current_structure['formula']
-        space_group = self.current_structure['space_group']
-        self.ax.set_title(f'{formula} ({space_group})')
-        
-        # Set equal aspect ratio for crystal coordinates
-        self.set_equal_aspect_crystal()
-        
-        # Optimize view for current structure
-        self.optimize_view_bounds()
-        
-        self.canvas.draw()
-    
-    def plot_atoms_crystal_coords(self, na, nb, nc):
-        """Plot atoms using proper Cartesian coordinates from crystal lattice."""
-        # Element colors (simplified)
-        element_colors = {
-            'H': '#FFFFFF', 'C': '#000000', 'N': '#0000FF', 'O': '#FF0000',
-            'F': '#00FF00', 'P': '#FFA500', 'S': '#FFFF00', 'Cl': '#00FF00',
-            'Ti': '#BFC2C7', 'Si': '#F0C814', 'Ca': '#3DFF00', 'Fe': '#E06633',
-            'Mg': '#8AFF00', 'Al': '#BFA6A6', 'K': '#8F40D4', 'Na': '#AB5CF2'
+        # Calculate statistics
+        if bond_lengths:
+            return {
+                'total_bonds': len(bond_lengths),
+                'bond_types': {k: {
+                    'count': len(v),
+                    'avg_length': np.mean(v),
+                    'min_length': min(v),
+                    'max_length': max(v)
+                } for k, v in bond_types.items()},
+                'avg_bond_length': np.mean(bond_lengths),
+                'min_bond_length': min(bond_lengths) if bond_lengths else 0.0,
+                'max_bond_length': max(bond_lengths) if bond_lengths else 0.0
+            }
+        return {
+            'total_bonds': 0,
+            'bond_types': {},
+            'avg_bond_length': 0.0,
+            'min_bond_length': 0.0,
+            'max_bond_length': 0.0
         }
+
+    def plot_bonds_pyvista(self, na, nb, nc):
+        """Plot bonds as cylinders in the PyVista scene."""
+        if not self.current_structure or not self.pymatgen_structure or not self.bonds:
+            return
+            
+        bond_radius = self.visualization_settings.get('bond_radius', 0.05)
+        transparency = self.visualization_settings.get('transparency', 0.3)
+        label_bonds = self.visualization_settings.get('label_bonds', False)
         
-        # Atomic radii scaling
-        scale = self.visualization_settings['atom_scale']
-        
-        # Get render quality setting
-        render_quality = self.visualization_settings.get('render_quality', 'High')
-        
-        for site_idx, site in enumerate(self.current_structure['sites']):
-            element = site['element']
-            frac_coords = np.array(site['frac_coords'])
-            
-            # Get color for element
-            color = element_colors.get(element, '#CCCCCC')
-            
-            # Base radius from element or default
-            base_radius = site.get('radius', 1.0)
-            if base_radius is None or base_radius <= 0:
-                base_radius = 0.5  # Default radius
-            
-            radius = base_radius * scale * 0.3  # Scale for visualization
-            
-            # Plot atoms in supercell
-            for i in range(na):
-                for j in range(nb):
-                    for k in range(nc):
-                        # Fractional coordinates including supercell translation
-                        frac_pos = frac_coords + np.array([i, j, k])
-                        
-                        # Convert to proper Cartesian coordinates using lattice matrix
-                        if self.pymatgen_structure:
-                            cart_pos = self.pymatgen_structure.lattice.get_cartesian_coords(frac_pos)
-                        else:
-                            cart_pos = frac_pos  # Fallback
-                        
-                        # Plot atom based on quality setting
-                        if render_quality == 'High':
-                            self.plot_atom_sphere(cart_pos, radius, color)
-                        else:  # Low quality
-                            self.plot_atom_circle(cart_pos, radius, color)
-                        
-                        # Add atom labels if enabled
-                        if self.visualization_settings['label_atoms']:
-                            self.add_atom_label(cart_pos, site_idx, element, i, j, k)
-    
-    def plot_atom_sphere(self, position, radius, color):
-        """Plot a high-quality 3D sphere for an atom."""
-        try:
-            # Ensure position and radius are scalars
-            pos_x = float(position[0])
-            pos_y = float(position[1]) 
-            pos_z = float(position[2])
-            r = float(radius)
-            
-            # Create sphere geometry
-            u = np.linspace(0, 2 * np.pi, 12)  # Reduced resolution for performance
-            v = np.linspace(0, np.pi, 8)
-            
-            # Create meshgrid for sphere coordinates
-            u_mesh, v_mesh = np.meshgrid(u, v)
-            
-            # Sphere coordinates
-            x = r * np.cos(u_mesh) * np.sin(v_mesh) + pos_x
-            y = r * np.sin(u_mesh) * np.sin(v_mesh) + pos_y
-            z = r * np.cos(v_mesh) + pos_z
-            
-            # Plot the 3D sphere surface
-            self.ax.plot_surface(x, y, z, color=color, alpha=0.8, linewidth=0, 
-                               antialiased=True, shade=True)
-        except Exception as e:
-            # Fallback to simple scatter plot if sphere plotting fails
-            print(f"Warning: Could not plot 3D sphere, falling back to circle: {e}")
-            self.plot_atom_circle(position, radius, color)
-    
-    def plot_atom_circle(self, position, radius, color):
-        """Plot a simple circle for an atom (low quality mode)."""
-        # Simple scatter plot with larger markers for low quality mode
-        self.ax.scatter(position[0], position[1], position[2],
-                      s=radius*200, c=color, alpha=0.8, 
-                      edgecolors='black', linewidths=0.5, marker='o')
-    
-    def plot_bonds_crystal_coords(self, na, nb, nc):
-        """Plot bonds using proper Cartesian coordinates with proper supercell handling."""
-        thickness = self.visualization_settings['bond_thickness']
-        
-        # Store drawn bonds for debugging
+        # Track drawn bonds for analysis
         self.drawn_bonds = []
         
         for bond in self.bonds:
-            i, j = bond['atom1_idx'], bond['atom2_idx']
+            if len(bond) < 2:  # Skip invalid bonds
+                continue
+                
+            i, j = bond[0], bond[1]
+            site1 = self.current_structure['sites'][i]
+            site2 = self.current_structure['sites'][j]
             
-            # Get fractional coordinates
-            pos1 = np.array(self.current_structure['sites'][i]['frac_coords'])
-            pos2 = np.array(self.current_structure['sites'][j]['frac_coords'])
+            # Get cartesian coordinates
+            cart1 = np.array(site1['cart_coords'])
+            cart2 = np.array(site2['cart_coords'])
             
-            # Use the original bond distance for validation
-            original_bond_distance = bond['distance']
+            # Calculate bond properties
+            center = (cart1 + cart2) / 2
+            direction = cart2 - cart1
+            length = np.linalg.norm(direction)
             
-            # For supercell visualization, we need to draw bonds intelligently
-            # Strategy: For each unit cell, find the shortest bond between atoms i and j
-            for ia in range(na):
-                for ja in range(nb):
-                    for ka in range(nc):
-                        # Fractional position of atom i in this unit cell
-                        frac_pos1 = pos1 + np.array([ia, ja, ka])
-                        
-                        # Find the closest image of atom j to this atom i
-                        best_frac_pos2, best_distance = self.find_closest_periodic_image(
-                            frac_pos1, pos2, na, nb, nc
-                        )
-                        
-                        # Convert to Cartesian coordinates
-                        if self.pymatgen_structure:
-                            cart_pos1 = self.pymatgen_structure.lattice.get_cartesian_coords(frac_pos1)
-                            cart_pos2 = self.pymatgen_structure.lattice.get_cartesian_coords(best_frac_pos2)
-                        else:
-                            cart_pos1 = frac_pos1  # Fallback
-                            cart_pos2 = best_frac_pos2
-                        
-                        # Calculate actual Cartesian distance
-                        actual_distance = np.linalg.norm(cart_pos1 - cart_pos2)
-                        
-                        # Only draw bond if the distance matches our calculated bond (within tolerance)
-                        distance_tolerance = 0.1  # Angstrom tolerance
-                        
-                        if abs(actual_distance - original_bond_distance) < distance_tolerance:
-                            # Draw the bond in Cartesian space
-                            self.ax.plot([cart_pos1[0], cart_pos2[0]],
-                                       [cart_pos1[1], cart_pos2[1]],
-                                       [cart_pos1[2], cart_pos2[2]],
-                                       'k-', linewidth=thickness, alpha=0.6)
-                            
-                            # Add bond labels if enabled
-                            if self.visualization_settings['label_bonds']:
-                                self.add_bond_label(cart_pos1, cart_pos2, bond, actual_distance)
-                            
-                            # Store for debugging
-                            self.drawn_bonds.append({
-                                'atom1_idx': i,
-                                'atom2_idx': j,
-                                'pos1': cart_pos1.copy(),
-                                'pos2': cart_pos2.copy(),
-                                'drawn_distance': actual_distance,
-                                'original_distance': original_bond_distance,
-                                'unit_cell': [ia, ja, ka]
-                            })
-    
-    def find_closest_periodic_image(self, frac_pos1, base_frac_pos2, na, nb, nc):
-        """Find the closest periodic image of atom 2 to atom 1 in fractional coordinates."""
-        best_frac_pos2 = None
-        best_distance = float('inf')
-        
-        # Check all possible images of atom 2 within the supercell and neighboring cells
-        for ib in range(-1, na + 1):
-            for jb in range(-1, nb + 1):
-                for kb in range(-1, nc + 1):
-                    # Fractional position of atom 2 in this image
-                    frac_pos2 = base_frac_pos2 + np.array([ib, jb, kb])
-                    
-                    # Calculate actual Cartesian distance
-                    if self.pymatgen_structure:
-                        cart_pos1 = self.pymatgen_structure.lattice.get_cartesian_coords(frac_pos1)
-                        cart_pos2 = self.pymatgen_structure.lattice.get_cartesian_coords(frac_pos2)
-                        distance = np.linalg.norm(cart_pos1 - cart_pos2)
-                    else:
-                        distance = np.linalg.norm(frac_pos1 - frac_pos2)  # Fallback
-                    
-                    if distance < best_distance:
-                        best_distance = distance
-                        best_frac_pos2 = frac_pos2.copy()
-        
-        return best_frac_pos2, best_distance
-    
-    def calculate_actual_distance_crystal_coords(self, crystal_pos1, crystal_pos2):
-        """Calculate actual distance between two points in crystal coordinates."""
-        if not self.pymatgen_structure:
-            # Fallback to simple Euclidean distance (not accurate)
-            return np.linalg.norm(crystal_pos1 - crystal_pos2)
-        
-        # Convert crystal coordinates to Cartesian
-        cart1 = self.pymatgen_structure.lattice.get_cartesian_coords(crystal_pos1)
-        cart2 = self.pymatgen_structure.lattice.get_cartesian_coords(crystal_pos2)
-        
-        # Calculate Cartesian distance
-        return np.linalg.norm(cart1 - cart2)
-    
-    def calculate_actual_distance_between_sites(self, site_i, site_j):
-        """Calculate the actual shortest distance between two atomic sites considering periodicity."""
-        if not self.pymatgen_structure:
-            return 0.0
-        
-        site1 = self.pymatgen_structure[site_i]
-        site2 = self.pymatgen_structure[site_j]
-        
-        # Use pymatgen's built-in distance calculation which handles periodicity
-        return site1.distance(site2)
-    
-    def add_atom_label(self, crystal_pos, site_idx, element, unit_cell_i, unit_cell_j, unit_cell_k):
-        """Add label to an atom."""
-        # Create label text
-        label_text = f"{element}{site_idx+1}"
-        
-        # Add unit cell information if in supercell
-        if unit_cell_i != 0 or unit_cell_j != 0 or unit_cell_k != 0:
-            label_text += f"({unit_cell_i},{unit_cell_j},{unit_cell_k})"
-        
-        # Position label slightly offset from atom center
-        offset = 0.1
-        label_pos = [crystal_pos[0] + offset, crystal_pos[1] + offset, crystal_pos[2] + offset]
-        
-        # Add text label
-        self.ax.text(label_pos[0], label_pos[1], label_pos[2], label_text,
-                    fontsize=8, color='black', weight='bold',
-                    bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8, edgecolor='gray'))
-    
-    def add_bond_label(self, pos1, pos2, bond, actual_distance):
-        """Add label to a bond."""
-        # Calculate midpoint of bond
-        midpoint = [(pos1[0] + pos2[0]) / 2, 
-                   (pos1[1] + pos2[1]) / 2, 
-                   (pos1[2] + pos2[2]) / 2]
-        
-        # Create label text with distance and bond type
-        bond_type = bond.get('bond_type', 'unknown')
-        label_text = f"{bond_type}\n{actual_distance:.2f}Å"
-        
-        # Add Wyckoff information if available
-        if 'wyckoff_info' in bond:
-            label_text += f"\n({bond['wyckoff_info']})"
-        
-        # Add text label at midpoint
-        self.ax.text(midpoint[0], midpoint[1], midpoint[2], label_text,
-                    fontsize=7, color='darkblue', weight='bold', ha='center',
-                    bbox=dict(boxstyle="round,pad=0.2", facecolor='lightyellow', alpha=0.9, edgecolor='orange'))
+            # Skip zero-length bonds
+            if length < 1e-3:
+                continue
+                
+            # Normalize direction vector
+            direction = direction / length
+            
+            # Only draw bonds within reasonable length
+            if 0.1 < length < 3.0:  # Reasonable bond length range in Angstroms
+                # Create cylinder for the bond
+                cyl = pv.Cylinder(
+                    center=center,
+                    direction=direction,
+                    radius=bond_radius,
+                    height=length,
+                    resolution=12  # Reduced resolution for better performance
+                )
+                
+                # Add to scene with light gray color and slight transparency
+                self.pv_widget.add_mesh(
+                    cyl, 
+                    color='lightgray', 
+                    opacity=min(0.7, transparency + 0.2),  # Slightly more opaque than atoms
+                    name=f"bond_{i}_{j}",
+                    smooth_shading=True
+                )
+                
+                # Record bond information for analysis
+                self.drawn_bonds.append({
+                    'atom1_idx': i,
+                    'atom2_idx': j,
+                    'drawn_distance': length,
+                    'original_distance': length,  # In this implementation, we don't have a separate original distance
+                    'unit_cell': [0, 0, 0]  # Simplified for basic implementation
+                })
+                
+                # Add bond label if enabled
+                if label_bonds:
+                    mid = (cart1 + cart2) / 2
+                    self.pv_widget.add_point_labels(
+                        [mid], 
+                        [f"{site1['element']}-{site2['element']}: {length:.2f}Å"],
+                        font_size=8,
+                        shape_opacity=0.5
+                    )
 
-    def plot_unit_cell(self):
-        """Plot unit cell outline using actual crystal lattice vectors."""
+    def plot_unit_cell_pyvista(self, na, nb, nc):
+        """Plot the unit cell edges as lines in the PyVista scene."""
         if not self.pymatgen_structure:
             return
             
-        # Get the actual lattice for accurate geometry
         lattice = self.pymatgen_structure.lattice
-        
-        # Unit cell corners in fractional coordinates
-        frac_corners = [
-            [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],  # Bottom face
-            [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]   # Top face
-        ]
-        
-        # Convert to Cartesian coordinates using actual lattice vectors
-        cart_corners = []
-        for frac_corner in frac_corners:
-            cart_corner = lattice.get_cartesian_coords(frac_corner)
-            cart_corners.append(cart_corner)
-        
-        # Unit cell edges with proper connectivity
+        # Get the 8 corners of the unit cell
+        corners = np.array([
+            [0, 0, 0],
+            [1, 0, 0],
+            [1, 1, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [1, 1, 1],
+            [0, 1, 1],
+        ])
+        cart_corners = np.array([lattice.get_cartesian_coords(c) for c in corners])
+        # Define the 12 edges of the unit cell
         edges = [
-            # Bottom face (z=0)
-            [0, 1], [1, 2], [2, 3], [3, 0],
-            # Top face (z=1)
-            [4, 5], [5, 6], [6, 7], [7, 4],
-            # Vertical edges connecting bottom to top
-            [0, 4], [1, 5], [2, 6], [3, 7]
+            (0,1),(1,2),(2,3),(3,0), # bottom
+            (4,5),(5,6),(6,7),(7,4), # top
+            (0,4),(1,5),(2,6),(3,7)  # verticals
         ]
-        
-        # Draw unit cell edges with the actual lattice geometry
-        for edge in edges:
-            p1, p2 = cart_corners[edge[0]], cart_corners[edge[1]]
-            self.ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], 
-                       color='#2E2E2E', linewidth=2.5, alpha=0.85, 
-                       solid_capstyle='round', linestyle='-')
-        
-        # Debug information about unit cell geometry
-        print(f"📐 Unit cell edges drawn with actual lattice parameters:")
-        crystal_system = self.determine_crystal_system_from_lattice(lattice)
-        print(f"   Crystal System: {crystal_system}")
-        print(f"   a={lattice.a:.3f}Å, b={lattice.b:.3f}Å, c={lattice.c:.3f}Å")
-        print(f"   α={lattice.alpha:.2f}°, β={lattice.beta:.2f}°, γ={lattice.gamma:.2f}°")
-        print(f"   Volume: {lattice.volume:.3f} Å³")
-        
-        # Add corner markers for better visualization (optional)
-        if self.visualization_settings.get('show_unit_cell_corners', False):
-            for i, corner in enumerate(cart_corners):
-                self.ax.scatter(corner[0], corner[1], corner[2], 
-                              color='red', s=30, alpha=0.7, marker='o')
-                # Label corners for debugging
-                if self.visualization_settings.get('label_unit_cell_corners', False):
-                    self.ax.text(corner[0], corner[1], corner[2], f'C{i}', 
-                               fontsize=8, color='red', alpha=0.8)
-    
-    def plot_crystal_axes(self):
-        """Plot actual crystal lattice vectors as axes."""
+        for start, end in edges:
+            pts = np.vstack([cart_corners[start], cart_corners[end]])
+            self.pv_widget.add_lines(pts, color='black', width=2, name=f"cell_{start}_{end}")
+
+    def plot_crystal_axes_pyvista(self):
+        """Plot crystal axes as colored arrows in the PyVista scene."""
         if not self.pymatgen_structure:
             return
-            
-        # Origin in Cartesian coordinates
-        origin = np.array([0.0, 0.0, 0.0])
-        
-        # Get actual lattice vectors
         lattice = self.pymatgen_structure.lattice
-        
-        # Scale factor for axis display (make them shorter for clarity)
-        scale_factor = 0.3
-        
-        # Actual lattice vectors scaled down
-        a_vector = lattice.matrix[0] * scale_factor
-        b_vector = lattice.matrix[1] * scale_factor  
-        c_vector = lattice.matrix[2] * scale_factor
-        
-        # Axis definitions with actual lattice directions
-        axes = {
-            'a': (origin, origin + a_vector, '#FF0000'),  # Red
-            'b': (origin, origin + b_vector, '#00AA00'),  # Green
-            'c': (origin, origin + c_vector, '#0000FF')   # Blue
-        }
-        
-        for axis_name, (start, end, color) in axes.items():
-            # Draw axis line representing actual lattice vector
-            self.ax.plot([start[0], end[0]], [start[1], end[1]], [start[2], end[2]],
-                       color=color, linewidth=4, alpha=0.9, solid_capstyle='round')
-            
-            # Add axis labels slightly beyond the end
-            direction = end - start
-            label_pos = end + direction * 0.2  # 20% beyond the end
-            self.ax.text(label_pos[0], label_pos[1], label_pos[2], 
-                        axis_name, fontsize=14, fontweight='bold', color=color,
-                        ha='center', va='center')
-    
-    def set_equal_aspect_crystal(self):
-        """Set proper aspect ratio for crystal coordinate system to preserve true geometry."""
-        # Get current data limits
-        x_limits = self.ax.get_xlim()
-        y_limits = self.ax.get_ylim()
-        z_limits = self.ax.get_zlim()
-        
-        # Find the actual data range
-        x_range = x_limits[1] - x_limits[0]
-        y_range = y_limits[1] - y_limits[0]
-        z_range = z_limits[1] - z_limits[0]
-        
-        # Calculate centers
-        x_center = (x_limits[0] + x_limits[1]) / 2
-        y_center = (y_limits[0] + y_limits[1]) / 2
-        z_center = (z_limits[0] + z_limits[1]) / 2
-        
-        # For crystal structures, we want to preserve the true geometric proportions
-        # rather than forcing equal aspect ratios, as this can distort the crystal geometry
-        
-        # Add minimal padding (2% of each range)
-        padding_factor = 0.02
-        x_pad = max(x_range * padding_factor, 0.1)  # Minimum 0.1 Å padding
-        y_pad = max(y_range * padding_factor, 0.1)
-        z_pad = max(z_range * padding_factor, 0.1)
-        
-        # Set limits that preserve the actual crystal geometry
-        self.ax.set_xlim([x_center - x_range/2 - x_pad, x_center + x_range/2 + x_pad])
-        self.ax.set_ylim([y_center - y_range/2 - y_pad, y_center + y_range/2 + y_pad])
-        self.ax.set_zlim([z_center - z_range/2 - z_pad, z_center + z_range/2 + z_pad])
-        
-        # Set aspect ratio based on user preference
-        try:
-            preserve_geometry = self.visualization_settings.get('preserve_geometry', True)
-            
-            if preserve_geometry and self.pymatgen_structure:
-                # Use actual lattice parameters to calculate true aspect ratios
-                lattice = self.pymatgen_structure.lattice
-                a_length = lattice.a
-                b_length = lattice.b
-                c_length = lattice.c
-                
-                # Calculate aspect ratios based on actual lattice constants
-                max_length = max(a_length, b_length, c_length)
-                if max_length > 0:
-                    # Use actual lattice proportions for true crystal geometry
-                    aspect_ratios = [a_length/max_length, b_length/max_length, c_length/max_length]
-                    
-                    # Only apply minimum aspect constraint for extremely distorted cases
-                    min_aspect = 0.1  # Reduced from 0.3 to allow more accurate representation
-                    aspect_ratios = [max(ar, min_aspect) for ar in aspect_ratios]
-                    
-                    self.ax.set_box_aspect(aspect_ratios)
-                    
-                    # Debug information
-                    print(f"🔷 Crystal unit cell geometry:")
-                    print(f"   a = {a_length:.3f} Å, b = {b_length:.3f} Å, c = {c_length:.3f} Å")
-                    print(f"   α = {lattice.alpha:.2f}°, β = {lattice.beta:.2f}°, γ = {lattice.gamma:.2f}°")
-                    print(f"   Aspect ratios: {aspect_ratios[0]:.3f} : {aspect_ratios[1]:.3f} : {aspect_ratios[2]:.3f}")
-                else:
-                    self.ax.set_box_aspect([1, 1, 1])  # Fallback to cubic
-            else:
-                # Force equal aspect ratios (may distort crystal geometry)
-                self.ax.set_box_aspect([1, 1, 1])
-                if preserve_geometry is False:
-                    print("⚠️  Crystal geometry preservation is disabled - unit cell may appear distorted")
-                
-        except AttributeError:
-            # Fallback for older matplotlib versions
-            print("⚠️  Using fallback aspect ratio method - upgrade matplotlib for better crystal geometry")
-            pass
-    
-    def optimize_view_bounds(self):
-        """Optimize the view bounds to better fill the available space."""
-        if not self.current_structure or not self.pymatgen_structure:
-            return
-        
-        # Get supercell dimensions
-        na, nb, nc = self.supercell_size
-        
-        # Calculate the actual extent of the structure in Cartesian coordinates
-        all_positions = []
-        
-        for site in self.current_structure['sites']:
-            frac_coords = np.array(site['frac_coords'])
-            
-            # Add all supercell positions
-            for i in range(na):
-                for j in range(nb):
-                    for k in range(nc):
-                        frac_pos = frac_coords + np.array([i, j, k])
-                        cart_pos = self.pymatgen_structure.lattice.get_cartesian_coords(frac_pos)
-                        all_positions.append(cart_pos)
-        
-        if all_positions:
-            all_positions = np.array(all_positions)
-            
-            # Find actual bounds with some padding
-            x_min, x_max = np.min(all_positions[:, 0]), np.max(all_positions[:, 0])
-            y_min, y_max = np.min(all_positions[:, 1]), np.max(all_positions[:, 1])
-            z_min, z_max = np.min(all_positions[:, 2]), np.max(all_positions[:, 2])
-            
-            # Add small padding (5% of the range)
-            x_range = x_max - x_min
-            y_range = y_max - y_min
-            z_range = z_max - z_min
-            
-            padding = 0.05  # 5% padding
-            x_pad = max(x_range * padding, 0.5)  # Minimum 0.5 Å padding
-            y_pad = max(y_range * padding, 0.5)
-            z_pad = max(z_range * padding, 0.5)
-            
-            # Set optimized bounds
-            self.ax.set_xlim([x_min - x_pad, x_max + x_pad])
-            self.ax.set_ylim([y_min - y_pad, y_max + y_pad])
-            self.ax.set_zlim([z_min - z_pad, z_max + z_pad])
-    
-    # === Control Methods ===
-    
-    def update_visualization_settings(self):
-        """Update visualization settings from controls."""
-        self.visualization_settings['show_bonds'] = self.show_bonds_cb.isChecked()
-        self.visualization_settings['show_unit_cell'] = self.show_unit_cell_cb.isChecked()
-        self.visualization_settings['show_axes'] = self.show_axes_cb.isChecked()
-        self.visualization_settings['label_atoms'] = self.label_atoms_cb.isChecked()
-        self.visualization_settings['label_bonds'] = self.label_bonds_cb.isChecked()
-        self.visualization_settings['preserve_geometry'] = self.preserve_geometry_cb.isChecked()
-        self.visualization_settings['show_unit_cell_corners'] = self.show_unit_cell_corners_cb.isChecked()
-        self.update_3d_plot()
+        origin = lattice.get_cartesian_coords([0,0,0])
+        a_vec = lattice.get_cartesian_coords([1,0,0]) - origin
+        b_vec = lattice.get_cartesian_coords([0,1,0]) - origin
+        c_vec = lattice.get_cartesian_coords([0,0,1]) - origin
+        arrow_len = min(np.linalg.norm(a_vec), np.linalg.norm(b_vec), np.linalg.norm(c_vec)) * 0.8
+        self.pv_widget.add_arrows(origin, a_vec/np.linalg.norm(a_vec)*arrow_len, color='red', name='a_axis')
+        self.pv_widget.add_arrows(origin, b_vec/np.linalg.norm(b_vec)*arrow_len, color='green', name='b_axis')
+        self.pv_widget.add_arrows(origin, c_vec/np.linalg.norm(c_vec)*arrow_len, color='blue', name='c_axis')
+
+    # ... (rest of the code remains the same)
     
     def update_atom_scale(self, value):
         """Update atom scale factor."""
@@ -2461,14 +1955,44 @@ class CrystalStructureWidget(QWidget):
                     item.setBackground(QColor(element_color))
     
     def get_element_color(self, element):
-        """Get a light color for element background."""
+        """Get a darker, more vibrant color for elements using CPK color scheme."""
         element_colors = {
-            'H': '#FFEEEE', 'C': '#EEEEEE', 'N': '#EEEEFF', 'O': '#FFEEEE',
-            'F': '#EEFFEE', 'P': '#FFEEDD', 'S': '#FFFFEE', 'Cl': '#EEFFEE',
-            'Ti': '#EEEEFF', 'Si': '#FFFFDD', 'Ca': '#EEFFDD', 'Fe': '#FFDDDD',
-            'Mg': '#DDFFDD', 'Al': '#EEDDDD', 'K': '#DDDDFF', 'Na': '#DDDDFF'
+            # CPK colors with darker shades
+            'H': '#FFFFFF',  # White
+            'C': '#909090',  # Darker gray
+            'N': '#4141FF',  # Darker blue
+            'O': '#FF0D0D',  # Darker red
+            'F': '#90E050',  # Darker green
+            'P': '#FF8000',  # Darker orange
+            'S': '#FFFF30',  # Darker yellow
+            'Cl': '#1FF01F', # Darker green
+            'Br': '#A52A2A', # Brown
+            'I': '#940094',  # Dark purple
+            'He': '#D9FFFF', # Cyan
+            'Ne': '#B3E3F5', # Neon blue
+            'Ar': '#80D1E3', # Darker cyan
+            'Xe': '#429EB0', # Dark teal
+            'Na': '#AB5CF2', # Darker blue-violet
+            'K': '#8F40D3',  # Darker violet
+            'Mg': '#8AFF00', # Darker green
+            'Ca': '#3DFF00', # Darker green
+            'Fe': '#E06633', # Darker rust
+            'Ti': '#BFC2C7', # Darker silver
+            'Al': '#AFAFAF', # Darker gray
+            'Si': '#F0C8A0', # Darker tan
+            'Cu': '#C88033', # Darker copper
+            'Ag': '#C0C0C0', # Silver
+            'Au': '#FFD700', # Gold
+            'Zn': '#7D80B0', # Darker bluish-gray
+            'Pb': '#575961', # Darker gray
+            'Hg': '#B8B8D0', # Darker silver-blue
+            'As': '#BD80E3', # Darker purple
+            'Se': '#FFA100', # Darker orange
+            'Li': '#CC80FF', # Darker violet
+            'Be': '#C2FF00', # Darker green
+            'B': '#FFB5B5',  # Darker pink
         }
-        return element_colors.get(element, '#F0F0F0')
+        return element_colors.get(element, '#A0A0A0')  # Default to medium gray
     
     def update_symmetry_info(self):
         """Update symmetry operations information."""

@@ -8200,6 +8200,15 @@ Stability Assessment:"""
                 f"Successfully exported {exported_clusters} clusters to:\n{export_dir}"
             )
             
+            # Restore window focus after file dialog
+            try:
+                from core.window_focus_manager import restore_window_focus_after_dialog
+                restore_window_focus_after_dialog(self)
+            except ImportError:
+                # Fallback if focus manager not available
+                self.raise_()
+                self.activateWindow()
+            
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Error exporting clusters: {str(e)}")
             print(f"Export error: {str(e)}")
@@ -8305,6 +8314,15 @@ Stability Assessment:"""
                 f"Summed spectra exported to:\n{export_dir}\n\nPlot saved to:\n{plot_filepath}"
             )
             
+            # Restore window focus after file dialog
+            try:
+                from core.window_focus_manager import restore_window_focus_after_dialog
+                restore_window_focus_after_dialog(self)
+            except ImportError:
+                # Fallback if focus manager not available
+                self.raise_()
+                self.activateWindow()
+            
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Error exporting summed spectra: {str(e)}")
             print(f"Export error: {str(e)}")
@@ -8402,10 +8420,17 @@ Stability Assessment:"""
         
         # Create figure
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5 * n_rows))
+        
+        # Handle different axes layouts properly
         if n_clusters == 1:
-            axes = [axes]
+            # Single cluster: axes is a single Axes object
+            axes_array = [[axes]]
         elif n_rows == 1:
-            axes = axes.reshape(1, -1)
+            # Single row: axes is a 1D array
+            axes_array = [axes] if n_cols == 1 else axes.reshape(1, -1)
+        else:
+            # Multiple rows: axes is a 2D array
+            axes_array = axes
         
         # Get colormap
         colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Set1'
@@ -8418,7 +8443,7 @@ Stability Assessment:"""
         for i, (cluster_id, data) in enumerate(processed_spectra.items()):
             row = i // n_cols
             col = i % n_cols
-            ax = axes[row, col] if n_rows > 1 else axes[col]
+            ax = axes_array[row][col]
             
             # Plot individual spectra (very transparent)
             for spectrum in data['individual']:
@@ -8450,8 +8475,9 @@ Stability Assessment:"""
         for i in range(n_clusters, n_rows * n_cols):
             row = i // n_cols
             col = i % n_cols
-            ax = axes[row, col] if n_rows > 1 else axes[col]
-            ax.set_visible(False)
+            if row < len(axes_array) and col < len(axes_array[row]):
+                ax = axes_array[row][col]
+                ax.set_visible(False)
         
         plt.tight_layout()
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
@@ -8575,6 +8601,15 @@ Stability Assessment:"""
                 self, "Export Complete", 
                 f"Cluster overview saved to:\n{filepath}"
             )
+            
+            # Restore window focus after file dialog
+            try:
+                from core.window_focus_manager import restore_window_focus_after_dialog
+                restore_window_focus_after_dialog(self)
+            except ImportError:
+                # Fallback if focus manager not available
+                self.raise_()
+                self.activateWindow()
             
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Error exporting cluster overview: {str(e)}")

@@ -1634,6 +1634,16 @@ class RamanAnalysisAppQt6(QMainWindow):
                 np.savetxt(file_path, data, delimiter='\t', header='Wavenumber\tIntensity')
                 self.status_bar.showMessage(f"Saved: {Path(file_path).name}")
                 QMessageBox.information(self, "Success", f"Spectrum saved to:\n{file_path}")
+                
+                # Restore window focus after file dialog
+                try:
+                    from core.window_focus_manager import restore_window_focus_after_dialog
+                    restore_window_focus_after_dialog(self)
+                except ImportError:
+                    # Fallback if focus manager not available
+                    self.raise_()
+                    self.activateWindow()
+                    
             except Exception as e:
                 QMessageBox.critical(self, "Save Error", f"Failed to save spectrum:\n{str(e)}")
 
