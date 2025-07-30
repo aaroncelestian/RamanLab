@@ -20,6 +20,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score, silhouette_samples
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.mixture import GaussianMixture
 from scipy.cluster.hierarchy import linkage, fcluster, dendrogram
 from scipy.optimize import curve_fit
 from scipy.stats import spearmanr, pearsonr
@@ -617,7 +618,11 @@ class RamanClusterAnalysisQt6(QMainWindow):
             'temporal_data': None,  # For time-series analysis
             'composition_data': None,  # For composition tracking
             'umap_embedding': None,  # Store UMAP results
-            'silhouette_scores': None  # Store silhouette analysis
+            'silhouette_scores': None,  # Store silhouette analysis
+            # Probabilistic clustering
+            'cluster_probs': None,  # Cluster probabilities from GMM
+            'gmm': None,  # Fitted GMM model
+            'subtypes': None  # Sub-type information
         }
         
         # Initialize advanced analysis data
@@ -834,7 +839,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         
         # Add phase separation method selection
         self.phase_method_combo = QComboBox()
-        self.phase_method_combo.addItems(['None', 'Exclude Regions', 'Corundum Correction', 'NMF Separation'])
+        self.phase_method_combo.addItems(['None', 'Exclude Regions', 'Corundum Correction', 'NMF Separation', 'Carbon Soot Optimization'])
         self.phase_method_combo.setCurrentText('None')
         self.phase_method_combo.currentTextChanged.connect(self.update_preprocessing_controls)
         preprocessing_layout.addRow("Phase Separation Method:", self.phase_method_combo)
@@ -854,10 +859,85 @@ class RamanClusterAnalysisQt6(QMainWindow):
         
         layout.addWidget(preprocessing_group)
         
-        # Add run clustering button
-        run_clustering_btn = QPushButton("Run Clustering")
+        # Carbon-specific analysis section
+        carbon_group = QGroupBox("Carbon Soot Analysis")
+        carbon_layout = QVBoxLayout(carbon_group)
+
+        # Enable carbon optimization
+        self.enable_carbon_analysis_cb = QCheckBox("Enable Carbon Soot Optimization")
+        self.enable_carbon_analysis_cb.setChecked(False)
+        self.enable_carbon_analysis_cb.stateChanged.connect(self.update_carbon_controls)
+        carbon_layout.addWidget(self.enable_carbon_analysis_cb)
+
+        # Carbon analysis parameters
+        carbon_params_frame = QFrame()
+        carbon_params_layout = QFormLayout(carbon_params_frame)
+
+        # D-band range
+        self.d_band_range_edit = QLineEdit("1300-1400")
+        carbon_params_layout.addRow("D-band Range (cm⁻¹):", self.d_band_range_edit)
+
+        # G-band range
+        self.g_band_range_edit = QLineEdit("1550-1620")
+        carbon_params_layout.addRow("G-band Range (cm⁻¹):", self.g_band_range_edit)
+
+        # Analysis buttons
+        carbon_buttons = QHBoxLayout()
+
+        analyze_carbon_btn = QPushButton("Analyze Carbon Features")
+        analyze_carbon_btn.clicked.connect(self.print_carbon_feature_analysis)
+        carbon_buttons.addWidget(analyze_carbon_btn)
+
+        suggest_improvements_btn = QPushButton("Suggest Improvements")
+        suggest_improvements_btn.clicked.connect(self.suggest_clustering_improvements)
+        carbon_buttons.addWidget(suggest_improvements_btn)
+        
+        # Add NMF info button
+        nmf_info_btn = QPushButton("NMF Clustering Info")
+        nmf_info_btn.clicked.connect(self.show_nmf_clustering_info)
+        carbon_buttons.addWidget(nmf_info_btn)
+
+        carbon_params_layout.addRow(carbon_buttons)
+
+        carbon_layout.addWidget(carbon_params_frame)
+        layout.addWidget(carbon_group)
+
+        # Initially hide carbon controls
+        carbon_params_frame.setVisible(False)
+        self.carbon_controls = [carbon_params_frame]
+        
+        # Add run buttons
+        button_layout = QHBoxLayout()
+        
+        # Standard clustering button
+        run_clustering_btn = QPushButton("Run Standard Clustering")
         run_clustering_btn.clicked.connect(self.run_clustering)
-        layout.addWidget(run_clustering_btn)
+        button_layout.addWidget(run_clustering_btn)
+        
+        # Probabilistic clustering button
+        run_prob_btn = QPushButton("Run Probabilistic Clustering")
+        run_prob_btn.clicked.connect(self.run_probabilistic_clustering)
+        run_prob_btn.setToolTip("Perform clustering with probability estimates and sub-type identification")
+        button_layout.addWidget(run_prob_btn)
+        
+        layout.addLayout(button_layout)
+        
+        # Add visualization buttons for probabilistic results
+        prob_vis_layout = QHBoxLayout()
+        
+        self.prob_viz_btn = QPushButton("Show Probability Heatmap")
+        self.prob_viz_btn.setToolTip("Visualize cluster assignment probabilities")
+        self.prob_viz_btn.clicked.connect(self.plot_probability_heatmap)
+        self.prob_viz_btn.setEnabled(False)  # Disabled until clustering is run
+        prob_vis_layout.addWidget(self.prob_viz_btn)
+        
+        self.subtype_viz_btn = QPushButton("View Sub-type Hierarchies")
+        self.subtype_viz_btn.setToolTip("View hierarchical sub-type structures")
+        self.subtype_viz_btn.clicked.connect(lambda: self.plot_dendrogram(None))
+        self.subtype_viz_btn.setEnabled(False)  # Disabled until clustering is run
+        prob_vis_layout.addWidget(self.subtype_viz_btn)
+        
+        layout.addLayout(prob_vis_layout)
         
         # Add progress bar
         self.clustering_progress = QProgressBar()
@@ -1108,10 +1188,25 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.umap_spread.setToolTip("Effective scale of embedded points")
         umap_params_layout.addWidget(self.umap_spread, 1, 3)
         
+        # UMAP presets for different material types
+        umap_params_layout.addWidget(QLabel("UMAP Presets:"), 2, 0)
+        self.umap_preset_combo = QComboBox()
+        self.umap_preset_combo.addItems([
+            'Custom',
+            'Carbon Soot (Tight Clusters)',
+            'Carbon Soot (Broad Clusters)',
+            'Carbon Manifold (Continuous)', 
+            'General Spectroscopy',
+            'High Noise Data'
+        ])
+        self.umap_preset_combo.currentTextChanged.connect(self.apply_umap_preset)
+        self.umap_preset_combo.setToolTip("Apply optimized UMAP parameters for different data types")
+        umap_params_layout.addWidget(self.umap_preset_combo, 2, 1, 1, 3)
+        
         # Update button
         self.update_umap_btn = QPushButton("Update UMAP")
         self.update_umap_btn.clicked.connect(self.update_scatter_plot)
-        umap_params_layout.addWidget(self.update_umap_btn, 2, 0, 1, 4)
+        umap_params_layout.addWidget(self.update_umap_btn, 3, 0, 1, 4)
         
         # Initially hide UMAP parameters
         self.umap_params_frame.setVisible(False)
@@ -1170,6 +1265,13 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.export_overview_btn.setEnabled(False)
         export_buttons_row.addWidget(self.export_overview_btn)
         
+        # Export XY plot data button
+        self.export_xy_btn = QPushButton("Export XY Plot Data")
+        self.export_xy_btn.setToolTip("Export the XY coordinates of the current scatter plot (PCA or UMAP)")
+        self.export_xy_btn.clicked.connect(self.export_xy_plot_data)
+        self.export_xy_btn.setEnabled(False)
+        export_buttons_row.addWidget(self.export_xy_btn)
+        
         export_layout.addLayout(export_buttons_row)
         
         # Export status
@@ -1190,8 +1292,44 @@ class RamanClusterAnalysisQt6(QMainWindow):
             if hasattr(self, 'cluster_data') and self.cluster_data['features_scaled'] is not None:
                 self.update_scatter_plot()
 
+    def apply_umap_preset(self):
+        """Apply UMAP parameter presets optimized for different data types."""
+        preset = self.umap_preset_combo.currentText()
+        
+        if preset == 'Carbon Soot (Tight Clusters)':
+            self.umap_n_neighbors.setValue(5)
+            self.umap_min_dist.setValue(0.01)
+            self.umap_metric.setCurrentText('cosine')
+            self.umap_spread.setValue(0.5)
+            
+        elif preset == 'Carbon Soot (Broad Clusters)':
+            self.umap_n_neighbors.setValue(15)
+            self.umap_min_dist.setValue(0.1)
+            self.umap_metric.setCurrentText('cosine')
+            self.umap_spread.setValue(1.0)
+            
+        elif preset == 'Carbon Manifold (Continuous)':
+            self.umap_n_neighbors.setValue(20)
+            self.umap_min_dist.setValue(0.1)
+            self.umap_metric.setCurrentText('cosine')
+            self.umap_spread.setValue(1.0)
+            
+        elif preset == 'General Spectroscopy':
+            self.umap_n_neighbors.setValue(15)
+            self.umap_min_dist.setValue(0.1)
+            self.umap_metric.setCurrentText('euclidean')
+            self.umap_spread.setValue(1.0)
+            
+        elif preset == 'High Noise Data':
+            self.umap_n_neighbors.setValue(30)
+            self.umap_min_dist.setValue(0.5)
+            self.umap_metric.setCurrentText('manhattan')
+            self.umap_spread.setValue(2.0)
+
     def update_scatter_plot(self):
-        """Update the scatter plot visualization with improved UMAP implementation."""
+        """
+        Enhanced UMAP implementation specifically optimized for carbon soot clustering.
+        """
         if (self.cluster_data['features_scaled'] is None or 
             self.cluster_data['labels'] is None):
             return
@@ -1201,23 +1339,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             # Clear previous scatter points data and hover annotation
             self.scatter_points = []
-            self.hover_annotation = None  # Reset hover annotation when clearing axes
+            self.hover_annotation = None
             
             # Get visualization method
             method = self.visualization_method_combo.currentText()
             
-            features = self.cluster_data['features_scaled']
+            # Use standard features (carbon optimization disabled for better results)
+            features_scaled = self.cluster_data['features_scaled']
+            
             labels = self.cluster_data['labels']
             
-            # Get hover labels (last 8 characters of filenames)
+            # Get hover labels
             hover_labels = self.get_hover_labels()
             
             if method == 'PCA':
-                # Perform PCA
+                # Standard PCA implementation
                 pca = PCA(n_components=2)
-                coords = pca.fit_transform(features)
+                coords = pca.fit_transform(features_scaled)
                 
-                # Store PCA results
                 self.cluster_data['pca_coords'] = coords
                 self.cluster_data['pca_model'] = pca
                 
@@ -1226,69 +1365,126 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 title = 'PCA Visualization of Clusters'
                 
             elif method == 'UMAP' and UMAP_AVAILABLE:
-                # Get UMAP parameters from UI
-                n_neighbors = self.umap_n_neighbors.value() if hasattr(self, 'umap_n_neighbors') else 15
-                min_dist = self.umap_min_dist.value() if hasattr(self, 'umap_min_dist') else 0.1
-                metric = self.umap_metric.currentText() if hasattr(self, 'umap_metric') else 'euclidean'
-                spread = self.umap_spread.value() if hasattr(self, 'umap_spread') else 1.0
+                # Optimized UMAP parameters for carbon soot discrimination
+                n_neighbors = max(5, min(50, len(features_scaled) // 3))  # Adaptive neighbors
+                min_dist = 0.01  # Very small for tight clusters
+                metric = 'cosine'  # Better for spectral data
+                spread = 0.5  # Tighter spread
                 
-                # Ensure n_neighbors is not larger than number of samples
-                n_neighbors = min(n_neighbors, len(features) - 1)
+                # Override with UI values if available
+                if hasattr(self, 'umap_n_neighbors'):
+                    n_neighbors = min(self.umap_n_neighbors.value(), len(features_scaled) - 1)
+                if hasattr(self, 'umap_min_dist'):
+                    min_dist = self.umap_min_dist.value()
+                if hasattr(self, 'umap_metric'):
+                    metric = self.umap_metric.currentText()
+                if hasattr(self, 'umap_spread'):
+                    spread = self.umap_spread.value()
                 
                 try:
-                    # Perform UMAP with tuned parameters
-                    umap_model = umap.UMAP(
-                        n_components=2, 
-                        n_neighbors=n_neighbors,
-                        min_dist=min_dist,
-                        metric=metric,
-                        spread=spread,
-                        random_state=42,
-                        n_jobs=1  # Use single thread for stability
-                    )
+                    print(f"Running UMAP with n_neighbors={n_neighbors}, min_dist={min_dist}, metric={metric}")
                     
-                    # Show progress for large datasets
-                    if len(features) > 1000:
-                        print(f"Computing UMAP for {len(features)} samples...")
+                    # Check if we want manifold structure or discrete clustering
+                    use_manifold_params = (hasattr(self, 'umap_preset_combo') and 
+                                         self.umap_preset_combo.currentText() == 'Carbon Manifold (Continuous)')
                     
-                    coords = umap_model.fit_transform(features)
+                    if use_manifold_params:
+                        # Use gentle parameters to preserve manifold structure
+                        umap_model = umap.UMAP(
+                            n_components=2,
+                            n_neighbors=n_neighbors,
+                            min_dist=min_dist,
+                            metric=metric,
+                            spread=spread,
+                            random_state=42,
+                            n_jobs=1,
+                            # Gentle parameters for manifold preservation
+                            local_connectivity=1.0,  # Standard connectivity
+                            repulsion_strength=1.0,  # Standard repulsion
+                            init='spectral',         # Good for spectral data
+                            verbose=False
+                        )
+                    else:
+                        # Create UMAP with optimized parameters for carbon discrimination
+                        umap_model = umap.UMAP(
+                            n_components=2,
+                            n_neighbors=n_neighbors,
+                            min_dist=min_dist,
+                            metric=metric,
+                            spread=spread,
+                            random_state=42,
+                            n_jobs=1,
+                            # Additional parameters for better carbon clustering
+                            local_connectivity=2.0,  # Increase local connectivity
+                            repulsion_strength=2.0,   # Increase repulsion for better separation
+                            negative_sample_rate=10,  # More negative samples for better structure
+                            transform_queue_size=8.0, # Larger queue for stability
+                            a=None, b=None,          # Let UMAP optimize these
+                            init='spectral',         # Better initialization for spectral data
+                            densmap=False,           # Focus on topology, not density
+                            dens_lambda=2.0,
+                            dens_frac=0.3,
+                            dens_var_shift=0.1,
+                            output_dens=False,
+                            verbose=True             # Show progress
+                        )
+                    
+                    coords = umap_model.fit_transform(features_scaled)
                     
                     # Store UMAP results
                     self.cluster_data['umap_coords'] = coords
                     self.cluster_data['umap_model'] = umap_model
+                    if self.cluster_data.get('carbon_optimized', False):
+                        self.cluster_data['carbon_features'] = carbon_features
+                        self.cluster_data['carbon_features_scaled'] = features_scaled
                     
-                    xlabel = f'UMAP 1 (neighbors={n_neighbors}, min_dist={min_dist:.3f})'
-                    ylabel = f'UMAP 2 (metric={metric}, spread={spread:.1f})'
+                    xlabel = f'UMAP 1 (carbon-optimized: {metric} metric)'
+                    ylabel = f'UMAP 2 (neighbors={n_neighbors}, min_dist={min_dist:.3f})'
                     title = 'UMAP Visualization of Clusters'
                     
+                    print("UMAP completed successfully")
+                    
                 except Exception as e:
-                    print(f"UMAP failed: {e}")
-                    # Fallback to PCA if UMAP fails
-                    pca = PCA(n_components=2)
-                    coords = pca.fit_transform(features)
-                    xlabel = f'PC1 (UMAP fallback - {pca.explained_variance_ratio_[0]:.1%})'
-                    ylabel = f'PC2 (UMAP fallback - {pca.explained_variance_ratio_[1]:.1%})'
-                    title = 'PCA Visualization (UMAP Failed)'
-                
-            else:
-                # Fallback to first two features or PCA if UMAP not available
-                if features.shape[1] >= 2:
-                    coords = features[:, :2]
-                    xlabel = 'Feature 1'
-                    ylabel = 'Feature 2'
-                    title = 'Feature Space Visualization'
-                else:
-                    # Use PCA if not enough features
-                    pca = PCA(n_components=2)
-                    coords = pca.fit_transform(features)
-                    xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%})'
-                    ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%})'
-                    title = 'PCA Visualization'
+                    print(f"UMAP failed with optimized parameters: {e}")
+                    print("Falling back to more conservative UMAP settings...")
+                    
+                    try:
+                        # Fallback UMAP with very conservative settings
+                        fallback_umap = umap.UMAP(
+                            n_components=2,
+                            n_neighbors=min(15, len(features_scaled) - 1),
+                            min_dist=0.1,
+                            metric='euclidean',
+                            random_state=42,
+                            n_jobs=1
+                        )
+                        coords = fallback_umap.fit_transform(features_scaled)
+                        
+                        xlabel = 'UMAP 1 (fallback mode)'
+                        ylabel = 'UMAP 2 (fallback mode)'
+                        title = 'UMAP Visualization (Fallback)'
+                        
+                    except Exception as e2:
+                        print(f"Fallback UMAP also failed: {e2}")
+                        # Final fallback to PCA
+                        pca = PCA(n_components=2)
+                        coords = pca.fit_transform(features_scaled)
+                        xlabel = f'PC1 (UMAP failed - {pca.explained_variance_ratio_[0]:.1%})'
+                        ylabel = f'PC2 (UMAP failed - {pca.explained_variance_ratio_[1]:.1%})'
+                        title = 'PCA Visualization (UMAP Failed)'
             
-            # Create scatter plot with improved visualization and store hover data
+            else:
+                # Fallback to PCA
+                pca = PCA(n_components=2)
+                coords = pca.fit_transform(features_scaled)
+                xlabel = f'PC1 ({pca.explained_variance_ratio_[0]:.1%})'
+                ylabel = f'PC2 ({pca.explained_variance_ratio_[1]:.1%})'
+                title = 'PCA Visualization'
+            
+            # Create enhanced scatter plot
             unique_labels = np.unique(labels)
             
-            # Get selected colormap
+            # Get colormap
             colormap_name = self.colormap_combo.currentText() if hasattr(self, 'colormap_combo') else 'Set1'
             reverse_colormap = self.reverse_colormap_cb.isChecked() if hasattr(self, 'reverse_colormap_cb') else False
             
@@ -1299,24 +1495,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 colors = colormap(np.linspace(0, 1, len(unique_labels)))
             except Exception as e:
                 print(f"Error loading colormap '{colormap_name}': {e}")
-                # Fallback to Set1 if colormap fails
                 colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
             
+            # Plot clusters with enhanced visualization
             for i, label in enumerate(unique_labels):
                 mask = labels == label
                 cluster_coords = coords[mask]
                 cluster_hover_labels = [hover_labels[j] for j in range(len(hover_labels)) if mask[j]]
                 
-                # Create scatter plot for this cluster
+                # Create scatter plot for this cluster with enhanced styling
                 scatter = self.viz_ax.scatter(
                     cluster_coords[:, 0], 
                     cluster_coords[:, 1], 
                     c=[colors[i]], 
-                    label=f'Cluster {label}',
-                    alpha=0.7,
-                    s=50,
+                    label=f'Cluster {label} (n={len(cluster_coords)})',
+                    alpha=0.8,
+                    s=60,  # Slightly larger points
                     edgecolors='white',
-                    linewidths=0.5
+                    linewidths=1.0  # Thicker edge for better visibility
                 )
                 
                 # Store scatter point information for hover detection
@@ -1327,7 +1523,12 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     'cluster': label
                 })
                 
-
+                # Add cluster centroid with matching color
+                centroid = np.mean(cluster_coords, axis=0)
+                self.viz_ax.scatter(centroid[0], centroid[1], 
+                                  c=[colors[i]], marker='x', s=200, 
+                                  edgecolors='black', linewidths=2,  # Black outline for visibility
+                                  zorder=10)  # Ensure centroids are on top
             
             self.viz_ax.set_xlabel(xlabel)
             self.viz_ax.set_ylabel(ylabel)
@@ -1335,18 +1536,32 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.viz_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
             self.viz_ax.grid(True, alpha=0.3)
             
+            # Add text box with optimization info (carbon optimization disabled)
+            # if method == 'UMAP' and self.cluster_data.get('carbon_optimized', False):
+            #     info_text = f"Carbon-optimized UMAP\nFeatures: D/G ratios, peak positions,\nwidths, and carbon-specific signatures"
+            #     self.viz_ax.text(0.02, 0.98, info_text, transform=self.viz_ax.transAxes,
+            #                    verticalalignment='top', bbox=dict(boxstyle='round',
+            #                    facecolor='lightblue', alpha=0.8), fontsize=9)
+            
             self.viz_fig.tight_layout()
             self.viz_canvas.draw()
             
-            # Enable export buttons if clusters are available
+            # Enable export buttons
             if hasattr(self, 'export_folders_btn') and unique_labels is not None:
                 self.export_folders_btn.setEnabled(True)
                 self.export_summed_btn.setEnabled(True)
                 self.export_overview_btn.setEnabled(True)
+                self.export_xy_btn.setEnabled(True)
                 self.export_status.setText(f"Ready to export {len(unique_labels)} clusters")
+            
+            # Print feature importance for debugging (carbon optimization disabled)
+            # if method == 'UMAP' and self.cluster_data.get('carbon_optimized', False):
+            #     self.print_carbon_feature_analysis()
             
         except Exception as e:
             print(f"Error updating scatter plot: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def get_hover_labels(self):
         """Get hover labels (last 8 characters of filenames) for each spectrum."""
@@ -3232,6 +3447,200 @@ class RamanClusterAnalysisQt6(QMainWindow):
                               "This will allow adding more spectra to the existing dataset.")
 
     # Clustering Methods
+    def run_probabilistic_clustering(self):
+        """Run probabilistic clustering with GMM and hierarchical sub-typing."""
+        if not hasattr(self, 'cluster_data') or self.cluster_data.get('features_scaled') is None:
+            QMessageBox.warning(self, "No Data", "Please import and preprocess data first.")
+            return
+        
+        try:
+            features = self.cluster_data['features_scaled']
+            
+            # Get number of clusters from UI or use a default
+            n_components = self.n_clusters_spinbox.value()
+            
+            # Show progress
+            progress = QProgressDialog("Running Probabilistic Clustering...", 
+                                     "Cancel", 0, 100, self)
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setValue(10)
+            
+            # 1. First-level clustering with GMM
+            progress.setLabelText("Fitting Gaussian Mixture Model...")
+            gmm = GaussianMixture(n_components=n_components, 
+                                covariance_type='full', 
+                                random_state=42)
+            
+            # Get cluster probabilities and hard assignments
+            gmm.fit(features)  # First fit the model
+            cluster_probs = gmm.predict_proba(features)  # Then get probabilities
+            hard_labels = gmm.predict(features)  # Get hard assignments
+            progress.setValue(50)
+            
+            # Store results
+            self.cluster_data['cluster_probs'] = cluster_probs
+            self.cluster_data['labels'] = hard_labels
+            self.cluster_data['gmm'] = gmm
+            
+            # 2. Hierarchical sub-typing
+            progress.setLabelText("Identifying sub-types...")
+            self._identify_subtypes(features, hard_labels, n_components)
+            progress.setValue(80)
+            
+            # Update visualizations
+            self.update_visualizations()
+            progress.setValue(100)
+            
+            # Enable visualization buttons
+            self.prob_viz_btn.setEnabled(True)
+            self.subtype_viz_btn.setEnabled(True)
+            
+            QMessageBox.information(self, "Success", 
+                                  f"Probabilistic clustering completed with {n_components} clusters")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Clustering failed: {str(e)}")
+        finally:
+            progress.close()
+    
+    def _identify_subtypes(self, features, labels, n_clusters):
+        """Identify sub-types within each cluster using hierarchical clustering."""
+        self.cluster_data['subtypes'] = {}
+        
+        for cluster_id in range(n_clusters):
+            # Get samples in this cluster
+            mask = (labels == cluster_id)
+            cluster_features = features[mask]
+            
+            if len(cluster_features) < 5:  # Skip small clusters
+                continue
+                
+            try:
+                # Determine number of sub-clusters (you can make this configurable)
+                n_subtypes = min(3, len(cluster_features) // 5)
+                
+                if n_subtypes > 1:
+                    # Calculate distance matrix and linkage
+                    dist_matrix = pdist(cluster_features, 'euclidean')
+                    Z = linkage(dist_matrix, method='ward')
+                    
+                    # Get sub-cluster labels
+                    sub_labels = fcluster(Z, t=n_subtypes, criterion='maxclust')
+                    
+                    # Store results
+                    self.cluster_data['subtypes'][cluster_id] = {
+                        'linkage': Z,
+                        'n_subtypes': n_subtypes,
+                        'sub_labels': sub_labels,
+                        'sample_indices': np.where(mask)[0]  # Store original indices
+                    }
+                    
+            except Exception as e:
+                print(f"Error in sub-clustering cluster {cluster_id}: {str(e)}")
+    
+    def plot_probability_heatmap(self):
+        """Plot a heatmap of cluster probabilities."""
+        if 'cluster_probs' not in self.cluster_data:
+            QMessageBox.warning(self, "No Data", "Run probabilistic clustering first.")
+            return
+            
+        # Create a new window
+        win = QDialog(self)
+        win.setWindowTitle("Cluster Probability Heatmap")
+        win.setMinimumSize(800, 600)
+        layout = QVBoxLayout(win)
+        
+        # Create figure and canvas
+        fig = Figure(figsize=(10, 8))
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        
+        # Get data
+        probs = self.cluster_data['cluster_probs']
+        labels = self.cluster_data['labels']
+        
+        # Sort by cluster for better visualization
+        sort_idx = np.argsort(labels)
+        sorted_probs = probs[sort_idx]
+        
+        # Create heatmap
+        ax = fig.add_subplot(111)
+        sns.heatmap(sorted_probs, ax=ax, cmap='viridis', 
+                    yticklabels=50, cbar_kws={'label': 'Probability'})
+        ax.set_title('Cluster Assignment Probabilities')
+        ax.set_xlabel('Cluster')
+        ax.set_ylabel('Samples (sorted by cluster)')
+        
+        # Add a button to save the figure
+        btn_save = QPushButton("Save Figure")
+        def save_fig():
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Save Figure", "", "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)")
+            if filename:
+                fig.savefig(filename, dpi=300, bbox_inches='tight')
+        
+        btn_save.clicked.connect(save_fig)
+        layout.addWidget(btn_save)
+        
+        win.exec()
+    
+    def plot_dendrogram(self, cluster_id=None):
+        """Plot dendrogram for a specific cluster's sub-types."""
+        if 'subtypes' not in self.cluster_data or not self.cluster_data['subtypes']:
+            QMessageBox.warning(self, "No Data", "No sub-type information available.")
+            return
+        
+        # If no cluster_id provided, show a dialog to select one
+        if cluster_id is None:
+            cluster_id, ok = QInputDialog.getInt(
+                self, "Select Cluster", 
+                "Enter cluster ID:", 
+                value=0,
+                minValue=0, 
+                maxValue=len(self.cluster_data.get('labels', [0]))-1,
+                step=1
+            )
+            if not ok:
+                return
+        
+        if cluster_id not in self.cluster_data['subtypes']:
+            QMessageBox.warning(self, "No Data", f"No sub-types found for cluster {cluster_id}")
+            return
+            
+        subtype_info = self.cluster_data['subtypes'][cluster_id]
+        
+        # Create a new window
+        win = QDialog(self)
+        win.setWindowTitle(f"Cluster {cluster_id} Sub-types")
+        win.setMinimumSize(800, 600)
+        layout = QVBoxLayout(win)
+        
+        # Create figure and canvas
+        fig = Figure(figsize=(10, 8))
+        canvas = FigureCanvas(fig)
+        layout.addWidget(canvas)
+        
+        # Plot dendrogram
+        ax = fig.add_subplot(111)
+        dendrogram(subtype_info['linkage'], 
+                  labels=[f"Sample {i+1}" for i in range(len(subtype_info['sub_labels']))],
+                  orientation='left')
+        ax.set_title(f'Cluster {cluster_id} Sub-type Hierarchy')
+        ax.set_xlabel('Distance')
+        
+        # Add a button to save the figure
+        btn_save = QPushButton("Save Figure")
+        def save_fig():
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Save Figure", "", "PNG (*.png);;PDF (*.pdf);;SVG (*.svg)")
+            if filename:
+                fig.savefig(filename, dpi=300, bbox_inches='tight')
+        
+        btn_save.clicked.connect(save_fig)
+        layout.addWidget(btn_save)
+        
+        win.exec()
+        
     def run_clustering(self):
         """Run hierarchical clustering analysis."""
         if self.cluster_data['intensities'] is None:
@@ -3273,6 +3682,15 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 self.cluster_data['corundum_component_idx'] = corundum_idx
                 self.clustering_status.setText("Applied NMF phase separation...")
             
+            elif preprocessing_method == 'Carbon Soot Optimization':
+                # Apply carbon-specific preprocessing
+                processed_intensities = self.apply_carbon_soot_preprocessing(
+                    processed_intensities, wavenumbers
+                )
+                self.clustering_status.setText("Applied carbon soot optimization...")
+                # Mark as carbon optimized for later use
+                self.cluster_data['carbon_optimized'] = True
+            
             self.clustering_progress.setValue(30)
             QApplication.processEvents()
             
@@ -3281,6 +3699,10 @@ class RamanClusterAnalysisQt6(QMainWindow):
             if preprocessing_method == 'Exclude Regions':
                 # For exclusion method, extract_vibrational_features handles the exclusion
                 features = self.extract_vibrational_features(processed_intensities, wavenumbers)
+            elif preprocessing_method == 'Carbon Soot Optimization':
+                # Use carbon-specific features
+                features = self.extract_carbon_specific_features(processed_intensities, wavenumbers)
+                self.clustering_status.setText("Extracted carbon-specific features...")
             else:
                 # For other methods, use the processed intensities directly
                 features = []
@@ -3399,6 +3821,602 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
         except Exception as e:
             raise Exception(f"Feature extraction failed: {str(e)}")
+
+    def extract_carbon_specific_features(self, intensities, wavenumbers):
+        """
+        Extract carbon-specific features optimized for soot clustering.
+        Focuses on D/G band characteristics, disorder levels, and structural parameters.
+        """
+        try:
+            features = []
+            
+            for spectrum in intensities:
+                spectrum_features = []
+                
+                # 1. D-band characteristics (1300-1400 cm⁻¹)
+                d_band_mask = (wavenumbers >= 1300) & (wavenumbers <= 1400)
+                if np.any(d_band_mask):
+                    d_region = spectrum[d_band_mask]
+                    d_wavenumbers = wavenumbers[d_band_mask]
+                    
+                    # Peak position (disorder indicator)
+                    d_peak_idx = np.argmax(d_region)
+                    d_peak_position = d_wavenumbers[d_peak_idx] if d_peak_idx < len(d_wavenumbers) else 1350
+                    spectrum_features.append(d_peak_position)
+                    
+                    # Peak intensity
+                    d_intensity = np.max(d_region)
+                    spectrum_features.append(d_intensity)
+                    
+                    # Peak width (FWHM estimate)
+                    half_max = d_intensity / 2
+                    indices = np.where(d_region >= half_max)[0]
+                    if len(indices) > 1:
+                        d_width = d_wavenumbers[indices[-1]] - d_wavenumbers[indices[0]]
+                    else:
+                        d_width = 50  # Default width
+                    spectrum_features.append(d_width)
+                    
+                    # Integrated intensity
+                    d_integrated = np.trapz(d_region, d_wavenumbers)
+                    spectrum_features.append(d_integrated)
+                else:
+                    spectrum_features.extend([1350, 0, 50, 0])  # Default D-band values
+                
+                # 2. G-band characteristics (1550-1620 cm⁻¹)
+                g_band_mask = (wavenumbers >= 1550) & (wavenumbers <= 1620)
+                if np.any(g_band_mask):
+                    g_region = spectrum[g_band_mask]
+                    g_wavenumbers = wavenumbers[g_band_mask]
+                    
+                    # Peak position (graphitic quality)
+                    g_peak_idx = np.argmax(g_region)
+                    g_peak_position = g_wavenumbers[g_peak_idx] if g_peak_idx < len(g_wavenumbers) else 1580
+                    spectrum_features.append(g_peak_position)
+                    
+                    # Peak intensity
+                    g_intensity = np.max(g_region)
+                    spectrum_features.append(g_intensity)
+                    
+                    # Peak width
+                    half_max = g_intensity / 2
+                    indices = np.where(g_region >= half_max)[0]
+                    if len(indices) > 1:
+                        g_width = g_wavenumbers[indices[-1]] - g_wavenumbers[indices[0]]
+                    else:
+                        g_width = 30  # Default width
+                    spectrum_features.append(g_width)
+                    
+                    # Integrated intensity
+                    g_integrated = np.trapz(g_region, g_wavenumbers)
+                    spectrum_features.append(g_integrated)
+                else:
+                    spectrum_features.extend([1580, 0, 30, 0])  # Default G-band values
+                
+                # 3. ID/IG ratio (key discriminator for carbon materials)
+                d_intensity = spectrum_features[1]  # D-band intensity
+                g_intensity = spectrum_features[5]  # G-band intensity
+                
+                if g_intensity > 0:
+                    id_ig_ratio = d_intensity / g_intensity
+                else:
+                    id_ig_ratio = 0
+                spectrum_features.append(id_ig_ratio)
+                
+                # 4. D' band characteristics (1610-1650 cm⁻¹)
+                d_prime_mask = (wavenumbers >= 1610) & (wavenumbers <= 1650)
+                if np.any(d_prime_mask):
+                    d_prime_region = spectrum[d_prime_mask]
+                    d_prime_intensity = np.max(d_prime_region)
+                    spectrum_features.append(d_prime_intensity)
+                    
+                    # D'/G ratio
+                    if g_intensity > 0:
+                        d_prime_g_ratio = d_prime_intensity / g_intensity
+                    else:
+                        d_prime_g_ratio = 0
+                    spectrum_features.append(d_prime_g_ratio)
+                else:
+                    spectrum_features.extend([0, 0])  # Default D' values
+                
+                # 5. Low-frequency structural modes (200-800 cm⁻¹)
+                low_freq_mask = (wavenumbers >= 200) & (wavenumbers <= 800)
+                if np.any(low_freq_mask):
+                    low_freq_region = spectrum[low_freq_mask]
+                    low_freq_wavenumbers = wavenumbers[low_freq_mask]
+                    low_freq_integrated = np.trapz(low_freq_region, low_freq_wavenumbers)
+                    spectrum_features.append(low_freq_integrated)
+                else:
+                    spectrum_features.append(0)
+                
+                # 6. RBM modes (100-300 cm⁻¹) for nanotube detection
+                rbm_mask = (wavenumbers >= 100) & (wavenumbers <= 300)
+                if np.any(rbm_mask):
+                    rbm_region = spectrum[rbm_mask]
+                    rbm_intensity = np.max(rbm_region)
+                    spectrum_features.append(rbm_intensity)
+                else:
+                    spectrum_features.append(0)
+                
+                # 7. 2D band characteristics (2600-2800 cm⁻¹)
+                band_2d_mask = (wavenumbers >= 2600) & (wavenumbers <= 2800)
+                if np.any(band_2d_mask):
+                    band_2d_region = spectrum[band_2d_mask]
+                    band_2d_intensity = np.max(band_2d_region)
+                    spectrum_features.append(band_2d_intensity)
+                    
+                    # 2D/G ratio
+                    if g_intensity > 0:
+                        band_2d_g_ratio = band_2d_intensity / g_intensity
+                    else:
+                        band_2d_g_ratio = 0
+                    spectrum_features.append(band_2d_g_ratio)
+                else:
+                    spectrum_features.extend([0, 0])
+                
+                # 8. G-band asymmetry (crystallinity indicator)
+                if np.any(g_band_mask):
+                    g_region = spectrum[g_band_mask]
+                    g_wavenumbers = wavenumbers[g_band_mask]
+                    g_peak_idx = np.argmax(g_region)
+                    
+                    if 0 < g_peak_idx < len(g_region) - 1:
+                        # Calculate asymmetry as ratio of left/right areas
+                        left_area = np.trapz(g_region[:g_peak_idx], g_wavenumbers[:g_peak_idx])
+                        right_area = np.trapz(g_region[g_peak_idx:], g_wavenumbers[g_peak_idx:])
+                        
+                        if right_area > 0:
+                            g_asymmetry = left_area / right_area
+                        else:
+                            g_asymmetry = 1.0
+                    else:
+                        g_asymmetry = 1.0
+                    spectrum_features.append(g_asymmetry)
+                else:
+                    spectrum_features.append(1.0)
+                
+                # 9. Background slope (amorphous content indicator)
+                if len(wavenumbers) > 10:
+                    # Calculate background slope from 1000-1200 cm⁻¹ region
+                    bg_mask = (wavenumbers >= 1000) & (wavenumbers <= 1200)
+                    if np.any(bg_mask):
+                        bg_region = spectrum[bg_mask]
+                        bg_wavenumbers = wavenumbers[bg_mask]
+                        
+                        if len(bg_region) > 5:
+                            # Linear fit to estimate background slope
+                            coeffs = np.polyfit(bg_wavenumbers, bg_region, 1)
+                            background_slope = coeffs[0]
+                        else:
+                            background_slope = 0
+                    else:
+                        background_slope = 0
+                    spectrum_features.append(background_slope)
+                else:
+                    spectrum_features.append(0)
+                
+                # Ensure consistent feature vector length
+                while len(spectrum_features) < 17:
+                    spectrum_features.append(0)
+                
+                features.append(spectrum_features[:17])  # Trim to exact length
+            
+            return np.array(features)
+            
+        except Exception as e:
+            print(f"Error in carbon feature extraction: {e}")
+            # Fallback to basic features
+            return self.extract_vibrational_features(intensities, wavenumbers)
+
+    def apply_carbon_soot_preprocessing(self, intensities, wavenumbers):
+        """
+        Enhanced carbon soot-specific preprocessing pipeline.
+        Optimized for diesel/car exhaust/charcoal discrimination with improved methods.
+        """
+        try:
+            processed_spectra = []
+            
+            print("Applying enhanced carbon soot preprocessing...")
+            
+            for i, spectrum in enumerate(intensities):
+                if i % 10 == 0 and i > 0:
+                    print(f"Processed {i}/{len(intensities)} spectra...")
+                
+                # 1. Remove cosmic rays (important for carbon analysis)
+                processed_spectrum = self._remove_cosmic_rays(spectrum, wavenumbers)
+                
+                # 2. Enhanced carbon-specific baseline removal
+                processed_spectrum = self._remove_enhanced_carbon_baseline(processed_spectrum, wavenumbers)
+                
+                # 3. Remove fluorescence background with carbon-specific approach
+                processed_spectrum = self._remove_carbon_fluorescence_background(processed_spectrum, wavenumbers)
+                
+                # 4. Apply carbon-specific smoothing
+                processed_spectrum = self._apply_carbon_smoothing(processed_spectrum, wavenumbers)
+                
+                # 5. Enhanced normalization for carbon materials
+                processed_spectrum = self._normalize_carbon_spectrum_enhanced(processed_spectrum, wavenumbers)
+                
+                processed_spectra.append(processed_spectrum)
+            
+            print(f"Enhanced carbon preprocessing completed for {len(processed_spectra)} spectra")
+            return np.array(processed_spectra)
+            
+        except Exception as e:
+            print(f"Error in enhanced carbon preprocessing: {e}")
+            return intensities  # Return original if preprocessing fails
+
+    def _remove_carbon_baseline(self, spectrum, wavenumbers):
+        """Remove baseline using carbon-specific approach."""
+        try:
+            from scipy.sparse import csc_matrix, eye, diags
+            from scipy.sparse.linalg import spsolve
+            
+            # Asymmetric Least Squares (ALS) baseline correction
+            # Parameters optimized for carbon materials
+            lam = 1e6  # Smoothing parameter (higher for carbon)
+            p = 0.001  # Asymmetry parameter (lower for carbon)
+            niter = 10
+            
+            L = len(spectrum)
+            if L < 10:
+                return spectrum
+            
+            D = diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+            D = lam * D.dot(D.transpose())
+            
+            w = np.ones(L)
+            W = diags(w, 0, shape=(L, L))
+            
+            for i in range(niter):
+                W.setdiag(w)
+                Z = W + D
+                baseline = spsolve(csc_matrix(Z), w * spectrum)
+                w = p * (spectrum > baseline) + (1-p) * (spectrum < baseline)
+            
+            return spectrum - baseline
+            
+        except Exception:
+            # Fallback: simple linear baseline
+            return spectrum - np.linspace(spectrum[0], spectrum[-1], len(spectrum))
+
+    def _remove_fluorescence_background(self, spectrum, wavenumbers):
+        """Remove fluorescence background common in carbon materials."""
+        try:
+            from scipy import signal
+            
+            # Use a polynomial baseline fitting approach
+            # Optimized for carbon soot fluorescence patterns
+            
+            # Find local minima as baseline points
+            min_indices = signal.argrelextrema(spectrum, np.less, order=20)[0]
+            
+            if len(min_indices) < 3:
+                # Not enough minima, use endpoints and middle
+                min_indices = [0, len(spectrum)//2, len(spectrum)-1]
+            
+            # Add endpoints
+            min_indices = np.concatenate([[0], min_indices, [len(spectrum)-1]])
+            min_indices = np.unique(min_indices)
+            
+            # Fit polynomial to baseline points
+            baseline_wn = wavenumbers[min_indices]
+            baseline_intensities = spectrum[min_indices]
+            
+            # Use degree 3 polynomial for smooth baseline
+            coeffs = np.polyfit(baseline_wn, baseline_intensities, min(3, len(min_indices)-1))
+            baseline = np.polyval(coeffs, wavenumbers)
+            
+            # Subtract baseline
+            corrected = spectrum - baseline
+            
+            # Ensure no negative values
+            corrected = np.maximum(corrected, 0)
+            
+            return corrected
+            
+        except Exception:
+            # Fallback: return original spectrum
+            return spectrum
+
+    def _normalize_carbon_spectrum(self, spectrum, wavenumbers):
+        """Normalize spectrum using carbon-specific approach."""
+        try:
+            # Method 1: Normalize to G-band if present
+            g_band_mask = (wavenumbers >= 1550) & (wavenumbers <= 1620)
+            
+            if np.any(g_band_mask) and np.max(spectrum[g_band_mask]) > 0:
+                # Normalize to G-band maximum
+                g_max = np.max(spectrum[g_band_mask])
+                return spectrum / g_max
+            
+            # Method 2: Normalize to total area in carbon region
+            carbon_mask = (wavenumbers >= 1200) & (wavenumbers <= 1700)
+            if np.any(carbon_mask):
+                carbon_area = np.trapz(spectrum[carbon_mask], wavenumbers[carbon_mask])
+                if carbon_area > 0:
+                    return spectrum / carbon_area * 1000  # Scale for better numerical stability
+            
+            # Method 3: Standard min-max normalization
+            spectrum_min = np.min(spectrum)
+            spectrum_max = np.max(spectrum)
+            
+            if spectrum_max > spectrum_min:
+                return (spectrum - spectrum_min) / (spectrum_max - spectrum_min)
+            else:
+                return spectrum
+                
+        except Exception:
+            # Fallback: standard normalization
+            return (spectrum - np.min(spectrum)) / (np.max(spectrum) - np.min(spectrum) + 1e-8)
+
+    def _remove_cosmic_rays(self, spectrum, wavenumbers):
+        """Remove cosmic ray spikes using median filtering and outlier detection."""
+        try:
+            from scipy.signal import medfilt
+            from scipy import stats
+            
+            # Apply median filter to detect outliers
+            filtered = medfilt(spectrum, kernel_size=5)
+            residual = spectrum - filtered
+            
+            # Identify cosmic rays using z-score threshold
+            z_scores = np.abs(stats.zscore(residual))
+            cosmic_ray_mask = z_scores > 3.0  # Threshold for cosmic ray detection
+            
+            # Replace cosmic rays with median-filtered values
+            cleaned_spectrum = spectrum.copy()
+            cleaned_spectrum[cosmic_ray_mask] = filtered[cosmic_ray_mask]
+            
+            return cleaned_spectrum
+            
+        except Exception:
+            return spectrum  # Return original if cosmic ray removal fails
+
+    def _remove_enhanced_carbon_baseline(self, spectrum, wavenumbers):
+        """Enhanced baseline removal optimized for carbon materials."""
+        try:
+            from scipy.sparse import csc_matrix, eye, diags
+            from scipy.sparse.linalg import spsolve
+            
+            # Enhanced Asymmetric Least Squares (ALS) baseline correction
+            # Parameters optimized specifically for carbon Raman spectra
+            L = len(spectrum)
+            if L < 10:
+                return spectrum
+            
+            # Adaptive parameters based on spectral region
+            carbon_mask = (wavenumbers >= 1200) & (wavenumbers <= 1700)
+            if np.any(carbon_mask):
+                # Higher smoothing in carbon region to preserve D/G bands
+                lam_values = np.full(L, 1e5)  # Base smoothing
+                lam_values[carbon_mask] = 1e7  # Higher smoothing in carbon region
+                lam = np.mean(lam_values)
+            else:
+                lam = 1e6  # Default smoothing
+            
+            p = 0.0005  # Lower asymmetry for carbon (more symmetric baseline)
+            niter = 15   # More iterations for better convergence
+            
+            # Create difference matrix
+            D = diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+            D = lam * D.dot(D.transpose())
+            
+            w = np.ones(L)
+            W = diags(w, 0, shape=(L, L))
+            
+            for i in range(niter):
+                W.setdiag(w)
+                Z = W + D
+                baseline = spsolve(csc_matrix(Z), w * spectrum)
+                w = p * (spectrum > baseline) + (1-p) * (spectrum < baseline)
+                
+                # Adaptive weight adjustment for carbon regions
+                if np.any(carbon_mask):
+                    # Preserve carbon band regions from over-correction
+                    w[carbon_mask] = np.maximum(w[carbon_mask], 0.1)
+            
+            # Ensure baseline doesn't exceed spectrum in carbon regions
+            if np.any(carbon_mask):
+                carbon_spectrum = spectrum[carbon_mask]
+                carbon_baseline = baseline[carbon_mask]
+                
+                # Adjust baseline if it's too high in carbon regions
+                if np.any(carbon_baseline > carbon_spectrum):
+                    excess_mask = carbon_baseline > carbon_spectrum
+                    carbon_indices = np.where(carbon_mask)[0]
+                    for idx in carbon_indices[excess_mask]:
+                        baseline[idx] = spectrum[idx] * 0.9  # Keep baseline slightly below
+            
+            return spectrum - baseline
+            
+        except Exception as e:
+            print(f"Enhanced baseline removal failed: {e}")
+            # Fallback to simple linear baseline
+            return spectrum - np.linspace(spectrum[0], spectrum[-1], len(spectrum))
+
+    def _remove_carbon_fluorescence_background(self, spectrum, wavenumbers):
+        """Enhanced fluorescence background removal for carbon materials."""
+        try:
+            # Carbon materials often have complex fluorescence backgrounds
+            # Use polynomial fitting with carbon-region protection
+            
+            # Identify regions likely to contain carbon bands
+            d_region_mask = (wavenumbers >= 1300) & (wavenumbers <= 1400)
+            g_region_mask = (wavenumbers >= 1550) & (wavenumbers <= 1620)
+            carbon_mask = d_region_mask | g_region_mask
+            
+            # Create background estimation points (avoiding carbon regions)
+            background_mask = ~carbon_mask
+            
+            # Add boundary points for better fitting
+            if len(wavenumbers) > 50:
+                boundary_indices = [0, len(wavenumbers)//4, 3*len(wavenumbers)//4, len(wavenumbers)-1]
+                for idx in boundary_indices:
+                    background_mask[idx] = True
+            
+            if np.sum(background_mask) > 10:  # Need enough points for fitting
+                # Fit polynomial to background regions
+                bg_wavenumbers = wavenumbers[background_mask]
+                bg_intensities = spectrum[background_mask]
+                
+                # Use adaptive polynomial degree
+                n_bg_points = len(bg_wavenumbers)
+                if n_bg_points > 50:
+                    poly_degree = 3
+                elif n_bg_points > 20:
+                    poly_degree = 2
+                else:
+                    poly_degree = 1
+                
+                # Robust polynomial fitting (reduce influence of outliers)
+                weights = np.ones_like(bg_intensities)
+                for iteration in range(3):  # Iterative reweighting
+                    coeffs = np.polyfit(bg_wavenumbers, bg_intensities, poly_degree, w=weights)
+                    bg_fit = np.polyval(coeffs, bg_wavenumbers)
+                    residuals = np.abs(bg_intensities - bg_fit)
+                    
+                    # Downweight outliers
+                    median_residual = np.median(residuals)
+                    mad = np.median(np.abs(residuals - median_residual))
+                    if mad > 0:
+                        outlier_threshold = median_residual + 3 * mad
+                        weights = np.where(residuals > outlier_threshold, 0.1, 1.0)
+                
+                # Apply background correction to entire spectrum
+                background_full = np.polyval(coeffs, wavenumbers)
+                
+                # Ensure background doesn't exceed spectrum in carbon regions
+                corrected_spectrum = spectrum - background_full
+                
+                # Prevent over-correction in carbon regions
+                if np.any(carbon_mask):
+                    carbon_corrected = corrected_spectrum[carbon_mask]
+                    if np.any(carbon_corrected < 0):
+                        # Adjust background to prevent negative values in carbon regions
+                        min_carbon = np.min(carbon_corrected)
+                        corrected_spectrum = corrected_spectrum - min_carbon
+                
+                return corrected_spectrum
+            else:
+                # Not enough background points, return original
+                return spectrum
+                
+        except Exception as e:
+            print(f"Fluorescence removal failed: {e}")
+            return spectrum
+
+    def _apply_carbon_smoothing(self, spectrum, wavenumbers):
+        """Apply intelligent smoothing preserving carbon band features."""
+        try:
+            from scipy.signal import savgol_filter
+            
+            # Adaptive smoothing: less in carbon regions, more elsewhere
+            smoothed_spectrum = spectrum.copy()
+            
+            # Define carbon regions where we want minimal smoothing
+            d_region_mask = (wavenumbers >= 1300) & (wavenumbers <= 1400)
+            g_region_mask = (wavenumbers >= 1550) & (wavenumbers <= 1620)
+            carbon_mask = d_region_mask | g_region_mask
+            
+            # Smooth non-carbon regions more aggressively
+            non_carbon_mask = ~carbon_mask
+            if np.any(non_carbon_mask):
+                # Apply moderate smoothing to non-carbon regions
+                try:
+                    smoothed_spectrum[non_carbon_mask] = savgol_filter(
+                        spectrum[non_carbon_mask], 
+                        window_length=min(7, len(spectrum[non_carbon_mask])//2 * 2 + 1), 
+                        polyorder=2
+                    )
+                except:
+                    pass  # Skip if smoothing fails
+            
+            # Light smoothing in carbon regions to preserve band shapes
+            if np.any(carbon_mask):
+                try:
+                    carbon_spectrum = spectrum[carbon_mask]
+                    if len(carbon_spectrum) > 5:
+                        window_length = min(5, len(carbon_spectrum)//2 * 2 + 1)
+                        if window_length >= 3:
+                            smoothed_spectrum[carbon_mask] = savgol_filter(
+                                carbon_spectrum, 
+                                window_length=window_length, 
+                                polyorder=1
+                            )
+                except:
+                    pass  # Keep original if smoothing fails
+            
+            return smoothed_spectrum
+            
+        except Exception:
+            return spectrum  # Return original if smoothing fails
+
+    def _normalize_carbon_spectrum_enhanced(self, spectrum, wavenumbers):
+        """Enhanced normalization optimized for carbon type discrimination."""
+        try:
+            # Method 1: Try normalization to G-band maximum (most stable reference)
+            g_band_mask = (wavenumbers >= 1550) & (wavenumbers <= 1620)
+            
+            if np.any(g_band_mask):
+                g_region = spectrum[g_band_mask]
+                g_max = np.max(g_region)
+                
+                if g_max > 0 and not np.isnan(g_max) and not np.isinf(g_max):
+                    # Normalize to G-band maximum
+                    normalized = spectrum / g_max
+                    
+                    # Verify normalization quality
+                    if np.all(np.isfinite(normalized)) and np.max(normalized) > 0:
+                        return normalized
+            
+            # Method 2: Normalize to total area in carbon-active region (1200-1700 cm⁻¹)
+            carbon_mask = (wavenumbers >= 1200) & (wavenumbers <= 1700)
+            if np.any(carbon_mask):
+                carbon_region = spectrum[carbon_mask]
+                carbon_wavenumbers = wavenumbers[carbon_mask]
+                
+                # Calculate area under curve
+                if len(carbon_region) > 1:
+                    carbon_area = np.trapz(np.maximum(carbon_region, 0), carbon_wavenumbers)
+                    
+                    if carbon_area > 0 and not np.isnan(carbon_area) and not np.isinf(carbon_area):
+                        normalized = spectrum / carbon_area * 1000  # Scale for numerical stability
+                        
+                        if np.all(np.isfinite(normalized)):
+                            return normalized
+            
+            # Method 3: Vector normalization (L2 norm)
+            spectrum_positive = spectrum - np.min(spectrum)  # Ensure all positive
+            l2_norm = np.linalg.norm(spectrum_positive)
+            
+            if l2_norm > 0 and not np.isnan(l2_norm) and not np.isinf(l2_norm):
+                normalized = spectrum_positive / l2_norm
+                
+                if np.all(np.isfinite(normalized)):
+                    return normalized
+            
+            # Method 4: Standard min-max normalization (fallback)
+            spectrum_min = np.min(spectrum)
+            spectrum_max = np.max(spectrum)
+            
+            if spectrum_max > spectrum_min and np.isfinite(spectrum_max) and np.isfinite(spectrum_min):
+                normalized = (spectrum - spectrum_min) / (spectrum_max - spectrum_min)
+                
+                if np.all(np.isfinite(normalized)):
+                    return normalized
+            
+            # Method 5: Return original if all normalizations fail
+            print("Warning: All normalization methods failed, returning original spectrum")
+            return spectrum
+                
+        except Exception as e:
+            print(f"Enhanced normalization failed: {e}")
+            # Final fallback
+            try:
+                return (spectrum - np.min(spectrum)) / (np.max(spectrum) - np.min(spectrum) + 1e-8)
+            except:
+                return spectrum
             
     def get_exclusion_regions(self):
         """Get regions to exclude from clustering analysis (e.g., corundum peaks)."""
@@ -3528,13 +4546,16 @@ class RamanClusterAnalysisQt6(QMainWindow):
         if hasattr(self, 'corundum_window_spinbox'):
             self.corundum_window_spinbox.parent().setVisible(corundum_visible)
         
-        # Show/hide NMF settings
+        # Show/hide and enable/disable NMF settings
         nmf_visible = method == 'NMF Separation'
         if hasattr(self, 'nmf_components_spinbox'):
+            self.nmf_components_spinbox.setEnabled(nmf_visible)
             self.nmf_components_spinbox.parent().setVisible(nmf_visible)
         
-        # Show/hide exclusion settings
+        # Show/hide and enable/disable exclusion settings
         exclusion_visible = method == 'Exclude Regions'
+        if hasattr(self, 'exclusion_regions_edit'):
+            self.exclusion_regions_edit.setEnabled(exclusion_visible)
         if hasattr(self, 'enable_exclusion_cb'):
             self.enable_exclusion_cb.parent().setVisible(exclusion_visible)
         if hasattr(self, 'exclusion_regions_frame'):
@@ -3543,6 +4564,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
         # Auto-enable exclusion checkbox if method is selected
         if exclusion_visible and hasattr(self, 'enable_exclusion_cb'):
             self.enable_exclusion_cb.setChecked(True)
+
+    def update_carbon_controls(self):
+        """Update visibility of carbon analysis controls."""
+        is_enabled = self.enable_carbon_analysis_cb.isChecked()
+        for control in self.carbon_controls:
+            control.setVisible(is_enabled)
+        
+        if is_enabled:
+            # Store the current method before switching to Carbon Soot Optimization
+            if not hasattr(self, 'previous_phase_method'):
+                self.previous_phase_method = self.phase_method_combo.currentText()
+            # Auto-select carbon optimization if enabled
+            self.phase_method_combo.setCurrentText('Carbon Soot Optimization')
+        else:
+            # Restore the previous phase method when disabling carbon analysis
+            if hasattr(self, 'previous_phase_method'):
+                self.phase_method_combo.setCurrentText(self.previous_phase_method)
+                delattr(self, 'previous_phase_method')
         
     def add_exclusion_region(self):
         """Add a new exclusion region widget."""
@@ -7662,6 +8701,90 @@ Cluster Sizes:
     # Database Import Dialog placeholder class
     # Method removed - using the functional version at line 2526
 
+    def show_nmf_clustering_info(self):
+        """Display information about NMF clustering options and how to use them."""
+        print("\n" + "="*60)
+        print("NMF (Non-negative Matrix Factorization) CLUSTERING GUIDE")
+        print("="*60)
+        
+        print("\n🔍 WHAT IS NMF CLUSTERING?")
+        print("NMF separates your spectra into non-negative components:")
+        print("• Each component represents a 'pure' spectral signature")
+        print("• Mixing weights show how much each component contributes")
+        print("• Useful for separating mixed phases (e.g., sample + corundum)")
+        print("• Can remove contaminants or substrates automatically")
+        
+        print("\n📍 HOW TO ACCESS NMF CLUSTERING:")
+        print("1. In the 'Clustering' tab")
+        print("2. Go to 'Preprocessing' section")
+        print("3. Change 'Phase Separation Method' to 'NMF Separation'")
+        print("4. Adjust 'NMF Components' (2-10, default=3)")
+        print("5. Run clustering normally")
+        
+        print("\n⚙️  NMF PARAMETERS:")
+        print("• Components: Number of pure spectral components to find")
+        print("  - 2-3: Simple mixtures (sample + substrate)")
+        print("  - 3-5: Complex mixtures (multiple phases)")
+        print("  - 5+: Very complex samples (many components)")
+        
+        print("\n💡 WHEN TO USE NMF:")
+        print("✅ Your samples have substrate peaks (corundum, diamond, etc.)")
+        print("✅ You want to separate sample from contaminants")
+        print("✅ Your spectra are mixtures of known components")
+        print("✅ You need to remove background signatures")
+        
+        print("\n❌ WHEN NOT TO USE NMF:")
+        print("❌ Pure single-phase samples")
+        print("❌ When you want full spectral information")
+        print("❌ Samples with negative spectral features")
+        
+        print("\n🎯 CURRENT PREPROCESSING METHOD:")
+        current_method = self.phase_method_combo.currentText() if hasattr(self, 'phase_method_combo') else 'Unknown'
+        print(f"Currently selected: {current_method}")
+        
+        if current_method != 'NMF Separation':
+            print("⚠️  NMF is NOT currently selected!")
+            print("To enable NMF clustering:")
+            print("1. Change 'Phase Separation Method' to 'NMF Separation'")
+            print("2. The 'NMF Components' control will become available")
+            print("3. Set the number of components you expect")
+            print("4. Run clustering as normal")
+        else:
+            print("✅ NMF is currently enabled!")
+            n_components = self.nmf_components_spinbox.value() if hasattr(self, 'nmf_components_spinbox') else 3
+            print(f"Number of components: {n_components}")
+            
+        print("\n📊 NMF vs OTHER METHODS:")
+        print("• NMF Separation: Removes contaminants, finds pure components")
+        print("• Carbon Soot Optimization: Carbon-specific features (D/G bands)")
+        print("• Exclude Regions: Manually removes wavenumber ranges")
+        print("• Corundum Correction: Specifically removes corundum peaks")
+        
+        print("\n🔬 EXAMPLE APPLICATIONS:")
+        print("1. Carbon on silicon substrate → 2-3 components")
+        print("2. Mineral mixture analysis → 3-5 components")
+        print("3. Pharmaceutical formulations → 2-4 components")
+        print("4. Coating + substrate → 2 components")
+        
+        print("\n📈 INTERPRETING NMF RESULTS:")
+        print("• Components matrix (H): Pure spectral signatures")
+        print("• Weights matrix (W): How much each component contributes")
+        print("• Clustering uses the weights to group similar spectra")
+        print("• Samples with similar mixing ratios cluster together")
+        
+        # Check if NMF results are available
+        if hasattr(self, 'cluster_data') and 'nmf_components' in self.cluster_data:
+            print(f"\n✅ NMF RESULTS AVAILABLE:")
+            print(f"• Components found: {self.cluster_data['nmf_components'].shape[0] if self.cluster_data['nmf_components'] is not None else 'None'}")
+            print(f"• Samples processed: {len(self.cluster_data.get('nmf_weights', []))}")
+            if 'corundum_component_idx' in self.cluster_data:
+                print(f"• Corundum component index: {self.cluster_data['corundum_component_idx']}")
+        else:
+            print(f"\n❌ NO NMF RESULTS AVAILABLE")
+            print("Run clustering with 'NMF Separation' method to generate results")
+        
+        print("\n" + "="*60)
+
     def export_results(self):
         """Export all analysis results to files."""
         try:
@@ -8483,6 +9606,78 @@ Stability Assessment:"""
         plt.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close()
 
+    def export_xy_plot_data(self):
+        """Export the XY coordinates of the current scatter plot (PCA or UMAP) to a CSV file."""
+        if not hasattr(self, 'cluster_data') or self.cluster_data.get('labels') is None:
+            QMessageBox.warning(self, "No Data", "No cluster data available to export.")
+            return
+            
+        # Determine which coordinates to export based on current visualization method
+        method = self.visualization_method_combo.currentText()
+        if method == 'PCA' and 'pca_coords' in self.cluster_data:
+            coords = self.cluster_data['pca_coords']
+            x_label = 'PC1'
+            y_label = 'PC2'
+        elif method == 'UMAP' and 'umap_coords' in self.cluster_data:
+            coords = self.cluster_data['umap_coords']
+            x_label = 'UMAP1'
+            y_label = 'UMAP2'
+        else:
+            QMessageBox.warning(self, "No Coordinates", 
+                              f"No {method} coordinates available for export.")
+            return
+        
+        # Get the labels and filenames
+        labels = self.cluster_data['labels']
+        filenames = [f"spectrum_{i}" for i in range(len(labels))]  # Default filenames
+        
+        # Try to get actual filenames from metadata if available
+        if 'spectrum_metadata' in self.cluster_data and self.cluster_data['spectrum_metadata']:
+            filenames = [meta.get('filename', f'spectrum_{i}') 
+                        for i, meta in enumerate(self.cluster_data['spectrum_metadata'])]
+        
+        # Get save file path
+        default_name = f"{method.lower()}_coordinates.csv"
+        filename, _ = QFileDialog.getSaveFileName(
+            self, 
+            f"Export {method} Coordinates",
+            default_name,
+            "CSV files (*.csv);;All files (*)"
+        )
+        
+        if not filename:
+            return  # User cancelled
+            
+        try:
+            # Create a DataFrame with the data
+            import pandas as pd
+            
+            data = {
+                'filename': filenames,
+                'cluster': labels,
+                x_label: coords[:, 0],
+                y_label: coords[:, 1]
+            }
+            
+            # Add additional metadata if available
+            if 'spectrum_metadata' in self.cluster_data and self.cluster_data['spectrum_metadata']:
+                # Add any additional metadata fields that might be useful
+                for field in ['sample_id', 'description', 'mineral', 'formula']:
+                    if field in self.cluster_data['spectrum_metadata'][0]:
+                        data[field] = [meta.get(field, '') for meta in self.cluster_data['spectrum_metadata']]
+            
+            df = pd.DataFrame(data)
+            
+            # Save to CSV
+            df.to_csv(filename, index=False)
+            
+            QMessageBox.information(self, "Export Complete", 
+                                  f"Successfully exported {len(df)} data points to:\n{filename}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", 
+                               f"Failed to export {method} coordinates:\n{str(e)}")
+
     def export_cluster_overview(self):
         """Export a comprehensive overview with all clusters in a grid layout."""
         if (self.cluster_data['labels'] is None or 
@@ -8614,6 +9809,121 @@ Stability Assessment:"""
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Error exporting cluster overview: {str(e)}")
             print(f"Export error: {str(e)}")
+
+    def print_carbon_feature_analysis(self):
+        """Print analysis of carbon-specific features for debugging."""
+        try:
+            if 'carbon_features' not in self.cluster_data:
+                print("No carbon features available. Run clustering with Carbon Soot Optimization first.")
+                return
+            
+            features = self.cluster_data['carbon_features']
+            labels = self.cluster_data['labels']
+            
+            feature_names = [
+                'D_peak_position', 'D_intensity', 'D_width', 'D_integrated',
+                'G_peak_position', 'G_intensity', 'G_width', 'G_integrated',
+                'ID_IG_ratio', 'D_prime_intensity', 'D_prime_G_ratio',
+                'Low_freq_integrated', 'RBM_intensity', '2D_intensity', '2D_G_ratio',
+                'G_asymmetry', 'Background_slope'
+            ]
+            
+            print("\n=== Carbon Feature Analysis ===")
+            unique_labels = np.unique(labels)
+            
+            for feature_idx, feature_name in enumerate(feature_names[:features.shape[1]]):
+                print(f"\n{feature_name}:")
+                for label in unique_labels:
+                    mask = labels == label
+                    feature_values = features[mask, feature_idx]
+                    mean_val = np.mean(feature_values)
+                    std_val = np.std(feature_values)
+                    print(f"  Cluster {label}: {mean_val:.4f} ± {std_val:.4f}")
+            
+            # Calculate ID/IG ratios specifically
+            if features.shape[1] > 8:
+                print(f"\n=== ID/IG Ratio Analysis (Key Discriminator) ===")
+                for label in unique_labels:
+                    mask = labels == label
+                    id_ig_values = features[mask, 8]  # ID/IG ratio is feature index 8
+                    mean_ratio = np.mean(id_ig_values)
+                    std_ratio = np.std(id_ig_values)
+                    print(f"Cluster {label} - ID/IG: {mean_ratio:.3f} ± {std_ratio:.3f}")
+                    
+                    # Interpretation
+                    if mean_ratio > 1.5:
+                        interpretation = "High disorder (amorphous/nanocrystalline)"
+                    elif mean_ratio > 1.0:
+                        interpretation = "Moderate disorder"
+                    elif mean_ratio > 0.5:
+                        interpretation = "Low disorder (more graphitic)"
+                    else:
+                        interpretation = "Highly graphitic"
+                    print(f"  Interpretation: {interpretation}")
+            
+        except Exception as e:
+            print(f"Error in carbon feature analysis: {e}")
+
+    def suggest_clustering_improvements(self):
+        """Suggest improvements based on current clustering results."""
+        if (self.cluster_data['labels'] is None or 
+            'carbon_features' not in self.cluster_data):
+            print("No clustering results available. Run clustering with Carbon Soot Optimization first.")
+            return
+        
+        try:
+            features = self.cluster_data['carbon_features']
+            labels = self.cluster_data['labels']
+            unique_labels = np.unique(labels)
+            
+            print("\n=== Clustering Improvement Suggestions ===")
+            
+            # 1. Check if clusters are well-separated in feature space
+            from sklearn.metrics import silhouette_score
+            if features.shape[0] > 1 and len(unique_labels) > 1:
+                silhouette_avg = silhouette_score(features, labels)
+                print(f"Current silhouette score: {silhouette_avg:.3f}")
+                
+                if silhouette_avg < 0.3:
+                    print("⚠️  Poor cluster separation detected!")
+                    print("Suggestions:")
+                    print("- Try different UMAP parameters (lower min_dist, higher n_neighbors)")
+                    print("- Check data quality and preprocessing")
+                    print("- Consider fewer clusters")
+                elif silhouette_avg < 0.5:
+                    print("⚠️  Moderate cluster separation")
+                    print("Suggestions:")
+                    print("- Fine-tune UMAP parameters")
+                    print("- Verify sample labeling if known groups exist")
+            
+            # 2. Check feature variance
+            feature_vars = np.var(features, axis=0)
+            low_variance_features = np.where(feature_vars < 1e-6)[0]
+            
+            if len(low_variance_features) > 0:
+                print(f"⚠️  {len(low_variance_features)} features have very low variance")
+                print("Consider removing these features or checking data preprocessing")
+            
+            # 3. Check for potential outliers
+            from scipy.stats import zscore
+            z_scores = np.abs(zscore(features, axis=0))
+            outlier_threshold = 3.0
+            potential_outliers = np.where(np.any(z_scores > outlier_threshold, axis=1))[0]
+            
+            if len(potential_outliers) > 0:
+                print(f"⚠️  {len(potential_outliers)} potential outlier samples detected")
+                print("Consider reviewing these samples for data quality")
+            
+            print("\n=== Carbon-Specific Recommendations ===")
+            print("For diesel/unleaded/charcoal discrimination, focus on:")
+            print("1. ID/IG ratio (disorder level)")
+            print("2. G-band position (graphitic quality)")
+            print("3. D-band width (crystallite size)")
+            print("4. Background slope (amorphous content)")
+            print("5. Low-frequency modes (structural differences)")
+            
+        except Exception as e:
+            print(f"Error in clustering improvement analysis: {e}")
 
 
 def launch_cluster_analysis(parent, raman_app):
