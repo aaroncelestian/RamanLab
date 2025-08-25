@@ -248,38 +248,64 @@ class UpdateDialog(QDialog):
     
     def _perform_git_update(self):
         """Execute git pull with progress dialog."""
-        progress = QProgressDialog("Updating RamanLab...", "Cancel", 0, 0, self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.show()
+        # Get the application directory (where the main script is located)
+        app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         
-        try:
-            # Run git pull
-            result = subprocess.run(['git', 'pull'], 
-                                  capture_output=True, 
-                                  text=True, 
-                                  cwd=os.getcwd())
-            
+        # Create a more detailed progress dialog
+        progress = QProgressDialog("Updating RamanLab...\nThis may take a moment.", "Cancel", 0, 0, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)  # Show immediately
+        progress.setValue(0)
+        progress.setMaximum(0)  # Indeterminate progress
+        
+        # Use QProcess for better output handling
+        process = QProcess(self)
+        process.setWorkingDirectory(app_dir)
+        
+        # Connect process signals
+        def handle_finished(exit_code, exit_status):
             progress.close()
-            
-            if result.returncode == 0:
-                QMessageBox.information(self, "Update Successful",
-                                      "RamanLab has been updated successfully!\n\n"
-                                      "Please restart the application to use the new version.\n\n"
-                                      f"Git output:\n{result.stdout}")
+            if exit_code == 0 and exit_status == QProcess.NormalExit:
+                output = process.readAllStandardOutput().data().decode('utf-8', errors='replace')
+                QMessageBox.information(
+                    self, 
+                    "Update Successful",
+                    "RamanLab has been updated successfully!\n\n"
+                    "Please restart the application to use the new version.\n\n"
+                    f"Git output:\n{output}"
+                )
                 self.accept()
             else:
-                QMessageBox.warning(self, "Update Failed",
-                                  f"Git pull failed:\n{result.stderr}\n\n"
-                                  "You may need to resolve conflicts manually or use the download option.")
+                error_output = process.readAllStandardError().data().decode('utf-8', errors='replace')
+                QMessageBox.warning(
+                    self, 
+                    "Update Failed",
+                    f"Git pull failed with exit code {exit_code}:\n{error_output}\n\n"
+                    "You may need to resolve conflicts manually or use the download option."
+                )
+        
+        process.finished.connect(handle_finished)
+        
+        # Start the git pull process
+        try:
+            # First try with the standard git command
+            process.start('git', ['pull', '--rebase'])
+            process.waitForStarted()
+            
+            # Set a timeout (5 minutes)
+            if not process.waitForFinished(300000):  # 5 minutes timeout
+                process.kill()
+                raise Exception("Git pull operation timed out after 5 minutes")
                 
-        except FileNotFoundError:
-            progress.close()
-            QMessageBox.warning(self, "Git Not Found",
-                              "Git is not installed or not in your PATH. "
-                              "Please install Git or use the download option.")
         except Exception as e:
             progress.close()
-            QMessageBox.warning(self, "Update Error", f"An error occurred during update: {str(e)}")
+            QMessageBox.warning(
+                self,
+                "Update Error",
+                f"An error occurred during update: {str(e)}\n\n"
+                "Please try updating manually using the 'git pull' command in the RamanLab directory:\n"
+                f"{app_dir}"
+            )
     
     def copy_git_command(self):
         """Copy git pull command to clipboard."""
