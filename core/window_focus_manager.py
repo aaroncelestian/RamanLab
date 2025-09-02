@@ -233,6 +233,149 @@ def is_linux():
     return platform.system().lower() == "linux"
 
 
+# Convenient QFileDialog wrappers that handle focus automatically
+from PySide6.QtWidgets import QFileDialog
+from PySide6.QtCore import QStandardPaths
+
+def safe_get_open_filename(parent, title="Open File", directory="", filter="All Files (*.*)"):
+    """
+    QFileDialog.getOpenFileName wrapper that maintains window focus.
+    
+    Args:
+        parent: Parent widget (the window that should keep focus)
+        title: Dialog title
+        directory: Starting directory (defaults to Documents if empty)
+        filter: File filter string
+    
+    Returns:
+        tuple: (file_path, selected_filter) - same as QFileDialog.getOpenFileName
+    """
+    if not directory:
+        directory = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    
+    dialog = QFileDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setDirectory(directory)
+    dialog.setNameFilter(filter)
+    dialog.setFileMode(QFileDialog.ExistingFile)
+    
+    if dialog.exec() == QFileDialog.Accepted:
+        files = dialog.selectedFiles()
+        if files:
+            return files[0], dialog.selectedNameFilter()
+        else:
+            parent.raise_()
+            parent.activateWindow()
+            return "", ""
+    else:
+        # Restore focus when cancelled
+        parent.raise_()
+        parent.activateWindow()
+        return "", ""
+
+def safe_get_open_filenames(parent, title="Open Files", directory="", filter="All Files (*.*)"):
+    """
+    QFileDialog.getOpenFileNames wrapper that maintains window focus.
+    
+    Args:
+        parent: Parent widget (the window that should keep focus)
+        title: Dialog title
+        directory: Starting directory (defaults to Documents if empty)
+        filter: File filter string
+    
+    Returns:
+        tuple: (file_paths_list, selected_filter) - same as QFileDialog.getOpenFileNames
+    """
+    if not directory:
+        directory = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    
+    dialog = QFileDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setDirectory(directory)
+    dialog.setNameFilter(filter)
+    dialog.setFileMode(QFileDialog.ExistingFiles)
+    
+    if dialog.exec() == QFileDialog.Accepted:
+        files = dialog.selectedFiles()
+        return files, dialog.selectedNameFilter()
+    else:
+        # Restore focus when cancelled
+        parent.raise_()
+        parent.activateWindow()
+        return [], ""
+
+def safe_get_save_filename(parent, title="Save File", directory="", filter="All Files (*.*)"):
+    """
+    QFileDialog.getSaveFileName wrapper that maintains window focus.
+    
+    Args:
+        parent: Parent widget (the window that should keep focus)
+        title: Dialog title
+        directory: Starting directory (defaults to Documents if empty)
+        filter: File filter string
+    
+    Returns:
+        tuple: (file_path, selected_filter) - same as QFileDialog.getSaveFileName
+    """
+    if not directory:
+        directory = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    
+    dialog = QFileDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setDirectory(directory)
+    dialog.setNameFilter(filter)
+    dialog.setAcceptMode(QFileDialog.AcceptSave)
+    
+    if dialog.exec() == QFileDialog.Accepted:
+        files = dialog.selectedFiles()
+        if files:
+            return files[0], dialog.selectedNameFilter()
+        else:
+            parent.raise_()
+            parent.activateWindow()
+            return "", ""
+    else:
+        # Restore focus when cancelled
+        parent.raise_()
+        parent.activateWindow()
+        return "", ""
+
+def safe_get_existing_directory(parent, title="Select Directory", directory=""):
+    """
+    QFileDialog.getExistingDirectory wrapper that maintains window focus.
+    
+    Args:
+        parent: Parent widget (the window that should keep focus)
+        title: Dialog title
+        directory: Starting directory (defaults to Documents if empty)
+    
+    Returns:
+        str: Selected directory path - same as QFileDialog.getExistingDirectory
+    """
+    if not directory:
+        directory = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+    
+    dialog = QFileDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setDirectory(directory)
+    dialog.setFileMode(QFileDialog.Directory)
+    dialog.setOption(QFileDialog.ShowDirsOnly, True)
+    
+    if dialog.exec() == QFileDialog.Accepted:
+        dirs = dialog.selectedFiles()
+        if dirs:
+            return dirs[0]
+        else:
+            parent.raise_()
+            parent.activateWindow()
+            return ""
+    else:
+        # Restore focus when cancelled
+        parent.raise_()
+        parent.activateWindow()
+        return ""
+
+
 if __name__ == "__main__":
     # Test the focus manager
     print("Window Focus Manager")

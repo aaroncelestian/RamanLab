@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QScrollArea
 )
 from PySide6.QtCore import Qt, QStandardPaths
+from core.window_focus_manager import safe_get_open_filenames, safe_get_open_filename, safe_get_save_filename
 from PySide6.QtGui import QFont, QColor
 
 # Import state management
@@ -1136,7 +1137,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
     
     def load_multiple_files(self):
         """Load multiple spectrum files."""
-        file_paths, _ = QFileDialog.getOpenFileNames(
+        file_paths, _ = safe_get_open_filenames(
             self,
             "Import Multiple Raman Spectra",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
@@ -1166,7 +1167,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
     
     def add_single_file(self):
         """Add a single spectrum file."""
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_path, _ = safe_get_open_filename(
             self,
             "Import Raman Spectrum",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
@@ -1217,7 +1218,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
             QMessageBox.warning(self, "No Data", "No spectra to save.")
             return
         
-        file_path, _ = QFileDialog.getSaveFileName(
+        file_path, _ = safe_get_save_filename(
             self,
             "Save Multi-Spectrum Plot",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
@@ -1237,7 +1238,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
             QMessageBox.warning(self, "No Data", "No spectra to export.")
             return
         
-        file_path, _ = QFileDialog.getSaveFileName(
+        file_path, _ = safe_get_save_filename(
             self,
             "Export Multi-Spectrum Data",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
