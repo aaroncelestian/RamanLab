@@ -96,8 +96,28 @@ def preprocess_spectrum(wavenumbers, intensities, target_wavenumbers=None):
     if len(wavenumbers) != len(intensities):
         raise ValueError(f"Wavenumbers and intensities have different lengths: {len(wavenumbers)} vs {len(intensities)}")
     
+    # Convert to numpy arrays and ensure proper data types
+    wavenumbers = np.asarray(wavenumbers, dtype=np.float64)
+    intensities = np.asarray(intensities, dtype=np.float64)
+    
+    # Check for NaN or inf values before processing
+    if np.any(np.isnan(wavenumbers)) or np.any(np.isnan(intensities)):
+        raise ValueError("Input data contains NaN values")
+    if np.any(np.isinf(wavenumbers)) or np.any(np.isinf(intensities)):
+        raise ValueError("Input data contains infinite values")
+    
     # Apply Savitzky-Golay filter for smoothing
-    smoothed = savgol_filter(intensities, window_length=11, polyorder=3)
+    # Ensure we have enough points for the filter
+    if len(intensities) < 11:
+        window_length = min(len(intensities), 5) if len(intensities) >= 5 else 3
+        if window_length % 2 == 0:  # Must be odd
+            window_length -= 1
+        polyorder = min(3, window_length - 1)
+    else:
+        window_length = 11
+        polyorder = 3
+    
+    smoothed = savgol_filter(intensities, window_length=window_length, polyorder=polyorder)
     
     # Simple baseline correction (can be replaced with more sophisticated methods)
     baseline = baseline_als(smoothed)

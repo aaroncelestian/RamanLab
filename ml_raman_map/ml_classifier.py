@@ -554,7 +554,7 @@ class RamanSpectraClassifier:
         """
         print(f"\nProcessing directory: {data_directory}")
         if output_file:
-            print(f"Will save results to: {output_file}")
+            print(f"Results will be saved to: {output_file}")
         print(f"Current working directory: {os.getcwd()}")
         
         # Get all files
@@ -565,7 +565,7 @@ class RamanSpectraClassifier:
             
         all_files = []
         for ext in file_ext:
-            all_files.extend([f for f in os.listdir(data_directory) if f.lower().endswith(ext.lower())])
+            all_files.extend([f for f in os.listdir(data_directory) if f.lower().endswith(ext.lower()) and not f.startswith('._')])
         
         print(f"Found {len(all_files)} files to process")
         
@@ -581,17 +581,15 @@ class RamanSpectraClassifier:
                 if result:
                     result_dict = {
                         "File": filename,
-                        "Prediction": result["prediction"],
-                        "Confidence": result["confidence"]
+                        "Prediction": result,
+                        "Confidence": "N/A"
                     }
                     
-                    # Extract X and Y coordinates from filename if possible
-                    x_match = re.search(r'_X(\d+)', filename)
-                    y_match = re.search(r'_Y(\d+)', filename)
-                    
-                    if x_match and y_match:
-                        result_dict["x_pos"] = int(x_match.group(1))
-                        result_dict["y_pos"] = int(y_match.group(1))
+                    # Extract x, y position from filename using enhanced extraction
+                    from ml_raman_map.map_visualizer import extract_coordinates_from_filename
+                    x_pos, y_pos = extract_coordinates_from_filename(filename)
+                    result_dict["x"] = x_pos
+                    result_dict["y"] = y_pos
                     
                     results.append(result_dict)
                     successful += 1
@@ -610,10 +608,19 @@ class RamanSpectraClassifier:
         print(f"- Successfully processed: {successful} files")
         print(f"- Errors encountered: {errors} files")
         
-        # If x_pos and y_pos were extracted, make sure they're included as numeric columns
-        if 'x_pos' in results_df.columns and 'y_pos' in results_df.columns:
-            results_df['x_pos'] = pd.to_numeric(results_df['x_pos'])
-            results_df['y_pos'] = pd.to_numeric(results_df['y_pos'])
+        # If x and y were extracted, make sure they're included as numeric columns
+        if 'x' in results_df.columns and 'y' in results_df.columns:
+            results_df['x'] = pd.to_numeric(results_df['x'], errors='coerce')
+            results_df['y'] = pd.to_numeric(results_df['y'], errors='coerce')
+            
+            # Create proper map visualization if coordinates are available
+            try:
+                from ml_raman_map.map_visualizer import create_proper_map_visualization
+                if output_file:
+                    vis_path = output_file.replace('.csv', '_map_visualization.png')
+                    create_proper_map_visualization(results_df, vis_path, "ML Classification ")
+            except Exception as e:
+                print(f"Warning: Could not create map visualization: {e}")
         
         return results_df
 

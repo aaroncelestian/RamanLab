@@ -304,7 +304,7 @@ def create_sample_results(directory, output_csv, grid_size=5, create_spectra=Fal
     return df
 
 def create_visualization(df, directory):
-    """Create visualization of the classification results."""
+    """Create visualization of the classification results with proper coordinate scaling."""
     # Check if we have enough data for a proper visualization
     if len(df) < 4:
         print("Not enough data points for visualization")
@@ -324,40 +324,45 @@ def create_visualization(df, directory):
     class_values = np.zeros_like(classes, dtype=int)
     class_values[classes == 'Class A'] = 1
     
-    # Determine grid size
-    grid_size_x = int(np.max(x_coords)) + 1
-    grid_size_y = int(np.max(y_coords)) + 1
+    # Determine actual coordinate ranges for proper scaling
+    x_min, x_max = int(np.min(x_coords)), int(np.max(x_coords))
+    y_min, y_max = int(np.min(y_coords)), int(np.max(y_coords))
+    grid_size_x = x_max - x_min + 1
+    grid_size_y = y_max - y_min + 1
     
-    # Create grid for plotting
-    grid = np.zeros((grid_size_y, grid_size_x))
+    # Create grid for plotting with proper coordinate mapping
+    grid = np.full((grid_size_y, grid_size_x), np.nan)  # Use NaN for missing data
     for i in range(len(df)):
         x, y = int(x_coords[i]), int(y_coords[i])
-        if 0 <= x < grid_size_x and 0 <= y < grid_size_y:
-            grid[y, x] = class_values[i]
+        # Map to grid coordinates
+        grid_x, grid_y = x - x_min, y - y_min
+        if 0 <= grid_x < grid_size_x and 0 <= grid_y < grid_size_y:
+            grid[grid_y, grid_x] = class_values[i]
     
-    # Plot class map
+    # Plot class map with proper extent
     cmap = ListedColormap(['blue', 'red'])
-    im1 = ax1.imshow(grid, cmap=cmap, interpolation='nearest', origin='lower')
+    extent = [x_min, x_max, y_min, y_max]  # [left, right, bottom, top]
+    im1 = ax1.imshow(grid, cmap=cmap, interpolation='nearest', origin='lower', extent=extent)
     ax1.set_title('Class Map (Blue: Class B, Red: Class A)')
     ax1.set_xlabel('X Position')
     ax1.set_ylabel('Y Position')
     
-    # Add text labels
-    for i in range(grid_size_y):
-        for j in range(grid_size_x):
-            if j < grid.shape[1] and i < grid.shape[0]:
-                text = 'A' if grid[i, j] == 1 else 'B'
-                ax1.text(j, i, text, ha='center', va='center', color='white')
+    # Add text labels at actual coordinates
+    for i in range(len(df)):
+        x, y = int(x_coords[i]), int(y_coords[i])
+        text = 'A' if class_values[i] == 1 else 'B'
+        ax1.text(x, y, text, ha='center', va='center', color='white', fontsize=8)
     
     # 2. Confidence map
     ax2 = axes[0, 1]
-    confidence_grid = np.zeros((grid_size_y, grid_size_x))
+    confidence_grid = np.full((grid_size_y, grid_size_x), np.nan)
     for i in range(len(df)):
         x, y = int(x_coords[i]), int(y_coords[i])
-        if 0 <= x < grid_size_x and 0 <= y < grid_size_y:
-            confidence_grid[y, x] = confidences[i]
+        grid_x, grid_y = x - x_min, y - y_min
+        if 0 <= grid_x < grid_size_x and 0 <= grid_y < grid_size_y:
+            confidence_grid[grid_y, grid_x] = confidences[i]
     
-    im2 = ax2.imshow(confidence_grid, cmap='viridis', interpolation='nearest', origin='lower')
+    im2 = ax2.imshow(confidence_grid, cmap='viridis', interpolation='nearest', origin='lower', extent=extent)
     fig.colorbar(im2, ax=ax2)
     ax2.set_title('Confidence Map')
     ax2.set_xlabel('X Position')
@@ -365,13 +370,14 @@ def create_visualization(df, directory):
     
     # 3. Dominant peak map
     ax3 = axes[1, 0]
-    peak_grid = np.zeros((grid_size_y, grid_size_x))
+    peak_grid = np.full((grid_size_y, grid_size_x), np.nan)
     for i in range(len(df)):
         x, y = int(x_coords[i]), int(y_coords[i])
-        if 0 <= x < grid_size_x and 0 <= y < grid_size_y:
-            peak_grid[y, x] = df['Dominant Peak'].iloc[i]
+        grid_x, grid_y = x - x_min, y - y_min
+        if 0 <= grid_x < grid_size_x and 0 <= grid_y < grid_size_y:
+            peak_grid[grid_y, grid_x] = df['Dominant Peak'].iloc[i]
     
-    im3 = ax3.imshow(peak_grid, cmap='plasma', interpolation='nearest', origin='lower')
+    im3 = ax3.imshow(peak_grid, cmap='plasma', interpolation='nearest', origin='lower', extent=extent)
     fig.colorbar(im3, ax=ax3)
     ax3.set_title('Dominant Peak Map (cm⁻¹)')
     ax3.set_xlabel('X Position')
@@ -379,13 +385,14 @@ def create_visualization(df, directory):
     
     # 4. Intensity ratio map
     ax4 = axes[1, 1]
-    ratio_grid = np.zeros((grid_size_y, grid_size_x))
+    ratio_grid = np.full((grid_size_y, grid_size_x), np.nan)
     for i in range(len(df)):
         x, y = int(x_coords[i]), int(y_coords[i])
-        if 0 <= x < grid_size_x and 0 <= y < grid_size_y:
-            ratio_grid[y, x] = df['Intensity Ratio'].iloc[i]
+        grid_x, grid_y = x - x_min, y - y_min
+        if 0 <= grid_x < grid_size_x and 0 <= grid_y < grid_size_y:
+            ratio_grid[grid_y, grid_x] = df['Intensity Ratio'].iloc[i]
     
-    im4 = ax4.imshow(ratio_grid, cmap='inferno', interpolation='nearest', origin='lower')
+    im4 = ax4.imshow(ratio_grid, cmap='inferno', interpolation='nearest', origin='lower', extent=extent)
     fig.colorbar(im4, ax=ax4)
     ax4.set_title('Intensity Ratio Map')
     ax4.set_xlabel('X Position')

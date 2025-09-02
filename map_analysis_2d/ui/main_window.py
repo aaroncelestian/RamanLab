@@ -881,12 +881,16 @@ class MapAnalysisMainWindow(QMainWindow):
 
             # Update visualization
             if map_data is not None:
-                # Fix: Use the map plot widget instead of missing visualizer
+                # Fix: Use the map plot widget with proper coordinate scaling
                 x_positions = [s.x_pos for s in self.map_data.spectra.values()]
                 y_positions = [s.y_pos for s in self.map_data.spectra.values()]
                 
-                extent = [min(x_positions), max(x_positions), 
-                         min(y_positions), max(y_positions)]
+                # Calculate extent with pixel boundaries for proper coordinate alignment
+                x_min, x_max = min(x_positions), max(x_positions)
+                y_min, y_max = min(y_positions), max(y_positions)
+                
+                # Extent for imshow: [left, right, bottom, top] with pixel boundaries
+                extent = [x_min - 0.5, x_max + 0.5, y_min - 0.5, y_max + 0.5]
                 
                 # Create title with integration info
                 title = f"{self.current_feature} Map"
@@ -4901,9 +4905,28 @@ class MapAnalysisMainWindow(QMainWindow):
                         np.savetxt(os.path.join(nmf_dir, f"component_{i+1}_map.csv"), 
                                   component_map, delimiter=',')
                 
-                # Save component spectra (H matrix)
+                # Save component spectra (H matrix) as combined CSV
                 np.savetxt(os.path.join(nmf_dir, "component_spectra.csv"), 
                           self.nmf_results['feature_components'], delimiter=',')
+                
+                # Save each component spectrum as individual XY files
+                wavenumbers = self.map_data.target_wavenumbers
+                feature_components = self.nmf_results['feature_components']
+                
+                for i in range(self.nmf_results['n_components']):
+                    component_spectrum = feature_components[i, :]
+                    
+                    # Create XY data (wavenumber, intensity)
+                    xy_data = np.column_stack((wavenumbers, component_spectrum))
+                    
+                    # Save as individual XY file
+                    component_filename = f"nmf_component_{i+1}_spectrum.txt"
+                    component_path = os.path.join(nmf_dir, component_filename)
+                    
+                    # Save with header for clarity
+                    header = f"NMF Component {i+1} Spectrum\nWavenumber (cm-1)\tIntensity"
+                    np.savetxt(component_path, xy_data, delimiter='\t', 
+                              header=header, comments='# ', fmt='%.6f')
                 
                 # Save component contributions (W matrix)
                 np.savetxt(os.path.join(nmf_dir, "component_contributions.csv"), 

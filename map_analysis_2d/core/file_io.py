@@ -239,10 +239,13 @@ class RamanMapData:
             if not data_path.exists():
                 raise FileNotFoundError(f"Data directory not found: {self.data_dir}")
             
-            # Find all spectrum files
+            # Find all spectrum files, excluding macOS metadata files
             spectrum_files = []
             for ext in ['*.txt', '*.csv', '*.dat']:
-                spectrum_files.extend(data_path.glob(ext))
+                all_files = data_path.glob(ext)
+                # Filter out macOS metadata files starting with '._'
+                filtered_files = [f for f in all_files if not f.name.startswith('._')]
+                spectrum_files.extend(filtered_files)
             
             if not spectrum_files:
                 raise ValueError(f"No spectrum files found in {self.data_dir}")

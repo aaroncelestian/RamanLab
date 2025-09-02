@@ -40,18 +40,19 @@ def process_directory(self, data_directory, output_file='plastic_detection_resul
     print("Scanning for files...")
     all_files = []
     for ext in file_ext:
-        # First try with glob pattern
+        # First try with glob pattern, filtering out macOS metadata files
         pattern = os.path.join(data_directory, f"*{ext}")
-        found_files = glob.glob(pattern)
-        print(f"Found {len(found_files)} files with pattern {pattern}")
+        found_files = [f for f in glob.glob(pattern) if not os.path.basename(f).startswith('._')]
+        print(f"Found {len(found_files)} files with pattern {pattern} (excluding ._* files)")
         
         # If that didn't work, try direct listing
         if not found_files:
             print(f"Trying direct directory listing for {ext}...")
             try:
                 dir_files = os.listdir(data_directory)
-                found_files = [os.path.join(data_directory, f) for f in dir_files if f.lower().endswith(ext.lower())]
-                print(f"Found {len(found_files)} files with extension {ext} through direct listing")
+                found_files = [os.path.join(data_directory, f) for f in dir_files 
+                             if f.lower().endswith(ext.lower()) and not f.startswith('._')]
+                print(f"Found {len(found_files)} files with extension {ext} through direct listing (excluding ._* files)")
             except Exception as e:
                 print(f"Error listing directory: {str(e)}")
         

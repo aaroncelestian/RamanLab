@@ -274,11 +274,11 @@ def batch_read_spectra(directory, file_ext=None, verbose=False, max_workers=4):
     elif isinstance(file_ext, str):
         file_ext = [file_ext]
     
-    # Get all files with specified extensions
+    # Get all files with specified extensions, filtering out macOS metadata files
     all_files = []
     for ext in file_ext:
         all_files.extend([os.path.join(directory, f) for f in os.listdir(directory) 
-                         if f.lower().endswith(ext.lower())])
+                         if f.lower().endswith(ext.lower()) and not f.startswith('._')])
     
     if verbose:
         print(f"\nFound {len(all_files)} files to process in {directory}")
