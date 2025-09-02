@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.2.2"
-__version_info__ = (1, 2, 2)
+__version__ = "1.2.3"
+__version_info__ = (1, 2, 3)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -18,7 +18,7 @@ __release_status__ = "stable"
 
 # Version history
 __changes__ = {
-    "1.2.2": {
+    "1.2.3": {
         "date": "2025-09-01",
         "name": "Window Focus Fix & QFileDialog Enhancement",
         "description": "Fixed window focus issues when canceling file dialogs across all RamanLab modules",
