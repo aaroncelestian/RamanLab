@@ -136,33 +136,13 @@ class MultiSpectrumManagerQt6(QMainWindow):
         # 2. Are called during data loading/removing/clearing operations
         # 3. Have signature conflicts with Qt signal arguments
         
-        # Safe methods for auto-save (no Qt signal conflicts):
-        # - add_selected_from_database: called by button clicks, but we use lambda
-        # - add_current_spectrum: called by button clicks, but we use lambda
+        # All methods called by Qt signals should NOT be wrapped due to signature conflicts
         
-        # Auto-save after adding from database
-        if hasattr(self, 'add_selected_from_database'):
-            original_method = self.add_selected_from_database
-            
-            def auto_save_wrapper(*args, **kwargs):
-                # add_selected_from_database takes no arguments, so ignore Qt signal arguments
-                result = original_method()
-                save_module_state('multi_spectrum_manager', "Auto-save: spectrum added from database")
-                return result
-            
-            self.add_selected_from_database = auto_save_wrapper
+        # REMOVED: Auto-save wrapper for add_selected_from_database
+        # This method is called by Qt signals and the wrapper was causing issues
         
-        # Auto-save after adding current spectrum
-        if hasattr(self, 'add_current_spectrum'):
-            original_method = self.add_current_spectrum
-            
-            def auto_save_wrapper(*args, **kwargs):
-                # add_current_spectrum takes no arguments, so ignore Qt signal arguments
-                result = original_method()
-                save_module_state('multi_spectrum_manager', "Auto-save: current spectrum added")
-                return result
-            
-            self.add_current_spectrum = auto_save_wrapper
+        # REMOVED: Auto-save wrapper for add_current_spectrum
+        # This method is called by Qt signals and the wrapper was causing issues
         
         # UNSAFE methods (DO NOT WRAP):
         # - load_spectrum_file_for_multi: called during file loading, can have timing issues
@@ -170,8 +150,8 @@ class MultiSpectrumManagerQt6(QMainWindow):
         # - clear_all_multi_spectra: called by button clicks with Qt signal arguments
         # - update_multi_plot: called frequently by Qt signals (checkbox, slider changes)
         
-        print("✅ Auto-save enabled for safe methods only")
-        print("📝 Memory: No wrappers on data loading/removing/clearing methods")
+        print("✅ Auto-save hooks disabled for Qt signal methods")
+        print("📝 Memory: No wrappers on Qt signal or data manipulation methods")
     
     def _update_global_settings(self):
         """Update global settings from UI controls."""
@@ -512,160 +492,204 @@ class MultiSpectrumManagerQt6(QMainWindow):
     
     def update_multi_plot(self):
         """Update multi-spectrum plot based on global settings."""
-        if not self.loaded_spectra:
-            self.multi_ax.clear()
-            self.multi_ax.set_xlabel("Wavenumber (cm⁻¹)")
-            self.multi_ax.set_ylabel("Intensity (a.u.)")
-            self.multi_ax.set_title("Multi-Spectrum Analysis")
-            self.multi_ax.text(0.5, 0.5, 
-                              'Multi-Spectrum Manager\n\nLoad spectra using the controls on the left\n'
-                              'to start your comparative analysis',
-                              ha='center', va='center', fontsize=14, fontweight='bold',
-                              transform=self.multi_ax.transAxes)
-            self.multi_canvas.draw()
-            return
+        # Save and disable autolayout to prevent layout conflicts
+        original_autolayout = self.multi_figure.get_tight_layout()
+        self.multi_figure.set_tight_layout(False)
+        
+        try:
+            if not self.loaded_spectra:
+                # Complete figure reset
+                self.multi_figure.clear()
+                import gc; gc.collect()  # Force cleanup
+                
+                # Recreate axis
+                self.multi_ax = self.multi_figure.add_subplot(111)
+                self.multi_ax.set_xlabel("Wavenumber (cm⁻¹)")
+                self.multi_ax.set_ylabel("Intensity (a.u.)")
+                self.multi_ax.set_title("Multi-Spectrum Analysis")
+                self.multi_ax.text(0.5, 0.5, 
+                                  'Multi-Spectrum Manager\n\nLoad spectra using the controls on the left\n'
+                                  'to start your comparative analysis',
+                                  ha='center', va='center', fontsize=14, fontweight='bold',
+                                  transform=self.multi_ax.transAxes)
+                
+                # Manual layout control
+                self.multi_figure.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.95)
+                
+                # Multi-step canvas refresh
+                self.multi_canvas.flush_events()
+                self.multi_canvas.draw_idle()
+                self.multi_canvas.draw()
+                return
             
-        self.multi_ax.clear()
-        
-        # Update labels
-        line_width = self.line_width_slider.value() / 10.0
-        self.line_width_label.setText(f"{line_width:.1f}")
-        
-        waterfall_spacing = self.waterfall_spacing_slider.value() / 10.0
-        self.waterfall_spacing_label.setText(f"{waterfall_spacing:.1f}")
-        
-        heatmap_spacing = self.heatmap_spacing_slider.value() / 10.0
-        self.heatmap_spacing_label.setText(f"{heatmap_spacing:.1f}")
-        
-        # Update global settings
-        self.global_settings['normalize'] = self.normalize_check.isChecked()
-        self.global_settings['show_legend'] = self.legend_check.isChecked()
-        self.global_settings['grid'] = self.grid_check.isChecked()
-        self.global_settings['line_width'] = line_width
-        self.global_settings['waterfall_mode'] = self.waterfall_check.isChecked()
-        self.global_settings['waterfall_spacing'] = waterfall_spacing
-        self.global_settings['heatmap_mode'] = self.heatmap_check.isChecked()
-        self.global_settings['heatmap_spacing'] = heatmap_spacing
-        self.global_settings['colormap'] = self.colormap_combo.currentText()
-        
-        # Get colors from colormap
-        colors = self.get_colormap_colors(len(self.loaded_spectra))
-        
-        # Plot all spectra
-        y_offset = 0
-        
-        if self.global_settings['heatmap_mode']:
-            # Heatmap mode: create a 2D array for heatmap visualization
-            spectrum_names = list(self.loaded_spectra.keys())
-            all_wavenumbers = []
-            all_intensities = []
+            # Complete figure reset for loaded spectra
+            self.multi_figure.clear()
+            import gc; gc.collect()  # Force cleanup
             
-            # Collect all data
-            for spectrum_name, spectrum_data in self.loaded_spectra.items():
-                wavenumbers, intensities = spectrum_data
-                x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
-                plot_wavenumbers = wavenumbers + x_offset_individual
-                plot_intensities = intensities.copy()
-                
-                # Normalize if requested
-                if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
-                    plot_intensities = plot_intensities / np.max(plot_intensities)
-                
-                all_wavenumbers.append(plot_wavenumbers)
-                all_intensities.append(plot_intensities)
+            # Recreate axis
+            self.multi_ax = self.multi_figure.add_subplot(111)
             
-            # Find common wavenumber range
-            min_wavenumber = max([np.min(wn) for wn in all_wavenumbers])
-            max_wavenumber = min([np.max(wn) for wn in all_wavenumbers])
+            # Update labels
+            line_width = self.line_width_slider.value() / 10.0
+            self.line_width_label.setText(f"{line_width:.1f}")
             
-            # Create heatmap data
-            heatmap_data = []
-            for i, (wavenumbers, intensities) in enumerate(zip(all_wavenumbers, all_intensities)):
-                # Interpolate to common wavenumber grid
-                mask = (wavenumbers >= min_wavenumber) & (wavenumbers <= max_wavenumber)
-                if np.any(mask):
-                    heatmap_data.append(intensities[mask])
+            waterfall_spacing = self.waterfall_spacing_slider.value() / 10.0
+            self.waterfall_spacing_label.setText(f"{waterfall_spacing:.1f}")
             
-            if heatmap_data:
-                # Create heatmap
-                heatmap_array = np.array(heatmap_data)
-                extent = [min_wavenumber, max_wavenumber, 0, len(spectrum_names)]
-                
-                im = self.multi_ax.imshow(heatmap_array, 
-                                        aspect='auto', 
-                                        extent=extent,
-                                        cmap=self.global_settings['colormap'],
-                                        origin='lower')
-                
-                # Add colorbar
-                self.multi_figure.colorbar(im, ax=self.multi_ax, label='Intensity (a.u.)')
-                
-                # Set y-axis labels
-                self.multi_ax.set_yticks(range(len(spectrum_names)))
-                self.multi_ax.set_yticklabels(spectrum_names)
-                
-        else:
-            # Regular line plot mode (with waterfall option)
-            for i, (spectrum_name, spectrum_data) in enumerate(self.loaded_spectra.items()):
-                wavenumbers, intensities = spectrum_data
-                
-                # Get individual spectrum settings
-                custom_color = self.get_spectrum_setting(spectrum_name, 'color', None)
-                y_offset_individual = self.get_spectrum_setting(spectrum_name, 'y_offset', 0.0)
-                x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
-                
-                # Apply offsets
-                plot_wavenumbers = wavenumbers + x_offset_individual
-                plot_intensities = intensities.copy()
-                
-                # Normalize if requested
-                if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
-                    plot_intensities = plot_intensities / np.max(plot_intensities)
-                
-                # Apply y-offset (individual + waterfall)
-                if self.global_settings['waterfall_mode']:
-                    plot_intensities += y_offset + y_offset_individual
-                    y_offset += waterfall_spacing
-                else:
-                    plot_intensities += y_offset_individual
-                
-                # Use custom color if set, otherwise use colormap
-                color = custom_color if custom_color else colors[i % len(colors)]
-                
-                self.multi_ax.plot(plot_wavenumbers, plot_intensities, 
-                                 color=color, 
-                                 linewidth=self.global_settings['line_width'],
-                                 label=spectrum_name)
-        
-        # Apply settings
-        if not self.global_settings['heatmap_mode']:
-            # Only show legend for line plots, not heatmaps
-            if self.global_settings['show_legend'] and self.loaded_spectra:
-                self.multi_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            heatmap_spacing = self.heatmap_spacing_slider.value() / 10.0
+            self.heatmap_spacing_label.setText(f"{heatmap_spacing:.1f}")
             
-            # Properly handle grid visibility for line plots
-            if self.global_settings['grid']:
-                self.multi_ax.grid(True, alpha=0.3)
+            # Update global settings
+            self.global_settings['normalize'] = self.normalize_check.isChecked()
+            self.global_settings['show_legend'] = self.legend_check.isChecked()
+            self.global_settings['grid'] = self.grid_check.isChecked()
+            self.global_settings['line_width'] = line_width
+            self.global_settings['waterfall_mode'] = self.waterfall_check.isChecked()
+            self.global_settings['waterfall_spacing'] = waterfall_spacing
+            self.global_settings['heatmap_mode'] = self.heatmap_check.isChecked()
+            self.global_settings['heatmap_spacing'] = heatmap_spacing
+            self.global_settings['colormap'] = self.colormap_combo.currentText()
+            
+            # Get colors from colormap
+            colors = self.get_colormap_colors(len(self.loaded_spectra))
+            
+            # Plot all spectra
+            y_offset = 0
+            
+            if self.global_settings['heatmap_mode']:
+                # Heatmap mode: create a 2D array for heatmap visualization
+                spectrum_names = list(self.loaded_spectra.keys())
+                all_wavenumbers = []
+                all_intensities = []
+                
+                # Collect all data
+                for spectrum_name, spectrum_data in self.loaded_spectra.items():
+                    wavenumbers, intensities = spectrum_data
+                    x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
+                    plot_wavenumbers = wavenumbers + x_offset_individual
+                    plot_intensities = intensities.copy()
+                    
+                    # Normalize if requested
+                    if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
+                        plot_intensities = plot_intensities / np.max(plot_intensities)
+                    
+                    all_wavenumbers.append(plot_wavenumbers)
+                    all_intensities.append(plot_intensities)
+                
+                # Find common wavenumber range
+                min_wavenumber = max([np.min(wn) for wn in all_wavenumbers])
+                max_wavenumber = min([np.max(wn) for wn in all_wavenumbers])
+                
+                # Create a common wavenumber grid for interpolation
+                n_points = 500  # Fixed number of points for consistent array size
+                common_wavenumbers = np.linspace(min_wavenumber, max_wavenumber, n_points)
+                
+                # Create heatmap data by interpolating all spectra to common grid
+                heatmap_data = []
+                for i, (wavenumbers, intensities) in enumerate(zip(all_wavenumbers, all_intensities)):
+                    # Interpolate to common wavenumber grid
+                    interpolated_intensities = np.interp(common_wavenumbers, wavenumbers, intensities)
+                    heatmap_data.append(interpolated_intensities)
+                
+                if heatmap_data:
+                    # Create heatmap - now all arrays have the same length
+                    heatmap_array = np.array(heatmap_data)
+                    extent = [min_wavenumber, max_wavenumber, 0, len(spectrum_names)]
+                    
+                    im = self.multi_ax.imshow(heatmap_array, 
+                                            aspect='auto', 
+                                            extent=extent,
+                                            cmap=self.global_settings['colormap'],
+                                            origin='lower')
+                    
+                    # Add colorbar
+                    self.multi_figure.colorbar(im, ax=self.multi_ax, label='Intensity (a.u.)')
+                    
+                    # Set y-axis labels
+                    self.multi_ax.set_yticks(range(len(spectrum_names)))
+                    self.multi_ax.set_yticklabels(spectrum_names)
+                    
             else:
-                self.multi_ax.grid(False)
-        
-        # Set axis labels and title
-        self.multi_ax.set_xlabel("Wavenumber (cm⁻¹)")
-        
-        if self.global_settings['heatmap_mode']:
-            self.multi_ax.set_ylabel("Spectrum")
-            title = "Multi-Spectrum Heatmap Analysis"
-        else:
-            ylabel = "Intensity (a.u.)"
-            if self.global_settings['waterfall_mode']:
-                ylabel += " (Offset)"
-            self.multi_ax.set_ylabel(ylabel)
-            title = "Multi-Spectrum Analysis"
-        
-        self.multi_ax.set_title(title)
-        
-        self.multi_figure.tight_layout()
-        self.multi_canvas.draw()
+                # Regular line plot mode (with waterfall option)
+                for i, (spectrum_name, spectrum_data) in enumerate(self.loaded_spectra.items()):
+                    wavenumbers, intensities = spectrum_data
+                    
+                    # Get individual spectrum settings
+                    custom_color = self.get_spectrum_setting(spectrum_name, 'color', None)
+                    y_offset_individual = self.get_spectrum_setting(spectrum_name, 'y_offset', 0.0)
+                    x_offset_individual = self.get_spectrum_setting(spectrum_name, 'x_offset', 0.0)
+                    
+                    # Apply offsets
+                    plot_wavenumbers = wavenumbers + x_offset_individual
+                    plot_intensities = intensities.copy()
+                    
+                    # Normalize if requested
+                    if self.global_settings['normalize'] and np.max(plot_intensities) > 0:
+                        plot_intensities = plot_intensities / np.max(plot_intensities)
+                    
+                    # Apply y-offset (individual + waterfall)
+                    if self.global_settings['waterfall_mode']:
+                        plot_intensities += y_offset + y_offset_individual
+                        y_offset += waterfall_spacing
+                    else:
+                        plot_intensities += y_offset_individual
+                    
+                    # Use custom color if set, otherwise use colormap
+                    color = custom_color if custom_color else colors[i % len(colors)]
+                    
+                    self.multi_ax.plot(plot_wavenumbers, plot_intensities, 
+                                     color=color, 
+                                     linewidth=self.global_settings['line_width'],
+                                     label=spectrum_name)
+            
+            # Apply settings
+            if not self.global_settings['heatmap_mode']:
+                # Only show legend for line plots, not heatmaps
+                if self.global_settings['show_legend'] and self.loaded_spectra:
+                    self.multi_ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                
+                # Properly handle grid visibility for line plots
+                if self.global_settings['grid']:
+                    self.multi_ax.grid(True, alpha=0.3)
+                else:
+                    self.multi_ax.grid(False)
+            
+            # Set axis labels and title
+            self.multi_ax.set_xlabel("Wavenumber (cm⁻¹)")
+            
+            if self.global_settings['heatmap_mode']:
+                self.multi_ax.set_ylabel("Spectrum")
+                title = "Multi-Spectrum Heatmap Analysis"
+            else:
+                ylabel = "Intensity (a.u.)"
+                if self.global_settings['waterfall_mode']:
+                    ylabel += " (Offset)"
+                self.multi_ax.set_ylabel(ylabel)
+                title = "Multi-Spectrum Analysis"
+            
+            self.multi_ax.set_title(title)
+            
+            # Manual layout control based on whether heatmap has colorbar
+            if self.global_settings['heatmap_mode']:
+                # With colorbar: leave space on the right
+                self.multi_figure.subplots_adjust(left=0.1, bottom=0.1, right=0.85, top=0.95)
+            else:
+                # Without colorbar: use full width
+                self.multi_figure.subplots_adjust(left=0.1, bottom=0.1, right=0.95, top=0.95)
+            
+            # Multi-step canvas refresh
+            self.multi_canvas.flush_events()
+            self.multi_canvas.draw_idle()
+            self.multi_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error updating multi-spectrum plot: {e}")
+            # Ensure axis exists even on error
+            if not hasattr(self, 'multi_ax') or self.multi_ax is None:
+                self.multi_ax = self.multi_figure.add_subplot(111)
+        finally:
+            # Always restore autolayout setting
+            self.multi_figure.set_tight_layout(original_autolayout)
     
     def on_multi_spectrum_select(self, current, previous):
         """Handle selection of a multi-spectrum."""
@@ -826,54 +850,197 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self.db_results_list.addItem(spectrum_name)
     
     def filter_database_results(self):
-        """Filter database results based on search text."""
-        search_text = self.db_search_field.text().lower()
+        """Filter database results based on search text with relevance ranking."""
+        search_text = self.db_search_field.text().lower().strip()
         self.db_results_list.clear()
         
-        if not self.raman_db or not hasattr(self.raman_db, 'database') or not self.raman_db.database:
+        if not search_text or not self.raman_db or not hasattr(self.raman_db, 'database') or not self.raman_db.database:
+            if not search_text:
+                # Show all results if no search text
+                for spectrum_name in list(self.raman_db.database.keys())[:100]:  # Limit to first 100
+                    self.db_results_list.addItem(spectrum_name)
             return
         
+        # Collect matches with relevance scores
+        matches = []
+        
         for spectrum_name, spectrum_data in self.raman_db.database.items():
-            # Search in spectrum name
-            if search_text in spectrum_name.lower():
-                self.db_results_list.addItem(spectrum_name)
-                continue
+            spectrum_name_lower = spectrum_name.lower()
+            score = 0
             
-            # Search in metadata
+            # Exact match in mineral name (highest priority)
+            if search_text == spectrum_name_lower.split('__')[0]:
+                score += 1000
+            # Starts with search term in mineral name
+            elif spectrum_name_lower.split('__')[0].startswith(search_text):
+                score += 500
+            # Contains search term in mineral name
+            elif search_text in spectrum_name_lower.split('__')[0]:
+                score += 100
+            # Contains search term anywhere in spectrum name
+            elif search_text in spectrum_name_lower:
+                score += 50
+            
+            # Search in metadata for additional matches
             metadata = spectrum_data.get('metadata', {})
             for key, value in metadata.items():
                 if isinstance(value, str) and search_text in value.lower():
-                    self.db_results_list.addItem(spectrum_name)
+                    score += 10
                     break
+            
+            if score > 0:
+                matches.append((score, spectrum_name))
+        
+        # Sort by relevance score (highest first) and add to list
+        matches.sort(key=lambda x: (-x[0], x[1]))  # Sort by score desc, then name asc
+        
+        # Limit results to prevent UI slowdown
+        for score, spectrum_name in matches[:200]:
+            self.db_results_list.addItem(spectrum_name)
     
     def add_selected_from_database(self):
         """Add selected spectrum from database search results."""
-        current_item = self.db_results_list.currentItem()
-        if not current_item:
-            QMessageBox.information(self, "No Selection", "Please select a spectrum from the search results.")
-            return
-        
-        spectrum_name = current_item.text()
-        
-        if not self.raman_db or spectrum_name not in self.raman_db.database:
-            QMessageBox.warning(self, "Spectrum Not Found", f"Spectrum '{spectrum_name}' not found in database.")
-            return
-        
-        spectrum_data = self.raman_db.database[spectrum_name]
-        wavenumbers = np.array(spectrum_data['wavenumbers'])
-        intensities = np.array(spectrum_data['intensities'])
-        
-        # Generate unique name for multi-spectrum manager
-        display_name = spectrum_name
-        counter = 1
-        while display_name in self.loaded_spectra:
-            display_name = f"{spectrum_name}_{counter}"
-            counter += 1
-        
-        self.loaded_spectra[display_name] = (wavenumbers, intensities)
-        self.multi_spectrum_list.addItem(display_name)
-        self.update_multi_plot()
-        self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
+        print("\n=== DEBUG: Starting add_selected_from_database ===")
+        try:
+            # Debug: Check if raman_db exists and its type
+            print(f"DEBUG: self.raman_db exists: {hasattr(self, 'raman_db')}")
+            if hasattr(self, 'raman_db'):
+                print(f"DEBUG: self.raman_db type: {type(self.raman_db).__name__}")
+                print(f"DEBUG: raman_db has 'database' attribute: {hasattr(self.raman_db, 'database')}")
+                if hasattr(self.raman_db, 'database'):
+                    print(f"DEBUG: raman_db.database type: {type(self.raman_db.database).__name__}")
+                    if hasattr(self.raman_db.database, 'keys'):
+                        print(f"DEBUG: Number of entries in database: {len(self.raman_db.database)}")
+            
+            if not hasattr(self, 'raman_db') or self.raman_db is None:
+                error_msg = "Database connection not available."
+                print(f"DEBUG: {error_msg}")
+                QMessageBox.warning(self, "Database Error", error_msg)
+                return
+                
+            current_item = self.db_results_list.currentItem()
+            if not current_item:
+                error_msg = "No item selected in database results list"
+                print(f"DEBUG: {error_msg}")
+                QMessageBox.information(self, "No Selection", "Please select a spectrum from the search results.")
+                return
+            
+            spectrum_name = current_item.text()
+            print(f"DEBUG: Selected spectrum name: {spectrum_name}")
+            
+            if not hasattr(self.raman_db, 'database') or not isinstance(self.raman_db.database, dict):
+                error_msg = "Database is not properly initialized or not a dictionary"
+                print(f"DEBUG: {error_msg}")
+                QMessageBox.warning(self, "Database Error", error_msg)
+                return
+            
+            if spectrum_name not in self.raman_db.database:
+                error_msg = f"Spectrum '{spectrum_name}' not found in database. Available keys: {list(self.raman_db.database.keys())[:5]}..."
+                print(f"DEBUG: {error_msg}")
+                QMessageBox.warning(self, "Spectrum Not Found", f"Spectrum '{spectrum_name}' not found in database.")
+                return
+            
+            # Get the spectrum data from the database
+            spectrum_data = self.raman_db.database[spectrum_name]
+            print(f"DEBUG: Retrieved spectrum_data. Type: {type(spectrum_data).__name__}")
+            
+            # Debug: Print the structure of spectrum_data
+            if hasattr(spectrum_data, 'keys'):
+                print(f"DEBUG: spectrum_data keys: {list(spectrum_data.keys())}")
+            elif isinstance(spectrum_data, (list, tuple, np.ndarray)):
+                print(f"DEBUG: spectrum_data is a sequence of length: {len(spectrum_data)}")
+            
+            # Check if the data is in the expected format
+            if hasattr(spectrum_data, 'get'):
+                if 'wavenumbers' in spectrum_data and 'intensities' in spectrum_data:
+                    print("DEBUG: Found 'wavenumbers' and 'intensities' keys in spectrum_data")
+                    wavenumbers = np.array(spectrum_data['wavenumbers'])
+                    intensities = np.array(spectrum_data['intensities'])
+                elif 'x' in spectrum_data and 'y' in spectrum_data:
+                    print("DEBUG: Found 'x' and 'y' keys in spectrum_data")
+                    wavenumbers = np.array(spectrum_data['x'])
+                    intensities = np.array(spectrum_data['y'])
+                else:
+                    # Try to extract data from potential nested structure
+                    print("DEBUG: Trying to extract data from nested structure")
+                    data = spectrum_data.get('data', spectrum_data.get('spectrum', None))
+                    if data and isinstance(data, dict):
+                        print("DEBUG: Found nested 'data' or 'spectrum' dictionary")
+                        wavenumbers = np.array(data.get('wavenumbers', data.get('x', [])))
+                        intensities = np.array(data.get('intensities', data.get('y', [])))
+                    else:
+                        # Last resort: try to use the first two arrays found in the data
+                        print("DEBUG: Trying to find first two arrays in the data")
+                        arrays = [v for v in spectrum_data.values() if isinstance(v, (list, tuple, np.ndarray))]
+                        print(f"DEBUG: Found {len(arrays)} arrays in the data")
+                        if len(arrays) >= 2:
+                            wavenumbers = np.array(arrays[0])
+                            intensities = np.array(arrays[1])
+                        else:
+                            error_msg = "Could not extract wavenumbers and intensities from spectrum data"
+                            print(f"DEBUG: {error_msg}")
+                            print(f"DEBUG: spectrum_data type: {type(spectrum_data).__name__}")
+                            if hasattr(spectrum_data, '__dict__'):
+                                print(f"DEBUG: spectrum_data attributes: {vars(spectrum_data).keys()}")
+                            raise ValueError(error_msg)
+            elif isinstance(spectrum_data, (list, tuple, np.ndarray)) and len(spectrum_data) >= 2:
+                print("DEBUG: spectrum_data is a sequence, using first two elements")
+                # Assume first element is wavenumbers, second is intensities
+                wavenumbers = np.array(spectrum_data[0])
+                intensities = np.array(spectrum_data[1])
+            else:
+                error_msg = "Unsupported spectrum data format"
+                print(f"DEBUG: {error_msg}")
+                print(f"DEBUG: spectrum_data type: {type(spectrum_data).__name__}")
+                raise ValueError(error_msg)
+            
+            # Debug: Print array shapes and first few values
+            print(f"DEBUG: wavenumbers shape: {wavenumbers.shape if hasattr(wavenumbers, 'shape') else 'N/A'}")
+            print(f"DEBUG: intensities shape: {intensities.shape if hasattr(intensities, 'shape') else 'N/A'}")
+            if len(wavenumbers) > 0 and len(intensities) > 0:
+                print(f"DEBUG: First few wavenumbers: {wavenumbers[:3] if len(wavenumbers) > 3 else wavenumbers}")
+                print(f"DEBUG: First few intensities: {intensities[:3] if len(intensities) > 3 else intensities}")
+            
+            # Validate the data
+            if len(wavenumbers) == 0 or len(intensities) == 0:
+                error_msg = f"Empty wavenumbers ({len(wavenumbers)}) or intensities ({len(intensities)}) array"
+                print(f"DEBUG: {error_msg}")
+                raise ValueError(error_msg)
+                
+            if len(wavenumbers) != len(intensities):
+                error_msg = f"Mismatched array lengths: wavenumbers ({len(wavenumbers)}) != intensities ({len(intensities)})"
+                print(f"DEBUG: {error_msg}")
+                raise ValueError(error_msg)
+            
+            # Generate unique name for multi-spectrum manager
+            display_name = spectrum_name
+            counter = 1
+            while display_name in self.loaded_spectra:
+                display_name = f"{spectrum_name}_{counter}"
+                counter += 1
+            
+            print(f"DEBUG: Adding spectrum '{display_name}' to loaded_spectra")
+            
+            # Store the spectrum data
+            self.loaded_spectra[display_name] = (wavenumbers, intensities)
+            
+            # Add to the list and update the display
+            self.multi_spectrum_list.addItem(display_name)
+            print("DEBUG: Calling update_multi_plot()")
+            self.update_multi_plot()
+            self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
+            print("=== DEBUG: Successfully added spectrum ===")
+            
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"\n=== DEBUG: Exception in add_selected_from_database ===")
+            print(error_trace)
+            print(f"\nError details: {str(e)}")
+            print("========================================\n")
+            
+            error_msg = f"Failed to load spectrum: {str(e)}\n\nSpectrum name: {spectrum_name if 'spectrum_name' in locals() else 'N/A'}"
+            QMessageBox.critical(self, "Error", error_msg)
     
     def remove_spectrum_by_name(self, spectrum_name):
         """Remove a specific spectrum by name."""
