@@ -9231,6 +9231,77 @@ Stability Assessment:"""
         except Exception as e:
             print(f"Error plotting stability analysis: {str(e)}")
 
+    def generate_stability_results(self, stability_stats, cluster_stability):
+        """Generate detailed stability analysis results text."""
+        results_text = "Cluster Stability Analysis Results\n"
+        results_text += "=" * 35 + "\n\n"
+        
+        # Overall stability metrics
+        results_text += f"Bootstrap Analysis Summary:\n"
+        results_text += f"• Total iterations: {stability_stats['total_iterations']}\n"
+        results_text += f"• Successful iterations: {stability_stats['successful_iterations']}\n"
+        results_text += f"• Success rate: {stability_stats['successful_iterations']/stability_stats['total_iterations']*100:.1f}%\n\n"
+        
+        results_text += f"Adjusted Rand Index (ARI) Statistics:\n"
+        results_text += f"• Mean ARI: {stability_stats['mean_ari']:.3f}\n"
+        results_text += f"• Std deviation: {stability_stats['std_ari']:.3f}\n"
+        results_text += f"• Range: {stability_stats['min_ari']:.3f} to {stability_stats['max_ari']:.3f}\n\n"
+        
+        # Overall stability assessment
+        mean_ari = stability_stats['mean_ari']
+        if mean_ari >= 0.8:
+            assessment = "Excellent - Very stable clustering"
+        elif mean_ari >= 0.6:
+            assessment = "Good - Stable clustering"
+        elif mean_ari >= 0.4:
+            assessment = "Moderate - Moderately stable clustering"
+        elif mean_ari >= 0.2:
+            assessment = "Poor - Unstable clustering"
+        else:
+            assessment = "Very Poor - Highly unstable clustering"
+        
+        results_text += f"Overall Stability Assessment: {assessment}\n\n"
+        
+        # Cluster-specific consistency
+        results_text += "Cluster-Specific Consistency:\n"
+        results_text += "-" * 30 + "\n"
+        
+        for label in sorted(cluster_stability.keys()):
+            stats = cluster_stability[label]
+            results_text += f"Cluster {label}:\n"
+            results_text += f"  • Mean consistency: {stats['mean_consistency']:.3f}\n"
+            results_text += f"  • Std deviation: {stats['std_consistency']:.3f}\n"
+            results_text += f"  • Range: {stats['min_consistency']:.3f} to {stats['max_consistency']:.3f}\n"
+            
+            # Consistency assessment
+            if stats['mean_consistency'] >= 0.8:
+                consistency_quality = "Highly consistent"
+            elif stats['mean_consistency'] >= 0.6:
+                consistency_quality = "Consistent"
+            elif stats['mean_consistency'] >= 0.4:
+                consistency_quality = "Moderately consistent"
+            else:
+                consistency_quality = "Inconsistent"
+            results_text += f"  • Assessment: {consistency_quality}\n\n"
+        
+        # Recommendations
+        results_text += "Recommendations:\n"
+        results_text += "-" * 15 + "\n"
+        
+        if mean_ari >= 0.6:
+            results_text += "• Clustering appears stable and reliable\n"
+            results_text += "• Results can be trusted for further analysis\n"
+        elif mean_ari >= 0.4:
+            results_text += "• Consider adjusting clustering parameters\n"
+            results_text += "• Try different linkage methods or distance metrics\n"
+        else:
+            results_text += "• Clustering is unstable - results may not be reliable\n"
+            results_text += "• Consider preprocessing data differently\n"
+            results_text += "• Try different clustering algorithms\n"
+            results_text += "• Increase number of clusters or change parameters\n"
+        
+        return results_text
+
     def export_clusters_to_folders(self):
         """Export each cluster's spectra to separate folders."""
         if (self.cluster_data['labels'] is None or 
