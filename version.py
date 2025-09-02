@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.1.4"
-__version_info__ = (1, 1, 4)
+__version__ = "1.2.1"
+__version_info__ = (1, 2, 1)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -12,12 +12,36 @@ __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
-__release_date__ = "2025-01-28"
+__release_date__ = "2025-09-01"
 __release_name__ = "Jupyter Console Integration & Enhanced Dependency Management"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.2.1": {
+        "date": "2025-09-01",
+        "name": "Auto-Update Fix & Version Synchronization",
+        "description": "Fixed auto-update mechanism to properly handle version updates and application restart",
+        "major_features": [
+            "🔄 Fixed auto-update mechanism to properly detect when updates are downloaded",
+            "🚀 Added intelligent restart prompting after successful updates",
+            "📝 Enhanced update success messaging with clear restart instructions",
+            "🔍 Improved detection of 'already up to date' vs actual update scenarios"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Enhanced simple_update_checker.py to detect actual git pull changes vs already up-to-date",
+            "Added automatic application close option after successful updates",
+            "Improved user experience with clear restart instructions",
+            "Fixed version persistence issue where old version remained after git pull"
+        ],
+        "bug_fixes": [
+            "Fixed auto-update showing old version after successful git pull",
+            "Resolved confusion where update claimed success but version didn't change",
+            "Enhanced update flow to properly handle application restart requirement",
+            "Improved update messaging to guide users through restart process"
+        ]
+    },
     "1.1.4": {
         "date": "2025-01-28",
         "name": "Jupyter Console Integration & Enhanced Dependency Management",

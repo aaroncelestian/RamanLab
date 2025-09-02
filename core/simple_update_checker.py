@@ -207,13 +207,30 @@ class SimpleUpdateDialog(QDialog):
                 progress_dialog.close()
                 
                 if pull_result.returncode == 0:
-                    # Success
-                    QMessageBox.information(self, "Update Successful! 🎉", 
-                                          f"RamanLab has been updated successfully!\n\n"
-                                          f"Updated to version {self.update_info['version']}\n\n"
-                                          "Changes:\n"
-                                          f"{pull_result.stdout}\n\n"
-                                          "Please restart RamanLab to use the new version.")
+                    # Success - check if there were actually changes
+                    output = pull_result.stdout.strip()
+                    if "Already up to date" in output or "Already up-to-date" in output:
+                        QMessageBox.information(self, "Already Up to Date", 
+                                              f"RamanLab is already up to date!\n\n"
+                                              f"Current version: {__version__}\n\n"
+                                              "No restart needed.")
+                    else:
+                        # Actual update occurred
+                        reply = QMessageBox.question(self, "Update Successful! 🎉", 
+                                                   f"RamanLab has been updated successfully!\n\n"
+                                                   f"Updated to version {self.update_info['version']}\n\n"
+                                                   "Changes:\n"
+                                                   f"{output}\n\n"
+                                                   "RamanLab must be restarted to use the new version.\n\n"
+                                                   "Would you like to close RamanLab now so you can restart it?",
+                                                   QMessageBox.Yes | QMessageBox.No,
+                                                   QMessageBox.Yes)
+                        if reply == QMessageBox.Yes:
+                            # Close the application
+                            import sys
+                            if self.parent():
+                                self.parent().close()
+                            sys.exit(0)
                     self.accept()
                 else:
                     # Git pull failed
