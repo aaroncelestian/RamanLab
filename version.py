@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.2.1"
-__version_info__ = (1, 2, 1)
+__version__ = "1.2.2"
+__version_info__ = (1, 2, 2)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -18,6 +18,35 @@ __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.2.2": {
+        "date": "2025-09-01",
+        "name": "Window Focus Fix & QFileDialog Enhancement",
+        "description": "Fixed window focus issues when canceling file dialogs across all RamanLab modules",
+        "major_features": [
+            "🔧 Fixed window focus issue where canceling file dialogs transferred focus to main window",
+            "🛠️ Created reusable QFileDialog wrapper functions with automatic focus restoration",
+            "📦 Enhanced core.window_focus_manager with safe_get_* utility functions",
+            "🎯 Applied focus fix to multi_spectrum_manager_qt6.py as demonstration"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Added safe_get_open_filename(), safe_get_open_filenames(), safe_get_save_filename(), safe_get_existing_directory() to window_focus_manager.py",
+            "Replaced direct QFileDialog static method calls with explicit dialog instances",
+            "Added automatic focus restoration using self.raise_() and self.activateWindow() on dialog cancellation",
+            "Created pattern for consistent focus handling across all RamanLab modules"
+        ],
+        "bug_fixes": [
+            "Fixed window focus jumping to main RamanLab window when canceling file dialogs in modules",
+            "Resolved workflow interruption caused by improper focus management",
+            "Enhanced user experience by maintaining focus on current working module",
+            "Simplified file dialog code while improving reliability"
+        ],
+        "future_roadmap": [
+            "Apply safe dialog wrappers to all remaining RamanLab modules",
+            "Enhance window focus management for other dialog types",
+            "Consider additional UI/UX improvements for better workflow continuity"
+        ]
+    },
     "1.2.1": {
         "date": "2025-09-01",
         "name": "Auto-Update Fix & Version Synchronization",

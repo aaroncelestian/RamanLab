@@ -1,4 +1,4 @@
-RamanLab Version 1.1.4 - "Jupyter Console Integration & Enhanced Dependency Management"
+RamanLab Version 1.2.2 - "Window Focus Fix & QFileDialog Enhancement"
 Release Date: January 28, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
