@@ -674,39 +674,73 @@ class BatchProcessingMonitor(QDialog):
             
             # Collect peak summary data
             if peaks is not None and fit_params is not None:
+                # Get model information from result (default to gaussian if not available)
+                model = result.get('model', 'gaussian')
                 n_peaks = len(peaks)
+                
                 for j in range(n_peaks):
-                    if j * 3 + 2 < len(fit_params):
-                        amplitude = fit_params[j * 3]
-                        center = fit_params[j * 3 + 1]
-                        width = fit_params[j * 3 + 2]
-                        
-                        # Calculate FWHM and area
-                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
-                        area = amplitude * width * np.sqrt(2 * np.pi)
-                        
-                        peak_summary.append({
-                            'Filename': filename,
-                            'Peak_Number': j + 1,
-                            'Center_cm-1': center,
-                            'Amplitude': amplitude,
-                            'Width_Sigma': width,
-                            'FWHM': fwhm,
-                            'Area': area,
-                            'Total_R2': total_r2 if j == 0 else '',  # Only show R² for first peak
-                            'Peak_Height_Raw': intensities[peaks[j]] if j < len(peaks) else np.nan
-                        })
+                    # Calculate FWHM using the new helper function
+                    fwhm_left, fwhm_right = self._calculate_fwhm_for_batch(fit_params, j, model)
+                    
+                    if model.lower() == 'asymmetric voigt':
+                        # For asymmetric peaks, extract 5 parameters
+                        if j * 5 + 4 < len(fit_params):
+                            amplitude = fit_params[j * 5]
+                            center = fit_params[j * 5 + 1]
+                            left_width = fit_params[j * 5 + 2]
+                            right_width = fit_params[j * 5 + 3]
+                            eta = fit_params[j * 5 + 4]
+                            
+                            # Approximate area calculation for asymmetric peak
+                            avg_width = (left_width + right_width) / 2
+                            area = amplitude * avg_width * np.sqrt(2 * np.pi)
+                            
+                            peak_summary.append({
+                                'Filename': filename,
+                                'Peak_Number': j + 1,
+                                'Center_cm-1': center,
+                                'Amplitude': amplitude,
+                                'Left_Width_Sigma': left_width,
+                                'Right_Width_Sigma': right_width,
+                                'FWHM_Left': fwhm_left,
+                                'FWHM_Right': fwhm_right,
+                                'Eta_Parameter': eta,
+                                'Area': area,
+                                'Total_R2': total_r2 if j == 0 else '',  # Only show R² for first peak
+                                'Peak_Height_Raw': intensities[peaks[j]] if j < len(peaks) else np.nan
+                            })
+                    else:
+                        # For symmetric peaks, extract 3 parameters
+                        if j * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[j * 3]
+                            center = fit_params[j * 3 + 1]
+                            width = fit_params[j * 3 + 2]
+                            
+                            # Calculate area
+                            area = amplitude * width * np.sqrt(2 * np.pi)
+                            
+                            peak_summary.append({
+                                'Filename': filename,
+                                'Peak_Number': j + 1,
+                                'Center_cm-1': center,
+                                'Amplitude': amplitude,
+                                'Width_Sigma': width,
+                                'FWHM': fwhm_left,  # Single FWHM value
+                                'Area': area,
+                                'Total_R2': total_r2 if j == 0 else '',  # Only show R² for first peak
+                                'Peak_Height_Raw': intensities[peaks[j]] if j < len(peaks) else np.nan
+                            })
         
         # Save main CSV with 4 columns per spectrum
         main_df = pd.DataFrame(csv_data)
         main_df.to_csv(spectral_data_file, index=False)
-        print(f"✅ Saved spectral data: {spectral_data_file}")
+        print(f"✅ Saved spectral data: {len(self.stored_results)} spectra × 4 columns = {len(self.stored_results) * 4} data columns")
         
         # Save peak parameters summary
         if peak_summary:
             peak_df = pd.DataFrame(peak_summary)
             peak_df.to_csv(peak_params_file, index=False)
-            print(f"✅ Saved peak parameters: {peak_params_file}")
+            print(f"✅ Saved peak parameters: {len(peak_summary)} peaks")
         
         # Save enhanced processing summary with individual peak parameters
         summary_data = []
@@ -723,6 +757,7 @@ class BatchProcessingMonitor(QDialog):
             peaks = result.get('peaks')
             fit_params = result.get('fit_params')
             total_r2 = result.get('total_r2')
+            model = result.get('model', 'gaussian')
             n_peaks = len(peaks) if peaks is not None else 0
             
             # Base summary info
@@ -732,38 +767,76 @@ class BatchProcessingMonitor(QDialog):
                 'Total_R2': total_r2,
                 'Fitting_Success': 'Yes' if total_r2 is not None and total_r2 > 0 else 'No',
                 'Region_Start': result.get('region_start', 'Full'),
-                'Region_End': result.get('region_end', 'Spectrum')
+                'Region_End': result.get('region_end', 'Spectrum'),
+                'Model': model
             }
             
             # Add individual peak parameters as columns
             if fit_params is not None and n_peaks > 0:
                 for i in range(max_peaks):
-                    if i < n_peaks and i * 3 + 2 < len(fit_params):
-                        amplitude = fit_params[i * 3]
-                        center = fit_params[i * 3 + 1]
-                        width = fit_params[i * 3 + 2]
-                        
-                        # Calculate FWHM
-                        fwhm = width * 2 * np.sqrt(2 * np.log(2))
-                        
-                        # Add peak parameters
-                        summary_row[f'Peak{i+1}_Amplitude'] = amplitude
-                        summary_row[f'Peak{i+1}_Position_cm-1'] = center
-                        summary_row[f'Peak{i+1}_FWHM'] = fwhm
-                        summary_row[f'Peak{i+1}_Width_Sigma'] = width
+                    # Calculate FWHM using the helper function
+                    fwhm_left, fwhm_right = self._calculate_fwhm_for_batch(fit_params, i, model)
+                    
+                    if model.lower() == 'asymmetric voigt':
+                        # For asymmetric peaks, extract 5 parameters
+                        if i < n_peaks and i * 5 + 4 < len(fit_params):
+                            amplitude = fit_params[i * 5]
+                            center = fit_params[i * 5 + 1]
+                            left_width = fit_params[i * 5 + 2]
+                            right_width = fit_params[i * 5 + 3]
+                            eta = fit_params[i * 5 + 4]
+                            
+                            # Add asymmetric peak parameters
+                            summary_row[f'Peak{i+1}_Amplitude'] = amplitude
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = center
+                            summary_row[f'Peak{i+1}_Left_Width_Sigma'] = left_width
+                            summary_row[f'Peak{i+1}_Right_Width_Sigma'] = right_width
+                            summary_row[f'Peak{i+1}_FWHM_Left'] = fwhm_left
+                            summary_row[f'Peak{i+1}_FWHM_Right'] = fwhm_right
+                            summary_row[f'Peak{i+1}_Eta_Parameter'] = eta
+                        else:
+                            # Fill with NaN for missing peaks
+                            summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                            summary_row[f'Peak{i+1}_Left_Width_Sigma'] = np.nan
+                            summary_row[f'Peak{i+1}_Right_Width_Sigma'] = np.nan
+                            summary_row[f'Peak{i+1}_FWHM_Left'] = np.nan
+                            summary_row[f'Peak{i+1}_FWHM_Right'] = np.nan
+                            summary_row[f'Peak{i+1}_Eta_Parameter'] = np.nan
                     else:
-                        # Fill with NaN for missing peaks
+                        # For symmetric peaks, extract 3 parameters
+                        if i < n_peaks and i * 3 + 2 < len(fit_params):
+                            amplitude = fit_params[i * 3]
+                            center = fit_params[i * 3 + 1]
+                            width = fit_params[i * 3 + 2]
+                            
+                            # Add symmetric peak parameters
+                            summary_row[f'Peak{i+1}_Amplitude'] = amplitude
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = center
+                            summary_row[f'Peak{i+1}_FWHM'] = fwhm_left  # Single FWHM value
+                            summary_row[f'Peak{i+1}_Width_Sigma'] = width
+                        else:
+                            # Fill with NaN for missing peaks
+                            summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                            summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                            summary_row[f'Peak{i+1}_FWHM'] = np.nan
+                            summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
+            else:
+                # No fit parameters available - fill with NaN
+                for i in range(max_peaks):
+                    if model.lower() == 'asymmetric voigt':
+                        summary_row[f'Peak{i+1}_Amplitude'] = np.nan
+                        summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
+                        summary_row[f'Peak{i+1}_Left_Width_Sigma'] = np.nan
+                        summary_row[f'Peak{i+1}_Right_Width_Sigma'] = np.nan
+                        summary_row[f'Peak{i+1}_FWHM_Left'] = np.nan
+                        summary_row[f'Peak{i+1}_FWHM_Right'] = np.nan
+                        summary_row[f'Peak{i+1}_Eta_Parameter'] = np.nan
+                    else:
                         summary_row[f'Peak{i+1}_Amplitude'] = np.nan
                         summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
                         summary_row[f'Peak{i+1}_FWHM'] = np.nan
                         summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
-            else:
-                # No fit parameters available - fill with NaN
-                for i in range(max_peaks):
-                    summary_row[f'Peak{i+1}_Amplitude'] = np.nan
-                    summary_row[f'Peak{i+1}_Position_cm-1'] = np.nan
-                    summary_row[f'Peak{i+1}_FWHM'] = np.nan
-                    summary_row[f'Peak{i+1}_Width_Sigma'] = np.nan
             
             summary_data.append(summary_row)
         
@@ -956,7 +1029,32 @@ class BatchProcessingMonitor(QDialog):
         if self.stored_results:
             self.setup_navigation_display()
     
-    def store_processing_result(self, wavenumbers, intensities, background, peaks, region_start, region_end, filename, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None, fit_params=None, total_r2=None):
+    def _calculate_fwhm_for_batch(self, fit_params, peak_index, model='gaussian'):
+        """Calculate FWHM for batch processing, handling both symmetric and asymmetric peaks."""
+        if model.lower() == 'asymmetric voigt':
+            # For asymmetric Voigt: params are [amp, center, left_width, right_width, eta]
+            if len(fit_params) < (peak_index + 1) * 5:
+                return np.nan, np.nan  # Return NaN for both left and right if insufficient params
+            
+            left_width = fit_params[peak_index * 5 + 2]
+            right_width = fit_params[peak_index * 5 + 3]
+            
+            # Calculate FWHM for each side
+            left_fwhm = left_width * 2 * np.sqrt(2 * np.log(2))
+            right_fwhm = right_width * 2 * np.sqrt(2 * np.log(2))
+            
+            return left_fwhm, right_fwhm
+        else:
+            # For symmetric models: params are [amp, center, width]
+            if len(fit_params) < (peak_index + 1) * 3:
+                return np.nan, None  # Return single value for symmetric
+            
+            width = fit_params[peak_index * 3 + 2]
+            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+            
+            return fwhm, None  # Return single value with None for right side
+    
+    def store_processing_result(self, wavenumbers, intensities, background, peaks, region_start, region_end, filename, full_wavenumbers=None, full_intensities=None, fitted_peaks=None, residuals=None, fit_params=None, total_r2=None, model='gaussian'):
         """Store a processing result for later navigation."""
         result = {
             'wavenumbers': wavenumbers,
@@ -971,7 +1069,8 @@ class BatchProcessingMonitor(QDialog):
             'full_wavenumbers': full_wavenumbers,
             'full_intensities': full_intensities,
             'fit_params': fit_params,
-            'total_r2': total_r2
+            'total_r2': total_r2,
+            'model': model
         }
         self.stored_results.append(result)
     
@@ -2394,6 +2493,7 @@ class SpectralDeconvolutionQt6(QDialog):
         results_layout = QVBoxLayout(results_group)
         
         self.results_table = QTableWidget()
+        # Will be dynamically adjusted based on model type
         self.results_table.setColumnCount(5)
         self.results_table.setHorizontalHeaderLabels([
             "Peak", "Position", "Amplitude", "Width", "R²"
@@ -3562,8 +3662,11 @@ class SpectralDeconvolutionQt6(QDialog):
             'amplitudes': [],
             'positions': [],
             'fwhms': [],
+            'fwhms_left': [],
+            'fwhms_right': [],
             'r2_values': [],
-            'spectrum_indices': []
+            'spectrum_indices': [],
+            'is_asymmetric': False
         }
         
         spectrum_index = 0
@@ -3575,6 +3678,10 @@ class SpectralDeconvolutionQt6(QDialog):
             peaks_df = data_source['peaks_df']
             
             if not peaks_df.empty:
+                # Check if we have asymmetric FWHM columns
+                has_asymmetric = 'FWHM_Left' in peaks_df.columns and 'FWHM_Right' in peaks_df.columns
+                data['is_asymmetric'] = has_asymmetric
+                
                 # Filter for the selected peak
                 selected_peak = peaks_df[peaks_df['peak_number'] == peak_index + 1]
                 
@@ -3582,7 +3689,22 @@ class SpectralDeconvolutionQt6(QDialog):
                     data['filenames'].append(row['filename'])
                     data['amplitudes'].append(row['amplitude'])
                     data['positions'].append(row['peak_center'])
-                    data['fwhms'].append(row['fwhm'])
+                    
+                    if has_asymmetric:
+                        # Use asymmetric FWHM values
+                        fwhm_left = row.get('FWHM_Left', 0)
+                        fwhm_right = row.get('FWHM_Right', 0)
+                        data['fwhms_left'].append(fwhm_left)
+                        data['fwhms_right'].append(fwhm_right)
+                        # For backward compatibility, use average as single FWHM
+                        data['fwhms'].append((fwhm_left + fwhm_right) / 2)
+                    else:
+                        # Use symmetric FWHM
+                        fwhm = row.get('fwhm', 0)
+                        data['fwhms'].append(fwhm)
+                        data['fwhms_left'].append(fwhm)
+                        data['fwhms_right'].append(fwhm)
+                    
                     # Robust access to total_r2 column
                     try:
                         r2_value = row['total_r2'] if 'total_r2' in row and pd.notna(row['total_r2']) else 0
@@ -3603,8 +3725,35 @@ class SpectralDeconvolutionQt6(QDialog):
                     total_r2 = region_result.get('total_r2')
                     
                     if peaks is not None and fit_params is not None and len(peaks) > peak_index:
-                        # Extract parameters for the selected peak
-                        if peak_index * 3 + 2 < len(fit_params):
+                        # Check if this is asymmetric data (5 params per peak) or symmetric (3 params per peak)
+                        # Extract model from peak_params if available
+                        peak_params = region_result.get('peak_params', {})
+                        model = peak_params.get('model', 'gaussian') if isinstance(peak_params, dict) else 'gaussian'
+                        is_asymmetric = model.lower() == 'asymmetric voigt'
+                        data['is_asymmetric'] = is_asymmetric or data['is_asymmetric']
+                        
+                        if is_asymmetric and peak_index * 5 + 4 < len(fit_params):
+                            # Extract asymmetric parameters (5 per peak)
+                            amplitude = fit_params[peak_index * 5]
+                            center = fit_params[peak_index * 5 + 1]
+                            left_width = fit_params[peak_index * 5 + 2]
+                            right_width = fit_params[peak_index * 5 + 3]
+                            
+                            # Calculate FWHM for each side
+                            fwhm_left = left_width * 2 * np.sqrt(2 * np.log(2))
+                            fwhm_right = right_width * 2 * np.sqrt(2 * np.log(2))
+                            
+                            data['filenames'].append(filename)
+                            data['amplitudes'].append(amplitude)
+                            data['positions'].append(center)
+                            data['fwhms_left'].append(fwhm_left)
+                            data['fwhms_right'].append(fwhm_right)
+                            data['fwhms'].append((fwhm_left + fwhm_right) / 2)  # Average for compatibility
+                            data['r2_values'].append(total_r2 if total_r2 is not None else 0)
+                            data['spectrum_indices'].append(spectrum_index)
+                            
+                        elif peak_index * 3 + 2 < len(fit_params):
+                            # Extract symmetric parameters (3 per peak)
                             amplitude = fit_params[peak_index * 3]
                             center = fit_params[peak_index * 3 + 1]
                             width = fit_params[peak_index * 3 + 2]
@@ -3616,6 +3765,8 @@ class SpectralDeconvolutionQt6(QDialog):
                             data['amplitudes'].append(amplitude)
                             data['positions'].append(center)
                             data['fwhms'].append(fwhm)
+                            data['fwhms_left'].append(fwhm)
+                            data['fwhms_right'].append(fwhm)
                             data['r2_values'].append(total_r2 if total_r2 is not None else 0)
                             data['spectrum_indices'].append(spectrum_index)
                     
@@ -3699,10 +3850,24 @@ class SpectralDeconvolutionQt6(QDialog):
             for j in range(2):
                 self.grid_axes[i, j].clear()
         
-        # Setup subplot titles and labels
-        titles = ['Peak Amplitude', 'Peak Position', 'FWHM', 'R² Values']
-        ylabels = ['Amplitude (a.u.)', 'Position (cm⁻¹)', 'FWHM (cm⁻¹)', 'R² Value']
-        plot_data = [data['amplitudes'], data['positions'], data['fwhms'], data['r2_values']]
+        # Setup subplot titles and labels based on whether we have asymmetric data
+        is_asymmetric = data.get('is_asymmetric', False)
+        print(f"DEBUG: Plotting data - is_asymmetric: {is_asymmetric}")
+        if len(data.get('fwhms_left', [])) > 0:
+            print(f"DEBUG: FWHM Left sample: {data['fwhms_left'][:3]}")
+        if len(data.get('fwhms_right', [])) > 0:
+            print(f"DEBUG: FWHM Right sample: {data['fwhms_right'][:3]}")
+        
+        if is_asymmetric:
+            titles = ['Peak Amplitude', 'Peak Position', 'FWHM Left/Right', 'R² Values']
+            ylabels = ['Amplitude (a.u.)', 'Position (cm⁻¹)', 'FWHM (cm⁻¹)', 'R² Value']
+            plot_data = [data['amplitudes'], data['positions'], 
+                        {'left': data['fwhms_left'], 'right': data['fwhms_right']}, 
+                        data['r2_values']]
+        else:
+            titles = ['Peak Amplitude', 'Peak Position', 'FWHM', 'R² Values']
+            ylabels = ['Amplitude (a.u.)', 'Position (cm⁻¹)', 'FWHM (cm⁻¹)', 'R² Value']
+            plot_data = [data['amplitudes'], data['positions'], data['fwhms'], data['r2_values']]
         
         x_data = data['spectrum_indices']
         
@@ -3711,29 +3876,62 @@ class SpectralDeconvolutionQt6(QDialog):
             y_data = plot_data[idx]
             
             if y_data:
-                # Plot the data
-                ax.plot(x_data, y_data, 'o-', linewidth=2, markersize=6, alpha=0.7)
-                
-                # Add error bars if requested
-                if hasattr(self, 'show_error_bars_check') and self.show_error_bars_check.isChecked():
-                    # Calculate simple standard error
-                    if len(y_data) > 1:
-                        std_err = np.std(y_data) / np.sqrt(len(y_data))
-                        ax.errorbar(x_data, y_data, yerr=std_err, fmt='none', alpha=0.5)
+                # Handle asymmetric FWHM plotting (dictionary with left/right data)
+                if isinstance(y_data, dict) and 'left' in y_data and 'right' in y_data:
+                    # Plot both left and right FWHM
+                    left_data = y_data['left']
+                    right_data = y_data['right']
+                    
+                    ax.plot(x_data, left_data, 'o-', linewidth=2, markersize=6, alpha=0.7, 
+                           color='blue', label='FWHM Left')
+                    ax.plot(x_data, right_data, 's-', linewidth=2, markersize=6, alpha=0.7, 
+                           color='red', label='FWHM Right')
+                    
+                    # Add legend
+                    ax.legend(fontsize=8, loc='upper right')
+                    
+                    # Add error bars if requested
+                    if hasattr(self, 'show_error_bars_check') and self.show_error_bars_check.isChecked():
+                        if len(left_data) > 1:
+                            left_std_err = np.std(left_data) / np.sqrt(len(left_data))
+                            ax.errorbar(x_data, left_data, yerr=left_std_err, fmt='none', alpha=0.5, color='blue')
+                        if len(right_data) > 1:
+                            right_std_err = np.std(right_data) / np.sqrt(len(right_data))
+                            ax.errorbar(x_data, right_data, yerr=right_std_err, fmt='none', alpha=0.5, color='red')
+                    
+                    # Add statistics text for both sides
+                    left_mean = np.mean(left_data)
+                    left_std = np.std(left_data)
+                    right_mean = np.mean(right_data)
+                    right_std = np.std(right_data)
+                    stats_text = f'Left: {left_mean:.2f}±{left_std:.2f}\nRight: {right_mean:.2f}±{right_std:.2f}'
+                    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                           verticalalignment='top', fontsize=8, 
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                else:
+                    # Regular single-value plotting
+                    ax.plot(x_data, y_data, 'o-', linewidth=2, markersize=6, alpha=0.7)
+                    
+                    # Add error bars if requested
+                    if hasattr(self, 'show_error_bars_check') and self.show_error_bars_check.isChecked():
+                        # Calculate simple standard error
+                        if len(y_data) > 1:
+                            std_err = np.std(y_data) / np.sqrt(len(y_data))
+                            ax.errorbar(x_data, y_data, yerr=std_err, fmt='none', alpha=0.5)
+                    
+                    # Add statistics text
+                    mean_val = np.mean(y_data)
+                    std_val = np.std(y_data)
+                    stats_text = f'Mean: {mean_val:.2f}\nStd: {std_val:.2f}'
+                    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                           verticalalignment='top', fontsize=8, 
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
                 
                 # Customize plot
                 ax.set_title(titles[idx], fontweight='bold')
                 ax.set_xlabel('Spectrum Index')
                 ax.set_ylabel(ylabels[idx])
                 ax.grid(True, alpha=0.3)
-                
-                # Add statistics text
-                mean_val = np.mean(y_data)
-                std_val = np.std(y_data)
-                stats_text = f'Mean: {mean_val:.2f}\nStd: {std_val:.2f}'
-                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
-                       verticalalignment='top', fontsize=8, 
-                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
             else:
                 ax.text(0.5, 0.5, 'No data available', 
                        transform=ax.transAxes, ha='center', va='center',
@@ -5520,18 +5718,64 @@ class SpectralDeconvolutionQt6(QDialog):
         if len(validated_peaks) == 0:
             return np.zeros_like(x)
         
+        # Determine parameters per peak based on model
+        if self.current_model == "Asymmetric Voigt":
+            params_per_peak = 5
+        else:
+            params_per_peak = 3
+            
         # Ensure we have the right number of parameters for the peaks
         n_peaks = len(validated_peaks)
-        expected_params = n_peaks * 3
+        expected_params = n_peaks * params_per_peak
         if len(params) < expected_params:
             # Pad with default values if not enough parameters
-            params = list(params) + [100, 1500, 50] * (expected_params - len(params) // 3)
+            if params_per_peak == 5:
+                # For asymmetric: amp, center, left_width, right_width, eta
+                default_params = [100, 1500, 25, 25, 0.5]
+            else:
+                # For symmetric: amp, center, width
+                default_params = [100, 1500, 50]
+            
+            missing_peaks = (expected_params - len(params)) // params_per_peak
+            params = list(params) + default_params * missing_peaks
         
         model = np.zeros_like(x)
         
         for i in range(n_peaks):
-            start_idx = i * 3
-            if start_idx + 2 < len(params):
+            start_idx = i * params_per_peak
+            
+            if self.current_model == "Asymmetric Voigt" and start_idx + 4 < len(params):
+                # Extract 5 parameters for asymmetric Voigt
+                amp, cen, left_wid, right_wid, eta = params[start_idx:start_idx+5]
+                
+                # Ensure positive widths
+                left_wid = max(abs(left_wid), 1.0)
+                right_wid = max(abs(right_wid), 1.0)
+                eta = max(0.0, min(1.0, eta))  # Clamp eta between 0 and 1
+                
+                # Asymmetric pseudo-Voigt implementation
+                mask_left = x <= cen
+                mask_right = x > cen
+                component = np.zeros_like(x)
+                
+                # Left side
+                if np.any(mask_left):
+                    x_left = x[mask_left]
+                    gaussian_left = np.exp(-(x_left - cen)**2 / (2 * left_wid**2))
+                    lorentzian_left = left_wid**2 / ((x_left - cen)**2 + left_wid**2)
+                    component[mask_left] = amp * ((1 - eta) * gaussian_left + eta * lorentzian_left)
+                
+                # Right side
+                if np.any(mask_right):
+                    x_right = x[mask_right]
+                    gaussian_right = np.exp(-(x_right - cen)**2 / (2 * right_wid**2))
+                    lorentzian_right = right_wid**2 / ((x_right - cen)**2 + right_wid**2)
+                    component[mask_right] = amp * ((1 - eta) * gaussian_right + eta * lorentzian_right)
+                
+                model += component
+                
+            elif start_idx + 2 < len(params):
+                # Extract 3 parameters for symmetric models
                 amp, cen, wid = params[start_idx:start_idx+3]
                 
                 # Ensure positive width
@@ -5565,6 +5809,10 @@ class SpectralDeconvolutionQt6(QDialog):
             # Store peaks for the model function (don't overwrite original peak detection results)
             self.fitted_peaks_indices = np.array(all_peaks)
             
+            # Get current model from centralized or fallback controls
+            current_params = self.get_peak_parameters()
+            self.current_model = current_params.get('model', self.current_model)
+            
             # Create initial parameter guesses
             initial_params = []
             bounds_lower = []
@@ -5581,11 +5829,24 @@ class SpectralDeconvolutionQt6(QDialog):
                     # Width: Estimate from local curvature
                     wid = self.estimate_peak_width(peak_idx)
                     
-                    initial_params.extend([amp, cen, wid])
-                    
-                    # Set reasonable bounds
-                    bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
-                    bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
+                    if self.current_model == "Asymmetric Voigt":
+                        # For asymmetric Voigt: amp, center, left_width, right_width, eta
+                        left_wid = wid * 0.8  # Slightly narrower left side
+                        right_wid = wid * 1.2  # Slightly wider right side
+                        eta = 0.5  # Default mixing parameter
+                        
+                        initial_params.extend([amp, cen, left_wid, right_wid, eta])
+                        
+                        # Set reasonable bounds for asymmetric model
+                        bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.2, wid * 0.2, 0.0])
+                        bounds_upper.extend([amp * 10, cen + wid * 2, wid * 5, wid * 5, 1.0])
+                    else:
+                        # For symmetric models: amp, center, width
+                        initial_params.extend([amp, cen, wid])
+                        
+                        # Set reasonable bounds
+                        bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
+                        bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
             
             if not initial_params:
                 QMessageBox.warning(self, "Invalid Peaks", "No valid peak parameters could be estimated.")
@@ -5593,10 +5854,6 @@ class SpectralDeconvolutionQt6(QDialog):
             
             # Prepare bounds
             bounds = (bounds_lower, bounds_upper)
-            
-            # Get current model from centralized or fallback controls
-            current_params = self.get_peak_parameters()
-            self.current_model = current_params.get('model', self.current_model)
             
             # Define fitting strategies with different approaches
             strategies = [
@@ -5784,20 +6041,42 @@ class SpectralDeconvolutionQt6(QDialog):
             
             results += "Peak Parameters:\n"
             n_peaks = len(validated_fitted_peaks)
+            
+            # Determine parameters per peak based on model
+            if self.current_model == "Asymmetric Voigt":
+                params_per_peak = 5
+            else:
+                params_per_peak = 3
+            
             for i in range(n_peaks):
-                start_idx = i * 3
-                if start_idx + 2 < len(self.fit_params):
+                start_idx = i * params_per_peak
+                
+                # Get individual R² value
+                individual_r2 = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+                
+                # Determine peak type safely
+                peak_type = "Auto"
+                if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
+                    validated_auto_peaks = self.validate_peak_indices(self.peaks)
+                    if len(validated_auto_peaks) > 0 and validated_fitted_peaks[i] not in validated_auto_peaks.tolist():
+                        peak_type = "Manual"
+                
+                if self.current_model == "Asymmetric Voigt" and start_idx + 4 < len(self.fit_params):
+                    # Extract 5 parameters for asymmetric Voigt
+                    amp, cen, left_wid, right_wid, eta = self.fit_params[start_idx:start_idx+5]
+                    
+                    # Calculate FWHM for each side
+                    left_fwhm = left_wid * 2 * np.sqrt(2 * np.log(2))
+                    right_fwhm = right_wid * 2 * np.sqrt(2 * np.log(2))
+                    
+                    results += (f"Peak {i+1} ({peak_type}): Center={cen:.1f} cm⁻¹, "
+                              f"Amplitude={amp:.1f}, Left_Width={left_wid:.1f}, Right_Width={right_wid:.1f}, "
+                              f"FWHM_Left={left_fwhm:.1f}, FWHM_Right={right_fwhm:.1f}, "
+                              f"Eta={eta:.3f}, R²={individual_r2:.3f}\n")
+                              
+                elif start_idx + 2 < len(self.fit_params):
+                    # Extract 3 parameters for symmetric models
                     amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                    
-                    # Get individual R² value
-                    individual_r2 = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
-                    
-                    # Determine peak type safely
-                    peak_type = "Auto"
-                    if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
-                        validated_auto_peaks = self.validate_peak_indices(self.peaks)
-                        if len(validated_auto_peaks) > 0 and validated_fitted_peaks[i] not in validated_auto_peaks.tolist():
-                            peak_type = "Manual"
                     
                     results += (f"Peak {i+1} ({peak_type}): Center={cen:.1f} cm⁻¹, "
                               f"Amplitude={amp:.1f}, Width={wid:.1f}, R²={individual_r2:.3f}\n")
@@ -5824,25 +6103,62 @@ class SpectralDeconvolutionQt6(QDialog):
         # Validate the fitted peaks
         validated_fitted_peaks = self.validate_peak_indices(np.array(fitted_peaks))
         n_peaks = len(validated_fitted_peaks)
+        
+        # Adjust table columns based on model type
+        if self.current_model == "Asymmetric Voigt":
+            self.results_table.setColumnCount(7)
+            self.results_table.setHorizontalHeaderLabels([
+                "Peak", "Position", "Amplitude", "Left_Width", "Right_Width", "FWHM_L/R", "R²"
+            ])
+        else:
+            self.results_table.setColumnCount(5)
+            self.results_table.setHorizontalHeaderLabels([
+                "Peak", "Position", "Amplitude", "Width", "R²"
+            ])
+        
         self.results_table.setRowCount(n_peaks)
         
         # Calculate individual R² values
         individual_r2_values = self.calculate_individual_r2_values()
         
+        # Determine parameters per peak based on model
+        if self.current_model == "Asymmetric Voigt":
+            params_per_peak = 5
+        else:
+            params_per_peak = 3
+        
         for i in range(n_peaks):
-            start_idx = i * 3
-            if start_idx + 2 < len(self.fit_params):
+            start_idx = i * params_per_peak
+            
+            # Get individual R² value
+            individual_r2 = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
+            
+            # Determine peak type safely
+            peak_type = "Auto"
+            if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
+                validated_auto_peaks = self.validate_peak_indices(self.peaks)
+                if len(validated_auto_peaks) > 0 and validated_fitted_peaks[i] not in validated_auto_peaks.tolist():
+                    peak_type = "Manual"
+            
+            if self.current_model == "Asymmetric Voigt" and start_idx + 4 < len(self.fit_params):
+                # Extract 5 parameters for asymmetric Voigt
+                amp, cen, left_wid, right_wid, eta = self.fit_params[start_idx:start_idx+5]
+                
+                # Calculate FWHM for each side
+                left_fwhm = left_wid * 2 * np.sqrt(2 * np.log(2))
+                right_fwhm = right_wid * 2 * np.sqrt(2 * np.log(2))
+                
+                self.results_table.setItem(i, 0, QTableWidgetItem(f"Peak {i+1} ({peak_type})"))
+                self.results_table.setItem(i, 1, QTableWidgetItem(f"{cen:.1f}"))
+                self.results_table.setItem(i, 2, QTableWidgetItem(f"{amp:.1f}"))
+                self.results_table.setItem(i, 3, QTableWidgetItem(f"{left_wid:.1f}"))
+                self.results_table.setItem(i, 4, QTableWidgetItem(f"{right_wid:.1f}"))
+                self.results_table.setItem(i, 5, QTableWidgetItem(f"{left_fwhm:.1f}/{right_fwhm:.1f}"))
+                self.results_table.setItem(i, 6, QTableWidgetItem(f"{individual_r2:.3f}"))
+                
+            elif start_idx + 2 < len(self.fit_params):
+                # Extract 3 parameters for symmetric models
                 amp, cen, wid = self.fit_params[start_idx:start_idx+3]
-                
-                # Get individual R² value
-                individual_r2 = individual_r2_values[i] if i < len(individual_r2_values) else 0.0
-                
-                # Determine peak type safely
-                peak_type = "Auto"
-                if hasattr(self, 'peaks') and self.peaks is not None and len(self.peaks) > 0:
-                    validated_auto_peaks = self.validate_peak_indices(self.peaks)
-                    if len(validated_auto_peaks) > 0 and validated_fitted_peaks[i] not in validated_auto_peaks.tolist():
-                        peak_type = "Manual"
                 
                 self.results_table.setItem(i, 0, QTableWidgetItem(f"Peak {i+1} ({peak_type})"))
                 self.results_table.setItem(i, 1, QTableWidgetItem(f"{cen:.1f}"))
@@ -8065,12 +8381,13 @@ class SpectralDeconvolutionQt6(QDialog):
                         )
                         
                         # Store result for navigation after completion
+                        current_model = peak_params.get('model', 'gaussian')
                         self.batch_monitor.store_processing_result(
                             region_wave, original_region_int, background, peaks,
                             start, end, Path(file_path).name,
                             full_wavenumbers=wavenumbers, full_intensities=intensities,
                             fitted_peaks=fitted_peaks, residuals=residuals,
-                            fit_params=fit_params, total_r2=total_r2
+                            fit_params=fit_params, total_r2=total_r2, model=current_model
                         )
                         
                         # Allow GUI to update
@@ -8174,6 +8491,9 @@ class SpectralDeconvolutionQt6(QDialog):
         if len(peaks) == 0:
             return None, None, None, intensities.copy()
             
+        # Get current model
+        current_model = peak_params.get('model', 'gaussian')
+        
         # Create initial parameter guesses
         initial_params = []
         bounds_lower = []
@@ -8192,17 +8512,27 @@ class SpectralDeconvolutionQt6(QDialog):
                 # Width: Estimate from local curvature
                 wid = self._estimate_peak_width_for_batch(wavenumbers, intensities, peak_idx)
                 
-                initial_params.extend([amp, cen, wid])
-                
-                # Set reasonable bounds
-                bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
-                bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
+                if current_model.lower() == 'asymmetric voigt':
+                    # For asymmetric Voigt: amp, center, left_width, right_width, eta
+                    left_wid = wid * 0.8  # Slightly narrower left side
+                    right_wid = wid * 1.2  # Slightly wider right side
+                    eta = 0.5  # Default mixing parameter
+                    
+                    initial_params.extend([amp, cen, left_wid, right_wid, eta])
+                    
+                    # Set reasonable bounds for asymmetric model
+                    bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.2, wid * 0.2, 0.0])
+                    bounds_upper.extend([amp * 10, cen + wid * 2, wid * 5, wid * 5, 1.0])
+                else:
+                    # For symmetric models: amp, center, width
+                    initial_params.extend([amp, cen, wid])
+                    
+                    # Set reasonable bounds
+                    bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
+                    bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
         
         if not initial_params:
             return None, None, None, intensities.copy()
-        
-        # Get current model
-        current_model = peak_params.get('model', 'gaussian')
         
         # Define fitting strategies
         strategies = [
@@ -8265,32 +8595,91 @@ class SpectralDeconvolutionQt6(QDialog):
     
     def _multi_peak_model_for_batch(self, x, params, model='gaussian'):
         """Multi-peak model for batch processing."""
-        if len(params) % 3 != 0:
-            raise ValueError("Parameters must be multiples of 3 (amp, cen, wid)")
+        # Handle asymmetric models with 5 parameters per peak
+        if model.lower() == 'asymmetric voigt':
+            if len(params) % 5 != 0:
+                raise ValueError("Asymmetric Voigt requires multiples of 5 parameters (amp, cen, left_wid, right_wid, eta)")
+            n_peaks = len(params) // 5
+            params_per_peak = 5
+        else:
+            if len(params) % 3 != 0:
+                raise ValueError("Parameters must be multiples of 3 (amp, cen, wid)")
+            n_peaks = len(params) // 3
+            params_per_peak = 3
         
-        n_peaks = len(params) // 3
         y = np.zeros_like(x)
         
         for i in range(n_peaks):
-            amp = params[i * 3]
-            cen = params[i * 3 + 1]
-            wid = params[i * 3 + 2]
-            
-            if model == 'gaussian':
-                y += amp * np.exp(-(x - cen)**2 / (2 * wid**2))
-            elif model == 'lorentzian':
-                y += amp * (wid**2 / ((x - cen)**2 + wid**2))
-            elif model == 'pseudo_voigt':
-                eta = 0.5  # Default mixing parameter
-                gaussian_part = np.exp(-(x - cen)**2 / (2 * wid**2))
-                lorentzian_part = wid**2 / ((x - cen)**2 + wid**2)
-                y += amp * ((1 - eta) * gaussian_part + eta * lorentzian_part)
-            else:
-                # Default to gaussian
-                y += amp * np.exp(-(x - cen)**2 / (2 * wid**2))
+            if params_per_peak == 5:  # Asymmetric Voigt
+                amp = params[i * 5]
+                cen = params[i * 5 + 1]
+                left_wid = params[i * 5 + 2]
+                right_wid = params[i * 5 + 3]
+                eta = params[i * 5 + 4]
+                
+                # Asymmetric pseudo-Voigt implementation
+                mask_left = x <= cen
+                mask_right = x > cen
+                
+                # Left side
+                if np.any(mask_left):
+                    x_left = x[mask_left]
+                    gaussian_left = np.exp(-(x_left - cen)**2 / (2 * left_wid**2))
+                    lorentzian_left = left_wid**2 / ((x_left - cen)**2 + left_wid**2)
+                    y[mask_left] += amp * ((1 - eta) * gaussian_left + eta * lorentzian_left)
+                
+                # Right side
+                if np.any(mask_right):
+                    x_right = x[mask_right]
+                    gaussian_right = np.exp(-(x_right - cen)**2 / (2 * right_wid**2))
+                    lorentzian_right = right_wid**2 / ((x_right - cen)**2 + right_wid**2)
+                    y[mask_right] += amp * ((1 - eta) * gaussian_right + eta * lorentzian_right)
+                    
+            else:  # Symmetric models (3 parameters)
+                amp = params[i * 3]
+                cen = params[i * 3 + 1]
+                wid = params[i * 3 + 2]
+                
+                if model == 'gaussian':
+                    y += amp * np.exp(-(x - cen)**2 / (2 * wid**2))
+                elif model == 'lorentzian':
+                    y += amp * (wid**2 / ((x - cen)**2 + wid**2))
+                elif model == 'pseudo_voigt':
+                    eta = 0.5  # Default mixing parameter
+                    gaussian_part = np.exp(-(x - cen)**2 / (2 * wid**2))
+                    lorentzian_part = wid**2 / ((x - cen)**2 + wid**2)
+                    y += amp * ((1 - eta) * gaussian_part + eta * lorentzian_part)
+                else:
+                    # Default to gaussian
+                    y += amp * np.exp(-(x - cen)**2 / (2 * wid**2))
         
         return y
     
+    def _calculate_fwhm_for_batch(self, fit_params, peak_index, model='gaussian'):
+        """Calculate FWHM for batch processing, handling both symmetric and asymmetric peaks."""
+        if model.lower() == 'asymmetric voigt':
+            # For asymmetric Voigt: params are [amp, center, left_width, right_width, eta]
+            if len(fit_params) < (peak_index + 1) * 5:
+                return np.nan, np.nan  # Return NaN for both left and right if insufficient params
+            
+            left_width = fit_params[peak_index * 5 + 2]
+            right_width = fit_params[peak_index * 5 + 3]
+            
+            # Calculate FWHM for each side
+            left_fwhm = left_width * 2 * np.sqrt(2 * np.log(2))
+            right_fwhm = right_width * 2 * np.sqrt(2 * np.log(2))
+            
+            return left_fwhm, right_fwhm
+        else:
+            # For symmetric models: params are [amp, center, width]
+            if len(fit_params) < (peak_index + 1) * 3:
+                return np.nan, None  # Return single value for symmetric
+            
+            width = fit_params[peak_index * 3 + 2]
+            fwhm = width * 2 * np.sqrt(2 * np.log(2))
+            
+            return fwhm, None  # Return single value with None for right side
+
     def _estimate_peak_width_for_batch(self, wavenumbers, intensities, peak_idx):
         """Estimate peak width for batch processing."""
         try:

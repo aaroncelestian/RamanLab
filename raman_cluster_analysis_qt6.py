@@ -2609,6 +2609,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
         """)
         layout.addWidget(comprehensive_btn)
         
+        # Advanced baseline subtraction button
+        baseline_btn = QPushButton("Advanced Baseline Subtraction")
+        baseline_btn.clicked.connect(self.open_advanced_baseline_window)
+        baseline_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #5CB85C;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #449D44;
+            }
+        """)
+        layout.addWidget(baseline_btn)
+        
         # Results visualization
         self.stats_fig = Figure(figsize=(12, 10))
         self.stats_canvas = FigureCanvas(self.stats_fig)
@@ -9995,6 +10013,559 @@ Stability Assessment:"""
             
         except Exception as e:
             print(f"Error in clustering improvement analysis: {e}")
+
+    def open_advanced_baseline_window(self):
+        """Open the advanced baseline subtraction window."""
+        try:
+            self.baseline_window = AdvancedBaselineWindow(self)
+            self.baseline_window.show()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open baseline window: {str(e)}")
+
+
+class AdvancedBaselineWindow(QMainWindow):
+    """Advanced baseline subtraction and data processing window."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.setWindowTitle("Advanced Baseline Subtraction & Data Processing")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Initialize data storage
+        self.current_data = None
+        self.current_wavenumbers = None
+        self.current_intensities = None
+        self.manual_baseline_points = []
+        self.processed_data = None
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Set up the user interface."""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        
+        # Title
+        title_label = QLabel("Advanced Baseline Subtraction & Data Processing")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin: 10px;")
+        layout.addWidget(title_label)
+        
+        # Create main horizontal layout
+        main_layout = QHBoxLayout()
+        
+        # Left panel for controls
+        left_panel = QWidget()
+        left_panel.setMaximumWidth(400)
+        left_layout = QVBoxLayout(left_panel)
+        
+        # File selection
+        file_group = QGroupBox("File Selection")
+        file_layout = QVBoxLayout(file_group)
+        
+        # Single file
+        single_frame = QFrame()
+        single_layout = QHBoxLayout(single_frame)
+        self.file_path = QLineEdit()
+        self.file_path.setPlaceholderText("Select a file...")
+        single_layout.addWidget(self.file_path)
+        
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self.browse_file)
+        single_layout.addWidget(browse_btn)
+        file_layout.addWidget(single_frame)
+        
+        # Folder for batch processing
+        folder_frame = QFrame()
+        folder_layout = QHBoxLayout(folder_frame)
+        self.folder_path = QLineEdit()
+        self.folder_path.setPlaceholderText("Select folder for batch processing...")
+        folder_layout.addWidget(self.folder_path)
+        
+        browse_folder_btn = QPushButton("Browse Folder")
+        browse_folder_btn.clicked.connect(self.browse_folder)
+        folder_layout.addWidget(browse_folder_btn)
+        file_layout.addWidget(folder_frame)
+        
+        left_layout.addWidget(file_group)
+        
+        # Baseline methods
+        methods_group = QGroupBox("Baseline Correction Methods")
+        methods_layout = QVBoxLayout(methods_group)
+        
+        self.method_combo = QComboBox()
+        self.method_combo.addItems([
+            'Asymmetric Least Squares (ALS)',
+            'Polynomial Fitting',
+            'Rolling Ball',
+            'Airpls',
+            'Rubberband',
+            'Manual Adjustment'
+        ])
+        self.method_combo.currentTextChanged.connect(self.update_parameters)
+        methods_layout.addWidget(self.method_combo)
+        
+        # Parameters frame
+        self.params_frame = QFrame()
+        self.params_layout = QFormLayout(self.params_frame)
+        methods_layout.addWidget(self.params_frame)
+        
+        self.update_parameters()
+        left_layout.addWidget(methods_group)
+        
+        # Data truncation
+        truncation_group = QGroupBox("Data Truncation")
+        truncation_layout = QVBoxLayout(truncation_group)
+        
+        self.enable_truncation = QCheckBox("Enable Data Truncation")
+        truncation_layout.addWidget(self.enable_truncation)
+        
+        truncation_params = QFrame()
+        truncation_params_layout = QFormLayout(truncation_params)
+        
+        self.min_wn = QDoubleSpinBox()
+        self.min_wn.setRange(0, 4000)
+        self.min_wn.setValue(200)
+        self.min_wn.setSuffix(" cm⁻¹")
+        truncation_params_layout.addRow("Min Wavenumber:", self.min_wn)
+        
+        self.max_wn = QDoubleSpinBox()
+        self.max_wn.setRange(0, 4000)
+        self.max_wn.setValue(3500)
+        self.max_wn.setSuffix(" cm⁻¹")
+        truncation_params_layout.addRow("Max Wavenumber:", self.max_wn)
+        
+        truncation_layout.addWidget(truncation_params)
+        left_layout.addWidget(truncation_group)
+        
+        # Processing buttons
+        buttons_frame = QFrame()
+        buttons_layout = QVBoxLayout(buttons_frame)
+        
+        load_btn = QPushButton("Load & Preview")
+        load_btn.clicked.connect(self.load_and_preview)
+        load_btn.setStyleSheet("QPushButton { background-color: #5CB85C; color: white; padding: 8px; border-radius: 4px; font-weight: bold; }")
+        buttons_layout.addWidget(load_btn)
+        
+        process_btn = QPushButton("Process Single File")
+        process_btn.clicked.connect(self.process_single_file)
+        process_btn.setStyleSheet("QPushButton { background-color: #337AB7; color: white; padding: 8px; border-radius: 4px; font-weight: bold; }")
+        buttons_layout.addWidget(process_btn)
+        
+        batch_btn = QPushButton("Process Batch")
+        batch_btn.clicked.connect(self.process_batch)
+        batch_btn.setStyleSheet("QPushButton { background-color: #D9534F; color: white; padding: 8px; border-radius: 4px; font-weight: bold; }")
+        buttons_layout.addWidget(batch_btn)
+        
+        reset_btn = QPushButton("Reset Manual Points")
+        reset_btn.clicked.connect(self.reset_manual_points)
+        reset_btn.setStyleSheet("QPushButton { background-color: #F0AD4E; color: white; padding: 8px; border-radius: 4px; font-weight: bold; }")
+        buttons_layout.addWidget(reset_btn)
+        
+        left_layout.addWidget(buttons_frame)
+        left_layout.addStretch()
+        
+        # Right panel for visualization
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        
+        # Plot area
+        self.fig = Figure(figsize=(10, 8))
+        self.canvas = FigureCanvas(self.fig)
+        right_layout.addWidget(self.canvas)
+        
+        # Toolbar
+        self.toolbar = NavigationToolbar(self.canvas, right_panel)
+        right_layout.addWidget(self.toolbar)
+        
+        # Status text
+        self.status_text = QTextEdit()
+        self.status_text.setMaximumHeight(100)
+        self.status_text.setReadOnly(True)
+        right_layout.addWidget(self.status_text)
+        
+        # Add panels to main layout
+        main_layout.addWidget(left_panel)
+        main_layout.addWidget(right_panel)
+        layout.addWidget(QWidget())  # Spacer
+        layout.addLayout(main_layout)
+        
+        # Connect plot interaction
+        self.canvas.mpl_connect('button_press_event', self.on_plot_click)
+        
+    def update_parameters(self):
+        """Update parameter controls based on selected method."""
+        # Clear existing parameters
+        for i in reversed(range(self.params_layout.count())):
+            self.params_layout.itemAt(i).widget().setParent(None)
+        
+        method = self.method_combo.currentText()
+        
+        if method == 'Asymmetric Least Squares (ALS)':
+            self.lambda_param = QDoubleSpinBox()
+            self.lambda_param.setRange(1e3, 1e9)
+            self.lambda_param.setValue(1e6)
+            self.lambda_param.setDecimals(0)
+            self.params_layout.addRow("Lambda (smoothing):", self.lambda_param)
+            
+            self.p_param = QDoubleSpinBox()
+            self.p_param.setRange(0.001, 0.1)
+            self.p_param.setValue(0.01)
+            self.p_param.setDecimals(4)
+            self.params_layout.addRow("p (asymmetry):", self.p_param)
+            
+        elif method == 'Polynomial Fitting':
+            self.poly_degree = QSpinBox()
+            self.poly_degree.setRange(1, 10)
+            self.poly_degree.setValue(3)
+            self.params_layout.addRow("Polynomial Degree:", self.poly_degree)
+            
+        elif method == 'Rolling Ball':
+            self.ball_radius = QSpinBox()
+            self.ball_radius.setRange(1, 1000)
+            self.ball_radius.setValue(100)
+            self.params_layout.addRow("Ball Radius:", self.ball_radius)
+            
+        elif method == 'Manual Adjustment':
+            info_label = QLabel("Click on the plot to add baseline points.\nPoints will be connected with spline interpolation.")
+            info_label.setWordWrap(True)
+            info_label.setStyleSheet("color: #666; font-style: italic;")
+            self.params_layout.addRow(info_label)
+    
+    def browse_file(self):
+        """Browse for a single file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Raman Data File", "", 
+            "Text files (*.txt);;CSV files (*.csv);;All files (*.*)"
+        )
+        if file_path:
+            self.file_path.setText(file_path)
+    
+    def browse_folder(self):
+        """Browse for a folder for batch processing."""
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Folder for Batch Processing")
+        if folder_path:
+            self.folder_path.setText(folder_path)
+    
+    def load_and_preview(self):
+        """Load and preview the selected file."""
+        file_path = self.file_path.text().strip()
+        if not file_path:
+            QMessageBox.warning(self, "Warning", "Please select a file first.")
+            return
+        
+        try:
+            # Load data
+            self.current_wavenumbers, self.current_intensities = self.load_spectrum_data(file_path)
+            
+            # Plot original data
+            self.plot_data()
+            
+            self.status_text.setText(f"Loaded: {file_path}\nData points: {len(self.current_wavenumbers)}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
+    
+    def load_spectrum_data(self, file_path):
+        """Load spectrum data from file."""
+        try:
+            # Try different loading methods
+            if file_path.endswith('.csv'):
+                data = np.loadtxt(file_path, delimiter=',', skiprows=1)
+            else:
+                # Try tab-delimited first
+                try:
+                    data = np.loadtxt(file_path, skiprows=1)
+                except:
+                    # Try comma-delimited
+                    data = np.loadtxt(file_path, delimiter=',', skiprows=1)
+            
+            if data.shape[1] >= 2:
+                wavenumbers = data[:, 0]
+                intensities = data[:, 1]
+                return wavenumbers, intensities
+            else:
+                raise ValueError("File must contain at least 2 columns (wavenumber, intensity)")
+                
+        except Exception as e:
+            raise Exception(f"Error loading spectrum data: {str(e)}")
+    
+    def plot_data(self):
+        """Plot the current data."""
+        if self.current_wavenumbers is None or self.current_intensities is None:
+            return
+        
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+        
+        # Plot original spectrum
+        ax.plot(self.current_wavenumbers, self.current_intensities, 'b-', label='Original', linewidth=1)
+        
+        # Plot baseline if available
+        if hasattr(self, 'current_baseline') and self.current_baseline is not None:
+            ax.plot(self.current_wavenumbers, self.current_baseline, 'r--', label='Baseline', linewidth=2)
+            
+            # Plot corrected spectrum
+            corrected = self.current_intensities - self.current_baseline
+            ax.plot(self.current_wavenumbers, corrected, 'g-', label='Corrected', linewidth=1)
+        
+        # Plot manual baseline points
+        if self.manual_baseline_points:
+            points = np.array(self.manual_baseline_points)
+            ax.plot(points[:, 0], points[:, 1], 'ro', markersize=8, label='Manual Points')
+        
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title('Spectrum with Baseline Correction')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        self.canvas.draw()
+    
+    def on_plot_click(self, event):
+        """Handle plot click events for manual baseline adjustment."""
+        if (event.inaxes and self.method_combo.currentText() == 'Manual Adjustment' and 
+            self.current_wavenumbers is not None):
+            
+            # Add point to manual baseline
+            self.manual_baseline_points.append([event.xdata, event.ydata])
+            
+            # Sort points by wavenumber
+            self.manual_baseline_points.sort(key=lambda x: x[0])
+            
+            # Update baseline
+            self.update_manual_baseline()
+            
+            # Replot
+            self.plot_data()
+    
+    def update_manual_baseline(self):
+        """Update the manual baseline using spline interpolation."""
+        if len(self.manual_baseline_points) < 2:
+            return
+        
+        try:
+            from scipy.interpolate import interp1d
+            
+            points = np.array(self.manual_baseline_points)
+            
+            # Create interpolation function
+            f = interp1d(points[:, 0], points[:, 1], kind='linear', 
+                        bounds_error=False, fill_value='extrapolate')
+            
+            # Generate baseline for all wavenumbers
+            self.current_baseline = f(self.current_wavenumbers)
+            
+        except Exception as e:
+            print(f"Error updating manual baseline: {e}")
+    
+    def reset_manual_points(self):
+        """Reset manual baseline points."""
+        self.manual_baseline_points = []
+        self.current_baseline = None
+        self.plot_data()
+    
+    def apply_baseline_correction(self, wavenumbers, intensities):
+        """Apply the selected baseline correction method."""
+        method = self.method_combo.currentText()
+        
+        try:
+            if method == 'Asymmetric Least Squares (ALS)':
+                baseline = self.als_baseline(intensities, 
+                                           lam=self.lambda_param.value(),
+                                           p=self.p_param.value())
+            
+            elif method == 'Polynomial Fitting':
+                baseline = self.polynomial_baseline(wavenumbers, intensities, 
+                                                  degree=self.poly_degree.value())
+            
+            elif method == 'Rolling Ball':
+                baseline = self.rolling_ball_baseline(intensities, 
+                                                    radius=self.ball_radius.value())
+            
+            elif method == 'Manual Adjustment':
+                if hasattr(self, 'current_baseline') and self.current_baseline is not None:
+                    baseline = self.current_baseline
+                else:
+                    baseline = np.zeros_like(intensities)
+            
+            else:
+                # Default to polynomial
+                baseline = self.polynomial_baseline(wavenumbers, intensities, degree=3)
+            
+            return baseline
+            
+        except Exception as e:
+            print(f"Error in baseline correction: {e}")
+            return np.zeros_like(intensities)
+    
+    def als_baseline(self, y, lam=1e6, p=0.01, niter=10):
+        """Asymmetric Least Squares baseline correction."""
+        try:
+            from scipy.sparse import csc_matrix, eye, diags
+            from scipy.sparse.linalg import spsolve
+            
+            L = len(y)
+            D = diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
+            D = lam * D.dot(D.transpose())
+            
+            w = np.ones(L)
+            W = diags(w, 0, shape=(L, L))
+            
+            for i in range(niter):
+                W.setdiag(w)
+                Z = W + D
+                z = spsolve(csc_matrix(Z), w * y)
+                w = p * (y > z) + (1-p) * (y < z)
+            
+            return z
+            
+        except Exception as e:
+            print(f"ALS baseline error: {e}")
+            return np.zeros_like(y)
+    
+    def polynomial_baseline(self, x, y, degree=3):
+        """Polynomial baseline correction."""
+        try:
+            coeffs = np.polyfit(x, y, degree)
+            baseline = np.polyval(coeffs, x)
+            return baseline
+        except Exception as e:
+            print(f"Polynomial baseline error: {e}")
+            return np.zeros_like(y)
+    
+    def rolling_ball_baseline(self, y, radius=100):
+        """Rolling ball baseline correction."""
+        try:
+            # Simple rolling minimum approximation
+            from scipy.ndimage import minimum_filter1d
+            baseline = minimum_filter1d(y, size=radius, mode='constant')
+            return baseline
+        except Exception as e:
+            print(f"Rolling ball baseline error: {e}")
+            return np.zeros_like(y)
+    
+    def process_single_file(self):
+        """Process a single file with baseline correction."""
+        if self.current_wavenumbers is None or self.current_intensities is None:
+            QMessageBox.warning(self, "Warning", "Please load a file first.")
+            return
+        
+        try:
+            # Apply baseline correction
+            baseline = self.apply_baseline_correction(self.current_wavenumbers, self.current_intensities)
+            corrected_intensities = self.current_intensities - baseline
+            
+            # Apply truncation if enabled
+            if self.enable_truncation.isChecked():
+                min_wn = self.min_wn.value()
+                max_wn = self.max_wn.value()
+                
+                mask = (self.current_wavenumbers >= min_wn) & (self.current_wavenumbers <= max_wn)
+                wavenumbers = self.current_wavenumbers[mask]
+                intensities = corrected_intensities[mask]
+            else:
+                wavenumbers = self.current_wavenumbers
+                intensities = corrected_intensities
+            
+            # Save processed file
+            self.save_processed_data(wavenumbers, intensities, self.file_path.text())
+            
+            # Update plot
+            self.current_baseline = baseline
+            self.plot_data()
+            
+            self.status_text.append(f"Processed single file successfully.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to process file: {str(e)}")
+    
+    def process_batch(self):
+        """Process all files in the selected folder."""
+        folder_path = self.folder_path.text().strip()
+        if not folder_path:
+            QMessageBox.warning(self, "Warning", "Please select a folder first.")
+            return
+        
+        try:
+            import os
+            import glob
+            
+            # Find all supported files
+            file_patterns = ['*.txt', '*.csv']
+            files = []
+            for pattern in file_patterns:
+                files.extend(glob.glob(os.path.join(folder_path, pattern)))
+            
+            if not files:
+                QMessageBox.warning(self, "Warning", "No supported files found in the selected folder.")
+                return
+            
+            # Process each file
+            processed_count = 0
+            for file_path in files:
+                try:
+                    # Load data
+                    wavenumbers, intensities = self.load_spectrum_data(file_path)
+                    
+                    # Apply baseline correction
+                    baseline = self.apply_baseline_correction(wavenumbers, intensities)
+                    corrected_intensities = intensities - baseline
+                    
+                    # Apply truncation if enabled
+                    if self.enable_truncation.isChecked():
+                        min_wn = self.min_wn.value()
+                        max_wn = self.max_wn.value()
+                        
+                        mask = (wavenumbers >= min_wn) & (wavenumbers <= max_wn)
+                        wavenumbers = wavenumbers[mask]
+                        corrected_intensities = corrected_intensities[mask]
+                    
+                    # Save processed file
+                    self.save_processed_data(wavenumbers, corrected_intensities, file_path)
+                    processed_count += 1
+                    
+                except Exception as e:
+                    print(f"Error processing {file_path}: {e}")
+            
+            self.status_text.append(f"Batch processing complete. Processed {processed_count}/{len(files)} files.")
+            QMessageBox.information(self, "Batch Processing", f"Successfully processed {processed_count} out of {len(files)} files.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to process batch: {str(e)}")
+    
+    def save_processed_data(self, wavenumbers, intensities, original_path):
+        """Save processed data to a new file."""
+        try:
+            import os
+            
+            # Create output filename
+            base_name = os.path.splitext(os.path.basename(original_path))[0]
+            output_dir = os.path.dirname(original_path)
+            
+            suffix = "_baseline_corrected"
+            if self.enable_truncation.isChecked():
+                suffix += "_truncated"
+            
+            output_path = os.path.join(output_dir, f"{base_name}{suffix}.txt")
+            
+            # Save data
+            with open(output_path, 'w') as f:
+                f.write("# Processed with Advanced Baseline Subtraction\n")
+                f.write(f"# Original file: {original_path}\n")
+                f.write(f"# Method: {self.method_combo.currentText()}\n")
+                if self.enable_truncation.isChecked():
+                    f.write(f"# Truncated: {self.min_wn.value()}-{self.max_wn.value()} cm⁻¹\n")
+                f.write("# Wavenumber\tIntensity\n")
+                
+                for wn, intensity in zip(wavenumbers, intensities):
+                    f.write(f"{wn:.2f}\t{intensity:.6f}\n")
+            
+            print(f"Saved processed data to: {output_path}")
+            
+        except Exception as e:
+            raise Exception(f"Error saving processed data: {str(e)}")
 
 
 def launch_cluster_analysis(parent, raman_app):
