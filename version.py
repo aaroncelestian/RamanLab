@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.2.3"
-__version_info__ = (1, 2, 3)
+__version__ = "1.3.0"
+__version_info__ = (1, 3, 0)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -12,12 +12,45 @@ __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
-__release_date__ = "2025-09-01"
-__release_name__ = "Jupyter Console Integration & Enhanced Dependency Management"
+__release_date__ = "2025-10-01"
+__release_name__ = "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.3.0": {
+        "date": "2025-10-01",
+        "name": "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction",
+        "description": "Major enhancement introducing comprehensive asymmetric Voigt peak fitting and advanced baseline subtraction capabilities",
+        "major_features": [
+            "🔬 Complete asymmetric Voigt peak fitting with 5-parameter support (amplitude, center, left_width, right_width, eta)",
+            "📊 Advanced baseline subtraction module with ALS, polynomial, rolling ball, and manual adjustment methods",
+            "📈 Enhanced plotting analysis with dual FWHM visualization (left/right asymmetry)",
+            "💾 Improved CSV export with separate asymmetric parameter columns",
+            "🎯 Dynamic Analysis Results table with model-specific column layouts",
+            "🔧 Interactive baseline adjustment with real-time preview capabilities"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Implemented asymmetric pseudo-Voigt mathematical model with separate left/right width parameters",
+            "Enhanced batch processing engine with asymmetric model detection and parameter handling",
+            "Added dedicated Advanced Baseline Subtraction window with comprehensive correction methods",
+            "Updated plotting system to display dual FWHM traces with color-coded left/right visualization",
+            "Enhanced CSV export structure with Peak1_FWHM_Left, Peak1_FWHM_Right column format",
+            "Improved Analysis Results table with dynamic 5-column (symmetric) vs 7-column (asymmetric) layouts"
+        ],
+        "bug_fixes": [
+            "Fixed asymmetric parameter detection in plotting analysis data extraction",
+            "Resolved CSV export errors for asymmetric Voigt batch processing",
+            "Enhanced model information preservation in batch results storage",
+            "Improved parameter handling for both single peak and batch fitting workflows"
+        ],
+        "future_roadmap": [
+            "Extended asymmetric model support for additional peak shapes",
+            "Advanced peak shape analysis and asymmetry quantification tools",
+            "Enhanced interactive baseline correction features"
+        ]
+    },
     "1.2.3": {
         "date": "2025-09-01",
         "name": "Window Focus Fix & QFileDialog Enhancement",

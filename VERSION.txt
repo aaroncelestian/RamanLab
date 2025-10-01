@@ -1,15 +1,20 @@
-RamanLab Version 1.2.3 - "Window Focus Fix & QFileDialog Enhancement"
-Release Date: January 28, 2025
+RamanLab Version 1.3.0 - "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction"
+Release Date: October 1, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🚀 **Version 1.1.4 Update**
+🚀 **Version 1.3.0 Update**
 
-This exciting update introduces interactive Jupyter console integration and comprehensive 
-dependency management tools, bringing advanced interactive analysis capabilities directly 
-into RamanLab while making updates and dependency management seamless for users.
+This major release introduces comprehensive asymmetric Voigt peak fitting capabilities and 
+advanced baseline subtraction tools, significantly expanding RamanLab's analytical power 
+for precise peak shape analysis and sophisticated baseline correction workflows.
 
 🎯 **Major New Features:**
-• 🐍 **Interactive Jupyter Console Integration** - Run Python commands directly within RamanLab
+• 🔬 **Complete Asymmetric Voigt Peak Fitting** - 5-parameter support with separate left/right widths
+• 📊 **Advanced Baseline Subtraction Module** - ALS, polynomial, rolling ball, and manual methods
+• 📈 **Dual FWHM Visualization** - Color-coded left/right asymmetry plotting
+• 💾 **Enhanced CSV Export** - Separate asymmetric parameter columns for analysis
+• 🎯 **Dynamic Analysis Results** - Model-specific table layouts (5 vs 7 columns)
+• 🔧 **Interactive Baseline Adjustment** - Real-time preview with manual point selection
 • 📊 **Live Data Access** - Access loaded spectra and analysis results interactively
 • 🔬 **Advanced Analysis Capabilities** - Run custom analysis scripts without leaving RamanLab
 • 📈 **Dynamic Plotting** - Create custom plots and visualizations on-the-fly

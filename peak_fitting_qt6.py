@@ -3852,11 +3852,6 @@ class SpectralDeconvolutionQt6(QDialog):
         
         # Setup subplot titles and labels based on whether we have asymmetric data
         is_asymmetric = data.get('is_asymmetric', False)
-        print(f"DEBUG: Plotting data - is_asymmetric: {is_asymmetric}")
-        if len(data.get('fwhms_left', [])) > 0:
-            print(f"DEBUG: FWHM Left sample: {data['fwhms_left'][:3]}")
-        if len(data.get('fwhms_right', [])) > 0:
-            print(f"DEBUG: FWHM Right sample: {data['fwhms_right'][:3]}")
         
         if is_asymmetric:
             titles = ['Peak Amplitude', 'Peak Position', 'FWHM Left/Right', 'R² Values']

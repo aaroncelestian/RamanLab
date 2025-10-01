@@ -10,9 +10,9 @@ RamanLab uses **Semantic Versioning (SemVer)** with the format: `MAJOR.MINOR.PAT
 - **MINOR** version (0.X.0) - New functionality, backward compatible
 - **PATCH** version (0.0.X) - Bug fixes, backward compatible
 
-### Current Version: 1.0.0 "Debut"
+### Current Version: 1.3.0 "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction"
 
-This is the inaugural stable release of RamanLab Qt6.
+This major release introduces comprehensive asymmetric Voigt peak fitting capabilities and advanced baseline subtraction tools.
 
 ## Version History
 

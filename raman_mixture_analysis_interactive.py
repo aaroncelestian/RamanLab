@@ -1442,7 +1442,7 @@ def main():
     
     # Set application properties
     app.setApplicationName("RamanLab Interactive Mixture Analysis")
-    app.setApplicationVersion("1.0")
+    app.setApplicationVersion("1.3.0")
     app.setOrganizationName("RamanLab")
     
     # Create and show main window
