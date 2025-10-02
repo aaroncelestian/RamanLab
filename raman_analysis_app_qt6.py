@@ -4012,8 +4012,8 @@ class RamanAnalysisAppQt6(QMainWindow):
         spectra_calibration_btn.setStyleSheet(additional_style)
         processing_layout.addWidget(spectra_calibration_btn)
         
-        # Baseline correction tools
-        baseline_btn = QPushButton("Advanced Baseline Correction")
+        # Advanced spectral processing tools
+        baseline_btn = QPushButton("Advanced Spectral Processing")
         baseline_btn.clicked.connect(self.launch_baseline_tools)
         baseline_btn.setStyleSheet(additional_style)
         processing_layout.addWidget(baseline_btn)
