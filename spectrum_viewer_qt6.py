@@ -48,6 +48,9 @@ class SpectrumViewerQt6(QMainWindow):
         self.setWindowTitle("RamanLab Qt6 - Spectrum Viewer")
         self.resize(1200, 700)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Data storage
         self.wavenumbers = None
         self.intensities = None

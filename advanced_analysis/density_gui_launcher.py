@@ -607,6 +607,9 @@ class DensityAnalysisGUI(QMainWindow):
         self.setWindowTitle("Raman Density Analysis Tool")
         self.setMinimumSize(1200, 800)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)

@@ -585,6 +585,9 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.setWindowTitle("Raman Cluster Analysis - Advanced Ion Exchange Analysis")
         self.setGeometry(100, 100, 1400, 900)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Store reference to main app
         self.raman_app = raman_app
         
@@ -10031,6 +10034,9 @@ class AdvancedBaselineWindow(QMainWindow):
         self.parent = parent
         self.setWindowTitle("Advanced Baseline Subtraction & Data Processing")
         self.setGeometry(100, 100, 1200, 800)
+        
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
         
         # Initialize data storage
         self.current_data = None

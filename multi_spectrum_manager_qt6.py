@@ -75,6 +75,9 @@ class MultiSpectrumManagerQt6(QMainWindow):
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Initialize session tracking
         self._session_start_time = None
         

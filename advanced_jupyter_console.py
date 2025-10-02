@@ -459,6 +459,9 @@ class AdvancedJupyterConsole(QMainWindow):
         self.setWindowTitle("RamanLab Advanced Analysis Console")
         self.setGeometry(100, 100, 1200, 800)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Central widget
         central_widget = QWidget()
         self.setCentralWidget(central_widget)

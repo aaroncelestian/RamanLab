@@ -22,6 +22,9 @@ class TemplateComparisonTool(QMainWindow):
         self.setWindowTitle("Template Extraction Debug Tool")
         self.setGeometry(100, 100, 1200, 800)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         self.setup_ui()
         
     def setup_ui(self):

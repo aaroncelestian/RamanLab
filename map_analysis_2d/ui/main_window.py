@@ -47,6 +47,9 @@ class MapAnalysisMainWindow(QMainWindow):
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Initialize data and analysis objects
         self.map_data: Optional[RamanMapData] = None
         self.pca_analyzer = PCAAnalyzer()

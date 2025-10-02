@@ -420,6 +420,9 @@ class InteractiveMixtureAnalyzer(QMainWindow):
         self.setWindowTitle("RamanLab Interactive Mixture Analysis")
         self.setGeometry(100, 100, 1400, 900)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Apply additional UI styling (but NOT matplotlib config - that's done above)
         self.apply_ui_styling()
         

@@ -136,6 +136,9 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.setMinimumSize(1400, 900)
         self.resize(1600, 1000)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Set up the UI
         self.setup_ui()
         self.setup_menu_bar()
@@ -6551,6 +6554,9 @@ class AdvancedBaselineWindow(QMainWindow):
         self.parent = parent
         self.setWindowTitle("Advanced Baseline Subtraction & Data Processing")
         self.setGeometry(100, 100, 1200, 800)
+        
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
         
         # Initialize data storage
         self.current_data = None

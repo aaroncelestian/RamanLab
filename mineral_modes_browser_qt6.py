@@ -54,6 +54,9 @@ class MineralModesDatabaseQt6(QMainWindow):
         self.setMinimumSize(1200, 800)
         self.resize(1400, 900)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Initialize database
         self.database_path = os.path.join(os.path.dirname(__file__), "mineral_modes.pkl")
         self.database = {}

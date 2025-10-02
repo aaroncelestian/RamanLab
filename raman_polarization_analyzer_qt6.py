@@ -91,6 +91,9 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
         self.setWindowTitle("Raman Polarization Analyzer - Qt6")
         self.setGeometry(100, 100, 1200, 800)
         
+        # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
+        
         # Initialize variables (same as original)
         self.mineral_database = None
         self.current_spectrum = None
