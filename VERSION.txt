@@ -1,51 +1,56 @@
-RamanLab Version 1.3.0 - "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction"
-Release Date: October 1, 2025
+RamanLab Version 1.3.2 - "Universal Drag-and-Drop & Analysis Enhancements"
+Release Date: October 15, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🚀 **Version 1.3.0 Update**
+🚀 **Version 1.3.2 Update**
 
-This major release introduces comprehensive asymmetric Voigt peak fitting capabilities and 
+This release introduces universal drag-and-drop file loading across all major RamanLab windows,
+fixes critical bugs in 2D map analysis, and enhances cluster analysis export capabilities.
+Drag files directly from your file browser for instant loading and analysis!
+
+🎯 **Major New Features:**
+• 🎯 **Universal Drag-and-Drop Support** - Drag files directly onto any RamanLab window to load instantly
+  - Main RamanLab Window: Drop spectrum files (.txt, .dat, .csv) for immediate plotting
+  - Spectral Deconvolution: Drop spectra for instant peak fitting analysis
+  - 2D Map Analysis: Drop single-file Raman maps for quick visualization
+  - Visual feedback with cursor state changes and status bar updates
+• 📊 **Enhanced Cluster Analysis** - Export individual cluster spectra with improved labeling
+• 🗺️ **Fixed 2D Map Analysis** - Resolved critical float/integer position handling bug
+• 🔧 **Improved User Experience** - Faster workflows without File → Open navigation
+
+🔧 **Technical Implementation:**
+• Custom DragDropCentralWidget class for QMainWindow compatibility
+• Disabled QTextEdit drop interception to prevent file paths appearing as text
+• Robust float conversion with error handling for map position data
+• Enhanced drag event handling across all modules
+• Consistent behavior with proper cursor feedback
+
+🐛 **Bug Fixes:**
+• Fixed drag-and-drop not working in main RamanLab window (QMainWindow vs QDialog)
+• Fixed file paths appearing as text in QTextEdit widgets during drag operations
+• Fixed float/integer position handling in 2D map analysis causing crashes
+• Fixed cursor not changing to "+" icon during drag operations
+• Corrected method name in Spectral Deconvolution drag-and-drop handler
+
+📋 **Files Modified:**
+• raman_analysis_app_qt6.py - Added DragDropCentralWidget, disabled QTextEdit drops
+• peak_fitting_qt6.py - Fixed drag-and-drop event handling
+• map_analysis_2d/ui/main_window.py - Fixed drag-and-drop, float position handling
+• map_analysis_2d/core/file_io.py - Enhanced position data type conversion
+
+🔄 **Previous Release - Version 1.3.0 "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction"**
+
+This major release introduced comprehensive asymmetric Voigt peak fitting capabilities and 
 advanced baseline subtraction tools, significantly expanding RamanLab's analytical power 
 for precise peak shape analysis and sophisticated baseline correction workflows.
 
-🎯 **Major New Features:**
+🎯 **Key Features:**
 • 🔬 **Complete Asymmetric Voigt Peak Fitting** - 5-parameter support with separate left/right widths
 • 📊 **Advanced Baseline Subtraction Module** - ALS, polynomial, rolling ball, and manual methods
 • 📈 **Dual FWHM Visualization** - Color-coded left/right asymmetry plotting
 • 💾 **Enhanced CSV Export** - Separate asymmetric parameter columns for analysis
-• 🎯 **Dynamic Analysis Results** - Model-specific table layouts (5 vs 7 columns)
 • 🔧 **Interactive Baseline Adjustment** - Real-time preview with manual point selection
 • 📊 **Live Data Access** - Access loaded spectra and analysis results interactively
-• 🔬 **Advanced Analysis Capabilities** - Run custom analysis scripts without leaving RamanLab
-• 📈 **Dynamic Plotting** - Create custom plots and visualizations on-the-fly
-• 🧪 **Interactive Experimentation** - Test analysis parameters and methods in real-time
-• 📦 **Automated Dependency Updates** - New update script with interactive and command-line modes
-
-🛠️ **New Tools & Scripts:**
-• **update_dependencies.py** - Interactive dependency updater with --jupyter, --core, --all flags
-• **Enhanced check_dependencies.py** - Now detects Jupyter packages and shows component status
-• **JUPYTER_INTEGRATION_UPDATE.md** - Comprehensive user guide and troubleshooting
-
-🔧 **Technical Enhancements:**
-• Added qtconsole>=5.4.0 for interactive console widget integration
-• Added jupyter-client>=7.0.0 for kernel management and communication
-• Added ipykernel>=6.0.0 for enhanced Python environment support
-• Enhanced requirements_qt6.txt with comprehensive installation instructions
-• Added Interactive Console component to availability tracking
-• Implemented virtual environment detection and warnings
-• Multiple update options: automatic, manual, and full system updates
-
-📋 **User Experience Improvements:**
-• Clear documentation and troubleshooting guides
-• Graceful fallback - RamanLab works perfectly without Jupyter packages
-• Enhanced dependency management workflow
-• Interactive console features seamlessly integrated into existing interface
-
-🎯 **How to Update:**
-Run any of these commands to get the new features:
-• `python update_dependencies.py --jupyter` (recommended for new features)
-• `python update_dependencies.py --all` (full update)
-• `pip install qtconsole jupyter-client ipykernel` (manual)
 
 🔄 **Previous Release - Version 1.1.3 "Matplotlib Toolbar Fix"**
 
