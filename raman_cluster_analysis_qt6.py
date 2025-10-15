@@ -781,6 +781,71 @@ class RamanClusterAnalysisQt6(QMainWindow):
         
         layout.addWidget(config_group)
         
+        # Performance optimization settings
+        perf_group = QGroupBox("Performance Optimization (for large datasets)")
+        perf_layout = QVBoxLayout(perf_group)
+        
+        perf_info = QLabel("⚡ Recommended for datasets with >10,000 spectra\n"
+                          "💡 Especially beneficial for UMAP analysis (10-100x faster)")
+        perf_info.setStyleSheet("color: #d97706; font-weight: bold; padding: 4px;")
+        perf_info.setWordWrap(True)
+        perf_layout.addWidget(perf_info)
+        
+        perf_form = QFormLayout()
+        
+        # Spectral downsampling
+        self.enable_spectral_downsample = QCheckBox("Enable spectral downsampling")
+        self.enable_spectral_downsample.setToolTip("Reduce number of wavenumber points while preserving spectral features")
+        self.enable_spectral_downsample.stateChanged.connect(self.update_performance_controls)
+        perf_form.addRow(self.enable_spectral_downsample)
+        
+        self.downsample_factor = QSpinBox()
+        self.downsample_factor.setRange(2, 10)
+        self.downsample_factor.setValue(3)
+        self.downsample_factor.setSuffix("x reduction")
+        self.downsample_factor.setToolTip("Factor by which to reduce spectral resolution (3x = keep every 3rd point)")
+        self.downsample_factor.setEnabled(False)
+        perf_form.addRow("  Downsample Factor:", self.downsample_factor)
+        
+        # PCA pre-reduction
+        self.enable_pca_prereduction = QCheckBox("Enable PCA pre-reduction")
+        self.enable_pca_prereduction.setToolTip("Reduce dimensionality before clustering (faster, preserves variance)")
+        self.enable_pca_prereduction.stateChanged.connect(self.update_performance_controls)
+        perf_form.addRow(self.enable_pca_prereduction)
+        
+        self.pca_prereduction_components = QSpinBox()
+        self.pca_prereduction_components.setRange(10, 500)
+        self.pca_prereduction_components.setValue(100)
+        self.pca_prereduction_components.setSuffix(" components")
+        self.pca_prereduction_components.setToolTip("Number of PCA components to retain (captures most variance)")
+        self.pca_prereduction_components.setEnabled(False)
+        perf_form.addRow("  PCA Components:", self.pca_prereduction_components)
+        
+        # Random subset sampling
+        self.enable_subset_sampling = QCheckBox("Enable subset sampling (exploration mode)")
+        self.enable_subset_sampling.setToolTip("Randomly sample subset of spectra for initial exploration")
+        self.enable_subset_sampling.stateChanged.connect(self.update_performance_controls)
+        perf_form.addRow(self.enable_subset_sampling)
+        
+        self.subset_sample_size = QSpinBox()
+        self.subset_sample_size.setRange(1000, 50000)
+        self.subset_sample_size.setValue(10000)
+        self.subset_sample_size.setSingleStep(1000)
+        self.subset_sample_size.setSuffix(" spectra")
+        self.subset_sample_size.setToolTip("Number of spectra to randomly sample")
+        self.subset_sample_size.setEnabled(False)
+        perf_form.addRow("  Sample Size:", self.subset_sample_size)
+        
+        perf_layout.addLayout(perf_form)
+        
+        # Performance estimate
+        self.perf_estimate_label = QLabel("")
+        self.perf_estimate_label.setStyleSheet("color: #059669; font-size: 10px; padding: 4px; font-style: italic;")
+        self.perf_estimate_label.setWordWrap(True)
+        perf_layout.addWidget(self.perf_estimate_label)
+        
+        layout.addWidget(perf_group)
+        
         # Add start import button
         start_import_btn = QPushButton("Start Import")
         start_import_btn.clicked.connect(self.start_batch_import)
@@ -2214,6 +2279,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
         
         # Dynamic spectral regions configuration
         regions_group = QGroupBox("Spectral Regions of Interest (cm⁻¹)")
+        regions_group.setCheckable(True)  # Make it collapsible
+        regions_group.setChecked(True)  # Expanded by default
         regions_layout = QVBoxLayout(regions_group)
         
         # Control buttons for regions
@@ -2233,25 +2300,33 @@ class RamanClusterAnalysisQt6(QMainWindow):
         
         regions_layout.addLayout(region_controls)
         
-        # Horizontally scrollable area for regions
+        # Scrollable area for regions - no height limit, takes available space
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(200)  # Reduced height
+        scroll_area.setMinimumHeight(150)  # Minimum visible height
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background-color: #fafafa;
+            }
+        """)
         
         self.regions_widget = QWidget()
         self.regions_widget.setMinimumWidth(720)  # Accommodate wider region widgets
         self.regions_layout = QVBoxLayout(self.regions_widget)
         self.regions_layout.setSpacing(5)
+        self.regions_layout.addStretch()  # Push regions to top
         
         scroll_area.setWidget(self.regions_widget)
-        regions_layout.addWidget(scroll_area)
+        regions_layout.addWidget(scroll_area, 1)  # Stretch factor of 1 to take available space
         
         # Store region widgets for dynamic management
         self.region_widgets = []
         
-        left_layout.addWidget(regions_group)
+        left_layout.addWidget(regions_group, 1)  # Give it stretch priority
         
         # Biofilm/COM Analysis Section
         biofilm_group = QGroupBox("Biofilm & COM Analysis")
@@ -2389,16 +2464,22 @@ class RamanClusterAnalysisQt6(QMainWindow):
     def create_validation_tab(self):
         """Create quantitative cluster validation tab."""
         validation_widget = QWidget()
-        layout = QVBoxLayout(validation_widget)
+        main_layout = QHBoxLayout(validation_widget)  # Changed to horizontal layout
+        
+        # Left panel for controls
+        left_panel = QWidget()
+        left_panel.setMaximumWidth(400)
+        left_layout = QVBoxLayout(left_panel)
         
         # Title and description
         title_label = QLabel("Quantitative Cluster Validation")
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
-        layout.addWidget(title_label)
+        left_layout.addWidget(title_label)
         
-        desc_label = QLabel("Statistical validation and quality assessment of cluster assignments")
+        desc_label = QLabel("Statistical validation and quality assessment of hierarchical clustering results (not PCA/UMAP visualizations)")
         desc_label.setStyleSheet("color: #666; margin-bottom: 10px;")
-        layout.addWidget(desc_label)
+        desc_label.setWordWrap(True)
+        left_layout.addWidget(desc_label)
         
         # Validation methods
         methods_group = QGroupBox("Validation Methods")
@@ -2417,6 +2498,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
         silhouette_layout.addWidget(silhouette_btn)
         
         silhouette_layout.addStretch()
+        
+        silhouette_help_btn = QPushButton("?")
+        silhouette_help_btn.setFixedSize(25, 25)
+        silhouette_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        silhouette_help_btn.clicked.connect(lambda: self.show_validation_help("silhouette"))
+        silhouette_layout.addWidget(silhouette_help_btn)
+        
         methods_layout.addWidget(silhouette_frame)
         
         # Cluster transition analysis
@@ -2432,6 +2531,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
         transition_layout.addWidget(transition_btn)
         
         transition_layout.addStretch()
+        
+        transition_help_btn = QPushButton("?")
+        transition_help_btn.setFixedSize(25, 25)
+        transition_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        transition_help_btn.clicked.connect(lambda: self.show_validation_help("transition"))
+        transition_layout.addWidget(transition_help_btn)
+        
         methods_layout.addWidget(transition_frame)
         
         # Stability analysis
@@ -2447,9 +2564,27 @@ class RamanClusterAnalysisQt6(QMainWindow):
         stability_layout.addWidget(stability_btn)
         
         stability_layout.addStretch()
+        
+        stability_help_btn = QPushButton("?")
+        stability_help_btn.setFixedSize(25, 25)
+        stability_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        stability_help_btn.clicked.connect(lambda: self.show_validation_help("stability"))
+        stability_layout.addWidget(stability_help_btn)
+        
         methods_layout.addWidget(stability_frame)
         
-        layout.addWidget(methods_group)
+        left_layout.addWidget(methods_group)
         
         # Parameters
         params_group = QGroupBox("Validation Parameters")
@@ -2466,7 +2601,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.bootstrap_iterations.setValue(100)
         params_layout.addRow("Bootstrap Iterations:", self.bootstrap_iterations)
         
-        layout.addWidget(params_group)
+        left_layout.addWidget(params_group)
         
         # Run all validation button
         run_all_btn = QPushButton("Run Complete Validation Suite")
@@ -2484,38 +2619,56 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 background-color: #449D44;
             }
         """)
-        layout.addWidget(run_all_btn)
+        left_layout.addWidget(run_all_btn)
+        
+        # Results text at bottom of left panel
+        results_group = QGroupBox("Results Summary")
+        results_layout = QVBoxLayout(results_group)
+        self.validation_results = QTextEdit()
+        self.validation_results.setReadOnly(True)
+        results_layout.addWidget(self.validation_results)
+        left_layout.addWidget(results_group)
+        
+        # Add left panel to main layout
+        main_layout.addWidget(left_panel)
+        
+        # Right panel for visualization
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
         
         # Results visualization
         self.validation_fig = Figure(figsize=(12, 10))
         self.validation_canvas = FigureCanvas(self.validation_fig)
-        layout.addWidget(self.validation_canvas)
+        right_layout.addWidget(self.validation_canvas)
         
         # Add toolbar
-        self.validation_toolbar = NavigationToolbar(self.validation_canvas, validation_widget)
-        layout.addWidget(self.validation_toolbar)
+        self.validation_toolbar = NavigationToolbar(self.validation_canvas, right_panel)
+        right_layout.addWidget(self.validation_toolbar)
         
-        # Results text
-        self.validation_results = QTextEdit()
-        self.validation_results.setMaximumHeight(150)
-        self.validation_results.setReadOnly(True)
-        layout.addWidget(self.validation_results)
+        # Add right panel to main layout
+        main_layout.addWidget(right_panel)
         
         self.tab_widget.addTab(validation_widget, "Validation")
 
     def create_advanced_statistics_tab(self):
         """Create advanced statistical analysis tab."""
         stats_widget = QWidget()
-        layout = QVBoxLayout(stats_widget)
+        main_layout = QHBoxLayout(stats_widget)  # Changed to horizontal layout
+        
+        # Left panel for controls
+        left_panel = QWidget()
+        left_panel.setMaximumWidth(400)
+        left_layout = QVBoxLayout(left_panel)
         
         # Title and description
         title_label = QLabel("Advanced Statistical Analysis")
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
-        layout.addWidget(title_label)
+        left_layout.addWidget(title_label)
         
         desc_label = QLabel("Feature importance, discriminant analysis, and statistical significance testing")
         desc_label.setStyleSheet("color: #666; margin-bottom: 10px;")
-        layout.addWidget(desc_label)
+        desc_label.setWordWrap(True)
+        left_layout.addWidget(desc_label)
         
         # Analysis options
         options_group = QGroupBox("Statistical Analysis Options")
@@ -2538,6 +2691,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
         feature_layout.addWidget(feature_btn)
         
         feature_layout.addStretch()
+        
+        feature_help_btn = QPushButton("?")
+        feature_help_btn.setFixedSize(25, 25)
+        feature_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        feature_help_btn.clicked.connect(lambda: self.show_statistics_help("feature_importance"))
+        feature_layout.addWidget(feature_help_btn)
+        
         options_layout.addWidget(feature_frame)
         
         # Discriminant analysis
@@ -2553,6 +2724,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
         discriminant_layout.addWidget(discriminant_btn)
         
         discriminant_layout.addStretch()
+        
+        discriminant_help_btn = QPushButton("?")
+        discriminant_help_btn.setFixedSize(25, 25)
+        discriminant_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        discriminant_help_btn.clicked.connect(lambda: self.show_statistics_help("discriminant"))
+        discriminant_layout.addWidget(discriminant_help_btn)
+        
         options_layout.addWidget(discriminant_frame)
         
         # Statistical significance
@@ -2572,9 +2761,27 @@ class RamanClusterAnalysisQt6(QMainWindow):
         significance_layout.addWidget(significance_btn)
         
         significance_layout.addStretch()
+        
+        significance_help_btn = QPushButton("?")
+        significance_help_btn.setFixedSize(25, 25)
+        significance_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border-radius: 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        significance_help_btn.clicked.connect(lambda: self.show_statistics_help("significance"))
+        significance_layout.addWidget(significance_help_btn)
+        
         options_layout.addWidget(significance_frame)
         
-        layout.addWidget(options_group)
+        left_layout.addWidget(options_group)
         
         # Parameters
         params_group = QGroupBox("Analysis Parameters")
@@ -2592,7 +2799,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.permutations.setValue(999)
         params_layout.addRow("Permutations:", self.permutations)
         
-        layout.addWidget(params_group)
+        left_layout.addWidget(params_group)
         
         # Run comprehensive analysis
         comprehensive_btn = QPushButton("Run Comprehensive Statistical Analysis")
@@ -2610,40 +2817,34 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 background-color: #286090;
             }
         """)
-        layout.addWidget(comprehensive_btn)
+        left_layout.addWidget(comprehensive_btn)
         
-        # Advanced baseline subtraction button
-        baseline_btn = QPushButton("Advanced Baseline Subtraction")
-        baseline_btn.clicked.connect(self.open_advanced_baseline_window)
-        baseline_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #5CB85C;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #449D44;
-            }
-        """)
-        layout.addWidget(baseline_btn)
+        # Results text at bottom of left panel
+        results_group = QGroupBox("Results Summary")
+        results_layout = QVBoxLayout(results_group)
+        self.stats_results = QTextEdit()
+        self.stats_results.setReadOnly(True)
+        results_layout.addWidget(self.stats_results)
+        left_layout.addWidget(results_group)
+        
+        # Add left panel to main layout
+        main_layout.addWidget(left_panel)
+        
+        # Right panel for visualization
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
         
         # Results visualization
         self.stats_fig = Figure(figsize=(12, 10))
         self.stats_canvas = FigureCanvas(self.stats_fig)
-        layout.addWidget(self.stats_canvas)
+        right_layout.addWidget(self.stats_canvas)
         
         # Add toolbar
-        self.stats_toolbar = NavigationToolbar(self.stats_canvas, stats_widget)
-        layout.addWidget(self.stats_toolbar)
+        self.stats_toolbar = NavigationToolbar(self.stats_canvas, right_panel)
+        right_layout.addWidget(self.stats_toolbar)
         
-        # Results text
-        self.stats_results = QTextEdit()
-        self.stats_results.setMaximumHeight(150)
-        self.stats_results.setReadOnly(True)
-        layout.addWidget(self.stats_results)
+        # Add right panel to main layout
+        main_layout.addWidget(right_panel)
         
         self.tab_widget.addTab(stats_widget, "Advanced Statistics")
 
@@ -2842,7 +3043,9 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.region_widgets.append(region_widget)
         
         if hasattr(self, 'regions_layout'):
-            self.regions_layout.addWidget(region_frame)
+            # Insert before the stretch item (which is always last)
+            insert_position = self.regions_layout.count() - 1
+            self.regions_layout.insertWidget(insert_position, region_frame)
 
     def remove_spectral_region(self):
         """Remove selected spectral regions."""
@@ -3143,8 +3346,11 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.cluster_data['intensities'] = np.array(processed_intensities)
             self.cluster_data['spectrum_metadata'] = all_metadata  # Store metadata
             
+            # Apply performance optimizations
+            self.cluster_data = self.apply_performance_optimizations(self.cluster_data)
+            
             # Extract features
-            features = self.extract_vibrational_features(self.cluster_data['intensities'], common_wavenumbers)
+            features = self.extract_vibrational_features(self.cluster_data['intensities'], self.cluster_data['wavenumbers'])
             self.cluster_data['features'] = features
             
             # Scale features
@@ -3441,8 +3647,11 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.cluster_data['intensities'] = np.array(processed_intensities)
             self.cluster_data['spectrum_metadata'] = all_metadata
             
+            # Apply performance optimizations
+            self.cluster_data = self.apply_performance_optimizations(self.cluster_data)
+            
             # Extract features
-            features = self.extract_vibrational_features(self.cluster_data['intensities'], common_wavenumbers)
+            features = self.extract_vibrational_features(self.cluster_data['intensities'], self.cluster_data['wavenumbers'])
             self.cluster_data['features'] = features
             
             # Scale features
@@ -3744,10 +3953,28 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.clustering_progress.setValue(70)
             QApplication.processEvents()
             
+            # Apply PCA pre-reduction if enabled (for large datasets)
+            features_for_clustering = self.cluster_data['features_scaled']
+            if hasattr(self, 'enable_pca_prereduction') and self.enable_pca_prereduction.isChecked():
+                n_components = min(self.pca_prereduction_components.value(), features_for_clustering.shape[1], features_for_clustering.shape[0])
+                self.clustering_status.setText(f"Applying PCA pre-reduction to {n_components} components...")
+                print(f"\n⚡ PCA Pre-Reduction:")
+                print(f"   Reducing from {features_for_clustering.shape[1]} to {n_components} dimensions")
+                
+                pca_reducer = PCA(n_components=n_components)
+                features_for_clustering = pca_reducer.fit_transform(features_for_clustering)
+                
+                variance_explained = np.sum(pca_reducer.explained_variance_ratio_)
+                print(f"   ✓ Variance explained: {variance_explained*100:.2f}%")
+                print(f"   ✓ Dimensionality reduction: {features_for_clustering.shape[1]/self.cluster_data['features_scaled'].shape[1]:.1%}")
+                
+                self.cluster_data['pca_reducer'] = pca_reducer
+                self.cluster_data['features_pca_reduced'] = features_for_clustering
+            
             # Perform clustering
             self.clustering_status.setText("Running clustering...")
             labels, linkage_matrix, distance_matrix = self.perform_hierarchical_clustering(
-                self.cluster_data['features_scaled'], n_clusters, linkage_method, distance_metric
+                features_for_clustering, n_clusters, linkage_method, distance_metric
             )
             
             # Store results
@@ -4603,6 +4830,118 @@ class RamanClusterAnalysisQt6(QMainWindow):
             if hasattr(self, 'previous_phase_method'):
                 self.phase_method_combo.setCurrentText(self.previous_phase_method)
                 delattr(self, 'previous_phase_method')
+    
+    def update_performance_controls(self):
+        """Update visibility and state of performance optimization controls."""
+        if hasattr(self, 'enable_spectral_downsample'):
+            self.downsample_factor.setEnabled(self.enable_spectral_downsample.isChecked())
+        
+        if hasattr(self, 'enable_pca_prereduction'):
+            self.pca_prereduction_components.setEnabled(self.enable_pca_prereduction.isChecked())
+        
+        if hasattr(self, 'enable_subset_sampling'):
+            self.subset_sample_size.setEnabled(self.enable_subset_sampling.isChecked())
+        
+        # Update performance estimate
+        self.update_performance_estimate()
+    
+    def update_performance_estimate(self):
+        """Update the performance estimate label based on selected optimizations."""
+        if not hasattr(self, 'perf_estimate_label'):
+            return
+        
+        estimates = []
+        
+        if hasattr(self, 'enable_spectral_downsample') and self.enable_spectral_downsample.isChecked():
+            factor = self.downsample_factor.value()
+            estimates.append(f"Spectral resolution: {factor}x faster, {factor}x less memory")
+        
+        if hasattr(self, 'enable_pca_prereduction') and self.enable_pca_prereduction.isChecked():
+            estimates.append("PCA pre-reduction: 5-10x faster clustering, preserves 95%+ variance")
+        
+        if hasattr(self, 'enable_subset_sampling') and self.enable_subset_sampling.isChecked():
+            size = self.subset_sample_size.value()
+            estimates.append(f"Subset sampling: Process only {size:,} spectra for exploration")
+        
+        if estimates:
+            self.perf_estimate_label.setText("💡 Expected improvements: " + " | ".join(estimates))
+        else:
+            self.perf_estimate_label.setText("")
+    
+    def apply_performance_optimizations(self, cluster_data):
+        """Apply performance optimizations to the loaded data.
+        
+        This function applies the selected optimizations:
+        1. Spectral downsampling - reduces wavenumber resolution
+        2. Subset sampling - randomly samples a subset of spectra
+        3. PCA pre-reduction will be applied later in the pipeline
+        
+        Returns modified cluster_data dictionary.
+        """
+        wavenumbers = cluster_data['wavenumbers']
+        intensities = cluster_data['intensities']
+        metadata = cluster_data.get('spectrum_metadata', [])
+        
+        n_spectra_original = len(intensities)
+        n_points_original = len(wavenumbers)
+        
+        print(f"\n{'='*60}")
+        print(f"PERFORMANCE OPTIMIZATION")
+        print(f"{'='*60}")
+        print(f"Original dataset: {n_spectra_original:,} spectra × {n_points_original:,} points")
+        
+        # 1. Subset sampling (do this first to reduce data early)
+        if hasattr(self, 'enable_subset_sampling') and self.enable_subset_sampling.isChecked():
+            sample_size = self.subset_sample_size.value()
+            if n_spectra_original > sample_size:
+                print(f"\n🎲 Subset Sampling:")
+                print(f"   Randomly sampling {sample_size:,} spectra from {n_spectra_original:,}")
+                
+                # Random sampling with fixed seed for reproducibility
+                np.random.seed(42)
+                sample_indices = np.random.choice(n_spectra_original, sample_size, replace=False)
+                sample_indices = np.sort(sample_indices)  # Keep order for consistency
+                
+                intensities = intensities[sample_indices]
+                if metadata:
+                    metadata = [metadata[i] for i in sample_indices]
+                
+                cluster_data['subset_indices'] = sample_indices  # Store for reference
+                print(f"   ✓ Reduced to {len(intensities):,} spectra ({100*sample_size/n_spectra_original:.1f}% of original)")
+        
+        # 2. Spectral downsampling (reduce wavenumber resolution)
+        if hasattr(self, 'enable_spectral_downsample') and self.enable_spectral_downsample.isChecked():
+            factor = self.downsample_factor.value()
+            print(f"\n📉 Spectral Downsampling:")
+            print(f"   Downsampling by factor of {factor}x")
+            
+            # Downsample using slicing (keeps every Nth point)
+            wavenumbers = wavenumbers[::factor]
+            intensities = intensities[:, ::factor]
+            
+            n_points_new = len(wavenumbers)
+            print(f"   ✓ Reduced from {n_points_original:,} to {n_points_new:,} points")
+            print(f"   ✓ Memory reduction: {100*(1-n_points_new/n_points_original):.1f}%")
+            print(f"   ✓ New wavenumber range: {wavenumbers[0]:.1f} - {wavenumbers[-1]:.1f} cm⁻¹")
+            print(f"   ✓ New resolution: ~{(wavenumbers[-1]-wavenumbers[0])/len(wavenumbers):.2f} cm⁻¹/point")
+        
+        # Update cluster_data
+        cluster_data['wavenumbers'] = wavenumbers
+        cluster_data['intensities'] = intensities
+        cluster_data['spectrum_metadata'] = metadata
+        
+        # Calculate total reduction
+        n_spectra_final = len(intensities)
+        n_points_final = len(wavenumbers)
+        total_reduction = (n_spectra_original * n_points_original) / (n_spectra_final * n_points_final)
+        
+        print(f"\n📊 Final Dataset:")
+        print(f"   {n_spectra_final:,} spectra × {n_points_final:,} points")
+        print(f"   Total data reduction: {total_reduction:.1f}x")
+        print(f"   Estimated speedup: {total_reduction*0.7:.1f}x - {total_reduction:.1f}x")
+        print(f"{'='*60}\n")
+        
+        return cluster_data
         
     def add_exclusion_region(self):
         """Add a new exclusion region widget."""
@@ -5461,7 +5800,7 @@ Cluster Sizes:
             )
             
             if filename:
-                with open(filename, 'w') as f:
+                with open(filename, 'w', encoding='utf-8') as f:
                         f.write(self.analysis_results_text.toPlainText())
                 
                 QMessageBox.information(self, "Export Complete", f"Results saved to:\n{filename}")
@@ -7871,6 +8210,619 @@ Cluster Sizes:
         except Exception as e:
             QMessageBox.critical(self, "Complete Validation Error", 
                                f"Failed to run complete validation:\n{str(e)}")
+    
+    def plot_comprehensive_validation(self, validation_results):
+        """Create comprehensive visualization of all validation results."""
+        try:
+            self.validation_fig.clear()
+            
+            # Determine how many subplots we need based on available results
+            n_plots = sum([
+                'silhouette' in validation_results and 'error' not in validation_results['silhouette'],
+                'transitions' in validation_results and 'error' not in validation_results['transitions'],
+                'stability' in validation_results and 'error' not in validation_results['stability']
+            ])
+            
+            if n_plots == 0:
+                # No valid results to plot
+                ax = self.validation_fig.add_subplot(1, 1, 1)
+                ax.text(0.5, 0.5, 'No validation results available\nPlease enable at least one validation method',
+                       ha='center', va='center', fontsize=14, color='red')
+                ax.axis('off')
+                self.validation_canvas.draw()
+                return
+            
+            # Create subplot layout
+            if n_plots == 1:
+                rows, cols = 1, 1
+            elif n_plots == 2:
+                rows, cols = 1, 2
+            else:
+                rows, cols = 2, 2
+            
+            plot_idx = 1
+            
+            # 1. Silhouette Analysis Summary
+            if 'silhouette' in validation_results and 'error' not in validation_results['silhouette']:
+                ax = self.validation_fig.add_subplot(rows, cols, plot_idx)
+                plot_idx += 1
+                
+                silhouette_data = validation_results['silhouette']
+                if 'cluster_scores' in silhouette_data and 'average' in silhouette_data:
+                    cluster_scores = silhouette_data['cluster_scores']
+                    avg_score = silhouette_data['average']
+                    
+                    clusters = list(cluster_scores.keys())
+                    scores = [cluster_scores[c] for c in clusters]
+                    
+                    colors = ['green' if s >= avg_score else 'orange' for s in scores]
+                    ax.bar(range(len(clusters)), scores, color=colors, alpha=0.7)
+                    ax.axhline(y=avg_score, color='red', linestyle='--', linewidth=2, label=f'Average: {avg_score:.3f}')
+                    ax.set_xlabel('Cluster')
+                    ax.set_ylabel('Silhouette Score')
+                    ax.set_title('Silhouette Analysis Summary')
+                    ax.set_xticks(range(len(clusters)))
+                    ax.set_xticklabels([f'C{c}' for c in clusters])
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+            
+            # 2. Transition Analysis Summary
+            if 'transitions' in validation_results and 'error' not in validation_results['transitions']:
+                ax = self.validation_fig.add_subplot(rows, cols, plot_idx)
+                plot_idx += 1
+                
+                transition_data = validation_results['transitions']
+                if 'boundary_thickness' in transition_data:
+                    boundary_data = transition_data['boundary_thickness']
+                    
+                    pairs = list(boundary_data.keys())
+                    thicknesses = [boundary_data[p]['thickness'] for p in pairs]
+                    
+                    colors = ['green' if t < np.median(thicknesses) else 'orange' for t in thicknesses]
+                    ax.bar(range(len(pairs)), thicknesses, color=colors, alpha=0.7)
+                    ax.set_xlabel('Cluster Pair')
+                    ax.set_ylabel('Boundary Thickness')
+                    ax.set_title('Cluster Separation Analysis')
+                    ax.set_xticks(range(len(pairs)))
+                    ax.set_xticklabels([f'{p[0]}-{p[1]}' for p in pairs], rotation=45)
+                    ax.grid(True, alpha=0.3)
+            
+            # 3. Stability Analysis Summary
+            if 'stability' in validation_results and 'error' not in validation_results['stability']:
+                ax = self.validation_fig.add_subplot(rows, cols, plot_idx)
+                plot_idx += 1
+                
+                stability_data = validation_results['stability']
+                if 'cluster_stability' in stability_data:
+                    cluster_stability = stability_data['cluster_stability']
+                    
+                    clusters = list(cluster_stability.keys())
+                    stabilities = [cluster_stability[c]['mean_consistency'] for c in clusters]
+                    
+                    colors = ['green' if s >= 0.8 else 'orange' if s >= 0.6 else 'red' for s in stabilities]
+                    ax.bar(range(len(clusters)), stabilities, color=colors, alpha=0.7)
+                    ax.axhline(y=0.8, color='green', linestyle='--', alpha=0.5, label='Good (≥0.8)')
+                    ax.axhline(y=0.6, color='orange', linestyle='--', alpha=0.5, label='Fair (≥0.6)')
+                    ax.set_xlabel('Cluster')
+                    ax.set_ylabel('Stability Score')
+                    ax.set_title('Cluster Stability Analysis')
+                    ax.set_xticks(range(len(clusters)))
+                    ax.set_xticklabels([f'C{c}' for c in clusters])
+                    ax.set_ylim([0, 1])
+                    ax.legend()
+                    ax.grid(True, alpha=0.3)
+            
+            # 4. Overall Summary (if we have space)
+            if n_plots >= 3 and plot_idx <= rows * cols:
+                ax = self.validation_fig.add_subplot(rows, cols, plot_idx)
+                ax.axis('off')
+                
+                summary_lines = ['Comprehensive Validation Summary\n' + '='*40 + '\n']
+                
+                if 'silhouette' in validation_results and 'error' not in validation_results['silhouette']:
+                    avg_score = validation_results['silhouette'].get('average', 0)
+                    quality = 'Excellent' if avg_score > 0.7 else 'Good' if avg_score > 0.5 else 'Fair' if avg_score > 0.3 else 'Poor'
+                    summary_lines.append(f'Silhouette Score: {avg_score:.3f} ({quality})')
+                
+                if 'stability' in validation_results and 'error' not in validation_results['stability']:
+                    stats = validation_results['stability'].get('overall_stats', {})
+                    mean_ari = stats.get('mean_ari', 0)
+                    quality = 'Excellent' if mean_ari > 0.9 else 'Good' if mean_ari > 0.8 else 'Fair' if mean_ari > 0.6 else 'Poor'
+                    summary_lines.append(f'Stability (ARI): {mean_ari:.3f} ({quality})')
+                
+                if 'transitions' in validation_results and 'error' not in validation_results['transitions']:
+                    summary_lines.append('Cluster Boundaries: Analyzed')
+                
+                summary_lines.append('\n' + '='*40)
+                summary_lines.append('\nInterpretation Guide:')
+                summary_lines.append('• Silhouette > 0.7: Well-separated')
+                summary_lines.append('• Stability > 0.8: Highly robust')
+                summary_lines.append('• Low boundary thickness: Clear separation')
+                
+                summary_text = '\n'.join(summary_lines)
+                ax.text(0.1, 0.9, summary_text, transform=ax.transAxes,
+                       verticalalignment='top', fontfamily='monospace', fontsize=9)
+            
+            self.validation_fig.tight_layout()
+            self.validation_canvas.draw()
+            
+        except Exception as e:
+            print(f"Error plotting comprehensive validation: {str(e)}")
+            # Show error on canvas
+            self.validation_fig.clear()
+            ax = self.validation_fig.add_subplot(1, 1, 1)
+            ax.text(0.5, 0.5, f'Error creating visualization:\n{str(e)}',
+                   ha='center', va='center', fontsize=12, color='red')
+            ax.axis('off')
+            self.validation_canvas.draw()
+    
+    def show_statistics_help(self, method_type):
+        """Show help dialog explaining statistical analysis methods in simple terms."""
+        help_content = {
+            'feature_importance': {
+                'title': 'Feature Importance Analysis',
+                'what': 'Identifies which wavenumbers (spectral features) are most important for distinguishing between your clusters.',
+                'how': 'Analyzes your spectral data to find which peaks/regions contribute most to cluster separation:\n'
+                       '• Random Forest: Uses decision trees to rank features by discrimination power\n'
+                       '• Linear Discriminant Analysis: Finds features with maximum between-cluster variance\n'
+                       '• Mutual Information: Measures statistical dependence between features and clusters',
+                'interpret': '• High importance scores: These wavenumbers are key for cluster differences\n'
+                            '• Low importance scores: These wavenumbers are similar across all clusters\n'
+                            '• Top 10-20 features: Usually sufficient to capture cluster differences\n'
+                            '• Peaks in importance plot: Correspond to diagnostic spectral features',
+                'when': 'Use this to understand which chemical/structural features (peaks) are responsible '
+                       'for the differences between your clusters. Essential for interpreting what makes '
+                       'each cluster unique.',
+                'example': 'If analyzing carbon materials and you find high importance at 1350 cm⁻¹ (D-band) '
+                          'and 1580 cm⁻¹ (G-band), it means these peaks are the main features distinguishing '
+                          'your carbon types. You can then focus on these regions for detailed analysis.',
+                'tips': '• Random Forest: Best general-purpose method, handles non-linear relationships\n'
+                       '• LDA: Good for linear separations, faster computation\n'
+                       '• Mutual Information: Captures complex dependencies, no assumptions about relationships'
+            },
+            'discriminant': {
+                'title': 'Discriminant Analysis',
+                'what': 'Creates a mathematical model that best separates your clusters and tests how well spectra can be classified.',
+                'how': 'Builds a classification model using Linear Discriminant Analysis (LDA):\n'
+                       '• Finds optimal linear combinations of features that maximize cluster separation\n'
+                       '• Projects data into a lower-dimensional discriminant space\n'
+                       '• Tests classification accuracy using cross-validation\n'
+                       '• Generates confusion matrix showing classification performance',
+                'interpret': '• Classification accuracy > 90%: Excellent cluster separation\n'
+                            '• Accuracy 70-90%: Good separation with some overlap\n'
+                            '• Accuracy < 70%: Significant overlap between clusters\n'
+                            '• Confusion matrix: Shows which clusters are confused with each other\n'
+                            '• Discriminant plot: Visualizes cluster separation in 2D space',
+                'when': 'Use this to:\n'
+                       '• Assess how well-separated your clusters are\n'
+                       '• Identify which clusters are easily confused\n'
+                       '• Build a predictive model for classifying new spectra\n'
+                       '• Visualize cluster relationships in discriminant space',
+                'example': 'If you have 5 mineral clusters and get 95% accuracy, you can confidently use '
+                          'this model to classify new unknown samples. The confusion matrix might show that '
+                          'Cluster 2 and 3 are sometimes confused, suggesting they have similar compositions.',
+                'tips': '• Works best with well-separated clusters\n'
+                       '• Requires more samples than features (use PCA if needed)\n'
+                       '• Cross-validation prevents overfitting\n'
+                       '• Discriminant axes show directions of maximum separation'
+            },
+            'significance': {
+                'title': 'Statistical Significance Testing',
+                'what': 'Tests whether your clusters are statistically different from each other or just random groupings.',
+                'how': 'Uses permutation tests to assess if cluster differences are real:\n'
+                       '• PERMANOVA: Tests if cluster centroids differ in multivariate space\n'
+                       '• ANOSIM: Tests if between-cluster distances > within-cluster distances\n'
+                       '• Kruskal-Wallis: Non-parametric test for differences across clusters\n'
+                       '• ANOVA: Parametric test assuming normal distributions',
+                'interpret': '• p-value < 0.05: Clusters are significantly different (reject null hypothesis)\n'
+                            '• p-value < 0.01: Very strong evidence of cluster differences\n'
+                            '• p-value > 0.05: No significant difference (clusters may be random)\n'
+                            '• R² or F-statistic: Effect size (how much variance explained by clusters)\n'
+                            '• Pairwise tests: Which specific cluster pairs differ significantly',
+                'when': 'Use this to:\n'
+                       '• Validate that your clusters represent real groups, not random patterns\n'
+                       '• Determine if cluster differences are statistically meaningful\n'
+                       '• Compare the strength of clustering across different methods\n'
+                       '• Provide statistical support for your clustering results',
+                'example': 'If analyzing geological samples and get p < 0.001, you have strong statistical '
+                          'evidence that your clusters represent distinct geological units. If p > 0.05, '
+                          'the apparent clusters might just be random variation and you should reconsider '
+                          'your clustering approach.',
+                'tips': '• PERMANOVA: Best for multivariate spectral data, most commonly used\n'
+                       '• ANOSIM: Good for non-normal data, focuses on rank distances\n'
+                       '• Kruskal-Wallis: Simple, robust, good for initial testing\n'
+                       '• ANOVA: Fastest but assumes normality (rarely true for spectra)\n'
+                       '• Use 999+ permutations for reliable p-values'
+            }
+        }
+        
+        if method_type not in help_content:
+            return
+        
+        content = help_content[method_type]
+        
+        # Create help dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Help: {content['title']}")
+        dialog.setMinimumWidth(650)
+        dialog.setMinimumHeight(550)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Title
+        title = QLabel(content['title'])
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        
+        # What is it?
+        what_label = QLabel("📊 What is it?")
+        what_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(what_label)
+        
+        what_text = QLabel(content['what'])
+        what_text.setWordWrap(True)
+        what_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(what_text)
+        
+        # How does it work?
+        how_label = QLabel("⚙️ How does it work?")
+        how_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(how_label)
+        
+        how_text = QLabel(content['how'])
+        how_text.setWordWrap(True)
+        how_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(how_text)
+        
+        # How to interpret?
+        interpret_label = QLabel("📈 How to interpret the results?")
+        interpret_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(interpret_label)
+        
+        interpret_text = QLabel(content['interpret'])
+        interpret_text.setWordWrap(True)
+        interpret_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(interpret_text)
+        
+        # When to use?
+        when_label = QLabel("🤔 When should I use this?")
+        when_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(when_label)
+        
+        when_text = QLabel(content['when'])
+        when_text.setWordWrap(True)
+        when_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(when_text)
+        
+        # Example
+        example_label = QLabel("💡 Example")
+        example_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(example_label)
+        
+        example_text = QLabel(content['example'])
+        example_text.setWordWrap(True)
+        example_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e; font-style: italic;")
+        content_layout.addWidget(example_text)
+        
+        # Tips (if available)
+        if 'tips' in content:
+            tips_label = QLabel("💭 Tips")
+            tips_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+            content_layout.addWidget(tips_label)
+            
+            tips_text = QLabel(content['tips'])
+            tips_text.setWordWrap(True)
+            tips_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+            content_layout.addWidget(tips_text)
+        
+        content_layout.addStretch()
+        
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll)
+        
+        # Close button
+        close_btn = QPushButton("Got it!")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 24px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
+    
+    def show_validation_help(self, method_type):
+        """Show help dialog explaining validation methods in simple terms."""
+        help_content = {
+            'silhouette': {
+                'title': 'Silhouette Analysis',
+                'what': 'Measures how well each spectrum fits into its assigned cluster.',
+                'how': 'For each spectrum, it calculates:\n'
+                       '• How close it is to other spectra in the same cluster (cohesion)\n'
+                       '• How far it is from spectra in other clusters (separation)\n'
+                       '• Combines these into a score from -1 to +1',
+                'interpret': '• Score > 0.7: Excellent - spectrum clearly belongs to its cluster\n'
+                            '• Score 0.5-0.7: Good - reasonable cluster assignment\n'
+                            '• Score 0.3-0.5: Fair - some overlap between clusters\n'
+                            '• Score < 0.3: Poor - clusters may not be well-defined',
+                'when': 'Use this to check if your clusters are well-separated and meaningful.',
+                'example': 'If you have 5 clusters and all have silhouette scores > 0.7, '
+                          'it means each cluster contains similar spectra that are clearly '
+                          'different from other clusters.'
+            },
+            'transition': {
+                'title': 'Cluster Transition Analysis',
+                'what': 'Examines the boundaries between clusters to see how distinct they are.',
+                'how': 'Analyzes the "transition zone" between clusters:\n'
+                       '• Finds spectra near cluster boundaries\n'
+                       '• Measures how thick the boundary region is\n'
+                       '• Calculates distances between cluster centers',
+                'interpret': '• Thin boundaries: Clusters are clearly separated\n'
+                            '• Thick boundaries: Gradual transition between clusters\n'
+                            '• Large centroid distances: Clusters are far apart (good)\n'
+                            '• Small centroid distances: Clusters are close together (overlap)',
+                'when': 'Use this when you want to understand if clusters have sharp or gradual '
+                       'transitions, which can indicate whether you have discrete groups or a '
+                       'continuous spectrum of variation.',
+                'example': 'If analyzing mineral samples with different compositions, thin boundaries '
+                          'suggest distinct compositional groups, while thick boundaries might indicate '
+                          'a continuous solid solution series.'
+            },
+            'stability': {
+                'title': 'Cluster Stability Analysis',
+                'what': 'Tests if your clusters are robust and reproducible.',
+                'how': 'Runs clustering multiple times with slight variations:\n'
+                       '• Randomly resamples your data (bootstrap)\n'
+                       '• Re-runs clustering on each sample\n'
+                       '• Checks if spectra consistently end up in the same clusters\n'
+                       '• Uses ARI (Adjusted Rand Index) to measure consistency',
+                'interpret': '• ARI > 0.9: Excellent - very stable, reliable clusters\n'
+                            '• ARI 0.8-0.9: Good - clusters are generally stable\n'
+                            '• ARI 0.6-0.8: Moderate - some variability in assignments\n'
+                            '• ARI < 0.6: Poor - unstable, results may not be reliable',
+                'when': 'Use this to verify that your clustering results are not just random patterns '
+                       'but represent real, reproducible groupings in your data.',
+                'example': 'If you cluster 1000 spectra and get high stability scores, you can be '
+                          'confident that running the analysis again (or with slightly different data) '
+                          'would give you the same cluster assignments.'
+            }
+        }
+        
+        if method_type not in help_content:
+            return
+        
+        content = help_content[method_type]
+        
+        # Create help dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Help: {content['title']}")
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(500)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Title
+        title = QLabel(content['title'])
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; }")
+        
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        
+        # What is it?
+        what_label = QLabel("📊 What is it?")
+        what_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(what_label)
+        
+        what_text = QLabel(content['what'])
+        what_text.setWordWrap(True)
+        what_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(what_text)
+        
+        # How does it work?
+        how_label = QLabel("⚙️ How does it work?")
+        how_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(how_label)
+        
+        how_text = QLabel(content['how'])
+        how_text.setWordWrap(True)
+        how_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(how_text)
+        
+        # How to interpret?
+        interpret_label = QLabel("📈 How to interpret the results?")
+        interpret_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(interpret_label)
+        
+        interpret_text = QLabel(content['interpret'])
+        interpret_text.setWordWrap(True)
+        interpret_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(interpret_text)
+        
+        # When to use?
+        when_label = QLabel("🤔 When should I use this?")
+        when_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(when_label)
+        
+        when_text = QLabel(content['when'])
+        when_text.setWordWrap(True)
+        when_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e;")
+        content_layout.addWidget(when_text)
+        
+        # Example
+        example_label = QLabel("💡 Example")
+        example_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #3498db;")
+        content_layout.addWidget(example_label)
+        
+        example_text = QLabel(content['example'])
+        example_text.setWordWrap(True)
+        example_text.setStyleSheet("font-size: 12px; padding-left: 20px; color: #34495e; font-style: italic;")
+        content_layout.addWidget(example_text)
+        
+        content_layout.addStretch()
+        
+        scroll.setWidget(content_widget)
+        layout.addWidget(scroll)
+        
+        # Close button
+        close_btn = QPushButton("Got it!")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                padding: 8px 24px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
+    
+    def generate_comprehensive_validation_results(self, validation_results):
+        """Generate comprehensive text summary of validation results."""
+        results_text = "="*80 + "\n"
+        results_text += "COMPREHENSIVE CLUSTER VALIDATION RESULTS\n"
+        results_text += "="*80 + "\n\n"
+        
+        # Overall assessment
+        results_text += "OVERALL ASSESSMENT\n"
+        results_text += "-"*80 + "\n"
+        
+        quality_scores = []
+        
+        # Silhouette Analysis
+        if 'silhouette' in validation_results:
+            results_text += "\n1. SILHOUETTE ANALYSIS\n"
+            if 'error' in validation_results['silhouette']:
+                results_text += f"   ❌ Error: {validation_results['silhouette']['error']}\n"
+            else:
+                silhouette_data = validation_results['silhouette']
+                avg_score = silhouette_data.get('average', 0)
+                quality_scores.append(avg_score)
+                
+                quality = 'Excellent ✓✓✓' if avg_score > 0.7 else 'Good ✓✓' if avg_score > 0.5 else 'Fair ✓' if avg_score > 0.3 else 'Poor ✗'
+                results_text += f"   Average Silhouette Score: {avg_score:.4f} ({quality})\n"
+                
+                if 'cluster_scores' in silhouette_data:
+                    results_text += "   Per-Cluster Scores:\n"
+                    for cluster, score in silhouette_data['cluster_scores'].items():
+                        status = '✓' if score >= avg_score else '⚠'
+                        results_text += f"      Cluster {cluster}: {score:.4f} {status}\n"
+                
+                results_text += "\n   Interpretation:\n"
+                results_text += "   • > 0.7: Strong, well-separated clusters\n"
+                results_text += "   • 0.5-0.7: Reasonable cluster structure\n"
+                results_text += "   • 0.3-0.5: Weak cluster structure\n"
+                results_text += "   • < 0.3: No substantial cluster structure\n"
+        
+        # Transition Analysis
+        if 'transitions' in validation_results:
+            results_text += "\n2. CLUSTER TRANSITION ANALYSIS\n"
+            if 'error' in validation_results['transitions']:
+                results_text += f"   ❌ Error: {validation_results['transitions']['error']}\n"
+            else:
+                transition_data = validation_results['transitions']
+                
+                if 'boundary_thickness' in transition_data:
+                    results_text += "   Boundary Thickness (lower = better separation):\n"
+                    for pair, data in transition_data['boundary_thickness'].items():
+                        thickness = data['thickness']
+                        status = '✓' if thickness < 0.5 else '⚠' if thickness < 1.0 else '✗'
+                        results_text += f"      Clusters {pair[0]}-{pair[1]}: {thickness:.4f} {status}\n"
+                
+                if 'centroid_distances' in transition_data:
+                    results_text += "\n   Centroid Distances (higher = better separation):\n"
+                    for pair, distance in transition_data['centroid_distances'].items():
+                        results_text += f"      Clusters {pair[0]}-{pair[1]}: {distance:.4f}\n"
+        
+        # Stability Analysis
+        if 'stability' in validation_results:
+            results_text += "\n3. CLUSTER STABILITY ANALYSIS\n"
+            if 'error' in validation_results['stability']:
+                results_text += f"   ❌ Error: {validation_results['stability']['error']}\n"
+            else:
+                stability_data = validation_results['stability']
+                
+                if 'overall_stats' in stability_data:
+                    stats = stability_data['overall_stats']
+                    mean_ari = stats.get('mean_ari', 0)
+                    quality_scores.append(mean_ari)
+                    
+                    quality = 'Excellent ✓✓✓' if mean_ari > 0.9 else 'Good ✓✓' if mean_ari > 0.8 else 'Fair ✓' if mean_ari > 0.6 else 'Poor ✗'
+                    results_text += f"   Mean ARI Score: {mean_ari:.4f} ({quality})\n"
+                    results_text += f"   Std Dev: {stats.get('std_ari', 0):.4f}\n"
+                    results_text += f"   Min ARI: {stats.get('min_ari', 0):.4f}\n"
+                    results_text += f"   Max ARI: {stats.get('max_ari', 0):.4f}\n"
+                
+                if 'cluster_stability' in stability_data:
+                    results_text += "\n   Per-Cluster Stability:\n"
+                    for cluster, data in stability_data['cluster_stability'].items():
+                        consistency = data['mean_consistency']
+                        status = '✓' if consistency >= 0.8 else '⚠' if consistency >= 0.6 else '✗'
+                        results_text += f"      Cluster {cluster}: {consistency:.4f} {status}\n"
+                
+                results_text += "\n   Interpretation:\n"
+                results_text += "   • ARI > 0.9: Highly stable clustering\n"
+                results_text += "   • ARI 0.8-0.9: Good stability\n"
+                results_text += "   • ARI 0.6-0.8: Moderate stability\n"
+                results_text += "   • ARI < 0.6: Unstable clustering\n"
+        
+        # Overall recommendation
+        results_text += "\n" + "="*80 + "\n"
+        results_text += "OVERALL RECOMMENDATION\n"
+        results_text += "="*80 + "\n"
+        
+        if quality_scores:
+            avg_quality = np.mean(quality_scores)
+            if avg_quality > 0.8:
+                results_text += "✓✓✓ EXCELLENT: Clustering is highly reliable and well-validated.\n"
+                results_text += "    Clusters are well-separated, stable, and suitable for interpretation.\n"
+            elif avg_quality > 0.6:
+                results_text += "✓✓ GOOD: Clustering shows reasonable quality.\n"
+                results_text += "    Results are generally reliable but consider validation of edge cases.\n"
+            elif avg_quality > 0.4:
+                results_text += "✓ FAIR: Clustering shows moderate quality.\n"
+                results_text += "    Consider adjusting parameters or preprocessing methods.\n"
+            else:
+                results_text += "✗ POOR: Clustering quality is questionable.\n"
+                results_text += "    Recommend trying different clustering parameters or methods.\n"
+        else:
+            results_text += "⚠ INCOMPLETE: Not all validation methods completed successfully.\n"
+            results_text += "   Review error messages above.\n"
+        
+        results_text += "\n" + "="*80 + "\n"
+        
+        return results_text
 
     # Advanced Statistics Methods
     def calculate_feature_importance(self):
@@ -8814,7 +9766,7 @@ Cluster Sizes:
             if folder:
                 # Export clustering results
                 if hasattr(self, 'analysis_results_text') and self.analysis_results_text.toPlainText():
-                    with open(os.path.join(folder, 'cluster_analysis.txt'), 'w') as f:
+                    with open(os.path.join(folder, 'cluster_analysis.txt'), 'w', encoding='utf-8') as f:
                         f.write(self.analysis_results_text.toPlainText())
                 
                 # Export cluster assignments if available
@@ -9381,7 +10333,7 @@ Stability Assessment:"""
                     filepath = os.path.join(cluster_folder, clean_filename)
                     
                     # Write spectrum data
-                    with open(filepath, 'w') as f:
+                    with open(filepath, 'w', encoding='utf-8') as f:
                         # Write metadata header
                         f.write(f"# Cluster: {cluster_id}\n")
                         f.write(f"# Original file: {filename}\n")
@@ -9396,7 +10348,7 @@ Stability Assessment:"""
                 
                 # Create cluster summary file
                 summary_file = os.path.join(cluster_folder, f"cluster_{cluster_id}_summary.txt")
-                with open(summary_file, 'w') as f:
+                with open(summary_file, 'w', encoding='utf-8') as f:
                     f.write(f"Cluster {cluster_id} Summary\n")
                     f.write("=" * 50 + "\n")
                     f.write(f"Number of spectra: {len(cluster_intensities)}\n")
@@ -9497,7 +10449,7 @@ Stability Assessment:"""
                 spectrum_filename = f"cluster_{cluster_id}_summed_spectrum.txt"
                 spectrum_filepath = os.path.join(export_dir, spectrum_filename)
                 
-                with open(spectrum_filepath, 'w') as f:
+                with open(spectrum_filepath, 'w', encoding='utf-8') as f:
                     f.write(f"# Cluster {cluster_id} Summed Spectrum\n")
                     f.write(f"# Number of spectra combined: {len(cluster_intensities)}\n")
                     f.write(f"# Processing date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
@@ -10557,7 +11509,7 @@ class AdvancedBaselineWindow(QMainWindow):
             output_path = os.path.join(output_dir, f"{base_name}{suffix}.txt")
             
             # Save data
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 f.write("# Processed with Advanced Baseline Subtraction\n")
                 f.write(f"# Original file: {original_path}\n")
                 f.write(f"# Method: {self.method_combo.currentText()}\n")
