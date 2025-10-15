@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.3.0"
-__version_info__ = (1, 3, 0)
+__version__ = "1.3.2"
+__version_info__ = (1, 3, 2)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -12,12 +12,41 @@ __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
-__release_date__ = "2025-10-01"
-__release_name__ = "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction"
+__release_date__ = "2025-10-15"
+__release_name__ = "Universal Drag-and-Drop & Analysis Enhancements"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.3.2": {
+        "date": "2025-10-15",
+        "name": "Universal Drag-and-Drop & Analysis Enhancements",
+        "description": "Universal drag-and-drop file loading across all major RamanLab windows with critical bug fixes",
+        "major_features": [
+            "🎯 Universal drag-and-drop support - drag files directly onto any RamanLab window",
+            "📊 Enhanced cluster analysis with improved export capabilities",
+            "🗺️ Fixed critical 2D map analysis float/integer position handling bug",
+            "🔧 Improved user experience with faster workflows"
+        ],
+        "breaking_changes": [],
+        "technical_notes": [
+            "Custom DragDropCentralWidget class for QMainWindow compatibility",
+            "Disabled QTextEdit drop interception to prevent file paths appearing as text",
+            "Robust float conversion with error handling for map position data",
+            "Enhanced drag event handling across all modules"
+        ],
+        "bug_fixes": [
+            "Fixed drag-and-drop not working in main RamanLab window (QMainWindow vs QDialog)",
+            "Fixed file paths appearing as text in QTextEdit widgets during drag operations",
+            "Fixed float/integer position handling in 2D map analysis causing crashes",
+            "Fixed cursor not changing to '+' icon during drag operations",
+            "Corrected method name in Spectral Deconvolution drag-and-drop handler"
+        ],
+        "future_roadmap": [
+            "Extended drag-and-drop support for additional file types",
+            "Enhanced multi-file drag-and-drop capabilities"
+        ]
+    },
     "1.3.0": {
         "date": "2025-10-01",
         "name": "Asymmetric Voigt Peak Fitting & Advanced Baseline Subtraction",
