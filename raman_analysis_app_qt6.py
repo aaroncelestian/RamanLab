@@ -77,6 +77,64 @@ except ImportError:
     print("Warning: State management not available - continuing without session saving")
 
 
+class DragDropCentralWidget(QWidget):
+    """Custom central widget that handles drag-and-drop and forwards to parent."""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.main_window = parent
+        self.setAcceptDrops(True)
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter events."""
+        print(f"[DEBUG] dragEnterEvent on central widget")
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if any(url.isLocalFile() for url in urls):
+                print(f"[DEBUG] Accepting drag on central widget")
+                event.accept()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move events."""
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle drop events and forward to main window."""
+        print(f"[DEBUG] dropEvent on central widget")
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+            if file_paths and self.main_window:
+                print(f"[DEBUG] Forwarding to main window: {file_paths}")
+                event.accept()
+                # Call the load method directly
+                try:
+                    import os
+                    file_path = file_paths[0]
+                    self.main_window.statusBar().showMessage(f"Loading spectrum: {os.path.basename(file_path)}")
+                    self.main_window.load_spectrum_file(file_path)
+                    self.main_window.statusBar().showMessage(f"Loaded: {os.path.basename(file_path)}", 3000)
+                except Exception as e:
+                    from PySide6.QtWidgets import QMessageBox
+                    QMessageBox.warning(
+                        self.main_window,
+                        "Load Error",
+                        f"Failed to load spectrum from file:\n{file_path}\n\nError: {str(e)}"
+                    )
+                    self.main_window.statusBar().showMessage("Load failed", 3000)
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+
+
 class RamanAnalysisAppQt6(QMainWindow):
     """RamanLab PySide6: Main application window for Raman spectrum analysis."""
 
@@ -145,6 +203,9 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.setup_status_bar()
         self.center_on_screen()
         
+        # Enable drag and drop (handled by DragDropCentralWidget)
+        self.setAcceptDrops(True)
+        
         # Load database
         self.load_database()
         
@@ -155,6 +216,20 @@ class RamanAnalysisAppQt6(QMainWindow):
         # Show startup message
         self.show_startup_message()
 
+    def _install_drag_drop_filters(self):
+        """Install event filter on child widgets to capture drag-and-drop events."""
+        # Install on the canvas (main plot area)
+        if hasattr(self, 'canvas'):
+            self.canvas.setAcceptDrops(True)  # Enable drops on canvas
+            self.canvas.installEventFilter(self)
+            print("[DEBUG] Event filter installed on canvas")
+        
+        # Install on the central widget
+        if hasattr(self, 'central_widget'):
+            self.central_widget.setAcceptDrops(True)  # Enable drops on central widget
+            self.central_widget.installEventFilter(self)
+            print("[DEBUG] Event filter installed on central_widget")
+    
     def load_database(self):
         """Load the database using RamanSpectra."""
         if self.raman_db:
@@ -204,9 +279,12 @@ class RamanAnalysisAppQt6(QMainWindow):
 
     def setup_ui(self):
         """Set up the main user interface."""
-        # Create central widget
-        central_widget = QWidget()
+        # Create custom central widget with drag-and-drop support
+        central_widget = DragDropCentralWidget(self)
         self.setCentralWidget(central_widget)
+        
+        # Store reference to central widget
+        self.central_widget = central_widget
         
         # Create main layout (horizontal splitter)
         main_layout = QHBoxLayout(central_widget)
@@ -230,6 +308,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         # Create matplotlib figure and canvas
         self.figure = Figure(figsize=(10, 6))
         self.canvas = FigureCanvas(self.figure)
+        # Note: setAcceptDrops will be enabled later with event filter
         self.toolbar = NavigationToolbar(self.canvas, viz_frame)
         
         # Create the main plot
@@ -306,6 +385,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.info_text = QTextEdit()
         self.info_text.setMaximumHeight(200)
         self.info_text.setPlainText("No spectrum loaded")
+        self.info_text.setAcceptDrops(False)  # Disable drag-and-drop on this widget
         info_layout.addWidget(self.info_text)
         
         layout.addWidget(info_group)
@@ -849,6 +929,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         self.db_stats_text = QTextEdit()
         self.db_stats_text.setMaximumHeight(100)
         self.db_stats_text.setPlainText("Database statistics will appear here...")
+        self.db_stats_text.setAcceptDrops(False)  # Disable drag-and-drop
         stats_layout.addWidget(self.db_stats_text)
         
         # Refresh stats button
@@ -971,6 +1052,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         self.search_results_text = QTextEdit()
         self.search_results_text.setPlainText("Search results will appear here...")
+        self.search_results_text.setAcceptDrops(False)  # Disable drag-and-drop
         results_layout.addWidget(self.search_results_text)
         
         layout.addWidget(results_group)
@@ -6544,6 +6626,100 @@ class RamanMapImportWorker(QThread):
             
         except Exception as e:
             raise Exception(f"Error parsing Raman spectral map: {str(e)}")
+    
+    def eventFilter(self, obj, event):
+        """Filter events to capture drag-and-drop on child widgets."""
+        from PySide6.QtCore import QEvent
+        
+        # Intercept drag events on any child widget and handle them here
+        if event.type() == QEvent.DragEnter:
+            if event.mimeData().hasUrls():
+                urls = event.mimeData().urls()
+                if any(url.isLocalFile() for url in urls):
+                    print(f"[DEBUG] DragEnter accepted on {obj}")
+                    event.accept()
+                    return True
+        elif event.type() == QEvent.DragMove:
+            if event.mimeData().hasUrls():
+                event.accept()  # Use accept() here too
+                return True
+        elif event.type() == QEvent.Drop:
+            if event.mimeData().hasUrls():
+                urls = event.mimeData().urls()
+                file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+                if file_paths:
+                    print(f"[DEBUG] Drop event on {obj}, files: {file_paths}")
+                    event.accept()  # Use accept() instead of acceptProposedAction()
+                    self._process_dropped_files(file_paths)
+                    return True
+        
+        # Pass event to parent class
+        return super().eventFilter(obj, event)
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter events for file dropping."""
+        print(f"[DEBUG] dragEnterEvent called on main window")
+        if event.mimeData().hasUrls():
+            # Check if any of the URLs are files
+            urls = event.mimeData().urls()
+            print(f"[DEBUG] URLs found: {[url.toLocalFile() for url in urls]}")
+            if any(url.isLocalFile() for url in urls):
+                print(f"[DEBUG] Accepting drag on main window")
+                event.accept()  # Use accept() instead of acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            print(f"[DEBUG] No URLs in mime data")
+            event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move events."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle drop events for file dropping."""
+        print(f"[DEBUG] dropEvent called on main window")
+        if not event.mimeData().hasUrls():
+            event.ignore()
+            return
+        
+        urls = event.mimeData().urls()
+        file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        print(f"[DEBUG] Drop files: {file_paths}")
+        
+        if not file_paths:
+            event.ignore()
+            return
+        
+        event.acceptProposedAction()
+        
+        # Process dropped files
+        self._process_dropped_files(file_paths)
+    
+    def _process_dropped_files(self, file_paths):
+        """Process files dropped onto the window."""
+        if not file_paths:
+            return
+        
+        # Get the first file (for now, handle one at a time)
+        file_path = file_paths[0]
+        
+        # Try to load it as a spectrum
+        try:
+            import os
+            self.statusBar().showMessage(f"Loading spectrum: {os.path.basename(file_path)}")
+            self.load_spectrum_file(file_path)
+            self.statusBar().showMessage(f"Loaded: {os.path.basename(file_path)}", 3000)
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Load Error",
+                f"Failed to load spectrum from file:\n{file_path}\n\nError: {str(e)}"
+            )
+            self.statusBar().showMessage("Load failed", 3000)
 
 
 class AdvancedBaselineWindow(QMainWindow):

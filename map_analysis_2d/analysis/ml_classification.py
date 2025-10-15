@@ -685,13 +685,26 @@ class UnsupervisedAnalyzer:
             elif method == 'DBSCAN':
                 self.model = DBSCAN(eps=eps, min_samples=min_samples)
                 self.labels = self.model.fit_predict(data_scaled)
-                self.cluster_centers = None  # DBSCAN doesn't have explicit centers
                 n_clusters_found = len(set(self.labels)) - (1 if -1 in self.labels else 0)
+                # Compute cluster centers for non-noise points for prediction
+                if n_clusters_found > 0:
+                    unique_labels = set(self.labels)
+                    unique_labels.discard(-1)  # Remove noise label
+                    self.cluster_centers = np.array([
+                        data_scaled[self.labels == i].mean(axis=0) 
+                        for i in sorted(unique_labels)
+                    ])
+                else:
+                    self.cluster_centers = None
                 
             elif method == 'Hierarchical Clustering':
                 self.model = AgglomerativeClustering(n_clusters=n_clusters)
                 self.labels = self.model.fit_predict(data_scaled)
-                self.cluster_centers = None  # No explicit centers
+                # Compute cluster centers manually for prediction
+                self.cluster_centers = np.array([
+                    data_scaled[self.labels == i].mean(axis=0) 
+                    for i in range(n_clusters)
+                ])
                 n_clusters_found = n_clusters
                 
             else:
@@ -764,20 +777,17 @@ class UnsupervisedAnalyzer:
             # Predict clusters based on method
             if self.method in ['K-Means', 'Gaussian Mixture Model']:
                 predictions = self.model.predict(data_scaled)
-            elif self.method == 'DBSCAN':
-                # DBSCAN doesn't have a predict method, use fit_predict on new data
-                # This is a limitation - for true prediction, we'd need a different approach
-                predictions = self.model.fit_predict(data_scaled)
-            elif self.method == 'Hierarchical Clustering':
-                # Hierarchical clustering doesn't have a predict method
+            elif self.method in ['DBSCAN', 'Hierarchical Clustering']:
+                # These methods don't have a predict method
                 # Use the closest cluster center approach for new data
-                if self.cluster_centers is not None:
+                if self.cluster_centers is not None and len(self.cluster_centers) > 0:
                     from sklearn.metrics.pairwise import euclidean_distances
                     distances = euclidean_distances(data_scaled, self.cluster_centers)
                     predictions = np.argmin(distances, axis=1)
                 else:
-                    # Fallback: re-fit on combined data
-                    predictions = self.model.fit_predict(data_scaled)
+                    # Fallback: assign all to cluster 0 or re-fit
+                    logger.warning(f"{self.method} has no cluster centers, assigning all to cluster 0")
+                    predictions = np.zeros(len(data_scaled), dtype=int)
             else:
                 predictions = self.model.predict(data_scaled)
             

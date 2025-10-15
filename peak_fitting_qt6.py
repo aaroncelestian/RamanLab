@@ -1353,6 +1353,9 @@ class SpectralDeconvolutionQt6(QDialog):
         self.setup_ui()
         self.initial_plot()
         
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        
     def setup_ui(self):
         """Set up the user interface."""
         self.update_window_title()
@@ -1407,6 +1410,13 @@ class SpectralDeconvolutionQt6(QDialog):
             open_action.setEnabled(False)
             open_action.setToolTip("File loading not available - install required dependencies")
         file_menu.addAction(open_action)
+        
+        # Open single-file map action
+        open_map_action = QAction("Open Single File Map...", self)
+        open_map_action.setShortcut("Ctrl+Shift+M")
+        open_map_action.setStatusTip("Load 2D map from single file with X,Y positions")
+        open_map_action.triggered.connect(self.open_single_file_map)
+        file_menu.addAction(open_map_action)
         
         file_menu.addSeparator()
         
@@ -1554,6 +1564,131 @@ class SpectralDeconvolutionQt6(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Loading Error", 
                                f"An error occurred while loading the file:\n{str(e)}")
+            self.status_bar.showMessage("Ready")
+    
+    def open_single_file_map(self):
+        """Open a single-file 2D Raman map and allow spectrum selection."""
+        from PySide6.QtWidgets import QProgressDialog, QInputDialog
+        
+        # Create file dialog with proper focus handling
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Select Single-File 2D Raman Map")
+        dialog.setFileMode(QFileDialog.ExistingFile)
+        dialog.setNameFilter("Text Files (*.txt *.csv *.dat);;All Files (*)")
+        
+        if dialog.exec() != QFileDialog.Accepted:
+            self.raise_()
+            self.activateWindow()
+            return
+        
+        file_path = dialog.selectedFiles()[0]
+        
+        try:
+            # Import the single-file loader
+            try:
+                from map_analysis_2d.core.single_file_map_loader import SingleFileRamanMapData
+                from map_analysis_2d.core.cosmic_ray_detection import CosmicRayConfig
+            except ImportError:
+                QMessageBox.critical(
+                    self,
+                    "Import Error",
+                    "Single-file map loader not available.\n\n"
+                    "Please ensure the map_analysis_2d module is properly installed."
+                )
+                return
+            
+            # Configure cosmic ray detection
+            cosmic_config = CosmicRayConfig(
+                apply_during_load=False,
+                enabled=True
+            )
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Loading single-file map...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            
+            def progress_callback(progress, message):
+                progress_dialog.setValue(progress)
+                progress_dialog.setLabelText(message)
+                QApplication.processEvents()
+                if progress_dialog.wasCanceled():
+                    raise Exception("Import cancelled by user")
+            
+            # Load the map
+            map_data = SingleFileRamanMapData(
+                filepath=file_path,
+                cosmic_ray_config=cosmic_config,
+                progress_callback=progress_callback
+            )
+            
+            progress_dialog.close()
+            
+            # Store map data for spectrum selection
+            self.map_data = map_data
+            self.current_file = file_path
+            
+            # Ask user which spectrum to load
+            positions = map_data.get_position_list()
+            position_strings = [f"X={x:.1f}, Y={y:.1f}" for x, y in positions]
+            
+            # Show selection dialog
+            position_str, ok = QInputDialog.getItem(
+                self,
+                "Select Spectrum",
+                f"Map loaded with {len(positions)} spectra.\n"
+                f"Grid: {map_data.width} × {map_data.height}\n\n"
+                f"Select a spectrum to analyze:",
+                position_strings,
+                0,
+                False
+            )
+            
+            if ok and position_str:
+                # Extract position from selection
+                idx = position_strings.index(position_str)
+                x_pos, y_pos = positions[idx]
+                
+                # Get the spectrum
+                spectrum = map_data.get_spectrum(x_pos, y_pos)
+                
+                if spectrum:
+                    # Load spectrum data
+                    self.wavenumbers = spectrum.wavenumbers
+                    self.original_intensities = spectrum.intensities
+                    self.processed_intensities = spectrum.processed_intensities.copy()
+                    
+                    # Reset analysis state
+                    self.reset_analysis_state()
+                    
+                    # Update UI
+                    self.update_window_title()
+                    self.update_status_bar()
+                    self.update_plot()
+                    
+                    # Show success message
+                    QMessageBox.information(
+                        self,
+                        "Spectrum Loaded",
+                        f"Loaded spectrum from position:\n"
+                        f"X = {x_pos:.1f}, Y = {y_pos:.1f}\n\n"
+                        f"Map file: {Path(file_path).name}\n"
+                        f"Data points: {len(self.wavenumbers)}\n"
+                        f"Wavenumber range: {self.wavenumbers[0]:.1f} to {self.wavenumbers[-1]:.1f} cm⁻¹"
+                    )
+                    
+                    self.status_bar.showMessage(f"Loaded spectrum from map position ({x_pos:.1f}, {y_pos:.1f})")
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to load spectrum from selected position")
+            else:
+                self.status_bar.showMessage("Spectrum selection cancelled")
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to load single-file map:\n\n{str(e)}"
+            )
             self.status_bar.showMessage("Ready")
     
     def reset_analysis_state(self):
@@ -9433,6 +9568,73 @@ class SpectralDeconvolutionQt6(QDialog):
                                "Make sure the console files are available.\n"
                                "For full functionality, install: pip install qtconsole jupyter-client ipykernel")
             print(f"Jupyter console launch error: {e}")
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter events for file dropping."""
+        if event.mimeData().hasUrls():
+            # Check if any of the URLs are files
+            urls = event.mimeData().urls()
+            if any(url.isLocalFile() for url in urls):
+                event.accept()  # Use accept() instead of acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move events."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle drop events for file dropping."""
+        if not event.mimeData().hasUrls():
+            event.ignore()
+            return
+        
+        urls = event.mimeData().urls()
+        file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        
+        if not file_paths:
+            event.ignore()
+            return
+        
+        event.acceptProposedAction()
+        
+        # Process dropped files
+        self._process_dropped_files(file_paths)
+    
+    def _process_dropped_files(self, file_paths):
+        """Process files dropped onto the window."""
+        if not file_paths:
+            return
+        
+        # Get the first file (for now, handle one at a time)
+        file_path = file_paths[0]
+        
+        # Try to load it as a spectrum
+        if FILE_LOADING_AVAILABLE:
+            try:
+                import os
+                self.status_bar.showMessage(f"Loading spectrum: {os.path.basename(file_path)}")
+                self.load_spectrum_file(file_path)  # Correct method name
+                self.status_bar.showMessage(f"Loaded: {os.path.basename(file_path)}", 3000)
+            except Exception as e:
+                QMessageBox.warning(
+                    self,
+                    "Load Error",
+                    f"Failed to load spectrum from file:\n{file_path}\n\nError: {str(e)}"
+                )
+                self.status_bar.showMessage("Load failed", 3000)
+        else:
+            QMessageBox.warning(
+                self,
+                "File Loading Not Available",
+                "File loading utilities are not available.\n\n"
+                "Please install required dependencies."
+            )
 
 
 # Launch function for integration with main app

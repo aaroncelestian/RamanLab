@@ -754,6 +754,12 @@ class RamanClusterAnalysisQt6(QMainWindow):
         select_folder_btn.clicked.connect(self.select_import_folder)
         folder_layout.addWidget(select_folder_btn)
         
+        # Add import single file button (for single-file 2D maps)
+        import_single_file_btn = QPushButton("Import Single File (2D Map)")
+        import_single_file_btn.clicked.connect(self.import_single_file_map)
+        import_single_file_btn.setToolTip("Import a single file containing all spectra with X,Y positions")
+        folder_layout.addWidget(import_single_file_btn)
+        
         # Add import from database button
         import_db_btn = QPushButton("Import from Database")
         import_db_btn.clicked.connect(self.open_database_import_dialog)
@@ -3211,6 +3217,109 @@ class RamanClusterAnalysisQt6(QMainWindow):
         if folder:
             self.selected_folder = folder
             self.folder_path_label.setText(folder)
+
+    def import_single_file_map(self):
+        """Import a single file containing all spectra with X,Y positions."""
+        # Create file dialog
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Select Single-File 2D Raman Map")
+        dialog.setFileMode(QFileDialog.ExistingFile)
+        dialog.setNameFilter("Text Files (*.txt *.csv *.dat);;All Files (*)")
+        
+        if dialog.exec() != QFileDialog.Accepted:
+            self.raise_()
+            self.activateWindow()
+            return
+        
+        file_path = dialog.selectedFiles()[0]
+        
+        try:
+            # Import the single-file loader
+            from map_analysis_2d.core.single_file_map_loader import SingleFileRamanMapData
+            from map_analysis_2d.core.cosmic_ray_detection import CosmicRayConfig
+            
+            # Configure cosmic ray detection
+            cosmic_config = CosmicRayConfig(
+                apply_during_load=False,
+                enabled=True
+            )
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Loading single-file map...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            
+            def progress_callback(progress, message):
+                progress_dialog.setValue(progress)
+                progress_dialog.setLabelText(message)
+                QApplication.processEvents()
+                if progress_dialog.wasCanceled():
+                    raise Exception("Import cancelled by user")
+            
+            # Load the map
+            map_data = SingleFileRamanMapData(
+                filepath=file_path,
+                cosmic_ray_config=cosmic_config,
+                progress_callback=progress_callback
+            )
+            
+            progress_dialog.close()
+            
+            # Get data matrix and metadata
+            data_matrix = map_data.get_processed_data_matrix()
+            wavenumbers = map_data.target_wavenumbers
+            positions = map_data.get_position_list()
+            
+            # Create filenames list
+            filenames = [f"pos_{x:.1f}_{y:.1f}" for x, y in positions]
+            
+            # Store data
+            self.wavenumbers = wavenumbers
+            self.intensities = data_matrix
+            self.filenames = filenames
+            self.original_intensities = data_matrix.copy()
+            
+            # Store map metadata for spatial visualization
+            self.map_metadata = {
+                'x_positions': map_data.x_positions,
+                'y_positions': map_data.y_positions,
+                'width': map_data.width,
+                'height': map_data.height,
+                'position_map': {filename: pos for filename, pos in zip(filenames, positions)},
+                'source_file': file_path
+            }
+            
+            # Update UI
+            self.update_data_info()
+            self.folder_path_label.setText(f"Single-file map: {os.path.basename(file_path)}")
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Import Complete",
+                f"Successfully imported single-file 2D map:\n\n"
+                f"File: {os.path.basename(file_path)}\n"
+                f"Spectra: {len(map_data.spectra)}\n"
+                f"Grid: {map_data.width} × {map_data.height}\n"
+                f"X positions: {len(map_data.x_positions)}\n"
+                f"Y positions: {len(map_data.y_positions)}\n"
+                f"Wavenumber range: {wavenumbers[0]:.1f} to {wavenumbers[-1]:.1f} cm⁻¹"
+            )
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Single-file map loader not available.\n\n"
+                f"Error: {str(e)}\n\n"
+                f"Please ensure the map_analysis_2d module is properly installed."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import single-file map:\n\n{str(e)}"
+            )
 
     def import_from_main_app(self):
         """Import spectra from the main application."""

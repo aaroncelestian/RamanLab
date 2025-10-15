@@ -53,6 +53,9 @@ dist/
 # Log files
 *.log
 
+# Documenetation files
+*.md
+
 # Configuration files that might contain sensitive data
 *.json
 !hey_classification_config.json

@@ -98,6 +98,9 @@ class MapAnalysisMainWindow(QMainWindow):
         self.setup_menu_bar()
         self.setup_status_bar()
         
+        # Enable drag and drop
+        self.setAcceptDrops(True)
+        
         logger.info("Main window initialized")
         
     def setup_ui(self):
@@ -257,11 +260,17 @@ class MapAnalysisMainWindow(QMainWindow):
         file_menu = menubar.addMenu('&File')
         
         # Data Loading section
-        load_action = QAction('&Load Map Data...', self)
+        load_action = QAction('&Load Map Data (Folder)...', self)
         load_action.setShortcut('Ctrl+O')
-        load_action.setStatusTip('Load Raman map data from directory')
+        load_action.setStatusTip('Load Raman map data from directory of individual files')
         load_action.triggered.connect(self.load_map_data)
         file_menu.addAction(load_action)
+        
+        load_single_file_action = QAction('Load &Single File Map...', self)
+        load_single_file_action.setShortcut('Ctrl+Shift+L')
+        load_single_file_action.setStatusTip('Load 2D map from single file with X,Y positions')
+        load_single_file_action.triggered.connect(self.load_single_file_map)
+        file_menu.addAction(load_single_file_action)
         
         file_menu.addSeparator()
         
@@ -489,6 +498,7 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.train_unsupervised_requested.connect(self.train_unsupervised_model)
             control_panel.classify_map_requested.connect(self.classify_map)
             control_panel.load_training_data_requested.connect(self.load_training_data)
+            control_panel.use_clustering_labels_requested.connect(self.use_clustering_as_training_labels)
             control_panel.save_named_model_requested.connect(self.save_named_model)
             control_panel.load_model_requested.connect(self.load_ml_model)
             control_panel.remove_model_requested.connect(self.remove_selected_model)
@@ -557,6 +567,96 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.progress_status.hide_progress()
                 QMessageBox.critical(self, "Error", f"Failed to load data:\n{str(e)}")
                 logger.error(f"Error loading map data: {e}")
+    
+    def load_single_file_map(self):
+        """Load map data from a single file with X,Y positions."""
+        from PySide6.QtWidgets import QProgressDialog
+        
+        # Create file dialog with proper focus handling
+        dialog = QFileDialog(self)
+        dialog.setWindowTitle("Select Single-File 2D Raman Map")
+        dialog.setFileMode(QFileDialog.ExistingFile)
+        dialog.setNameFilter("Text Files (*.txt *.csv *.dat);;All Files (*)")
+        
+        if dialog.exec() != QFileDialog.Accepted:
+            self.raise_()
+            self.activateWindow()
+            return
+        
+        file_path = dialog.selectedFiles()[0]
+        
+        try:
+            # Import the single-file loader
+            from ..core.single_file_map_loader import SingleFileRamanMapData
+            
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Loading single-file map...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
+            
+            def progress_callback(progress, message):
+                progress_dialog.setValue(progress)
+                progress_dialog.setLabelText(message)
+                from PySide6.QtWidgets import QApplication
+                QApplication.processEvents()
+                if progress_dialog.wasCanceled():
+                    raise Exception("Import cancelled by user")
+            
+            # Load the map with cosmic ray detection
+            self.map_data = SingleFileRamanMapData(
+                filepath=file_path,
+                cosmic_ray_config=self.cosmic_ray_config,
+                progress_callback=progress_callback
+            )
+            
+            progress_dialog.close()
+            
+            # Update status
+            self.statusBar().showMessage(
+                f"Loaded {len(self.map_data.spectra)} spectra from single file "
+                f"({self.map_data.width} × {self.map_data.height})"
+            )
+            logger.info(f"Loaded single-file map with {len(self.map_data.spectra)} spectra")
+            
+            # Initialize integration slider with spectrum midpoint
+            self._initialize_integration_slider()
+            
+            # Update the map display
+            self.update_map()
+            
+            # Show success message
+            QMessageBox.information(
+                self,
+                "Map Loaded",
+                f"Successfully loaded single-file 2D map:\n\n"
+                f"File: {file_path.split('/')[-1]}\n"
+                f"Spectra: {len(self.map_data.spectra)}\n"
+                f"Grid: {self.map_data.width} × {self.map_data.height}\n"
+                f"X positions: {len(self.map_data.x_positions)}\n"
+                f"Y positions: {len(self.map_data.y_positions)}\n"
+                f"Wavenumber range: {self.map_data.target_wavenumbers[0]:.1f} to "
+                f"{self.map_data.target_wavenumbers[-1]:.1f} cm⁻¹"
+            )
+            
+            # Suggest saving to PKL for future quick access
+            self.suggest_pkl_save_after_load()
+            
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Single-file map loader not available.\n\n"
+                f"Error: {str(e)}\n\n"
+                f"Please ensure the single_file_map_loader module is properly installed."
+            )
+            logger.error(f"Import error loading single-file map: {e}")
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to load single-file map:\n\n{str(e)}"
+            )
+            logger.error(f"Error loading single-file map: {e}")
     
     def _initialize_integration_slider(self):
         """Initialize the integration slider with spectrum midpoint."""
@@ -764,6 +864,29 @@ class MapAnalysisMainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error adding position marker: {e}")
         
+    def _get_map_grid_info(self):
+        """
+        Get grid information for creating map arrays.
+        Returns: (unique_x, unique_y, x_to_idx, y_to_idx, map_shape)
+        """
+        import numpy as np
+        
+        positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+        x_coords = [pos[0] for pos in positions]
+        y_coords = [pos[1] for pos in positions]
+        
+        # Get unique sorted positions
+        unique_x = sorted(list(set(x_coords)))
+        unique_y = sorted(list(set(y_coords)))
+        
+        # Create position-to-index mapping
+        x_to_idx = {x: i for i, x in enumerate(unique_x)}
+        y_to_idx = {y: i for i, y in enumerate(unique_y)}
+        
+        map_shape = (len(unique_y), len(unique_x))
+        
+        return unique_x, unique_y, x_to_idx, y_to_idx, map_shape
+    
     def update_map(self):
         """Update the map display based on current settings."""
         if self.map_data is None:
@@ -925,18 +1048,11 @@ class MapAnalysisMainWindow(QMainWindow):
         """Create integrated intensity map with optional wavenumber range."""
         import numpy as np
         
-        positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
+        # Get grid information
+        unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
         
-        if not positions:
-            return None
-            
-        x_coords = [pos[0] for pos in positions]
-        y_coords = [pos[1] for pos in positions]
-        
-        x_min, x_max = min(x_coords), max(x_coords)
-        y_min, y_max = min(y_coords), max(y_coords)
-        
-        map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+        # Create map array
+        map_array = np.zeros(map_shape)
         
         for spectrum in self.map_data.spectra.values():
             intensities = (spectrum.processed_intensities 
@@ -964,7 +1080,10 @@ class MapAnalysisMainWindow(QMainWindow):
                 # Full spectrum integration (default behavior)
                 integrated_intensity = np.sum(intensities)
             
-            map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = integrated_intensity
+            # Use position-to-index mapping for array indexing
+            y_idx = y_to_idx[spectrum.y_pos]
+            x_idx = x_to_idx[spectrum.x_pos]
+            map_array[y_idx, x_idx] = integrated_intensity
             
         return map_array
         
@@ -984,15 +1103,10 @@ class MapAnalysisMainWindow(QMainWindow):
                 
             template_index = template_names.index(template_name)
             
-            # Get map dimensions
-            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in positions]
-            y_coords = [pos[1] for pos in positions]
+            # Get grid information
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
             
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            map_array = np.zeros(map_shape)
             
             # Fill map with template contribution coefficients
             for spectrum in self.map_data.spectra.values():
@@ -1001,7 +1115,9 @@ class MapAnalysisMainWindow(QMainWindow):
                     coeffs = self.template_fitting_results['coefficients'][pos_key]
                     if template_index < len(coeffs):
                         contribution = coeffs[template_index]
-                        map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = contribution
+                        y_idx = y_to_idx[spectrum.y_pos]
+                        x_idx = x_to_idx[spectrum.x_pos]
+                        map_array[y_idx, x_idx] = contribution
             
             return map_array
             
@@ -1017,22 +1133,19 @@ class MapAnalysisMainWindow(QMainWindow):
         try:
             import numpy as np
             
-            # Get map dimensions
-            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in positions]
-            y_coords = [pos[1] for pos in positions]
+            # Get grid information
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
             
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            map_array = np.zeros(map_shape)
             
             # Fill map with R-squared values
             for spectrum in self.map_data.spectra.values():
                 pos_key = (spectrum.x_pos, spectrum.y_pos)
                 if pos_key in self.template_fitting_results['r_squared']:
                     r_squared = self.template_fitting_results['r_squared'][pos_key]
-                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = r_squared
+                    y_idx = y_to_idx[spectrum.y_pos]
+                    x_idx = x_to_idx[spectrum.x_pos]
+                    map_array[y_idx, x_idx] = r_squared
             
             return map_array
             
@@ -1052,15 +1165,10 @@ class MapAnalysisMainWindow(QMainWindow):
             template_names = self.template_fitting_results['template_names']
             n_templates = len(template_names)
             
-            # Get map dimensions
-            positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in positions]
-            y_coords = [pos[1] for pos in positions]
+            # Get grid information
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
             
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.full((y_max - y_min + 1, x_max - x_min + 1), n_templates, dtype=int)  # Default to "Mixed/Unclear"
+            map_array = np.full(map_shape, n_templates, dtype=int)  # Default to "Mixed/Unclear"
             
             # Thresholds for dominance
             confidence_threshold = 0.30  # Must contribute at least 30%
@@ -1088,7 +1196,9 @@ class MapAnalysisMainWindow(QMainWindow):
                             if len(sorted_contribs) > 1:
                                 margin = sorted_contribs[0] - sorted_contribs[1]
                                 if margin > significance_margin:
-                                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = dominant_idx
+                                    y_idx = y_to_idx[spectrum.y_pos]
+                                    x_idx = x_to_idx[spectrum.x_pos]
+                                    map_array[y_idx, x_idx] = dominant_idx
             
             return map_array
             
@@ -1174,7 +1284,9 @@ class MapAnalysisMainWindow(QMainWindow):
         self.pca_results = results
         
         # Perform clustering on PCA components
-        pca_clusters = self.perform_pca_clustering(results)
+        # Use number of components as number of clusters
+        n_components = results.get('n_components', 3)
+        pca_clusters = self.perform_pca_clustering(results, n_clusters=n_components)
         
         # Use the new plotting widget to display results
         self.dimensionality_plot_widget.plot_pca_results(results, pca_clusters)
@@ -1972,7 +2084,9 @@ class MapAnalysisMainWindow(QMainWindow):
                     break
         
         # Perform clustering on NMF components
-        nmf_clusters = self.perform_nmf_clustering(results)
+        # Use number of components as number of clusters
+        n_components = results.get('n_components', 3)
+        nmf_clusters = self.perform_nmf_clustering(results, n_clusters=n_components)
         
         # Use the new plotting widget to display results
         self.dimensionality_plot_widget.plot_nmf_results(results, nmf_clusters, wavenumbers)
@@ -2108,19 +2222,15 @@ class MapAnalysisMainWindow(QMainWindow):
                     pos_to_contribution[(x, y)] = component_contributions[i]
             
             # Create map array
-            all_positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in all_positions]
-            y_coords = [pos[1] for pos in all_positions]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+            map_array = np.zeros(map_shape)
             
             for spectrum in self.map_data.spectra.values():
                 pos_key = (spectrum.x_pos, spectrum.y_pos)
                 if pos_key in pos_to_contribution:
-                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = pos_to_contribution[pos_key]
+                    y_idx = y_to_idx[spectrum.y_pos]
+                    x_idx = x_to_idx[spectrum.x_pos]
+                    map_array[y_idx, x_idx] = pos_to_contribution[pos_key]
             
             return map_array
             
@@ -2149,19 +2259,15 @@ class MapAnalysisMainWindow(QMainWindow):
                 pos_to_value[(x, y)] = components[i, component_index]
             
             # Create map array
-            all_positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in all_positions]
-            y_coords = [pos[1] for pos in all_positions]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+            map_array = np.zeros(map_shape)
             
             for spectrum in self.map_data.spectra.values():
                 pos_key = (spectrum.x_pos, spectrum.y_pos)
                 if pos_key in pos_to_value:
-                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = pos_to_value[pos_key]
+                    y_idx = y_to_idx[spectrum.y_pos]
+                    x_idx = x_to_idx[spectrum.x_pos]
+                    map_array[y_idx, x_idx] = pos_to_value[pos_key]
             
             return map_array
             
@@ -2186,19 +2292,15 @@ class MapAnalysisMainWindow(QMainWindow):
                 pos_to_label[(x, y)] = labels[i]
             
             # Create map array
-            all_positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in all_positions]
-            y_coords = [pos[1] for pos in all_positions]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.full((y_max - y_min + 1, x_max - x_min + 1), -1, dtype=float)
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+            map_array = np.full(map_shape, -1, dtype=float)
             
             for spectrum in self.map_data.spectra.values():
                 pos_key = (spectrum.x_pos, spectrum.y_pos)
                 if pos_key in pos_to_label:
-                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = pos_to_label[pos_key]
+                    y_idx = y_to_idx[spectrum.y_pos]
+                    x_idx = x_to_idx[spectrum.x_pos]
+                    map_array[y_idx, x_idx] = pos_to_label[pos_key]
             
             return map_array
             
@@ -2284,6 +2386,169 @@ class MapAnalysisMainWindow(QMainWindow):
             self.progress_status.hide_progress()
             QMessageBox.critical(self, "Error", f"Error loading training data:\n{str(e)}")
             logger.error(f"Training data loading error: {e}")
+    
+    def use_clustering_as_training_labels(self):
+        """Use clustering results (PCA, NMF, or ML clustering) as training labels for supervised learning."""
+        from PySide6.QtWidgets import QInputDialog
+        
+        if self.map_data is None:
+            QMessageBox.warning(self, "No Data", "Load map data first.")
+            return
+        
+        # Check what clustering results are available
+        available_methods = []
+        
+        if hasattr(self, 'last_pca_clusters') and self.last_pca_clusters is not None:
+            available_methods.append("PCA Clustering")
+        
+        if hasattr(self, 'last_nmf_clusters') and self.last_nmf_clusters is not None:
+            available_methods.append("NMF Clustering")
+        
+        if hasattr(self, 'ml_results') and self.ml_results.get('type') == 'unsupervised':
+            available_methods.append("ML Clustering (Unsupervised)")
+        
+        if not available_methods:
+            QMessageBox.warning(
+                self, "No Clustering Results",
+                "No clustering results available.\n\n"
+                "Please run one of the following first:\n"
+                "• PCA Analysis (with clustering)\n"
+                "• NMF Analysis (with clustering)\n"
+                "• ML Unsupervised Clustering"
+            )
+            return
+        
+        # Let user choose which clustering to use
+        method, ok = QInputDialog.getItem(
+            self, "Select Clustering Method",
+            "Which clustering results would you like to use as training labels?",
+            available_methods, 0, False
+        )
+        
+        if not ok:
+            return
+        
+        try:
+            # Get the appropriate clustering labels and positions
+            labels = None
+            positions = None
+            n_clusters = 0
+            
+            if method == "PCA Clustering":
+                labels = self.last_pca_clusters['labels']
+                positions = self.pca_valid_positions if hasattr(self, 'pca_valid_positions') else list(self.map_data.spectra.keys())
+                n_clusters = self.last_pca_clusters['n_clusters']
+            
+            elif method == "NMF Clustering":
+                labels = self.last_nmf_clusters['labels']
+                positions = self.nmf_valid_positions
+                n_clusters = self.last_nmf_clusters['n_clusters']
+            
+            elif method == "ML Clustering (Unsupervised)":
+                labels = self.ml_results['labels']
+                positions = self.ml_valid_positions
+                n_clusters = len(np.unique(labels[labels >= 0]))  # Exclude noise (-1)
+            
+            # Create training data from map spectra using cluster labels
+            import numpy as np
+            
+            # Collect all spectra by cluster
+            cluster_spectra = {i: [] for i in range(n_clusters)}
+            wavenumbers = None
+            
+            for i, pos in enumerate(positions):
+                if i < len(labels):
+                    label = labels[i]
+                    # Skip noise points (label = -1)
+                    if label >= 0 and label < n_clusters:
+                        spectrum = self.map_data.get_spectrum(pos[0], pos[1])
+                        if spectrum:
+                            intensities = (spectrum.processed_intensities 
+                                         if self.use_processed and spectrum.processed_intensities is not None
+                                         else spectrum.intensities)
+                            cluster_spectra[label].append(intensities)
+                            if wavenumbers is None:
+                                wavenumbers = spectrum.wavenumbers
+            
+            # Sum spectra for each cluster to create representative spectra
+            X_train = []
+            y_train = []
+            class_names = [f"Cluster {i}" for i in range(n_clusters)]
+            cluster_counts = {}
+            
+            for cluster_id in range(n_clusters):
+                if len(cluster_spectra[cluster_id]) > 0:
+                    # Sum all spectra in this cluster
+                    summed_spectrum = np.sum(cluster_spectra[cluster_id], axis=0)
+                    X_train.append(summed_spectrum)
+                    y_train.append(cluster_id)
+                    cluster_counts[cluster_id] = len(cluster_spectra[cluster_id])
+                    logger.info(f"Cluster {cluster_id}: Summed {len(cluster_spectra[cluster_id])} spectra")
+            
+            X_train = np.array(X_train)
+            y_train = np.array(y_train)
+            
+            # Store in ml_data_manager format
+            # Each cluster gets ONE summed representative spectrum
+            self.ml_data_manager.class_data = {}
+            for i, class_name in enumerate(class_names):
+                if i in cluster_counts:
+                    # Store as array with single spectrum (the summed one)
+                    cluster_idx = np.where(y_train == i)[0]
+                    if len(cluster_idx) > 0:
+                        self.ml_data_manager.class_data[class_name] = {
+                            'spectra': X_train[cluster_idx],  # Single summed spectrum
+                            'wavenumbers': wavenumbers,
+                            'count': 1,  # One representative spectrum
+                            'original_count': cluster_counts[i]  # Track how many were summed
+                        }
+            
+            # Update control panel
+            control_panel = self.get_current_ml_control_panel()
+            if control_panel:
+                info_text = f"Training labels from {method}:\n"
+                info_text += f"Classes: {n_clusters}\n"
+                info_text += f"Representative spectra: {len(y_train)} (summed)\n"
+                for i, class_name in enumerate(class_names):
+                    if i in cluster_counts:
+                        info_text += f"  {class_name}: {cluster_counts[i]} spectra summed\n"
+                
+                control_panel.update_training_data_info(
+                    f"Using {method} labels: {n_clusters} summed representative spectra"
+                )
+            
+            # Build detailed message showing summing info
+            detail_msg = f"Successfully created training data from {method}:\n\n"
+            detail_msg += f"Classes: {n_clusters}\n"
+            detail_msg += f"Representative spectra: {len(y_train)} (one per cluster)\n\n"
+            detail_msg += "Spectra summed per cluster:\n"
+            for i in range(n_clusters):
+                if i in cluster_counts:
+                    detail_msg += f"  Cluster {i}: {cluster_counts[i]} spectra\n"
+            detail_msg += "\nEach cluster is represented by the sum of all its member spectra.\n"
+            detail_msg += "You can now train a supervised model using these representative spectra."
+            
+            QMessageBox.information(
+                self, "Clustering Labels Applied",
+                detail_msg
+            )
+            
+            total_summed = sum(cluster_counts.values())
+            self.statusBar().showMessage(
+                f"Training labels from {method}: {n_clusters} clusters, "
+                f"{total_summed} spectra summed into {len(y_train)} representatives"
+            )
+            logger.info(
+                f"Created training data from {method}: {n_clusters} classes, "
+                f"{total_summed} spectra summed into {len(y_train)} representatives"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error",
+                f"Failed to create training data from clustering:\n{str(e)}"
+            )
+            logger.error(f"Error using clustering as training labels: {e}")
     
     def train_supervised_model(self):
         """Train supervised ML classification model."""
@@ -3307,19 +3572,15 @@ class MapAnalysisMainWindow(QMainWindow):
                 pos_to_prediction[(x, y)] = predictions[i]
             
             # Create map array
-            all_positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in all_positions]
-            y_coords = [pos[1] for pos in all_positions]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+            map_array = np.zeros(map_shape)
             
             for spectrum in self.map_data.spectra.values():
                 pos_key = (spectrum.x_pos, spectrum.y_pos)
                 if pos_key in pos_to_prediction:
-                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = pos_to_prediction[pos_key]
+                    y_idx = y_to_idx[spectrum.y_pos]
+                    x_idx = x_to_idx[spectrum.x_pos]
+                    map_array[y_idx, x_idx] = pos_to_prediction[pos_key]
             
             return map_array
             
@@ -3418,19 +3679,15 @@ class MapAnalysisMainWindow(QMainWindow):
                     pos_to_probability[(x, y)] = corrected_probabilities[i][corrected_class_index]
             
             # Create map array
-            all_positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
-            x_coords = [pos[0] for pos in all_positions]
-            y_coords = [pos[1] for pos in all_positions]
-            
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            
-            map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+            unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+            map_array = np.zeros(map_shape)
             
             for spectrum in self.map_data.spectra.values():
                 pos_key = (spectrum.x_pos, spectrum.y_pos)
                 if pos_key in pos_to_probability:
-                    map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = pos_to_probability[pos_key]
+                    y_idx = y_to_idx[spectrum.y_pos]
+                    x_idx = x_to_idx[spectrum.x_pos]
+                    map_array[y_idx, x_idx] = pos_to_probability[pos_key]
             
             return map_array
             
@@ -5287,19 +5544,10 @@ class MapAnalysisMainWindow(QMainWindow):
         
         if self.map_data is None:
             return None
-            
-        positions = [(s.x_pos, s.y_pos) for s in self.map_data.spectra.values()]
         
-        if not positions:
-            return None
-            
-        x_coords = [pos[0] for pos in positions]
-        y_coords = [pos[1] for pos in positions]
-        
-        x_min, x_max = min(x_coords), max(x_coords)
-        y_min, y_max = min(y_coords), max(y_coords)
-        
-        map_array = np.zeros((y_max - y_min + 1, x_max - x_min + 1))
+        # Get grid information
+        unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+        map_array = np.zeros(map_shape)
         
         for spectrum in self.map_data.spectra.values():
             if spectrum.wavenumbers is not None and spectrum.intensities is not None:
@@ -5309,7 +5557,9 @@ class MapAnalysisMainWindow(QMainWindow):
                         spectrum.wavenumbers, spectrum.intensities)
                 
                 cosmic_ray_count = detection_info.get('cosmic_ray_count', 0)
-                map_array[spectrum.y_pos - y_min, spectrum.x_pos - x_min] = cosmic_ray_count
+                y_idx = y_to_idx[spectrum.y_pos]
+                x_idx = x_to_idx[spectrum.x_pos]
+                map_array[y_idx, x_idx] = cosmic_ray_count
                 
         return map_array
         
@@ -8564,3 +8814,100 @@ The map is now ready for analysis!"""
                 )
         
         super().keyPressEvent(event)
+    
+    def dragEnterEvent(self, event):
+        """Handle drag enter events for file dropping."""
+        if event.mimeData().hasUrls():
+            # Check if any of the URLs are files
+            urls = event.mimeData().urls()
+            if any(url.isLocalFile() for url in urls):
+                event.accept()  # Use accept() instead of acceptProposedAction()
+            else:
+                event.ignore()
+        else:
+            event.ignore()
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move events."""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def dropEvent(self, event):
+        """Handle drop events for file dropping."""
+        if not event.mimeData().hasUrls():
+            event.ignore()
+            return
+        
+        urls = event.mimeData().urls()
+        file_paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+        
+        if not file_paths:
+            event.ignore()
+            return
+        
+        event.acceptProposedAction()
+        
+        # Process dropped files
+        self._process_dropped_files(file_paths)
+    
+    def _process_dropped_files(self, file_paths):
+        """Process files dropped onto the window."""
+        if not file_paths:
+            return
+        
+        # Get the first file (for now, handle one at a time)
+        file_path = file_paths[0]
+        
+        # Determine file type and load appropriately
+        import os
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        # Check if it's a single-file map (tab-delimited with X, Y columns)
+        if file_ext in ['.txt', '.dat', '.csv']:
+            # Try to detect if it's a single-file map or regular spectrum
+            try:
+                with open(file_path, 'r') as f:
+                    first_line = f.readline().strip()
+                    second_line = f.readline().strip()
+                
+                # Check if first line has multiple columns (likely a map)
+                first_cols = first_line.split('\t')
+                second_cols = second_line.split('\t')
+                
+                # Single-file map format: first line has wavenumbers, second line has X, Y, intensities
+                if len(first_cols) > 10 and len(second_cols) > 3:
+                    # Looks like a single-file map
+                    self.statusBar().showMessage(f"Loading single-file map: {os.path.basename(file_path)}")
+                    self.load_single_file_map(file_path)
+                else:
+                    # Looks like a regular spectrum - not supported in map analysis
+                    QMessageBox.information(
+                        self,
+                        "Single Spectrum Detected",
+                        f"This appears to be a single spectrum file.\n\n"
+                        f"The 2D Map Analysis tool is designed for Raman maps.\n\n"
+                        f"For single spectrum analysis, please use:\n"
+                        f"• Multi-Spectrum Manager\n"
+                        f"• Spectral Deconvolution tool\n\n"
+                        f"File: {os.path.basename(file_path)}"
+                    )
+            except Exception as e:
+                logger.error(f"Error detecting file type: {e}")
+                QMessageBox.warning(
+                    self,
+                    "File Type Detection Failed",
+                    f"Could not determine file type.\n\n{str(e)}"
+                )
+        else:
+            QMessageBox.information(
+                self,
+                "Unsupported File Type",
+                f"File type '{file_ext}' is not supported.\n\n"
+                f"Supported formats:\n"
+                f"• .txt (single-file maps)\n"
+                f"• .dat (single-file maps)\n"
+                f"• .csv (single-file maps)\n\n"
+                f"For folder-based maps, use File → Load Map Folder"
+            )

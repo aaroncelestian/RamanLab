@@ -954,6 +954,7 @@ class MLControlPanel(BaseControlPanel):
     train_unsupervised_requested = Signal()
     classify_map_requested = Signal()
     load_training_data_requested = Signal()
+    use_clustering_labels_requested = Signal()
     save_named_model_requested = Signal()
     load_model_requested = Signal()
     remove_model_requested = Signal()
@@ -1027,6 +1028,13 @@ class MLControlPanel(BaseControlPanel):
         load_data_btn.clicked.connect(self.load_training_data_requested.emit)
         load_data_btn.setMaximumWidth(200)  # Compact width
         training_data_layout.addWidget(load_data_btn)
+        
+        # Add button to use clustering as training labels
+        use_clustering_btn = InfoButton("🧩 Use Clustering Labels")
+        use_clustering_btn.clicked.connect(self.use_clustering_labels_requested.emit)
+        use_clustering_btn.setMaximumWidth(200)  # Compact width
+        use_clustering_btn.setToolTip("Use PCA/NMF/ML clustering results as training labels")
+        training_data_layout.addWidget(use_clustering_btn)
         
         self.training_data_label = QLabel("No data loaded")
         self.training_data_label.setStyleSheet("QLabel { color: #666; font-size: 9px; }")
