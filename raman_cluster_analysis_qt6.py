@@ -2493,7 +2493,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.silhouette_analysis_cb.setChecked(True)
         silhouette_layout.addWidget(self.silhouette_analysis_cb)
         
-        silhouette_btn = QPushButton("Calculate Silhouette Scores")
+        silhouette_btn = QPushButton("Run")
         silhouette_btn.clicked.connect(self.calculate_silhouette_analysis)
         silhouette_layout.addWidget(silhouette_btn)
         
@@ -2526,7 +2526,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.transition_analysis_cb.setChecked(True)
         transition_layout.addWidget(self.transition_analysis_cb)
         
-        transition_btn = QPushButton("Analyze Cluster Boundaries")
+        transition_btn = QPushButton("Run")
         transition_btn.clicked.connect(self.analyze_cluster_transitions)
         transition_layout.addWidget(transition_btn)
         
@@ -2559,7 +2559,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.stability_analysis_cb.setChecked(True)
         stability_layout.addWidget(self.stability_analysis_cb)
         
-        stability_btn = QPushButton("Test Cluster Stability")
+        stability_btn = QPushButton("Run")
         stability_btn.clicked.connect(self.test_cluster_stability)
         stability_layout.addWidget(stability_btn)
         
@@ -2686,7 +2686,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.feature_method_combo.addItems(['Random Forest', 'Linear Discriminant Analysis', 'Mutual Information'])
         feature_layout.addWidget(self.feature_method_combo)
         
-        feature_btn = QPushButton("Calculate Feature Importance")
+        feature_btn = QPushButton("Run")
         feature_btn.clicked.connect(self.calculate_feature_importance)
         feature_layout.addWidget(feature_btn)
         
@@ -2719,7 +2719,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.discriminant_analysis_cb.setChecked(True)
         discriminant_layout.addWidget(self.discriminant_analysis_cb)
         
-        discriminant_btn = QPushButton("Perform Discriminant Analysis")
+        discriminant_btn = QPushButton("Run")
         discriminant_btn.clicked.connect(self.perform_discriminant_analysis)
         discriminant_layout.addWidget(discriminant_btn)
         
@@ -2756,7 +2756,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
         self.significance_method_combo.addItems(['PERMANOVA', 'ANOSIM', 'Kruskal-Wallis', 'ANOVA'])
         significance_layout.addWidget(self.significance_method_combo)
         
-        significance_btn = QPushButton("Test Significance")
+        significance_btn = QPushButton("Run")
         significance_btn.clicked.connect(self.test_statistical_significance)
         significance_layout.addWidget(significance_btn)
         

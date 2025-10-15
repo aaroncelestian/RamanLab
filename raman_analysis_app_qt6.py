@@ -3860,10 +3860,10 @@ class RamanAnalysisAppQt6(QMainWindow):
         primary_group = QGroupBox("Primary Analysis Tools")
         primary_layout = QVBoxLayout(primary_group)
         
-        # Dark blue button style
+        # Primary analysis button style (bright blue)
         dark_blue_style = """
             QPushButton {
-                background-color: #1E3A8A;
+                background-color: #2563EB;
                 color: white;
                 border: none;
                 padding: 10px;
@@ -3872,10 +3872,10 @@ class RamanAnalysisAppQt6(QMainWindow):
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #1E40AF;
+                background-color: #1D4ED8;
             }
             QPushButton:pressed {
-                background-color: #1D4ED8;
+                background-color: #1E40AF;
             }
         """
         
@@ -3901,10 +3901,10 @@ class RamanAnalysisAppQt6(QMainWindow):
         spatial_group = QGroupBox("Spatial Analysis Tools")
         spatial_layout = QVBoxLayout(spatial_group)
         
-        # Spatial analysis button style (teal/green)
+        # Spatial analysis button style (cool cyan)
         spatial_style = """
             QPushButton {
-                background-color: #0D9488;
+                background-color: #0891B2;
                 color: white;
                 border: none;
                 padding: 10px;
@@ -3913,10 +3913,10 @@ class RamanAnalysisAppQt6(QMainWindow):
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #0F766E;
+                background-color: #0E7490;
             }
             QPushButton:pressed {
-                background-color: #115E59;
+                background-color: #155E75;
             }
         """
         
@@ -3987,10 +3987,10 @@ class RamanAnalysisAppQt6(QMainWindow):
         processing_group = QGroupBox("Additional Processing Tools")
         processing_layout = QVBoxLayout(processing_group)
         
-        # Additional tools button style (orange)
+        # Additional tools button style (balanced teal)
         additional_style = """
             QPushButton {
-                background-color: #EA580C;
+                background-color: #0D9488;
                 color: white;
                 border: none;
                 padding: 8px;
@@ -3999,10 +3999,10 @@ class RamanAnalysisAppQt6(QMainWindow):
                 font-size: 10px;
             }
             QPushButton:hover {
-                background-color: #DC2626;
+                background-color: #0F766E;
             }
             QPushButton:pressed {
-                background-color: #B91C1C;
+                background-color: #115E59;
             }
         """
         
@@ -4030,10 +4030,10 @@ class RamanAnalysisAppQt6(QMainWindow):
         export_group = QGroupBox("Export and Reporting")
         export_layout = QVBoxLayout(export_group)
         
-        # Export tools button style (gray)
+        # Export tools button style (professional slate)
         export_style = """
             QPushButton {
-                background-color: #6B7280;
+                background-color: #64748B;
                 color: white;
                 border: none;
                 padding: 8px;
@@ -4042,10 +4042,10 @@ class RamanAnalysisAppQt6(QMainWindow):
                 font-size: 10px;
             }
             QPushButton:hover {
-                background-color: #4B5563;
+                background-color: #475569;
             }
             QPushButton:pressed {
-                background-color: #374151;
+                background-color: #334155;
             }
         """
         
