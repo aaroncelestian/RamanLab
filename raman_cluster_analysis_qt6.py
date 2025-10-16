@@ -3290,7 +3290,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             }
             
             # Update UI
-            self.update_data_info()
+            self.update_ui_after_import(len(filenames))
             self.folder_path_label.setText(f"Single-file map: {os.path.basename(file_path)}")
             
             # Show success message
