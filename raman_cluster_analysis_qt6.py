@@ -3273,11 +3273,23 @@ class RamanClusterAnalysisQt6(QMainWindow):
             # Create filenames list
             filenames = [f"pos_{x:.1f}_{y:.1f}" for x, y in positions]
             
-            # Store data
-            self.wavenumbers = wavenumbers
-            self.intensities = data_matrix
-            self.filenames = filenames
-            self.original_intensities = data_matrix.copy()
+            # Create spectrum metadata for each position
+            spectrum_metadata = []
+            for i, (filename, pos) in enumerate(zip(filenames, positions)):
+                metadata = {
+                    'filename': filename,
+                    'spectrum_index': i,
+                    'source': 'single_file_map',
+                    'x_position': pos[0],
+                    'y_position': pos[1],
+                    'file_path': file_path
+                }
+                spectrum_metadata.append(metadata)
+            
+            # Store data in cluster_data dictionary
+            self.cluster_data['wavenumbers'] = wavenumbers
+            self.cluster_data['intensities'] = data_matrix
+            self.cluster_data['spectrum_metadata'] = spectrum_metadata
             
             # Store map metadata for spatial visualization
             self.map_metadata = {
@@ -3288,6 +3300,14 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 'position_map': {filename: pos for filename, pos in zip(filenames, positions)},
                 'source_file': file_path
             }
+            
+            # Extract features
+            features = self.extract_vibrational_features(self.cluster_data['intensities'], wavenumbers)
+            self.cluster_data['features'] = features
+            
+            # Scale features
+            scaler = StandardScaler()
+            self.cluster_data['features_scaled'] = scaler.fit_transform(features)
             
             # Update UI
             self.update_ui_after_import(len(filenames))
