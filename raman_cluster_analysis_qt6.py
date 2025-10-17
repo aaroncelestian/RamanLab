@@ -13,7 +13,9 @@ import os
 from scipy.spatial.distance import pdist
 import glob
 from datetime import datetime
-from sklearn.cluster import KMeans
+import multiprocessing
+from sklearn.cluster import KMeans, MiniBatchKMeans
+import sklearn
 from sklearn.cluster import SpectralClustering
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
@@ -843,6 +845,16 @@ class RamanClusterAnalysisQt6(QMainWindow):
         perf_form.addRow("  Sample Size:", self.subset_sample_size)
         
         perf_layout.addLayout(perf_form)
+        
+        # Algorithm auto-selection info
+        n_cores = multiprocessing.cpu_count()
+        algo_info = QLabel(f"🤖 Clustering Algorithm Auto-Selection ({n_cores} CPU cores):\n"
+                          "• <1,000 spectra: Hierarchical clustering (dendrogram available)\n"
+                          "• 1,000-5,000 spectra: KMeans (fast, accurate, multi-core)\n"
+                          "• >5,000 spectra: MiniBatchKMeans (optimized for large datasets, multi-core)")
+        algo_info.setStyleSheet("color: #0891b2; font-size: 10px; padding: 4px; background-color: #ecfeff; border-radius: 3px;")
+        algo_info.setWordWrap(True)
+        perf_layout.addWidget(algo_info)
         
         # Performance estimate
         self.perf_estimate_label = QLabel("")
@@ -4102,7 +4114,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             # Perform clustering
             self.clustering_status.setText("Running clustering...")
-            labels, linkage_matrix, distance_matrix = self.perform_hierarchical_clustering(
+            labels, linkage_matrix, distance_matrix, algorithm_used = self.perform_hierarchical_clustering(
                 features_for_clustering, n_clusters, linkage_method, distance_metric
             )
             
@@ -4111,6 +4123,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.cluster_data['linkage_matrix'] = linkage_matrix
             self.cluster_data['distance_matrix'] = distance_matrix
             self.cluster_data['preprocessing_method'] = preprocessing_method
+            self.cluster_data['algorithm_used'] = algorithm_used
             
             # Update progress
             self.clustering_progress.setValue(90)
@@ -4128,7 +4141,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             # Update status
             method_text = f" (using {preprocessing_method})" if preprocessing_method != 'None' else ""
-            self.clustering_status.setText(f"Clustering complete: {n_clusters} clusters found{method_text}")
+            algo_text = f" via {algorithm_used}" if algorithm_used else ""
+            self.clustering_status.setText(f"Clustering complete: {n_clusters} clusters found{method_text}{algo_text}")
             
             # Switch to visualization tab
             self.tab_widget.setCurrentIndex(2)
@@ -4139,25 +4153,163 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.clustering_status.setText("Clustering failed")
 
     def perform_hierarchical_clustering(self, features, n_clusters, linkage_method, distance_metric):
-        """Perform hierarchical clustering on the features."""
+        """Perform clustering on the features with automatic algorithm selection for performance.
+        
+        For large datasets (>5000 spectra), uses MiniBatchKMeans for speed.
+        For medium datasets (1000-5000 spectra), uses standard KMeans.
+        For small datasets (<1000 spectra), uses hierarchical clustering.
+        """
         try:
-            # Compute distance matrix if needed
-            if distance_metric == 'euclidean':
-                distance_matrix = pdist(features, metric='euclidean')
-            elif distance_metric == 'cosine':
-                distance_matrix = pdist(features, metric='cosine')
-            elif distance_metric == 'correlation':
-                distance_matrix = pdist(features, metric='correlation')
+            n_samples = features.shape[0]
+            
+            # Get number of available CPU cores
+            n_jobs = multiprocessing.cpu_count()
+            
+            # Check sklearn version for n_jobs support with better parsing
+            try:
+                version_parts = sklearn.__version__.split('.')
+                sklearn_version = tuple(int(x.split('rc')[0].split('dev')[0]) for x in version_parts[:2])
+            except:
+                # Fallback: assume old version if parsing fails
+                sklearn_version = (0, 19)
+            
+            print(f"\n🔍 Debug: scikit-learn version {sklearn.__version__} -> {sklearn_version}")
+            
+            supports_minibatch_njobs = sklearn_version >= (1, 0)  # MiniBatchKMeans got n_jobs in 1.0+
+            supports_kmeans_njobs = sklearn_version >= (0, 20)  # KMeans has had n_jobs since 0.20
+            
+            print(f"   MiniBatchKMeans n_jobs support: {supports_minibatch_njobs}")
+            print(f"   KMeans n_jobs support: {supports_kmeans_njobs}")
+            
+            # Automatic algorithm selection based on dataset size
+            if n_samples > 5000:
+                # Very large dataset - use MiniBatchKMeans for speed
+                print(f"\n⚡ Large dataset detected ({n_samples:,} spectra)")
+                if supports_minibatch_njobs:
+                    print(f"   Using MiniBatchKMeans with {n_jobs} CPU cores for optimal performance...")
+                    self.clustering_status.setText(f"Using MiniBatchKMeans ({n_jobs} cores) for {n_samples:,} spectra...")
+                else:
+                    print(f"   Using MiniBatchKMeans (single-core - upgrade to sklearn 1.0+ for multi-core)")
+                    self.clustering_status.setText(f"Using MiniBatchKMeans for {n_samples:,} spectra...")
+                QApplication.processEvents()
+                
+                # MiniBatchKMeans with progress tracking and parallel processing (if supported)
+                batch_size = min(1000, n_samples // 10)
+                kmeans_params = {
+                    'n_clusters': n_clusters,
+                    'batch_size': batch_size,
+                    'max_iter': 100,
+                    'random_state': 42,
+                    'verbose': 0,
+                    'n_init': 3
+                }
+                
+                # Try to add n_jobs if supported (check actual parameter support)
+                if supports_minibatch_njobs:
+                    try:
+                        import inspect
+                        sig = inspect.signature(MiniBatchKMeans.__init__)
+                        if 'n_jobs' in sig.parameters:
+                            kmeans_params['n_jobs'] = -1
+                            print(f"   ✓ n_jobs parameter confirmed available")
+                        else:
+                            print(f"   ⚠ n_jobs parameter not found in MiniBatchKMeans signature")
+                            supports_minibatch_njobs = False
+                    except Exception as e:
+                        print(f"   ⚠ Could not verify n_jobs support: {e}")
+                        supports_minibatch_njobs = False
+                
+                kmeans = MiniBatchKMeans(**kmeans_params)
+                
+                labels = kmeans.fit_predict(features)
+                
+                # Create dummy linkage matrix and distance matrix for compatibility
+                linkage_matrix = None
+                distance_matrix = None
+                algorithm_used = "MiniBatchKMeans"
+                
+                print(f"   ✓ Clustering complete in {n_clusters} clusters")
+                print(f"   ✓ Inertia: {kmeans.inertia_:.2f}")
+                if supports_minibatch_njobs:
+                    print(f"   ✓ Parallel processing: {n_jobs} cores utilized")
+                
+            elif n_samples > 1000:
+                # Medium dataset - use standard KMeans
+                print(f"\n⚡ Medium dataset detected ({n_samples:,} spectra)")
+                if supports_kmeans_njobs:
+                    print(f"   Using KMeans with {n_jobs} CPU cores for optimal performance...")
+                    self.clustering_status.setText(f"Using KMeans ({n_jobs} cores) for {n_samples:,} spectra...")
+                else:
+                    print(f"   Using KMeans (single-core - upgrade to sklearn 0.20+ for multi-core)")
+                    self.clustering_status.setText(f"Using KMeans for {n_samples:,} spectra...")
+                QApplication.processEvents()
+                
+                kmeans_params = {
+                    'n_clusters': n_clusters,
+                    'random_state': 42,
+                    'n_init': 10,
+                    'max_iter': 300
+                }
+                
+                # Try to add n_jobs if supported (check actual parameter support)
+                if supports_kmeans_njobs:
+                    try:
+                        import inspect
+                        sig = inspect.signature(KMeans.__init__)
+                        if 'n_jobs' in sig.parameters:
+                            kmeans_params['n_jobs'] = -1
+                            print(f"   ✓ n_jobs parameter confirmed available")
+                        else:
+                            print(f"   ⚠ n_jobs parameter not found in KMeans signature")
+                            supports_kmeans_njobs = False
+                    except Exception as e:
+                        print(f"   ⚠ Could not verify n_jobs support: {e}")
+                        supports_kmeans_njobs = False
+                
+                kmeans = KMeans(**kmeans_params)
+                
+                labels = kmeans.fit_predict(features)
+                
+                # Create dummy linkage matrix and distance matrix for compatibility
+                linkage_matrix = None
+                distance_matrix = None
+                algorithm_used = "KMeans"
+                
+                print(f"   ✓ Clustering complete in {n_clusters} clusters")
+                print(f"   ✓ Inertia: {kmeans.inertia_:.2f}")
+                if supports_kmeans_njobs:
+                    print(f"   ✓ Parallel processing: {n_jobs} cores utilized")
+                
             else:
-                distance_matrix = pdist(features, metric='euclidean')
+                # Small dataset - use hierarchical clustering with optimized distance computation
+                print(f"\n⚡ Small dataset ({n_samples:,} spectra)")
+                print(f"   Using hierarchical clustering...")
+                self.clustering_status.setText(f"Computing distances for {n_samples:,} spectra...")
+                QApplication.processEvents()
+                
+                # Compute distance matrix with progress updates
+                if distance_metric == 'euclidean':
+                    distance_matrix = pdist(features, metric='euclidean')
+                elif distance_metric == 'cosine':
+                    distance_matrix = pdist(features, metric='cosine')
+                elif distance_metric == 'correlation':
+                    distance_matrix = pdist(features, metric='correlation')
+                else:
+                    distance_matrix = pdist(features, metric='euclidean')
+                
+                self.clustering_status.setText(f"Building dendrogram...")
+                QApplication.processEvents()
+                
+                # Perform hierarchical clustering
+                linkage_matrix = linkage(distance_matrix, method=linkage_method)
+                
+                # Get cluster labels
+                labels = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
+                algorithm_used = f"Hierarchical ({linkage_method})"
+                
+                print(f"   ✓ Hierarchical clustering complete")
             
-            # Perform hierarchical clustering
-            linkage_matrix = linkage(distance_matrix, method=linkage_method)
-            
-            # Get cluster labels
-            labels = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
-            
-            return labels, linkage_matrix, distance_matrix
+            return labels, linkage_matrix, distance_matrix, algorithm_used
             
         except Exception as e:
             raise Exception(f"Clustering failed: {str(e)}")
@@ -9003,8 +9155,8 @@ Cluster Sizes:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(intensities)
         
-        # Train Random Forest
-        rf = RandomForestClassifier(n_estimators=100, random_state=42)
+        # Train Random Forest with parallel processing
+        rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
         rf.fit(X_scaled, labels)
         
         return rf.feature_importances_
