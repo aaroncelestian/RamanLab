@@ -93,6 +93,11 @@ class MapAnalysisMainWindow(QMainWindow):
         # Initialize template extraction mode
         self.template_extraction_mode = False
         
+        # Performance optimization for large datasets
+        self._map_cache = {}  # Cache computed maps to avoid recomputation
+        self._cache_enabled = True  # Enable/disable caching
+        self._use_parallel_map_creation = True  # Use multi-core for map creation
+        
         # Setup UI
         self.setup_ui()
         self.setup_menu_bar()
@@ -551,9 +556,21 @@ class MapAnalysisMainWindow(QMainWindow):
                 # Load map data with cosmic ray detection
                 self.map_data = RamanMapData(directory, cosmic_ray_config=self.cosmic_ray_config)
                 
+                # Clear map cache when new data is loaded
+                self._clear_map_cache()
+                
                 self.progress_status.hide_progress()
-                self.statusBar().showMessage(f"Loaded {len(self.map_data.spectra)} spectra")
-                logger.info(f"Loaded map data with {len(self.map_data.spectra)} spectra")
+                n_spectra = len(self.map_data.spectra)
+                
+                # Add performance optimization message for large datasets
+                if n_spectra > 10000:
+                    perf_msg = f" (Performance optimizations enabled for {n_spectra:,} spectra)"
+                    logger.info(f"Large dataset detected: Caching and parallel processing enabled")
+                else:
+                    perf_msg = ""
+                
+                self.statusBar().showMessage(f"Loaded {n_spectra:,} spectra{perf_msg}")
+                logger.info(f"Loaded map data with {n_spectra:,} spectra")
                 
                 # Initialize integration slider with spectrum midpoint
                 self._initialize_integration_slider()
@@ -609,7 +626,20 @@ class MapAnalysisMainWindow(QMainWindow):
                 progress_callback=progress_callback
             )
             
+            # Clear map cache when new data is loaded
+            self._clear_map_cache()
+            
             progress_dialog.close()
+            
+            n_spectra = len(self.map_data.spectra)
+            if n_spectra > 10000:
+                logger.info(f"Large dataset detected: Caching and parallel processing enabled")
+            
+            # Initialize integration slider with spectrum midpoint
+            self._initialize_integration_slider()
+            
+            # Update the map display
+            self.update_map()
             
             # Update status
             self.statusBar().showMessage(
@@ -618,7 +648,6 @@ class MapAnalysisMainWindow(QMainWindow):
             )
             logger.info(f"Loaded single-file map with {len(self.map_data.spectra)} spectra")
             
-            # Initialize integration slider with spectrum midpoint
             self._initialize_integration_slider()
             
             # Update the map display
@@ -1044,9 +1073,28 @@ class MapAnalysisMainWindow(QMainWindow):
             import traceback
             traceback.print_exc()
 
+    def _clear_map_cache(self):
+        """Clear the map cache when data changes."""
+        self._map_cache.clear()
+        logger.debug("Map cache cleared")
+    
+    def _get_cache_key(self, feature_name, use_processed=None, integration_params=None):
+        """Generate a cache key for a map."""
+        if use_processed is None:
+            use_processed = self.use_processed
+        if integration_params is None and hasattr(self, 'integration_center'):
+            integration_params = (self.integration_center, self.integration_width)
+        return (feature_name, use_processed, integration_params)
+    
     def create_integrated_intensity_map(self):
         """Create integrated intensity map with optional wavenumber range."""
         import numpy as np
+        
+        # Check cache first
+        cache_key = self._get_cache_key("Integrated Intensity")
+        if self._cache_enabled and cache_key in self._map_cache:
+            logger.debug("Using cached integrated intensity map")
+            return self._map_cache[cache_key]
         
         # Get grid information
         unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
@@ -1054,36 +1102,82 @@ class MapAnalysisMainWindow(QMainWindow):
         # Create map array
         map_array = np.zeros(map_shape)
         
-        for spectrum in self.map_data.spectra.values():
-            intensities = (spectrum.processed_intensities 
-                         if self.use_processed and spectrum.processed_intensities is not None
-                         else spectrum.intensities)
+        # Check if we should use parallel processing for large datasets
+        n_spectra = len(self.map_data.spectra)
+        use_parallel = self._use_parallel_map_creation and n_spectra > 1000
+        
+        if use_parallel:
+            # Parallel processing for large datasets
+            from joblib import Parallel, delayed
+            import multiprocessing
             
-            # Apply wavenumber range integration if specified
-            if self.integration_center is not None and self.integration_width is not None:
-                wavenumbers = spectrum.wavenumbers
+            def process_spectrum(spectrum, integration_center, integration_width, use_processed):
+                intensities = (spectrum.processed_intensities 
+                             if use_processed and spectrum.processed_intensities is not None
+                             else spectrum.intensities)
                 
-                # Calculate range bounds
-                min_wavenumber = self.integration_center - self.integration_width / 2
-                max_wavenumber = self.integration_center + self.integration_width / 2
-                
-                # Find indices within the range
-                mask = (wavenumbers >= min_wavenumber) & (wavenumbers <= max_wavenumber)
-                
-                if np.any(mask):
-                    # Integrate only within the specified range
-                    integrated_intensity = np.sum(intensities[mask])
+                if integration_center is not None and integration_width is not None:
+                    wavenumbers = spectrum.wavenumbers
+                    min_wavenumber = integration_center - integration_width / 2
+                    max_wavenumber = integration_center + integration_width / 2
+                    mask = (wavenumbers >= min_wavenumber) & (wavenumbers <= max_wavenumber)
+                    if np.any(mask):
+                        integrated_intensity = np.sum(intensities[mask])
+                    else:
+                        integrated_intensity = 0.0
                 else:
-                    # No data in range, set to zero
-                    integrated_intensity = 0.0
-            else:
-                # Full spectrum integration (default behavior)
-                integrated_intensity = np.sum(intensities)
+                    integrated_intensity = np.sum(intensities)
+                
+                return spectrum.x_pos, spectrum.y_pos, integrated_intensity
             
-            # Use position-to-index mapping for array indexing
-            y_idx = y_to_idx[spectrum.y_pos]
-            x_idx = x_to_idx[spectrum.x_pos]
-            map_array[y_idx, x_idx] = integrated_intensity
+            n_jobs = min(multiprocessing.cpu_count(), 8)  # Limit to 8 cores for I/O bound tasks
+            results = Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
+                delayed(process_spectrum)(spectrum, self.integration_center, self.integration_width, self.use_processed)
+                for spectrum in self.map_data.spectra.values()
+            )
+            
+            # Fill map array from results
+            for x_pos, y_pos, integrated_intensity in results:
+                y_idx = y_to_idx[y_pos]
+                x_idx = x_to_idx[x_pos]
+                map_array[y_idx, x_idx] = integrated_intensity
+        else:
+            # Sequential processing for smaller datasets
+            for spectrum in self.map_data.spectra.values():
+                intensities = (spectrum.processed_intensities 
+                             if self.use_processed and spectrum.processed_intensities is not None
+                             else spectrum.intensities)
+                
+                # Apply wavenumber range integration if specified
+                if self.integration_center is not None and self.integration_width is not None:
+                    wavenumbers = spectrum.wavenumbers
+                    
+                    # Calculate range bounds
+                    min_wavenumber = self.integration_center - self.integration_width / 2
+                    max_wavenumber = self.integration_center + self.integration_width / 2
+                    
+                    # Find indices within the range
+                    mask = (wavenumbers >= min_wavenumber) & (wavenumbers <= max_wavenumber)
+                    
+                    if np.any(mask):
+                        # Integrate only within the specified range
+                        integrated_intensity = np.sum(intensities[mask])
+                    else:
+                        # No data in range, set to zero
+                        integrated_intensity = 0.0
+                else:
+                    # Full spectrum integration (default behavior)
+                    integrated_intensity = np.sum(intensities)
+                
+                # Use position-to-index mapping for array indexing
+                y_idx = y_to_idx[spectrum.y_pos]
+                x_idx = x_to_idx[spectrum.x_pos]
+                map_array[y_idx, x_idx] = integrated_intensity
+        
+        # Cache the result
+        if self._cache_enabled:
+            self._map_cache[cache_key] = map_array
+            logger.debug(f"Cached integrated intensity map (cache size: {len(self._map_cache)})")
             
         return map_array
         

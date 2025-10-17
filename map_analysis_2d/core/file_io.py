@@ -259,19 +259,76 @@ class RamanMapData:
             # Update template manager target wavenumbers
             self.template_manager.target_wavenumbers = self.target_wavenumbers
             
-            # Load all spectra
+            # Load all spectra with parallel cosmic ray processing
             total_files = len(spectrum_files)
             loaded_count = 0
             
-            for i, filepath in enumerate(spectrum_files):
-                if progress_callback:
-                    progress = int((i / total_files) * 100)
-                    progress_callback(progress, f"Loading {filepath.name}")
+            # Check if we should use batch parallel processing for cosmic rays
+            use_batch_cr = (self.cosmic_ray_manager.config.apply_during_load and 
+                           self.cosmic_ray_manager.config.use_parallel_processing and 
+                           total_files >= 10)
+            
+            if use_batch_cr:
+                # Load all raw data first (fast)
+                raw_spectra_data = []
+                for i, filepath in enumerate(spectrum_files):
+                    if progress_callback:
+                        progress = int((i / total_files) * 50)  # First 50% for loading
+                        progress_callback(progress, f"Loading {filepath.name}")
+                    
+                    try:
+                        x_pos, y_pos = self._parse_filename(filepath.name)
+                        file_ext = filepath.suffix.lower()
+                        
+                        # Load data
+                        if file_ext == '.csv':
+                            data = pd.read_csv(filepath, header=None).values
+                        else:
+                            data = np.loadtxt(filepath)
+                        
+                        wavenumbers = data[:, 0]
+                        intensities = data[:, 1]
+                        spectrum_id = f"{filepath.name}_{x_pos}_{y_pos}"
+                        
+                        raw_spectra_data.append((wavenumbers, intensities, spectrum_id, x_pos, y_pos, filepath))
+                    except Exception as e:
+                        logger.error(f"Error loading {filepath}: {str(e)}")
                 
-                spectrum_data = self._load_spectrum(filepath)
-                if spectrum_data is not None:
-                    self.spectra[(spectrum_data.x_pos, spectrum_data.y_pos)] = spectrum_data
+                if progress_callback:
+                    progress_callback(50, f"Processing cosmic rays in parallel ({len(raw_spectra_data)} spectra)...")
+                
+                # Process cosmic rays in parallel
+                cr_inputs = [(wn, intens, sid) for wn, intens, sid, _, _, _ in raw_spectra_data]
+                cr_results = self.cosmic_ray_manager.process_batch_parallel(cr_inputs)
+                
+                # Create spectrum objects with cleaned data
+                for (wn, _, _, x_pos, y_pos, filepath), (cosmic_detected, cleaned_intensities, _) in zip(raw_spectra_data, cr_results):
+                    if progress_callback:
+                        progress = 50 + int((loaded_count / len(raw_spectra_data)) * 50)
+                        progress_callback(progress, f"Finalizing {filepath.name}")
+                    
+                    processed_intensities = self._preprocess_spectrum(wn, cleaned_intensities)
+                    spectrum_data = SpectrumData(
+                        x_pos=x_pos,
+                        y_pos=y_pos,
+                        wavenumbers=wn,
+                        intensities=cleaned_intensities,
+                        filename=filepath.name,
+                        processed_intensities=processed_intensities
+                    )
+                    self.spectra[(x_pos, y_pos)] = spectrum_data
                     loaded_count += 1
+            else:
+                # Sequential processing (original behavior)
+                for i, filepath in enumerate(spectrum_files):
+                    if progress_callback:
+                        progress = int((i / total_files) * 100)
+                        progress_callback(progress, f"Loading {filepath.name}")
+                    
+                    spectrum_data = self._load_spectrum(filepath)
+                    if spectrum_data is not None:
+                        self.spectra[(spectrum_data.x_pos, spectrum_data.y_pos)] = spectrum_data
+                        loaded_count += 1
             
             if loaded_count == 0:
                 raise ValueError("No valid spectra could be loaded")

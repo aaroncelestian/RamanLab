@@ -4,6 +4,8 @@ import numpy as np
 from dataclasses import dataclass
 from typing import Tuple, Dict, Optional, List
 from scipy.signal import find_peaks, peak_widths
+import multiprocessing
+from joblib import Parallel, delayed
 
 
 @dataclass
@@ -14,6 +16,10 @@ class CosmicRayConfig:
     absolute_threshold: float = 1000  # Lower threshold to catch more cosmic rays
     neighbor_ratio: float = 5.0       # Lower ratio to handle consecutive cosmic rays better
     apply_during_load: bool = False
+    
+    # Parallel processing configuration
+    use_parallel_processing: bool = True  # Enable multi-core processing for batch operations
+    n_jobs: int = -1  # Number of CPU cores to use (-1 = all available)
     
     # Shape analysis parameters for distinguishing cosmic rays from Raman peaks
     # More lenient settings to better handle consecutive cosmic rays
@@ -1114,6 +1120,34 @@ class SimpleCosmicRayManager:
             
             cleaned_intensities[idx] = final_val
 
+    def process_batch_parallel(self, spectra_data: List[Tuple[np.ndarray, np.ndarray, str]]) -> List[Tuple[bool, np.ndarray, dict]]:
+        """
+        Process multiple spectra in parallel using all available CPU cores.
+        
+        Args:
+            spectra_data: List of (wavenumbers, intensities, spectrum_id) tuples
+            
+        Returns:
+            List of (cosmic_detected, cleaned_intensities, detection_info) tuples
+        """
+        if not self.config.use_parallel_processing or len(spectra_data) < 10:
+            # For small batches, sequential processing is faster due to overhead
+            return [self.detect_and_remove_cosmic_rays(wn, intens, sid) 
+                    for wn, intens, sid in spectra_data]
+        
+        # Determine number of jobs
+        n_jobs = self.config.n_jobs
+        if n_jobs == -1:
+            n_jobs = multiprocessing.cpu_count()
+        
+        # Process in parallel using joblib
+        results = Parallel(n_jobs=n_jobs, backend='loky', verbose=0)(
+            delayed(self.detect_and_remove_cosmic_rays)(wavenumbers, intensities, spectrum_id)
+            for wavenumbers, intensities, spectrum_id in spectra_data
+        )
+        
+        return results
+    
     def reset_statistics(self):
         """Reset cosmic ray statistics."""
         self.statistics = {
