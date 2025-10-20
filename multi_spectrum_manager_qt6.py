@@ -20,11 +20,11 @@ import matplotlib.pyplot as plt
 from PySide6.QtWidgets import (
     QDialog, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QPushButton, QLineEdit, QTextEdit, QSlider, QCheckBox, QComboBox,
-    QGroupBox, QSplitter, QFileDialog, QMessageBox, QProgressBar,
+    QGroupBox, QSplitter, QFileDialog, QMessageBox, QProgressBar, QProgressDialog,
     QListWidget, QListWidgetItem, QInputDialog, QColorDialog, QSpinBox,
     QDoubleSpinBox, QScrollArea
 )
-from PySide6.QtCore import Qt, QStandardPaths
+from PySide6.QtCore import Qt, QStandardPaths, QCoreApplication
 from core.window_focus_manager import safe_get_open_filenames, safe_get_open_filename, safe_get_save_filename
 from PySide6.QtGui import QFont, QColor
 
@@ -66,8 +66,11 @@ class MultiSpectrumManagerQt6(QMainWindow):
             'waterfall_mode': False,
             'waterfall_spacing': 1.0,
             'heatmap_mode': False,
-            'heatmap_spacing': 1.0,
-            'colormap': 'tab10'
+            'heatmap_contrast': 1.0,  # Contrast control for heatmap (0.1-5.0)
+            'colormap': 'tab10',
+            'use_range': False,  # Whether to use custom range
+            'range_min': 100,    # Default min wavenumber
+            'range_max': 4000    # Default max wavenumber
         }
         
         # Set window properties
@@ -171,12 +174,18 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self.global_settings['waterfall_spacing'] = self.waterfall_spacing_slider.value() / 10.0
         if hasattr(self, 'heatmap_check'):
             self.global_settings['heatmap_mode'] = self.heatmap_check.isChecked()
-        if hasattr(self, 'heatmap_spacing_slider'):
-            self.global_settings['heatmap_spacing'] = self.heatmap_spacing_slider.value() / 10.0
+        if hasattr(self, 'heatmap_contrast_slider'):
+            self.global_settings['heatmap_contrast'] = self.heatmap_contrast_slider.value() / 10.0
         if hasattr(self, 'line_width_slider'):
             self.global_settings['line_width'] = self.line_width_slider.value() / 10.0
         if hasattr(self, 'colormap_combo'):
             self.global_settings['colormap'] = self.colormap_combo.currentText()
+        if hasattr(self, 'range_check'):
+            self.global_settings['use_range'] = self.range_check.isChecked()
+        if hasattr(self, 'range_min_spin'):
+            self.global_settings['range_min'] = self.range_min_spin.value()
+        if hasattr(self, 'range_max_spin'):
+            self.global_settings['range_max'] = self.range_max_spin.value()
     
     def create_left_panel(self, parent):
         """Create the left control panel."""
@@ -317,81 +326,106 @@ class MultiSpectrumManagerQt6(QMainWindow):
         """Create the spectrum controls tab."""
         spectrum_tab = QWidget()
         spectrum_layout = QVBoxLayout(spectrum_tab)
+        spectrum_layout.setSpacing(6)  # Reduce spacing between sections
+        spectrum_layout.setContentsMargins(4, 4, 4, 4)  # Tighter margins
         
         # Global Settings
         global_group = QGroupBox("Global Settings")
         global_layout = QVBoxLayout(global_group)
+        global_layout.setSpacing(4)  # Compact spacing
+        global_layout.setContentsMargins(6, 6, 6, 6)  # Tighter margins
         
-        # Basic display options
+        # Basic display options - single row
         display_row1 = QHBoxLayout()
-        self.normalize_check = QCheckBox("Normalize Spectra")
+        display_row1.setSpacing(8)
+        self.normalize_check = QCheckBox("Normalize")
         self.normalize_check.setChecked(self.global_settings['normalize'])
         self.normalize_check.toggled.connect(lambda: self.update_multi_plot())
         display_row1.addWidget(self.normalize_check)
         
-        self.legend_check = QCheckBox("Show Legend")
+        self.legend_check = QCheckBox("Legend")
         self.legend_check.setChecked(self.global_settings['show_legend'])
         self.legend_check.toggled.connect(lambda: self.update_multi_plot())
         display_row1.addWidget(self.legend_check)
         
-        self.grid_check = QCheckBox("Show Grid")
+        self.grid_check = QCheckBox("Grid")
         self.grid_check.setChecked(self.global_settings['grid'])
         self.grid_check.toggled.connect(lambda: self.update_multi_plot())
         display_row1.addWidget(self.grid_check)
+        display_row1.addStretch()
         global_layout.addLayout(display_row1)
         
-        # Waterfall mode
-        waterfall_row = QHBoxLayout()
-        self.waterfall_check = QCheckBox("Waterfall Plot")
+        # Plot modes - compact layout
+        modes_row = QHBoxLayout()
+        modes_row.setSpacing(8)
+        self.waterfall_check = QCheckBox("Waterfall")
         self.waterfall_check.setChecked(self.global_settings['waterfall_mode'])
         self.waterfall_check.toggled.connect(lambda: self.update_multi_plot())
-        waterfall_row.addWidget(self.waterfall_check)
+        modes_row.addWidget(self.waterfall_check)
         
-        waterfall_row.addWidget(QLabel("Spacing:"))
+        self.heatmap_check = QCheckBox("Heatmap")
+        self.heatmap_check.setChecked(self.global_settings['heatmap_mode'])
+        self.heatmap_check.toggled.connect(lambda: self.update_multi_plot())
+        modes_row.addWidget(self.heatmap_check)
+        modes_row.addStretch()
+        global_layout.addLayout(modes_row)
+        
+        # Waterfall spacing - compact
+        waterfall_row = QHBoxLayout()
+        waterfall_row.setSpacing(4)
+        waterfall_label = QLabel("W-Space:")
+        waterfall_label.setFixedWidth(55)
+        waterfall_row.addWidget(waterfall_label)
         self.waterfall_spacing_slider = QSlider(Qt.Horizontal)
-        self.waterfall_spacing_slider.setRange(1, 50)  # 0.1 to 5.0 (multiplied by 10)
+        self.waterfall_spacing_slider.setRange(1, 50)
         self.waterfall_spacing_slider.setValue(int(self.global_settings['waterfall_spacing'] * 10))
         self.waterfall_spacing_slider.valueChanged.connect(lambda: self.update_multi_plot())
         waterfall_row.addWidget(self.waterfall_spacing_slider)
-        
         self.waterfall_spacing_label = QLabel(f"{self.global_settings['waterfall_spacing']:.1f}")
+        self.waterfall_spacing_label.setFixedWidth(25)
         waterfall_row.addWidget(self.waterfall_spacing_label)
         global_layout.addLayout(waterfall_row)
         
-        # Heatmap mode
+        # Heatmap contrast - compact
         heatmap_row = QHBoxLayout()
-        self.heatmap_check = QCheckBox("Heatmap Plot")
-        self.heatmap_check.setChecked(self.global_settings['heatmap_mode'])
-        self.heatmap_check.toggled.connect(lambda: self.update_multi_plot())
-        heatmap_row.addWidget(self.heatmap_check)
-        
-        heatmap_row.addWidget(QLabel("Spacing:"))
-        self.heatmap_spacing_slider = QSlider(Qt.Horizontal)
-        self.heatmap_spacing_slider.setRange(1, 50)  # 0.1 to 5.0 (multiplied by 10)
-        self.heatmap_spacing_slider.setValue(int(self.global_settings['heatmap_spacing'] * 10))
-        self.heatmap_spacing_slider.valueChanged.connect(lambda: self.update_multi_plot())
-        heatmap_row.addWidget(self.heatmap_spacing_slider)
-        
-        self.heatmap_spacing_label = QLabel(f"{self.global_settings['heatmap_spacing']:.1f}")
-        heatmap_row.addWidget(self.heatmap_spacing_label)
+        heatmap_row.setSpacing(4)
+        heatmap_label = QLabel("H-Contrast:")
+        heatmap_label.setFixedWidth(55)
+        heatmap_label.setToolTip("Heatmap contrast: Higher values enhance weak features")
+        heatmap_row.addWidget(heatmap_label)
+        self.heatmap_contrast_slider = QSlider(Qt.Horizontal)
+        self.heatmap_contrast_slider.setRange(1, 50)  # 0.1 to 5.0
+        self.heatmap_contrast_slider.setValue(int(self.global_settings['heatmap_contrast'] * 10))
+        self.heatmap_contrast_slider.valueChanged.connect(lambda: self.update_multi_plot())
+        self.heatmap_contrast_slider.setToolTip("Adjust contrast to reveal weak spectral features")
+        heatmap_row.addWidget(self.heatmap_contrast_slider)
+        self.heatmap_contrast_label = QLabel(f"{self.global_settings['heatmap_contrast']:.1f}")
+        self.heatmap_contrast_label.setFixedWidth(25)
+        heatmap_row.addWidget(self.heatmap_contrast_label)
         global_layout.addLayout(heatmap_row)
         
-        # Line width control
+        # Line width control - compact
         line_width_layout = QHBoxLayout()
-        line_width_layout.addWidget(QLabel("Line Width:"))
+        line_width_layout.setSpacing(4)
+        line_label = QLabel("Line:")
+        line_label.setFixedWidth(55)
+        line_width_layout.addWidget(line_label)
         self.line_width_slider = QSlider(Qt.Horizontal)
-        self.line_width_slider.setRange(5, 50)  # 0.5 to 5.0 (multiplied by 10)
+        self.line_width_slider.setRange(5, 50)
         self.line_width_slider.setValue(int(self.global_settings['line_width'] * 10))
         self.line_width_slider.valueChanged.connect(lambda: self.update_multi_plot())
         line_width_layout.addWidget(self.line_width_slider)
-        
         self.line_width_label = QLabel(f"{self.global_settings['line_width']:.1f}")
+        self.line_width_label.setFixedWidth(25)
         line_width_layout.addWidget(self.line_width_label)
         global_layout.addLayout(line_width_layout)
         
-        # Colormap theme selection
+        # Colormap theme selection - compact
         colormap_layout = QHBoxLayout()
-        colormap_layout.addWidget(QLabel("Colormap Theme:"))
+        colormap_layout.setSpacing(4)
+        cmap_label = QLabel("Colormap:")
+        cmap_label.setMinimumWidth(60)  # Ensure full word is visible
+        colormap_layout.addWidget(cmap_label)
         self.colormap_combo = QComboBox()
         self.colormap_combo.addItems([
             'tab10', 'tab20', 'Set1', 'Set2', 'Set3', 'Dark2', 'Paired',
@@ -401,13 +435,52 @@ class MultiSpectrumManagerQt6(QMainWindow):
         ])
         self.colormap_combo.setCurrentText(self.global_settings['colormap'])
         self.colormap_combo.currentTextChanged.connect(lambda: self.update_multi_plot())
-        colormap_layout.addWidget(self.colormap_combo)
+        colormap_layout.addWidget(self.colormap_combo, 1)
         
-        # Reset colors button
-        reset_colors_btn = QPushButton("Reset Colors")
+        # Reset colors button - smaller
+        reset_colors_btn = QPushButton("Reset")
+        reset_colors_btn.setMaximumWidth(60)
         reset_colors_btn.clicked.connect(self.reset_all_colors)
         colormap_layout.addWidget(reset_colors_btn)
         global_layout.addLayout(colormap_layout)
+        
+        # Range selection controls
+        range_check_row = QHBoxLayout()
+        range_check_row.setSpacing(8)
+        self.range_check = QCheckBox("Custom Range")
+        self.range_check.setChecked(self.global_settings['use_range'])
+        self.range_check.toggled.connect(lambda: self.update_multi_plot())
+        range_check_row.addWidget(self.range_check)
+        range_check_row.addStretch()
+        global_layout.addLayout(range_check_row)
+        
+        # Min/Max range inputs - compact
+        range_layout = QHBoxLayout()
+        range_layout.setSpacing(4)
+        range_label = QLabel("Range:")
+        range_label.setFixedWidth(55)
+        range_layout.addWidget(range_label)
+        
+        self.range_min_spin = QSpinBox()
+        self.range_min_spin.setRange(0, 10000)
+        self.range_min_spin.setValue(self.global_settings['range_min'])
+        self.range_min_spin.setSuffix(" cm⁻¹")
+        self.range_min_spin.setMaximumWidth(100)
+        self.range_min_spin.valueChanged.connect(lambda: self.update_multi_plot())
+        range_layout.addWidget(self.range_min_spin)
+        
+        range_layout.addWidget(QLabel("to"))
+        
+        self.range_max_spin = QSpinBox()
+        self.range_max_spin.setRange(0, 10000)
+        self.range_max_spin.setValue(self.global_settings['range_max'])
+        self.range_max_spin.setSuffix(" cm⁻¹")
+        self.range_max_spin.setMaximumWidth(100)
+        self.range_max_spin.valueChanged.connect(lambda: self.update_multi_plot())
+        range_layout.addWidget(self.range_max_spin)
+        
+        range_layout.addStretch()
+        global_layout.addLayout(range_layout)
         
         spectrum_layout.addWidget(global_group)
         
@@ -419,11 +492,15 @@ class MultiSpectrumManagerQt6(QMainWindow):
         
         self.individual_widget = QWidget()
         self.individual_layout = QVBoxLayout(self.individual_widget)
+        self.individual_layout.setSpacing(4)
+        self.individual_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.individual_group = QGroupBox("Selected Spectrum Controls")
+        self.individual_group = QGroupBox("Selected Spectrum")
         self.individual_controls_layout = QVBoxLayout(self.individual_group)
+        self.individual_controls_layout.setSpacing(4)
+        self.individual_controls_layout.setContentsMargins(6, 6, 6, 6)
         
-        self.no_selection_label = QLabel("Select a spectrum from the list above\nto see individual controls")
+        self.no_selection_label = QLabel("Select a spectrum from\nthe list above")
         self.no_selection_label.setAlignment(Qt.AlignCenter)
         self.individual_controls_layout.addWidget(self.no_selection_label)
         
@@ -540,8 +617,8 @@ class MultiSpectrumManagerQt6(QMainWindow):
             waterfall_spacing = self.waterfall_spacing_slider.value() / 10.0
             self.waterfall_spacing_label.setText(f"{waterfall_spacing:.1f}")
             
-            heatmap_spacing = self.heatmap_spacing_slider.value() / 10.0
-            self.heatmap_spacing_label.setText(f"{heatmap_spacing:.1f}")
+            heatmap_contrast = self.heatmap_contrast_slider.value() / 10.0
+            self.heatmap_contrast_label.setText(f"{heatmap_contrast:.1f}")
             
             # Update global settings
             self.global_settings['normalize'] = self.normalize_check.isChecked()
@@ -551,8 +628,11 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self.global_settings['waterfall_mode'] = self.waterfall_check.isChecked()
             self.global_settings['waterfall_spacing'] = waterfall_spacing
             self.global_settings['heatmap_mode'] = self.heatmap_check.isChecked()
-            self.global_settings['heatmap_spacing'] = heatmap_spacing
+            self.global_settings['heatmap_contrast'] = heatmap_contrast
             self.global_settings['colormap'] = self.colormap_combo.currentText()
+            self.global_settings['use_range'] = self.range_check.isChecked()
+            self.global_settings['range_min'] = self.range_min_spin.value()
+            self.global_settings['range_max'] = self.range_max_spin.value()
             
             # Get colors from colormap
             colors = self.get_colormap_colors(len(self.loaded_spectra))
@@ -598,13 +678,28 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 if heatmap_data:
                     # Create heatmap - now all arrays have the same length
                     heatmap_array = np.array(heatmap_data)
+                    
+                    # Apply contrast adjustment using percentile-based clipping
+                    contrast = self.global_settings['heatmap_contrast']
+                    if contrast != 1.0:
+                        # Use percentile clipping to enhance contrast
+                        # Higher contrast = lower percentile threshold = more clipping of bright peaks
+                        # contrast range: 0.1 (low, show full range) to 5.0 (high, clip bright peaks)
+                        percentile_threshold = max(5, 100 - (contrast - 1.0) * 20)  # 95% to 20%
+                        vmax = np.percentile(heatmap_array, percentile_threshold)
+                        vmin = np.min(heatmap_array)
+                    else:
+                        vmin, vmax = None, None  # Auto-scale
+                    
                     extent = [min_wavenumber, max_wavenumber, 0, len(spectrum_names)]
                     
                     im = self.multi_ax.imshow(heatmap_array, 
                                             aspect='auto', 
                                             extent=extent,
                                             cmap=self.global_settings['colormap'],
-                                            origin='lower')
+                                            origin='lower',
+                                            vmin=vmin,
+                                            vmax=vmax)
                     
                     # Add colorbar
                     self.multi_figure.colorbar(im, ax=self.multi_ax, label='Intensity (a.u.)')
@@ -673,6 +768,13 @@ class MultiSpectrumManagerQt6(QMainWindow):
             
             self.multi_ax.set_title(title)
             
+            # Apply custom range if enabled
+            if self.global_settings['use_range']:
+                range_min = self.global_settings['range_min']
+                range_max = self.global_settings['range_max']
+                if range_min < range_max:
+                    self.multi_ax.set_xlim(range_min, range_max)
+            
             # Manual layout control based on whether heatmap has colorbar
             if self.global_settings['heatmap_mode']:
                 # With colorbar: leave space on the right
@@ -710,21 +812,32 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 child.setParent(None)
         
         if spectrum_name not in self.loaded_spectra:
-            self.no_selection_label = QLabel("Select a spectrum from the list above\nto see individual controls")
+            self.no_selection_label = QLabel("Select a spectrum from\nthe list above")
             self.no_selection_label.setAlignment(Qt.AlignCenter)
             self.individual_controls_layout.addWidget(self.no_selection_label)
             return
         
-        # Title
-        title_label = QLabel(f"Controls: {spectrum_name}")
-        title_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+        # Title - truncate long names for display
+        # Truncate from middle if name is too long (> 50 chars)
+        display_name = spectrum_name
+        if len(spectrum_name) > 50:
+            # Show first 25 and last 20 characters with ... in middle
+            display_name = spectrum_name[:25] + "..." + spectrum_name[-20:]
+        
+        title_label = QLabel(display_name)
+        title_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        title_label.setWordWrap(False)
+        title_label.setToolTip(spectrum_name)  # Show full name on hover
         self.individual_controls_layout.addWidget(title_label)
         
-        # Color selection
+        # Color selection - compact
         color_layout = QHBoxLayout()
-        color_layout.addWidget(QLabel("Color:"))
+        color_layout.setSpacing(4)
+        color_label = QLabel("Color:")
+        color_label.setFixedWidth(45)
+        color_layout.addWidget(color_label)
         
-        color_btn = QPushButton("Choose Color")
+        color_btn = QPushButton("Choose")
         current_color = self.get_spectrum_setting(spectrum_name, 'color', None)
         if current_color:
             # Convert matplotlib color to QColor for display
@@ -736,19 +849,23 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 color_btn.setStyleSheet(f"background-color: rgb({rgb[0]}, {rgb[1]}, {rgb[2]});")
         
         color_btn.clicked.connect(lambda: self.choose_spectrum_color(spectrum_name, color_btn))
-        color_layout.addWidget(color_btn)
+        color_layout.addWidget(color_btn, 1)
         
         reset_color_btn = QPushButton("Reset")
+        reset_color_btn.setMaximumWidth(50)
         reset_color_btn.clicked.connect(lambda: self.reset_spectrum_color(spectrum_name, color_btn))
         color_layout.addWidget(reset_color_btn)
-        self.individual_controls_layout.addWidget(QWidget())  # Spacer
+        
         color_widget = QWidget()
         color_widget.setLayout(color_layout)
         self.individual_controls_layout.addWidget(color_widget)
         
-        # Y-offset control
+        # Y-offset control - compact
         y_offset_layout = QHBoxLayout()
-        y_offset_layout.addWidget(QLabel("Y-Offset:"))
+        y_offset_layout.setSpacing(4)
+        y_label = QLabel("Y-Off:")
+        y_label.setFixedWidth(45)
+        y_offset_layout.addWidget(y_label)
         
         y_offset_slider = QSlider(Qt.Horizontal)
         y_offset_slider.setRange(-100, 100)  # -10.0 to 10.0
@@ -756,6 +873,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
         y_offset_slider.setValue(int(current_y_offset * 10))
         
         y_offset_label = QLabel(f"{current_y_offset:.1f}")
+        y_offset_label.setFixedWidth(35)
         
         def update_y_offset(value):
             new_offset = value / 10.0
@@ -771,9 +889,12 @@ class MultiSpectrumManagerQt6(QMainWindow):
         y_offset_widget.setLayout(y_offset_layout)
         self.individual_controls_layout.addWidget(y_offset_widget)
         
-        # X-offset control
+        # X-offset control - compact
         x_offset_layout = QHBoxLayout()
-        x_offset_layout.addWidget(QLabel("X-Offset:"))
+        x_offset_layout.setSpacing(4)
+        x_label = QLabel("X-Off:")
+        x_label.setFixedWidth(45)
+        x_offset_layout.addWidget(x_label)
         
         x_offset_slider = QSlider(Qt.Horizontal)
         x_offset_slider.setRange(-1000, 1000)  # -100.0 to 100.0 cm⁻¹
@@ -781,6 +902,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
         x_offset_slider.setValue(int(current_x_offset * 10))
         
         x_offset_label = QLabel(f"{current_x_offset:.1f}")
+        x_offset_label.setFixedWidth(35)
         
         def update_x_offset(value):
             new_offset = value / 10.0
@@ -796,8 +918,8 @@ class MultiSpectrumManagerQt6(QMainWindow):
         x_offset_widget.setLayout(x_offset_layout)
         self.individual_controls_layout.addWidget(x_offset_widget)
         
-        # Reset offsets button
-        reset_offsets_btn = QPushButton("Reset All Offsets")
+        # Reset offsets button - compact
+        reset_offsets_btn = QPushButton("Reset Offsets")
         reset_offsets_btn.clicked.connect(lambda: self.reset_spectrum_offsets(spectrum_name))
         self.individual_controls_layout.addWidget(reset_offsets_btn)
         
@@ -1093,8 +1215,17 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self.update_multi_plot()
             self.update_individual_controls("")
     
-    def load_spectrum_file_for_multi(self, file_path):
-        """Load a spectrum file into the multi-spectrum manager."""
+    def load_spectrum_file_for_multi(self, file_path, update_plot=True):
+        """Load a spectrum file into the multi-spectrum manager.
+        
+        Parameters:
+        -----------
+        file_path : str
+            Path to the spectrum file
+        update_plot : bool, optional
+            Whether to update the plot after loading (default: True)
+            Set to False for batch loading to improve performance
+        """
         try:
             # Load the file data
             data = np.loadtxt(file_path)
@@ -1120,13 +1251,14 @@ class MultiSpectrumManagerQt6(QMainWindow):
                 # Store spectrum
                 self.loaded_spectra[display_name] = (wavenumbers, intensities)
                 
-                # Add to list
+                # Add to list (without triggering selection events during batch load)
                 self.multi_spectrum_list.addItem(display_name)
                 
-                # Update plot
-                self.update_multi_plot()
+                # Only update plot if requested (skip during batch loading)
+                if update_plot:
+                    self.update_multi_plot()
+                    self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
                 
-                self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
                 return True
                 
             elif data.ndim == 1 or data.shape[1] < 2:
@@ -1139,7 +1271,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
         return False
     
     def load_multiple_files(self):
-        """Load multiple spectrum files."""
+        """Load multiple spectrum files with optimized batch processing."""
         file_paths, _ = safe_get_open_filenames(
             self,
             "Import Multiple Raman Spectra",
@@ -1147,26 +1279,63 @@ class MultiSpectrumManagerQt6(QMainWindow):
             "Text files (*.txt *.csv *.dat);;All files (*.*)"
         )
         
-        if file_paths:
-            success_count = 0
-            failed_files = []
-            for file_path in file_paths:
-                try:
-                    self.load_spectrum_file_for_multi(file_path)
-                    success_count += 1
-                except Exception as e:
-                    failed_files.append(f"{Path(file_path).name}: {str(e)}")
+        if not file_paths:
+            return
+        
+        # Create progress dialog for batch loading
+        progress = QProgressDialog(
+            "Loading spectra...",
+            "Cancel",
+            0,
+            len(file_paths),
+            self
+        )
+        progress.setWindowTitle("Bulk Import")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(500)  # Show after 500ms
+        
+        success_count = 0
+        failed_files = []
+        
+        # Batch load files without updating plot each time
+        for i, file_path in enumerate(file_paths):
+            # Check if user cancelled
+            if progress.wasCanceled():
+                break
             
-            # Show results to user
-            if success_count > 0:
-                message = f"Successfully loaded {success_count} of {len(file_paths)} files."
-                if failed_files:
-                    message += f"\n\nFailed files:\n" + "\n".join(failed_files[:5])
-                    if len(failed_files) > 5:
-                        message += f"\n... and {len(failed_files) - 5} more"
-                QMessageBox.information(self, "Load Results", message)
-            elif failed_files:
-                QMessageBox.warning(self, "Load Failed", f"Failed to load any files:\n" + "\n".join(failed_files[:3]))
+            # Update progress
+            progress.setValue(i)
+            progress.setLabelText(f"Loading {i+1}/{len(file_paths)}: {Path(file_path).name}")
+            QCoreApplication.processEvents()  # Keep UI responsive
+            
+            try:
+                # Load without updating plot (update_plot=False)
+                self.load_spectrum_file_for_multi(file_path, update_plot=False)
+                success_count += 1
+            except Exception as e:
+                failed_files.append(f"{Path(file_path).name}: {str(e)}")
+        
+        progress.setValue(len(file_paths))
+        
+        # Single plot update after all files loaded
+        if success_count > 0:
+            progress.setLabelText("Updating plot...")
+            QCoreApplication.processEvents()
+            self.update_multi_plot()
+            self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
+        
+        progress.close()
+        
+        # Show results to user
+        if success_count > 0:
+            message = f"Successfully loaded {success_count} of {len(file_paths)} files."
+            if failed_files:
+                message += f"\n\nFailed files:\n" + "\n".join(failed_files[:5])
+                if len(failed_files) > 5:
+                    message += f"\n... and {len(failed_files) - 5} more"
+            QMessageBox.information(self, "Load Results", message)
+        elif failed_files:
+            QMessageBox.warning(self, "Load Failed", f"Failed to load any files:\n" + "\n".join(failed_files[:3]))
     
     def add_single_file(self):
         """Add a single spectrum file."""
