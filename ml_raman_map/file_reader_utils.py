@@ -249,7 +249,7 @@ def read_raman_spectrum(file_path, verbose=False, timeout=10):
             # Re-raise with more informative message
             raise ValueError(f"Failed to read spectrum data from {file_path}: {str(e)}")
 
-def batch_read_spectra(directory, file_ext=None, verbose=False, max_workers=4):
+def batch_read_spectra(directory, file_ext=None, verbose=False, max_workers=None):
     """
     Read all Raman spectra files in a directory.
     

@@ -39,11 +39,12 @@ class NMFAnalyzer:
             Dictionary containing NMF results
         """
         try:
-            # Set environment variables to prevent threading issues
-            os.environ['OMP_NUM_THREADS'] = '1'
-            os.environ['MKL_NUM_THREADS'] = '1'
-            os.environ['NUMEXPR_NUM_THREADS'] = '1'
-            os.environ['OPENBLAS_NUM_THREADS'] = '1'
+            # Allow multi-threaded NumPy/SciPy operations for better performance
+            # Note: If you experience threading issues, uncomment these lines:
+            # os.environ['OMP_NUM_THREADS'] = '1'
+            # os.environ['MKL_NUM_THREADS'] = '1'
+            # os.environ['NUMEXPR_NUM_THREADS'] = '1'
+            # os.environ['OPENBLAS_NUM_THREADS'] = '1'
             
             # Data validation and cleaning
             data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)

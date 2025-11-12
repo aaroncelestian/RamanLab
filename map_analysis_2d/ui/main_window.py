@@ -1130,7 +1130,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 
                 return spectrum.x_pos, spectrum.y_pos, integrated_intensity
             
-            n_jobs = min(multiprocessing.cpu_count(), 8)  # Limit to 8 cores for I/O bound tasks
+            n_jobs = -1  # Use all available CPU cores
             results = Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
                 delayed(process_spectrum)(spectrum, self.integration_center, self.integration_width, self.use_processed)
                 for spectrum in self.map_data.spectra.values()

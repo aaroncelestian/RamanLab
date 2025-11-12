@@ -1291,8 +1291,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
                                 min_dist=min_dist,
                                 metric=metric,
                                 spread=spread,
-                                random_state=42,
-                                n_jobs=1,
+                                random_state=None,  # Remove random_state to enable parallel processing
+                                n_jobs=-1,  # Use all available CPU cores
                                 local_connectivity=2.0,
                                 repulsion_strength=2.0,
                                 negative_sample_rate=10,

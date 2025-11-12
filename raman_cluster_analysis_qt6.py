@@ -1482,8 +1482,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
                             min_dist=min_dist,
                             metric=metric,
                             spread=spread,
-                            random_state=42,
-                            n_jobs=1,
+                            random_state=None,  # Remove to enable parallel processing
+                            n_jobs=-1,  # Use all available CPU cores
                             # Gentle parameters for manifold preservation
                             local_connectivity=1.0,  # Standard connectivity
                             repulsion_strength=1.0,  # Standard repulsion
@@ -1498,8 +1498,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
                             min_dist=min_dist,
                             metric=metric,
                             spread=spread,
-                            random_state=42,
-                            n_jobs=1,
+                            random_state=None,  # Remove to enable parallel processing
+                            n_jobs=-1,  # Use all available CPU cores
                             # Additional parameters for better carbon clustering
                             local_connectivity=2.0,  # Increase local connectivity
                             repulsion_strength=2.0,   # Increase repulsion for better separation
@@ -1541,8 +1541,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
                             n_neighbors=min(15, len(features_scaled) - 1),
                             min_dist=0.1,
                             metric='euclidean',
-                            random_state=42,
-                            n_jobs=1
+                            random_state=None,  # Remove to enable parallel processing
+                            n_jobs=-1  # Use all available CPU cores
                         )
                         coords = fallback_umap.fit_transform(features_scaled)
                         
@@ -6293,7 +6293,7 @@ Cluster Sizes:
             if viz_method == 'UMAP':
                 try:
                     import umap
-                    reducer = umap.UMAP(n_components=2, random_state=42)
+                    reducer = umap.UMAP(n_components=2, random_state=None, n_jobs=-1)
                     coords = reducer.fit_transform(features)
                     xlabel, ylabel = 'UMAP 1', 'UMAP 2'
                 except ImportError:
@@ -6497,7 +6497,7 @@ Cluster Sizes:
             
             # Apply UMAP to centroids
             umap_model = umap.UMAP(n_components=2, n_neighbors=min(3, len(labels)-1), 
-                                 random_state=42)
+                                 random_state=None, n_jobs=-1)
             umap_coords = umap_model.fit_transform(centroids)
             
             # Find reference cluster index

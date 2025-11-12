@@ -82,8 +82,8 @@ def update_scatter_plot_improved(self):
                     min_dist=min_dist,
                     metric=metric,
                     spread=spread,
-                    random_state=42,
-                    n_jobs=1,
+                    random_state=None,  # Remove to enable parallel processing
+                    n_jobs=-1,  # Use all available CPU cores
                     # Enhanced parameters for tighter carbon clustering
                     local_connectivity=3.0,   # Higher local connectivity for tighter groups
                     repulsion_strength=3.0,   # Stronger repulsion for better separation
@@ -132,8 +132,8 @@ def update_scatter_plot_improved(self):
                         spread=0.5,
                         local_connectivity=2.0,
                         repulsion_strength=2.0,
-                        random_state=42,
-                        n_jobs=1,
+                        random_state=None,  # Remove to enable parallel processing
+                        n_jobs=-1,  # Use all available CPU cores
                         n_epochs=300
                     )
                     coords = fallback_umap.fit_transform(features_scaled)
@@ -712,7 +712,8 @@ def optimize_clustering_parameters_automatically(self):
                     min_dist=min_dist,
                     metric='cosine',
                     spread=spread,
-                    random_state=42,
+                    random_state=None,  # Remove to enable parallel processing
+                    n_jobs=-1,  # Use all available CPU cores
                     local_connectivity=3.0,
                     repulsion_strength=repulsion,
                     negative_sample_rate=15,

@@ -6,10 +6,12 @@
 
 echo "Starting RamanLab with optimized settings..."
 
-# Set threading environment variables to prevent conflicts
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1  
-export OMP_NUM_THREADS=1
+# Allow NumPy/SciPy to use all available CPU cores for optimal performance
+# Note: If you experience segfaults, you can limit these (e.g., to 8 or 16)
+# but this will reduce performance on high-core systems
+# export OPENBLAS_NUM_THREADS=1  # Disabled for performance
+# export MKL_NUM_THREADS=1       # Disabled for performance
+# export OMP_NUM_THREADS=1       # Disabled for performance
 
 # Optional: Set Qt6 specific environment variables for better macOS compatibility
 export QT_MAC_WANTS_LAYER=1
