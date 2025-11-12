@@ -38,6 +38,9 @@ test_batch_data/
 *_backup.py
 docs_backup/
 
+# Sync conflict files (Dropbox, iCloud, etc.)
+*conflicted copy*
+
 # Package builds
 packages/
 build/

@@ -1,8 +1,8 @@
-RamanLab Version 1.3.2 - "Universal Drag-and-Drop & Analysis Enhancements"
-Release Date: October 15, 2025
+RamanLab Version 1.4.0 - "Universal Drag-and-Drop & Analysis Enhancements"
+Release Date: November 11, 2025
 Author & Maintainer: Aaron J. Celestian Ph.D. (aaron.celestian@gmail.com)
 
-🚀 **Version 1.3.2 Update**
+🚀 **Version 1.4.0 Update**
 
 This release introduces universal drag-and-drop file loading across all major RamanLab windows,
 fixes critical bugs in 2D map analysis, and enhances cluster analysis export capabilities.

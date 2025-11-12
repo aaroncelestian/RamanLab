@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.3.2"
-__version_info__ = (1, 3, 2)
+__version__ = "1.4.0"
+__version_info__ = (1, 4, 0)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -12,14 +12,14 @@ __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
-__release_date__ = "2025-10-15"
+__release_date__ = "2025-11-11"
 __release_name__ = "Universal Drag-and-Drop & Analysis Enhancements"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
-    "1.3.2": {
-        "date": "2025-10-15",
+    "1.4.0": {
+        "date": "2025-11-11",
         "name": "Universal Drag-and-Drop & Analysis Enhancements",
         "description": "Universal drag-and-drop file loading across all major RamanLab windows with critical bug fixes",
         "major_features": [
