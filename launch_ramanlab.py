@@ -10,7 +10,6 @@ Usage:
     python launch_ramanlab.py --fast  # Skip dependency checks for faster startup
 
 Author: Aaron Celestian
-Version: 1.1.4
 License: MIT
 """
 
@@ -21,7 +20,12 @@ from pathlib import Path
 
 def main():
     """Launch RamanLab with dependency checking."""
-    print("🔬 RamanLab v1.1.2 'Major Feature Update: Auto-Update & Advanced Batch Processing'")
+    # Import version information
+    try:
+        from version import __version__, __release_name__
+        print(f"🔬 RamanLab v{__version__} '{__release_name__}'")
+    except ImportError:
+        print("🔬 RamanLab")
     print("=" * 40)
     
     # Check for fast launch flag
