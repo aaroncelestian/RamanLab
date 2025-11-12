@@ -4294,8 +4294,8 @@ class RamanAnalysisAppQt6(QMainWindow):
     def launch_cluster_analysis(self):
         """Launch cluster analysis tool."""
         try:
-            # Import and launch the cluster analysis module
-            from raman_cluster_analysis_qt6 import launch_cluster_analysis
+            # Import and launch the cluster analysis module (refactored)
+            from cluster_analysis import launch_cluster_analysis
             
             # Launch the cluster analysis window - pass self as both parent and raman_app
             self.cluster_analysis_window = launch_cluster_analysis(self, self)
@@ -4308,7 +4308,7 @@ class RamanAnalysisAppQt6(QMainWindow):
                 self,
                 "Import Error",
                 f"Failed to import cluster analysis module:\n{str(e)}\n\n"
-                "Please ensure raman_cluster_analysis_qt6.py is in the same directory."
+                "Please ensure the cluster_analysis package is properly installed."
             )
         except Exception as e:
             QMessageBox.critical(

@@ -6,10 +6,10 @@ This module contains all visualization-related tabs and functionality.
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
                               QLabel, QComboBox, QSpinBox, QCheckBox, QPushButton,
-                              QTabWidget, QGridLayout, QDoubleSpinBox)
+                              QTabWidget, QGridLayout, QDoubleSpinBox, QSizePolicy)
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 
 class VisualizationTab(QWidget):
@@ -112,6 +112,7 @@ class DendrogramTab(QWidget):
         self.dendro_fig = Figure(figsize=(10, 6))
         self.dendrogram_ax = self.dendro_fig.add_subplot(111)
         self.dendro_canvas = FigureCanvas(self.dendro_fig)
+        self.dendro_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.dendro_canvas)
         
         # Add toolbar

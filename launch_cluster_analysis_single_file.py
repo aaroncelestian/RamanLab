@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 from map_analysis_2d.core.single_file_map_loader import SingleFileRamanMapData
 from map_analysis_2d.core.cosmic_ray_detection import CosmicRayConfig
 
-# Import cluster analysis
-from raman_cluster_analysis_qt6 import RamanClusterAnalysisQt6
+# Import cluster analysis (refactored module)
+from cluster_analysis import RamanClusterAnalysisQt6
 
 
 def load_single_file_map(filepath, cosmic_ray_removal=False):

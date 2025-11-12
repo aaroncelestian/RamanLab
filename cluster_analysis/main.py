@@ -324,29 +324,56 @@ class RamanClusterAnalysisQt6(QMainWindow):
             if not selected_spectra:
                 return
             
-            # Extract data from selected spectra
-            intensities = []
-            wavenumbers = None
+            # Extract data from selected spectra and find common wavenumber range
+            all_spectra = []
+            all_wavenumbers = []
             
             for name, spectrum_data in selected_spectra.items():
                 # Use the correct key for the database structure
                 spectrum = spectrum_data.get('intensities', [])
-                if wavenumbers is None:
-                    wavenumbers = spectrum_data.get('wavenumbers', np.arange(len(spectrum)))
+                wn = spectrum_data.get('wavenumbers', np.arange(len(spectrum)))
                 
-                intensities.append(spectrum)
+                if len(spectrum) > 0 and len(wn) > 0:
+                    all_spectra.append((name, wn, spectrum))
+                    all_wavenumbers.append(wn)
+            
+            if not all_spectra:
+                QMessageBox.warning(self, "Import Error", "No valid spectra found in selection.")
+                return
+            
+            # Find common wavenumber range (intersection of all ranges)
+            min_wn = max(wn.min() for wn in all_wavenumbers)
+            max_wn = min(wn.max() for wn in all_wavenumbers)
+            
+            # Create common wavenumber grid (use the spectrum with most points in range as reference)
+            reference_wn = None
+            max_points = 0
+            for wn in all_wavenumbers:
+                mask = (wn >= min_wn) & (wn <= max_wn)
+                n_points = np.sum(mask)
+                if n_points > max_points:
+                    max_points = n_points
+                    reference_wn = wn[mask]
+            
+            # Interpolate all spectra to common grid
+            intensities = []
+            for name, wn, spectrum in all_spectra:
+                # Interpolate to common wavenumber grid
+                interpolated = np.interp(reference_wn, wn, spectrum)
+                intensities.append(interpolated)
             
             # Store in cluster data
             self.cluster_data['intensities'] = np.array(intensities)
-            self.cluster_data['wavenumbers'] = wavenumbers
+            self.cluster_data['wavenumbers'] = reference_wn
             
             # Update preview in import tab
             if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_import_status'):
                 status_label = self.import_tab.get_import_status()
                 status_label.setText(f"Loaded {len(intensities)} spectra from database\n" +
-                                    f"Wavenumber range: {np.min(wavenumbers):.1f} - {np.max(wavenumbers):.1f} cm⁻¹")
+                                    f"Wavenumber range: {reference_wn.min():.1f} - {reference_wn.max():.1f} cm⁻¹\n" +
+                                    f"Data points: {len(reference_wn)}")
             
-            self.statusBar().showMessage(f"Loaded {len(intensities)} spectra")
+            self.statusBar().showMessage(f"Loaded {len(intensities)} spectra (interpolated to common grid)")
             
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import spectra:\n{str(e)}")
@@ -364,15 +391,16 @@ class RamanClusterAnalysisQt6(QMainWindow):
                                   "No data available for clustering. Please import data first.")
                 return
             
-            # Get parameters
-            n_clusters = self.n_clusters_spinbox.value()
-            linkage_method = self.linkage_method_combo.currentText()
-            distance_metric = self.distance_metric_combo.currentText()
-            preprocessing_method = self.phase_method_combo.currentText()
+            # Get parameters from clustering tab
+            clustering_controls = self.clustering_tab.get_clustering_controls()
+            n_clusters = clustering_controls['n_clusters_spinbox'].value()
+            linkage_method = clustering_controls['linkage_method_combo'].currentText()
+            distance_metric = clustering_controls['distance_metric_combo'].currentText()
+            preprocessing_method = clustering_controls['phase_method_combo'].currentText()
             
             # Update status
-            self.clustering_status.setText("Applying preprocessing...")
-            self.clustering_progress.setValue(10)
+            clustering_controls['clustering_status'].setText("Applying preprocessing...")
+            clustering_controls['clustering_progress'].setValue(10)
             QApplication.processEvents()
             
             # Apply preprocessing using data processor
@@ -383,7 +411,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 processed_intensities = self.data_processor.apply_corundum_drift_correction(
                     processed_intensities, wavenumbers
                 )
-                self.clustering_status.setText("Applied corundum drift correction...")
+                clustering_controls['clustering_status'].setText("Applied corundum drift correction...")
                 
             elif preprocessing_method == 'NMF Separation':
                 n_components = 3  # Default, could be made configurable
@@ -395,20 +423,20 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 self.cluster_data['nmf_components'] = nmf_components
                 self.cluster_data['nmf_weights'] = nmf_weights
                 self.cluster_data['corundum_component_idx'] = corundum_idx
-                self.clustering_status.setText("Applied NMF phase separation...")
+                clustering_controls['clustering_status'].setText("Applied NMF phase separation...")
                 
             elif preprocessing_method == 'Carbon Soot Optimization':
                 processed_intensities = self.data_processor.apply_carbon_soot_preprocessing(
                     processed_intensities, wavenumbers
                 )
-                self.clustering_status.setText("Applied carbon soot optimization...")
+                clustering_controls['clustering_status'].setText("Applied carbon soot optimization...")
                 self.cluster_data['carbon_optimized'] = True
             
-            self.clustering_progress.setValue(30)
+            clustering_controls['clustering_progress'].setValue(30)
             QApplication.processEvents()
             
             # Extract features
-            self.clustering_status.setText("Extracting features...")
+            clustering_controls['clustering_status'].setText("Extracting features...")
             if preprocessing_method == 'Carbon Soot Optimization':
                 features = self.data_processor.extract_carbon_specific_features(
                     processed_intensities, wavenumbers
@@ -419,18 +447,18 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 )
             
             self.cluster_data['features'] = features
-            self.clustering_progress.setValue(50)
+            clustering_controls['clustering_progress'].setValue(50)
             QApplication.processEvents()
             
             # Scale features using clustering engine
-            self.clustering_status.setText("Scaling features...")
+            clustering_controls['clustering_status'].setText("Scaling features...")
             features_scaled = self.clustering_engine.scale_features(features)
             self.cluster_data['features_scaled'] = features_scaled
-            self.clustering_progress.setValue(70)
+            clustering_controls['clustering_progress'].setValue(70)
             QApplication.processEvents()
             
             # Perform clustering using clustering engine
-            self.clustering_status.setText("Running clustering...")
+            clustering_controls['clustering_status'].setText("Running clustering...")
             labels, linkage_matrix, distance_matrix, algorithm_used = \
                 self.clustering_engine.perform_hierarchical_clustering(
                     features_scaled, n_clusters, linkage_method, distance_metric
@@ -443,25 +471,27 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.cluster_data['preprocessing_method'] = preprocessing_method
             self.cluster_data['algorithm_used'] = algorithm_used
             
-            self.clustering_progress.setValue(90)
+            clustering_controls['clustering_progress'].setValue(90)
             QApplication.processEvents()
             
             # Update results
             self.update_analysis_results()
-            self.clustering_progress.setValue(100)
+            clustering_controls['clustering_progress'].setValue(100)
             
             # Update status
             method_text = f" (using {preprocessing_method})" if preprocessing_method != 'None' else ""
             algo_text = f" via {algorithm_used}" if algorithm_used else ""
-            self.clustering_status.setText(f"Clustering complete: {n_clusters} clusters found{method_text}{algo_text}")
+            clustering_controls['clustering_status'].setText(f"Clustering complete: {n_clusters} clusters found{method_text}{algo_text}")
             
             # Switch to visualization tab
             self.tab_widget.setCurrentIndex(2)
             
         except Exception as e:
             QMessageBox.critical(self, "Clustering Error", f"Clustering failed:\n{str(e)}")
-            self.clustering_progress.setValue(0)
-            self.clustering_status.setText("Clustering failed")
+            if hasattr(self, 'clustering_tab'):
+                controls = self.clustering_tab.get_clustering_controls()
+                controls['clustering_progress'].setValue(0)
+                controls['clustering_status'].setText("Clustering failed")
     
     def update_analysis_results(self):
         """Update the analysis results display."""
@@ -945,62 +975,6 @@ class RamanClusterAnalysisQt6(QMainWindow):
         """Update carbon analysis control visibility."""
         pass
     
-    def run_clustering(self):
-        """Run clustering analysis on the loaded data."""
-        try:
-            # Check if we have data
-            if (self.cluster_data.get('intensities') is None or 
-                self.cluster_data.get('wavenumbers') is None):
-                QMessageBox.warning(self, "No Data", 
-                                  "No spectral data loaded. Please import data first.")
-                return
-            
-            # Get clustering parameters from the clustering tab
-            if not hasattr(self, 'clustering_tab'):
-                QMessageBox.warning(self, "No Clustering Tab", 
-                                  "Clustering tab not available.")
-                return
-            
-            # Get parameters (these would come from the clustering tab UI)
-            n_clusters = 5  # Default, should get from UI
-            linkage_method = 'ward'  # Default, should get from UI
-            distance_metric = 'euclidean'  # Default, should get from UI
-            
-            # Update status
-            self.statusBar().showMessage("Running clustering analysis...")
-            
-            # Run clustering using the clustering engine
-            labels, linkage_matrix, distance_matrix, algorithm_used = self.clustering_engine.perform_hierarchical_clustering(
-                self.cluster_data['intensities'],
-                n_clusters=n_clusters,
-                linkage_method=linkage_method,
-                distance_metric=distance_metric
-            )
-            
-            # Store results
-            self.cluster_data['labels'] = labels
-            self.cluster_data['linkage_matrix'] = linkage_matrix
-            self.cluster_data['distance_matrix'] = distance_matrix
-            self.cluster_data['algorithm_used'] = algorithm_used
-            
-            # Update status
-            self.statusBar().showMessage(f"Clustering complete: {n_clusters} clusters found")
-            
-            # Update visualization tabs
-            self.update_visualization_tabs()
-            
-            # Update analysis tab
-            self.update_analysis_results()
-            
-            QMessageBox.information(self, "Clustering Complete", 
-                                  f"Successfully clustered {len(self.cluster_data['intensities'])} spectra into {n_clusters} clusters.\n\n"
-                                  f"Linkage method: {linkage_method}\n"
-                                  f"Distance metric: {distance_metric}\n"
-                                  f"Algorithm used: {algorithm_used}")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Clustering Error", f"Failed to run clustering:\n{str(e)}")
-    
     def update_visualization_tabs(self):
         """Update all visualization tabs with new clustering results."""
         try:
@@ -1153,7 +1127,9 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     
                     print("DEBUG: About to draw canvas...")
                     # Update canvas
-                    canvas.draw()
+                    fig.tight_layout()
+                    canvas.draw_idle()
+                    canvas.flush_events()
                     print("DEBUG: Canvas draw completed")
                 else:
                     print("DEBUG: Dendrogram tab has no get_dendrogram_controls method")
@@ -1196,8 +1172,10 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     print(f"DEBUG: Heatmap data shape: {self.cluster_data['intensities'].shape}")
                     print(f"DEBUG: Colormap: {colormap}, Sort by cluster: {sort_by_cluster}")
                     
-                    # Clear previous plot
+                    # Clear previous plot and any colorbars
                     ax.clear()
+                    fig.clear()
+                    ax = fig.add_subplot(111)
                     
                     # Get data
                     intensities = self.cluster_data['intensities']
@@ -1220,14 +1198,13 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     ax.set_ylabel('Sample Index')
                     
                     # Add colorbar
-                    if hasattr(fig, 'colorbars'):
-                        for cbar in fig.colorbars:
-                            cbar.remove()
                     fig.colorbar(im, ax=ax, label='Intensity')
                     
                     print("DEBUG: About to draw heatmap canvas...")
                     # Update canvas
-                    canvas.draw()
+                    fig.tight_layout()
+                    canvas.draw_idle()
+                    canvas.flush_events()
                     print("DEBUG: Heatmap canvas draw completed")
                 else:
                     print("DEBUG: Heatmap tab has no get_heatmap_controls method")
@@ -1332,7 +1309,8 @@ class RamanClusterAnalysisQt6(QMainWindow):
                         except ImportError:
                             ax.text(0.5, 0.5, 'UMAP not installed\n\nInstall with:\npip install umap-learn', 
                                    ha='center', va='center', transform=ax.transAxes, fontsize=12)
-                            canvas.draw()
+                            canvas.draw_idle()
+                            canvas.flush_events()
                             return
                         except Exception as e:
                             print(f"UMAP failed: {e}")
@@ -1377,7 +1355,9 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     
                     print("DEBUG: About to draw scatter canvas...")
                     # Update canvas
-                    canvas.draw()
+                    fig.tight_layout()
+                    canvas.draw_idle()
+                    canvas.flush_events()
                     print("DEBUG: Scatter canvas draw completed")
                 else:
                     print("DEBUG: Scatter tab has no get_scatter_controls method")

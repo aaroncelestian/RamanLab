@@ -10,8 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from PySide6.QtWidgets import QApplication
 
-# Import the enhanced cluster analysis module
-from raman_cluster_analysis_qt6 import RamanClusterAnalysisQt6
+# Import the enhanced cluster analysis module (refactored)
+from cluster_analysis import RamanClusterAnalysisQt6
 # Import safe file handling
 from pkl_utils import get_example_data_paths, get_example_spectrum_file, print_available_example_files
 from utils.file_loaders import load_spectrum_file
