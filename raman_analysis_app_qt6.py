@@ -6739,9 +6739,9 @@ class AdvancedBaselineWindow(QMainWindow):
         super().__init__(parent)
         self.parent = parent
         self.setWindowTitle("Advanced Baseline Subtraction & Data Processing")
-        # Reduce size for laptop screens (was 1200x800)
-        self.setGeometry(100, 100, 1000, 700)
-        self.setMinimumSize(900, 600)
+        # Larger default size for better visibility (can still be resized)
+        self.setGeometry(100, 100, 1400, 850)
+        self.setMinimumSize(1000, 650)
         
         # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
         self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
@@ -6752,6 +6752,16 @@ class AdvancedBaselineWindow(QMainWindow):
         self.current_intensities = None
         self.manual_baseline_points = []
         self.processed_data = None
+        
+        # Storage for processed/truncated results
+        self.processed_wavenumbers = None
+        self.processed_intensities = None
+        
+        # Visibility flags for plot elements
+        self.show_original = True
+        self.show_baseline = True
+        self.show_corrected = True
+        self.show_processed = True
         
         self.setup_ui()
         
@@ -6892,6 +6902,43 @@ class AdvancedBaselineWindow(QMainWindow):
         self.canvas = FigureCanvas(self.fig)
         right_layout.addWidget(self.canvas)
         
+        # Visibility controls
+        visibility_frame = QFrame()
+        visibility_layout = QHBoxLayout(visibility_frame)
+        visibility_layout.setContentsMargins(5, 5, 5, 5)
+        
+        visibility_label = QLabel("Show:")
+        visibility_label.setStyleSheet("font-weight: bold;")
+        visibility_layout.addWidget(visibility_label)
+        
+        self.show_original_cb = QCheckBox("Original")
+        self.show_original_cb.setChecked(True)
+        self.show_original_cb.stateChanged.connect(lambda: self.toggle_visibility('original'))
+        visibility_layout.addWidget(self.show_original_cb)
+        
+        self.show_baseline_cb = QCheckBox("Baseline")
+        self.show_baseline_cb.setChecked(True)
+        self.show_baseline_cb.stateChanged.connect(lambda: self.toggle_visibility('baseline'))
+        visibility_layout.addWidget(self.show_baseline_cb)
+        
+        self.show_corrected_cb = QCheckBox("Corrected")
+        self.show_corrected_cb.setChecked(True)
+        self.show_corrected_cb.stateChanged.connect(lambda: self.toggle_visibility('corrected'))
+        visibility_layout.addWidget(self.show_corrected_cb)
+        
+        self.show_processed_cb = QCheckBox("Processed (Offset)")
+        self.show_processed_cb.setChecked(True)
+        self.show_processed_cb.stateChanged.connect(lambda: self.toggle_visibility('processed'))
+        visibility_layout.addWidget(self.show_processed_cb)
+        
+        auto_scale_btn = QPushButton("Auto Scale")
+        auto_scale_btn.clicked.connect(self.auto_scale_plot)
+        auto_scale_btn.setStyleSheet("QPushButton { background-color: #5CB85C; color: white; padding: 5px 10px; }")
+        visibility_layout.addWidget(auto_scale_btn)
+        
+        visibility_layout.addStretch()
+        right_layout.addWidget(visibility_frame)
+        
         # Toolbar
         self.toolbar = NavigationToolbar(self.canvas, right_panel)
         right_layout.addWidget(self.toolbar)
@@ -6928,6 +6975,7 @@ class AdvancedBaselineWindow(QMainWindow):
             self.lambda_param.setRange(1e3, 1e9)
             self.lambda_param.setValue(1e6)
             self.lambda_param.setDecimals(0)
+            self.lambda_param.setMinimumWidth(150)
             self.lambda_param.valueChanged.connect(self.update_live_preview)
             lambda_layout.addWidget(self.lambda_param)
             
@@ -6952,6 +7000,7 @@ class AdvancedBaselineWindow(QMainWindow):
             self.p_param.setRange(0.001, 0.1)
             self.p_param.setValue(0.01)
             self.p_param.setDecimals(4)
+            self.p_param.setMinimumWidth(150)
             self.p_param.valueChanged.connect(self.update_live_preview)
             p_layout.addWidget(self.p_param)
             
@@ -7003,6 +7052,8 @@ class AdvancedBaselineWindow(QMainWindow):
         )
         if file_path:
             self.file_path.setText(file_path)
+            # Auto-load and preview the file
+            self.load_and_preview()
     
     def browse_folder(self):
         """Browse for a folder for batch processing."""
@@ -7021,10 +7072,23 @@ class AdvancedBaselineWindow(QMainWindow):
             # Load data
             self.current_wavenumbers, self.current_intensities = self.load_spectrum_data(file_path)
             
+            # Set truncation range to actual data range
+            data_min = float(np.min(self.current_wavenumbers))
+            data_max = float(np.max(self.current_wavenumbers))
+            
+            # Update truncation spinboxes to match data range
+            self.min_wn.setValue(data_min)
+            self.max_wn.setValue(data_max)
+            
             # Auto-preview with baseline correction
             self.update_live_preview()
             
-            self.status_text.setText(f"Loaded: {file_path}\nData points: {len(self.current_wavenumbers)}\nAuto-preview enabled with {self.method_combo.currentText()}")
+            self.status_text.setText(
+                f"Loaded: {file_path}\n"
+                f"Data points: {len(self.current_wavenumbers)}\n"
+                f"Wavenumber range: {data_min:.1f} - {data_max:.1f} cm⁻¹\n"
+                f"Auto-preview enabled with {self.method_combo.currentText()}"
+            )
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load file: {str(e)}")
@@ -7061,24 +7125,40 @@ class AdvancedBaselineWindow(QMainWindow):
         self.fig.clear()
         ax = self.fig.add_subplot(111)
         
-        # Plot original spectrum
-        ax.plot(self.current_wavenumbers, self.current_intensities, 'b-', 
-                label='Original', linewidth=1.5, alpha=0.8)
+        # Plot original spectrum (if visible)
+        if self.show_original:
+            ax.plot(self.current_wavenumbers, self.current_intensities, 'b-', 
+                    label='Original', linewidth=1.5, alpha=0.8)
         
-        # Plot baseline if available
+        # Plot baseline if available (if visible)
         if hasattr(self, 'current_baseline') and self.current_baseline is not None:
-            ax.plot(self.current_wavenumbers, self.current_baseline, 'r--', 
-                    label='Baseline', linewidth=2, alpha=0.9)
+            if self.show_baseline:
+                ax.plot(self.current_wavenumbers, self.current_baseline, 'r--', 
+                        label='Baseline', linewidth=2, alpha=0.9)
+                
+                # Add fill between original and baseline for better visualization
+                if self.show_original:
+                    ax.fill_between(self.current_wavenumbers, self.current_intensities, 
+                                   self.current_baseline, alpha=0.2, color='red', 
+                                   label='Baseline Area')
             
-            # Plot corrected spectrum
-            corrected = self.current_intensities - self.current_baseline
-            ax.plot(self.current_wavenumbers, corrected, 'g-', 
-                    label='Corrected', linewidth=1.5, alpha=0.8)
+            # Plot corrected spectrum (if visible)
+            if self.show_corrected:
+                corrected = self.current_intensities - self.current_baseline
+                ax.plot(self.current_wavenumbers, corrected, 'g-', 
+                        label='Corrected', linewidth=1.5, alpha=0.8)
+        
+        # Plot processed/truncated result with 10% offset (if available and visible)
+        if self.processed_wavenumbers is not None and self.processed_intensities is not None and self.show_processed:
+            # Calculate 10% offset based on current data range
+            if self.current_intensities is not None:
+                data_range = np.max(self.current_intensities) - np.min(self.current_intensities)
+                offset = data_range * 0.10
+            else:
+                offset = 0
             
-            # Add fill between original and baseline for better visualization
-            ax.fill_between(self.current_wavenumbers, self.current_intensities, 
-                           self.current_baseline, alpha=0.2, color='red', 
-                           label='Baseline Area')
+            ax.plot(self.processed_wavenumbers, self.processed_intensities + offset, 'm-', 
+                    label='Processed (10% offset)', linewidth=2, alpha=0.9)
         
         # Plot manual baseline points
         if self.manual_baseline_points:
@@ -7090,9 +7170,6 @@ class AdvancedBaselineWindow(QMainWindow):
         if self.enable_truncation.isChecked():
             min_wn = self.min_wn.value()
             max_wn = self.max_wn.value()
-            
-            # Get y-axis limits for vertical lines
-            y_min, y_max = ax.get_ylim()
             
             # Draw vertical lines at truncation boundaries
             ax.axvline(x=min_wn, color='orange', linestyle='--', linewidth=2, 
@@ -7115,9 +7192,11 @@ class AdvancedBaselineWindow(QMainWindow):
         title = f'Spectrum with {method} Baseline Correction'
         if self.enable_truncation.isChecked():
             title += ' (Truncation Preview)'
-        ax.set_title(title, fontsize=14, fontweight='bold')
+        if self.processed_wavenumbers is not None:
+            title += ' + Processed Result'
+        ax.set_title(title, fontsize=11, fontweight='bold')
         
-        ax.legend(loc='best', framealpha=0.9)
+        ax.legend(loc='best', framealpha=0.9, fontsize=9)
         ax.grid(True, alpha=0.3)
         
         # Improve layout
@@ -7330,14 +7409,15 @@ class AdvancedBaselineWindow(QMainWindow):
             # Save processed file
             output_path = self.save_processed_data(wavenumbers, intensities, self.file_path.text())
             
-            # Update plot to show the processed result
-            self.current_wavenumbers = wavenumbers
-            self.current_intensities = intensities
-            self.current_baseline = None  # Clear baseline since we're showing corrected data
+            # Store processed data for overlay display
+            self.processed_wavenumbers = wavenumbers.copy()
+            self.processed_intensities = intensities.copy()
+            
+            # Reload and display the processed file overlaid on original
             self.plot_data()
             
             # Show success message with file location
-            success_msg = f"Processed single file successfully.\n\nSaved to:\n{output_path}"
+            success_msg = f"Processed single file successfully.\n\nSaved to:\n{output_path}\n\nProcessed result shown with 10% offset (magenta)"
             self.status_text.append(success_msg)
             QMessageBox.information(self, "Processing Complete", success_msg)
             
@@ -7459,6 +7539,65 @@ class AdvancedBaselineWindow(QMainWindow):
             
         except Exception as e:
             raise Exception(f"Error saving processed data: {str(e)}")
+    
+    def toggle_visibility(self, element):
+        """Toggle visibility of plot elements."""
+        if element == 'original':
+            self.show_original = self.show_original_cb.isChecked()
+        elif element == 'baseline':
+            self.show_baseline = self.show_baseline_cb.isChecked()
+        elif element == 'corrected':
+            self.show_corrected = self.show_corrected_cb.isChecked()
+        elif element == 'processed':
+            self.show_processed = self.show_processed_cb.isChecked()
+        
+        # Redraw plot with new visibility settings
+        self.plot_data()
+    
+    def auto_scale_plot(self):
+        """Auto-scale the plot to fit all visible data."""
+        if self.current_wavenumbers is None or self.current_intensities is None:
+            return
+        
+        try:
+            # Collect all visible data for scaling
+            all_intensities = []
+            
+            if self.show_original and self.current_intensities is not None:
+                all_intensities.extend(self.current_intensities)
+            
+            if self.show_baseline and hasattr(self, 'current_baseline') and self.current_baseline is not None:
+                all_intensities.extend(self.current_baseline)
+            
+            if self.show_corrected and hasattr(self, 'current_baseline') and self.current_baseline is not None:
+                corrected = self.current_intensities - self.current_baseline
+                all_intensities.extend(corrected)
+            
+            if self.show_processed and self.processed_intensities is not None:
+                # Include offset in calculation
+                data_range = np.max(self.current_intensities) - np.min(self.current_intensities)
+                offset = data_range * 0.10
+                all_intensities.extend(self.processed_intensities + offset)
+            
+            if all_intensities:
+                # Get current axes
+                ax = self.fig.gca()
+                
+                # Calculate appropriate limits with some padding
+                y_min = np.min(all_intensities)
+                y_max = np.max(all_intensities)
+                y_range = y_max - y_min
+                padding = y_range * 0.05  # 5% padding
+                
+                ax.set_ylim(y_min - padding, y_max + padding)
+                
+                # Redraw
+                self.canvas.draw()
+                
+                self.status_text.append("Plot auto-scaled to fit all visible data")
+        
+        except Exception as e:
+            print(f"Auto-scale error: {e}")
 
 
 # Main entry point (if running as standalone)
