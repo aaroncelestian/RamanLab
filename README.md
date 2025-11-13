@@ -82,7 +82,6 @@ This will create:
 python install_desktop_icon.py --uninstall
 ```
 
-See [DESKTOP_ICON_INSTALLATION.md](DESKTOP_ICON_INSTALLATION.md) for detailed instructions.
 
 ---
 
