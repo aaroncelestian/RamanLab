@@ -67,6 +67,9 @@ class DatabaseBrowserQt6(QDialog):
         # Lazy loading for performance with large databases
         self.all_spectrum_names = []  # Full list of spectrum names
         self.MAX_INITIAL_ITEMS = 100  # Only show first 100 initially
+        self.LOAD_BATCH_SIZE = 50  # Load 50 more items when scrolling
+        self.current_loaded_count = 0  # Track how many items are currently loaded
+        self.is_loading_more = False  # Prevent multiple simultaneous loads
         
         # Hey Index tab variables
         self.current_hey_spectrum = None
@@ -515,6 +518,11 @@ class DatabaseBrowserQt6(QDialog):
         
         self.spectrum_list = QListWidget()
         self.spectrum_list.currentItemChanged.connect(self.on_spectrum_select)
+        
+        # Connect scroll bar to detect when user reaches the bottom
+        scrollbar = self.spectrum_list.verticalScrollBar()
+        scrollbar.valueChanged.connect(self.on_spectrum_list_scroll)
+        
         list_layout.addWidget(self.spectrum_list)
         
         left_layout.addWidget(list_group)
@@ -1130,6 +1138,7 @@ class DatabaseBrowserQt6(QDialog):
         
         # Only populate first MAX_INITIAL_ITEMS for instant loading
         items_to_show = min(self.MAX_INITIAL_ITEMS, total_spectra)
+        self.current_loaded_count = items_to_show
         
         print(f"🚀 LAZY LOADING: Populating {items_to_show} of {total_spectra:,} spectra")
         
@@ -1141,7 +1150,60 @@ class DatabaseBrowserQt6(QDialog):
         print(f"⏱️  Spectrum list populated: {elapsed:.2f}s ({items_to_show} items)")
         
         if total_spectra > self.MAX_INITIAL_ITEMS:
-            print(f"ℹ️  Showing first {items_to_show} of {total_spectra:,} spectra. Use search to find specific spectra.")
+            print(f"ℹ️  Showing first {items_to_show} of {total_spectra:,} spectra. Scroll down to load more.")
+    
+    def on_spectrum_list_scroll(self, value):
+        """Handle scroll events to load more items when reaching the bottom."""
+        if self.is_loading_more:
+            return  # Already loading, don't trigger again
+        
+        scrollbar = self.spectrum_list.verticalScrollBar()
+        
+        # Check if we're near the bottom (within 10% of max)
+        max_value = scrollbar.maximum()
+        if max_value == 0:
+            return  # No scrollbar needed
+        
+        threshold = max_value * 0.9  # Trigger at 90% scroll
+        
+        if value >= threshold:
+            # Check if there are more items to load
+            total_spectra = len(self.all_spectrum_names)
+            if self.current_loaded_count < total_spectra:
+                self.load_more_spectra()
+    
+    def load_more_spectra(self):
+        """Load the next batch of spectra into the list."""
+        if self.is_loading_more:
+            return
+        
+        self.is_loading_more = True
+        
+        try:
+            total_spectra = len(self.all_spectrum_names)
+            start_index = self.current_loaded_count
+            end_index = min(start_index + self.LOAD_BATCH_SIZE, total_spectra)
+            
+            if start_index >= total_spectra:
+                return  # Already loaded everything
+            
+            print(f"📥 Loading more spectra: {start_index} to {end_index} of {total_spectra:,}")
+            
+            # Add next batch of items
+            for name in self.all_spectrum_names[start_index:end_index]:
+                item = QListWidgetItem(name)
+                self.spectrum_list.addItem(item)
+            
+            self.current_loaded_count = end_index
+            
+            remaining = total_spectra - end_index
+            if remaining > 0:
+                print(f"✅ Loaded {end_index} of {total_spectra:,} spectra ({remaining:,} remaining)")
+            else:
+                print(f"✅ All {total_spectra:,} spectra loaded")
+        
+        finally:
+            self.is_loading_more = False
     
     def on_spectrum_select(self, current, previous):
         """Handle spectrum selection."""
