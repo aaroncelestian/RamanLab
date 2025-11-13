@@ -177,7 +177,14 @@ class RamanSpectraQt6:
                 # Create empty database
                 print(f"⚠ Database file not found at: {self.db_path}")
                 print("  Creating empty database")
-                self.database = {}
+                
+                # Show interactive dialog to user
+                if self.parent:
+                    self.database = {}
+                    self._prompt_database_download()
+                else:
+                    self.database = {}
+                
                 return True
                 
         except Exception as e:
@@ -190,6 +197,136 @@ class RamanSpectraQt6:
                 )
             self.database = {}
             return False
+    
+    def _prompt_database_download(self):
+        """Prompt user to download or locate the database file."""
+        from PySide6.QtWidgets import QFileDialog
+        import webbrowser
+        import shutil
+        
+        msg = QMessageBox(self.parent)
+        msg.setIcon(QMessageBox.Information)
+        msg.setWindowTitle("Database Not Found")
+        msg.setText("The RamanLab database file was not found.")
+        msg.setInformativeText(
+            f"Expected location:\n{self.db_path}\n\n"
+            f"The database contains 6,939+ reference spectra (200MB).\n\n"
+            f"What would you like to do?"
+        )
+        
+        # Add custom buttons
+        download_btn = msg.addButton("Download from Zenodo", QMessageBox.ActionRole)
+        locate_btn = msg.addButton("Locate Existing File", QMessageBox.ActionRole)
+        continue_btn = msg.addButton("Continue Without Database", QMessageBox.RejectRole)
+        
+        msg.setDefaultButton(download_btn)
+        msg.exec()
+        
+        clicked_button = msg.clickedButton()
+        
+        if clicked_button == download_btn:
+            # Open Zenodo download page
+            zenodo_url = "https://zenodo.org/records/15742626"
+            webbrowser.open(zenodo_url)
+            
+            QMessageBox.information(
+                self.parent,
+                "Download Instructions",
+                f"Opening Zenodo download page in your browser...\n\n"
+                f"After downloading 'RamanLab_Database_20250602.pkl':\n\n"
+                f"1. Place it in:\n   {self.db_directory}\n\n"
+                f"2. Restart RamanLab\n\n"
+                f"The database will be automatically loaded on next launch."
+            )
+            
+        elif clicked_button == locate_btn:
+            # Let user browse for existing database file
+            file_path, _ = QFileDialog.getOpenFileName(
+                self.parent,
+                "Locate RamanLab Database File",
+                str(Path.home()),
+                "Database Files (*.pkl);;All Files (*.*)"
+            )
+            
+            if file_path and os.path.exists(file_path):
+                try:
+                    # Verify it's a valid database file by trying to load it
+                    with open(file_path, 'rb') as f:
+                        test_data = pickle.load(f)
+                    
+                    # Check if it's a valid RamanLab database
+                    if isinstance(test_data, dict):
+                        # Check for nested structure or flat structure
+                        if 'spectra' in test_data:
+                            spectra_count = len(test_data['spectra'])
+                        else:
+                            spectra_count = len(test_data)
+                        
+                        # Ask user if they want to copy it to the expected location
+                        reply = QMessageBox.question(
+                            self.parent,
+                            "Copy Database File",
+                            f"Found valid database with {spectra_count} spectra.\n\n"
+                            f"Copy to RamanLab directory?\n"
+                            f"From: {file_path}\n"
+                            f"To: {self.db_path}",
+                            QMessageBox.Yes | QMessageBox.No,
+                            QMessageBox.Yes
+                        )
+                        
+                        if reply == QMessageBox.Yes:
+                            # Create directory if it doesn't exist
+                            self.db_directory.mkdir(parents=True, exist_ok=True)
+                            
+                            # Copy the file
+                            shutil.copy2(file_path, self.db_path)
+                            
+                            # Load the database
+                            self.load_database()
+                            
+                            QMessageBox.information(
+                                self.parent,
+                                "Database Loaded",
+                                f"Successfully loaded database with {len(self.database)} spectra!\n\n"
+                                f"Database location: {self.db_path}"
+                            )
+                        else:
+                            # Use the file from its current location
+                            self.db_path = Path(file_path)
+                            self.load_database()
+                            
+                            QMessageBox.information(
+                                self.parent,
+                                "Database Loaded",
+                                f"Successfully loaded database with {len(self.database)} spectra!\n\n"
+                                f"Note: Database is being used from:\n{file_path}\n\n"
+                                f"Consider copying it to:\n{self.db_directory}\n"
+                                f"for permanent use."
+                            )
+                    else:
+                        QMessageBox.warning(
+                            self.parent,
+                            "Invalid Database",
+                            f"The selected file is not a valid RamanLab database.\n\n"
+                            f"Expected a pickle file with dictionary structure."
+                        )
+                        
+                except Exception as e:
+                    QMessageBox.critical(
+                        self.parent,
+                        "Error Loading Database",
+                        f"Failed to load database file:\n{str(e)}\n\n"
+                        f"Please ensure the file is a valid RamanLab database."
+                    )
+            elif file_path:
+                QMessageBox.warning(
+                    self.parent,
+                    "File Not Found",
+                    f"The selected file does not exist:\n{file_path}"
+                )
+        
+        # If continue_btn or dialog closed, just continue with empty database
+        # (database is already initialized as empty)
     
     def get_database_stats(self):
         """Get database statistics."""

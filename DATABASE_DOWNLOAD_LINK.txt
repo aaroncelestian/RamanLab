@@ -1,0 +1,66 @@
+================================================================================
+                    RAMANLAB DATABASE DOWNLOAD
+================================================================================
+
+⚠️  IMPORTANT: Database file NOT included in repository
+
+The RamanLab database file is too large (200MB+) to include in the Git 
+repository. You must download it separately.
+
+FILE INFORMATION
+----------------
+Name:     RamanLab_Database_20250602.pkl
+Size:     ~200MB
+Format:   Python pickle (.pkl)
+Contains: 6,939+ experimental Raman spectra
+
+
+DOWNLOAD LINK
+-------------
+
+https://zenodo.org/records/15742626
+
+The database is hosted on Zenodo, a trusted research data repository.
+This ensures permanent, citable access to the database files.
+
+
+INSTALLATION
+------------
+
+After downloading, place the file in ONE of these locations:
+
+1. Documents/RamanLab_Qt6/RamanLab_Database_20250602.pkl (recommended)
+2. Same folder as raman_analysis_app_qt6.py
+
+See DATABASE_INSTALLATION.md for detailed instructions.
+
+
+VERIFICATION
+------------
+
+When RamanLab starts successfully with the database:
+✓ Console shows: "Database loaded successfully"
+✓ Database contains 6939 entries
+✓ No "Database Not Found" warning
+
+
+ALTERNATIVE: Start with Empty Database
+---------------------------------------
+
+If you don't need the reference database immediately:
+- RamanLab will start with an empty database
+- You can add your own spectra
+- Import the database later when needed
+
+
+QUESTIONS?
+----------
+Support Forum: https://ramanlab.freeforums.net/#category-3
+GitHub Issues: https://github.com/aaroncelestian/RamanLab/issues
+Email: aaron.celestian@gmail.com
+Repository: https://github.com/aaroncelestian/RamanLab
+Database: https://zenodo.org/records/15742626
+Documentation: See README.md and DATABASE_INSTALLATION.md
+
+
+================================================================================

@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use this software or database, please cite it as below."
+type: software
+title: "RamanLab: Advanced Raman Spectroscopy Analysis Suite"
+abstract: "Comprehensive Python-based application for Raman spectroscopy data analysis, featuring peak fitting, database management, cluster analysis, 2D mapping, and advanced visualization tools."
+authors:
+  - family-names: "Celestian"
+    given-names: "Aaron"
+    orcid: "https://orcid.org/0000-0003-0775-6380"
+    email: "aaron.celestian@gmail.com"
+repository-code: "https://github.com/aaroncelestian/RamanLab"
+keywords:
+  - Raman spectroscopy
+  - spectral analysis
+  - peak fitting
+  - cluster analysis
+  - mineralogy
+  - materials science
+license: "MIT"
+version: "2025.06"
+date-released: "2025-06-02"
+url: "https://github.com/aaroncelestian/RamanLab"
+
+preferred-citation:
+  type: article
+  title: "RamanLab: A Comprehensive Cross-Platform Software Suite for Advanced Raman Spectroscopy Analysis"
+  authors:
+    - family-names: "Celestian"
+      given-names: "Aaron"
+      orcid: "https://orcid.org/0000-0003-0775-6380"
+  year: 2025
+  doi: "10.22541/au.175269971.11603902/v1"
+  url: "https://www.authorea.com/users/19309/articles/1315548"
+
+references:
+  - type: dataset
+    title: "RamanLab Raman Spectra Database"
+    authors:
+      - family-names: "Celestian"
+        given-names: "Aaron"
+    year: 2025
+    database: "Zenodo"
+    doi: "10.5281/zenodo.15742626"
+    url: "https://zenodo.org/records/15742626"
+    abstract: "Database containing 6,939+ experimental Raman spectra for mineral and material identification"

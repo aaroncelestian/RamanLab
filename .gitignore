@@ -56,8 +56,13 @@ dist/
 # Log files
 *.log
 
-# Documenetation files
+# Documentation files (exclude most, but keep README and installation guides)
 *.md
+!README.md
+!DATABASE_INSTALLATION.md
+!DESKTOP_ICON_INSTALLATION.md
+!INSTALL.txt
+!CITATION.cff
 
 # Configuration files that might contain sensitive data
 *.json

@@ -1,0 +1,134 @@
+================================================================================
+                    RAMANLAB INSTALLATION QUICK START
+================================================================================
+
+PREREQUISITES
+-------------
+- Python 3.8 or higher
+- 8GB RAM minimum (16GB+ recommended)
+- 500MB disk space + 250MB for database
+
+INSTALLATION STEPS
+------------------
+
+1. INSTALL PYTHON DEPENDENCIES
+   
+   pip install -r requirements_qt6.txt
+
+
+2. VERIFY INSTALLATION (RECOMMENDED)
+   
+   python check_dependencies.py
+   
+   This checks:
+   - Python version (3.8+ required)
+   - All required packages
+   - Qt6 framework
+   - System resources
+   - Database files
+   
+   Provides specific fix commands if issues found.
+
+
+3. DOWNLOAD DATABASE FILE (REQUIRED - 200MB)
+   
+   File: RamanLab_Database_20250602.pkl
+   
+   ⚠️  DATABASE NOT INCLUDED IN REPOSITORY DUE TO SIZE
+   
+   Download from: https://zenodo.org/records/15742626
+
+
+4. PLACE DATABASE FILE
+   
+   Choose ONE location:
+   
+   OPTION A (Recommended): User Documents folder
+   
+   Windows:  C:\Users\<YourUsername>\Documents\RamanLab_Qt6\
+   macOS:    ~/Documents/RamanLab_Qt6/
+   Linux:    ~/Documents/RamanLab_Qt6/
+   
+   OPTION B: Application directory (same folder as Python scripts)
+
+
+5. LAUNCH RAMANLAB
+   
+   python raman_analysis_app_qt6.py
+
+
+6. OPTIONAL: INSTALL DESKTOP ICON
+   
+   For convenient access, create a desktop shortcut:
+   
+   python install_desktop_icon.py
+   
+   This creates:
+   - Windows: Desktop shortcut with icon
+   - macOS: Application in ~/Applications
+   - Linux: Desktop entry in applications menu
+   
+   To uninstall: python install_desktop_icon.py --uninstall
+   
+   See DESKTOP_ICON_INSTALLATION.md for details.
+
+
+VERIFICATION
+------------
+
+✓ Console should show: "Database loaded successfully from: <path>"
+✓ Database should contain 6939 entries
+✓ Database tab should show statistics
+
+✗ If you see "Database Not Found" warning:
+  - Download the database file (200MB)
+  - Place in correct location (see step 3)
+  - Restart RamanLab
+
+
+TROUBLESHOOTING
+---------------
+
+Problem: "Database Not Found"
+Solution: Download RamanLab_Database_20250602.pkl and place in:
+          Documents/RamanLab_Qt6/ folder
+
+Problem: Import errors
+Solution: pip install -r requirements_qt6.txt
+
+Problem: Window too large
+Solution: Minimum resolution 1024x600, scroll areas enabled
+
+
+DOCUMENTATION
+-------------
+
+README.md                  - Full documentation
+DATABASE_INSTALLATION.md   - Detailed database setup guide
+requirements_qt6.txt       - Python dependencies
+
+
+MODULES
+-------
+
+Main Application:          python raman_analysis_app_qt6.py
+Cluster Analysis:          python raman_cluster_analysis_qt6.py
+2D Map Analysis:           python map_analysis_2d_qt6.py
+Database Browser:          python database_browser_qt6.py
+Polarization Analyzer:     python raman_polarization_analyzer_qt6.py
+
+
+SUPPORT
+-------
+Support Forum: https://ramanlab.freeforums.net/#category-3
+GitHub Issues: https://github.com/aaroncelestian/RamanLab/issues
+Email: aaron.celestian@gmail.com
+Repository: https://github.com/aaroncelestian/RamanLab
+Database: https://zenodo.org/records/15742626
+
+See DATABASE_INSTALLATION.md for detailed troubleshooting.
+
+
+================================================================================
+                         QUICK START COMPLETE!
+================================================================================
