@@ -184,7 +184,7 @@ python raman_polarization_analyzer_qt6.py
 
 RamanLab searches for databases in this order:
 
-1. **User Documents folder**: `~/Documents/RamanLab_Qt6/`
+1. **User Documents folder**: e.g. `~/Documents/RamanLab_Qt6/`
 2. **Application directory**: Same folder as Python scripts
 
 ### Performance Settings
