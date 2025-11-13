@@ -2153,12 +2153,12 @@ class DatabaseBrowserQt6(QDialog):
             return
         
         # Get save location
-        default_filename = f"RamanLab_Database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sqlite"
+        default_filename = f"RamanLab_Database_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pkl"
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export RamanLab Database",
             os.path.join(os.path.expanduser("~"), "Desktop", default_filename),
-            "SQLite Database (*.sqlite);;All files (*.*)"
+            "RamanLab Database (*.pkl);;All files (*.*)"
         )
         
         if not file_path:
@@ -2198,19 +2198,19 @@ class DatabaseBrowserQt6(QDialog):
             shutil.copy2(self.raman_db.db_path, file_path)
             
             # Create an info file alongside the database
-            info_file = file_path.replace('.sqlite', '_info.txt')
+            info_file = file_path.replace('.pkl', '_info.txt')
             with open(info_file, 'w', encoding='utf-8') as f:
                 f.write(f"RamanLab Database Export\n")
                 f.write(f"{'='*40}\n\n")
                 f.write(f"Export Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"Database Version: Qt6 SQLite Format\n\n")
+                f.write(f"Database Version: Qt6 Pickle Format\n\n")
                 f.write(f"Database Statistics:\n")
                 f.write(f"  Total Spectra: {stats['total_spectra']}\n")
                 f.write(f"  Average Data Points: {stats['avg_data_points']:.0f}\n")
                 f.write(f"  Average Peaks: {stats['avg_peaks']:.1f}\n")
                 f.write(f"  File Size: {stats['database_size']}\n\n")
                 f.write(f"Installation Instructions:\n")
-                f.write(f"1. Copy this .sqlite file to your RamanLab directory\n")
+                f.write(f"1. Copy this .pkl file to your RamanLab directory\n")
                 f.write(f"2. Use 'Database > Import Database' in RamanLab\n")
                 f.write(f"3. Select this file to load all {stats['total_spectra']} spectra\n\n")
                 f.write(f"No migration required - ready to use!\n")
@@ -2235,13 +2235,13 @@ class DatabaseBrowserQt6(QDialog):
             traceback.print_exc()
 
     def import_database(self):
-        """Import a database file (SQLite or filtered pickle)."""
+        """Import a database file (pickle format)."""
         # Browse for database file
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Import RamanLab Database",
             os.path.expanduser("~"),
-            "Database Files (*.sqlite *.pkl);;SQLite Database (*.sqlite);;Pickle Files (*.pkl);;All files (*.*)"
+            "RamanLab Database (*.pkl);;All files (*.*)"
         )
         
         if not file_path:
@@ -2255,46 +2255,24 @@ class DatabaseBrowserQt6(QDialog):
             self.export_import_status_label.setText("Validating database file...")
             QApplication.processEvents()
             
-            # Determine file type and validate
-            file_extension = os.path.splitext(file_path)[1].lower()
+            # Load and validate pickle file
+            with open(file_path, 'rb') as f:
+                data = pickle.load(f)
             
-            if file_extension == '.pkl':
-                # Handle pickle file (filtered export)
-                with open(file_path, 'rb') as f:
-                    data = pickle.load(f)
-                
-                # Validate pickle structure
-                if not isinstance(data, dict) or 'spectra' not in data:
-                    raise ValueError("Not a valid RamanLab pickle file")
-                
-                count = len(data['spectra'])
-                file_type = "Filtered Pickle"
-                
-                # Show filter information if available
-                metadata = data.get('metadata', {})
-                filter_info = ""
-                if metadata.get('export_type') == 'filtered':
-                    filter_type = metadata.get('filter_type', 'Unknown')
-                    filter_value = metadata.get('filter_value', 'Unknown')
-                    filter_info = f"\nFilter: {filter_type} = '{filter_value}'"
-                
-            else:
-                # Handle SQLite file (full database)
-                import sqlite3
-                with sqlite3.connect(file_path) as conn:
-                    cursor = conn.cursor()
-                    # Check if it has the expected table structure
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                    tables = [row[0] for row in cursor.fetchall()]
-                    
-                    if 'spectra' not in tables:
-                        raise ValueError("Not a valid RamanLab database file")
-                    
-                    # Get basic stats
-                    cursor.execute("SELECT COUNT(*) FROM spectra")
-                    count = cursor.fetchone()[0]
-                    file_type = "SQLite Database"
-                    filter_info = ""
+            # Validate pickle structure
+            if not isinstance(data, dict) or 'spectra' not in data:
+                raise ValueError("Not a valid RamanLab database file")
+            
+            count = len(data['spectra'])
+            file_type = "RamanLab Database"
+            
+            # Show filter information if available
+            metadata = data.get('metadata', {})
+            filter_info = ""
+            if metadata.get('export_type') == 'filtered':
+                filter_type = metadata.get('filter_type', 'Unknown')
+                filter_value = metadata.get('filter_value', 'Unknown')
+                filter_info = f"\nFilter: {filter_type} = '{filter_value}'"
             
             # Confirm import
             file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
@@ -2304,8 +2282,8 @@ class DatabaseBrowserQt6(QDialog):
                 f"Import {file_type} from: {os.path.basename(file_path)}\n"
                 f"Contains {count} spectra{filter_info}\n"
                 f"File size: {file_size:.1f} MB\n\n"
-                f"This will {'merge with' if file_extension == '.pkl' else 'replace'} your current database.\n"
-                f"{'Your existing database will be backed up first.' if file_extension != '.pkl' else 'Existing spectra with same names will be updated.'}\n\n"
+                f"This will merge with your current database.\n"
+                f"Existing spectra with same names will be updated.\n\n"
                 f"Continue with import?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No  # Default to No for safety
@@ -2315,56 +2293,31 @@ class DatabaseBrowserQt6(QDialog):
                 self.export_import_status_label.setText("Import cancelled.")
                 return
             
-            if file_extension == '.pkl':
-                # Handle pickle file import (merge)
-                self.export_import_status_label.setText("Importing filtered database...")
-                QApplication.processEvents()
-                
-                # Load pickle data
-                with open(file_path, 'rb') as f:
-                    import_data = pickle.load(f)
-                
-                spectra_to_import = import_data['spectra']
-                imported_count = 0
-                updated_count = 0
-                
-                # Merge spectra into current database
-                for spectrum_name, spectrum_data in spectra_to_import.items():
-                    if spectrum_name in self.raman_db.database:
-                        updated_count += 1
-                    else:
-                        imported_count += 1
-                    
-                    # Add/update spectrum in database
-                    self.raman_db.database[spectrum_name] = spectrum_data
-                
-                # Save the updated database
-                self.raman_db.save_database()
-                backup_msg = f"Merged {imported_count} new and updated {updated_count} existing spectra."
-                
-            else:
-                # Handle SQLite file import (replace)
-                self.export_import_status_label.setText("Backing up current database...")
-                QApplication.processEvents()
-                
-                # Backup current database if it exists
-                if os.path.exists(self.raman_db.db_path):
-                    backup_path = str(self.raman_db.db_path) + f".backup_{int(time.time())}"
-                    import shutil
-                    shutil.copy2(self.raman_db.db_path, backup_path)
-                    backup_msg = f"Current database backed up to: {os.path.basename(backup_path)}"
+            # Handle pickle file import (merge)
+            self.export_import_status_label.setText("Importing database...")
+            QApplication.processEvents()
+            
+            # Load pickle data
+            with open(file_path, 'rb') as f:
+                import_data = pickle.load(f)
+            
+            spectra_to_import = import_data['spectra']
+            imported_count = 0
+            updated_count = 0
+            
+            # Merge spectra into current database
+            for spectrum_name, spectrum_data in spectra_to_import.items():
+                if spectrum_name in self.raman_db.database:
+                    updated_count += 1
                 else:
-                    backup_msg = "No existing database to backup."
+                    imported_count += 1
                 
-                self.export_import_status_label.setText("Importing new database...")
-                QApplication.processEvents()
-                
-                # Copy the new database file
-                import shutil
-                shutil.copy2(file_path, self.raman_db.db_path)
-                
-                # Reload the database in memory
-                self.raman_db.load_database()
+                # Add/update spectrum in database
+                self.raman_db.database[spectrum_name] = spectrum_data
+            
+            # Save the updated database
+            self.raman_db.save_database()
+            backup_msg = f"Merged {imported_count} new and updated {updated_count} existing spectra."
             
             # Update UI
             self.update_spectrum_list()
@@ -2373,25 +2326,15 @@ class DatabaseBrowserQt6(QDialog):
             # Success message
             stats = self.raman_db.get_database_stats()
             
-            if file_extension == '.pkl':
-                message = (
-                    f"Filtered database imported successfully!\n\n"
-                    f"✅ Total spectra in database: {stats['total_spectra']}\n"
-                    f"✅ Database size: {stats['database_size']}\n"
-                    f"🔍 Source: {file_type}{filter_info}\n\n"
-                    f"{backup_msg}\n\n"
-                    f"The filtered spectra have been merged into your database!"
-                )
-                self.export_import_status_label.setText(f"Merged filtered database successfully ({count} spectra)")
-            else:
-                message = (
-                    f"Database imported successfully!\n\n"
-                    f"✅ Imported: {stats['total_spectra']} spectra\n"
-                    f"✅ Database size: {stats['database_size']}\n\n"
-                    f"{backup_msg}\n\n"
-                    f"The new database is now active and ready to use!"
-                )
-                self.export_import_status_label.setText(f"Imported {stats['total_spectra']} spectra successfully")
+            message = (
+                f"Database imported successfully!\n\n"
+                f"✅ Total spectra in database: {stats['total_spectra']}\n"
+                f"✅ Database size: {stats['database_size']}\n"
+                f"🔍 Source: {file_type}{filter_info}\n\n"
+                f"{backup_msg}\n\n"
+                f"The spectra have been merged into your database!"
+            )
+            self.export_import_status_label.setText(f"Imported {count} spectra successfully")
             
             QMessageBox.information(self, "Import Complete", message)
             

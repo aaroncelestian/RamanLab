@@ -373,10 +373,10 @@ class RamanSpectraQt6:
         try:
             if import_path.endswith('.pkl'):
                 with open(import_path, 'rb') as f:
-                    imported_db = pickle.load(f)
+                    imported_data = pickle.load(f)
             elif import_path.endswith('.json'):
                 with open(import_path, 'r') as f:
-                    imported_db = json.load(f)
+                    imported_data = json.load(f)
             else:
                 if self.parent:
                     QMessageBox.warning(
@@ -385,6 +385,23 @@ class RamanSpectraQt6:
                         "Only .pkl and .json files are supported for import."
                     )
                 return False
+            
+            # Handle both flat dictionary and nested dictionary structures
+            # Check if this is a filtered export with nested structure
+            if isinstance(imported_data, dict) and 'spectra' in imported_data:
+                # Nested structure from filtered export
+                imported_db = imported_data['spectra']
+                metadata = imported_data.get('metadata', {})
+                print(f"Importing filtered database: {metadata.get('filter_type', 'Unknown')} = {metadata.get('filter_value', 'Unknown')}")
+            elif isinstance(imported_data, dict):
+                # Flat dictionary structure (old format or direct database export)
+                imported_db = imported_data
+            else:
+                raise ValueError("Invalid database format: expected dictionary structure")
+            
+            # Validate that imported_db contains spectrum data
+            if not imported_db:
+                raise ValueError("No spectra found in imported database")
             
             # Merge with existing database
             conflicts = []
@@ -406,6 +423,14 @@ class RamanSpectraQt6:
             self.database.update(imported_db)
             self.save_database()
             
+            if self.parent:
+                QMessageBox.information(
+                    self.parent,
+                    "Import Successful",
+                    f"Successfully imported {len(imported_db)} spectra.\n"
+                    f"{'Overwrote ' + str(len(conflicts)) + ' existing entries.' if conflicts else 'No conflicts.'}"
+                )
+            
             return True
             
         except Exception as e:
@@ -413,7 +438,8 @@ class RamanSpectraQt6:
                 QMessageBox.critical(
                     self.parent,
                     "Import Error",
-                    f"Failed to import database:\n{str(e)}"
+                    f"Failed to import database:\n{str(e)}\n\n"
+                    f"Please ensure the file is a valid RamanLab database export."
                 )
             return False
     

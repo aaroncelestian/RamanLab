@@ -191,7 +191,8 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         # Set window properties
         self.setWindowTitle("RamanLab")
-        self.setMinimumSize(1400, 900)
+        # Reduce minimum size for laptop screens (was 1400x900)
+        self.setMinimumSize(1024, 600)
         self.resize(1600, 1000)
         
         # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
@@ -329,6 +330,12 @@ class RamanAnalysisAppQt6(QMainWindow):
 
     def setup_control_panel(self, parent):
         """Set up the control panel with tabs."""
+        # Create scroll area for small screen support
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
         # Create tab widget
         self.tab_widget = QTabWidget()
         
@@ -349,7 +356,10 @@ class RamanAnalysisAppQt6(QMainWindow):
         # Set a reasonable maximum width for the tab widget
         self.tab_widget.setMaximumWidth(450)
         
-        parent.addWidget(self.tab_widget)
+        # Put tab widget in scroll area
+        scroll_area.setWidget(self.tab_widget)
+        
+        parent.addWidget(scroll_area)
 
     def create_file_tab(self):
         """Create the file operations tab."""
@@ -6729,7 +6739,9 @@ class AdvancedBaselineWindow(QMainWindow):
         super().__init__(parent)
         self.parent = parent
         self.setWindowTitle("Advanced Baseline Subtraction & Data Processing")
-        self.setGeometry(100, 100, 1200, 800)
+        # Reduce size for laptop screens (was 1200x800)
+        self.setGeometry(100, 100, 1000, 700)
+        self.setMinimumSize(900, 600)
         
         # Explicitly set window flags to ensure minimize/maximize/close buttons on Windows
         self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint)
@@ -6821,6 +6833,7 @@ class AdvancedBaselineWindow(QMainWindow):
         truncation_layout = QVBoxLayout(truncation_group)
         
         self.enable_truncation = QCheckBox("Enable Data Truncation")
+        self.enable_truncation.stateChanged.connect(self.update_live_preview)
         truncation_layout.addWidget(self.enable_truncation)
         
         truncation_params = QFrame()
@@ -6830,12 +6843,14 @@ class AdvancedBaselineWindow(QMainWindow):
         self.min_wn.setRange(0, 4000)
         self.min_wn.setValue(200)
         self.min_wn.setSuffix(" cm⁻¹")
+        self.min_wn.valueChanged.connect(self.update_live_preview)
         truncation_params_layout.addRow("Min Wavenumber:", self.min_wn)
         
         self.max_wn = QDoubleSpinBox()
         self.max_wn.setRange(0, 4000)
         self.max_wn.setValue(3500)
         self.max_wn.setSuffix(" cm⁻¹")
+        self.max_wn.valueChanged.connect(self.update_live_preview)
         truncation_params_layout.addRow("Max Wavenumber:", self.max_wn)
         
         truncation_layout.addWidget(truncation_params)
@@ -7071,12 +7086,36 @@ class AdvancedBaselineWindow(QMainWindow):
             ax.plot(points[:, 0], points[:, 1], 'ro', markersize=8, 
                     label='Manual Points', markeredgecolor='darkred', markeredgewidth=1)
         
+        # Show truncation boundaries if enabled
+        if self.enable_truncation.isChecked():
+            min_wn = self.min_wn.value()
+            max_wn = self.max_wn.value()
+            
+            # Get y-axis limits for vertical lines
+            y_min, y_max = ax.get_ylim()
+            
+            # Draw vertical lines at truncation boundaries
+            ax.axvline(x=min_wn, color='orange', linestyle='--', linewidth=2, 
+                      label=f'Truncation: {min_wn}-{max_wn} cm⁻¹', alpha=0.7)
+            ax.axvline(x=max_wn, color='orange', linestyle='--', linewidth=2, alpha=0.7)
+            
+            # Shade the regions that will be removed
+            data_min = np.min(self.current_wavenumbers)
+            data_max = np.max(self.current_wavenumbers)
+            if data_min < min_wn:
+                ax.axvspan(data_min, min_wn, alpha=0.15, color='gray', label='Truncated Region')
+            if data_max > max_wn:
+                ax.axvspan(max_wn, data_max, alpha=0.15, color='gray')
+        
         ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=12)
         ax.set_ylabel('Intensity', fontsize=12)
         
         # Dynamic title based on method
         method = self.method_combo.currentText()
-        ax.set_title(f'Spectrum with {method} Baseline Correction', fontsize=14, fontweight='bold')
+        title = f'Spectrum with {method} Baseline Correction'
+        if self.enable_truncation.isChecked():
+            title += ' (Truncation Preview)'
+        ax.set_title(title, fontsize=14, fontweight='bold')
         
         ax.legend(loc='best', framealpha=0.9)
         ax.grid(True, alpha=0.3)
@@ -7250,24 +7289,62 @@ class AdvancedBaselineWindow(QMainWindow):
                 min_wn = self.min_wn.value()
                 max_wn = self.max_wn.value()
                 
-                mask = (self.current_wavenumbers >= min_wn) & (self.current_wavenumbers <= max_wn)
+                # Validate truncation range
+                if min_wn >= max_wn:
+                    QMessageBox.warning(
+                        self, 
+                        "Invalid Range", 
+                        f"Minimum wavenumber ({min_wn}) must be less than maximum wavenumber ({max_wn})."
+                    )
+                    return
+                
+                # Check actual data range
+                data_min = np.min(self.current_wavenumbers)
+                data_max = np.max(self.current_wavenumbers)
+                
+                # Handle both ascending and descending wavenumber order
+                mask = ((self.current_wavenumbers >= min_wn) & (self.current_wavenumbers <= max_wn))
                 wavenumbers = self.current_wavenumbers[mask]
                 intensities = corrected_intensities[mask]
+                
+                # Validate that truncation produced data
+                if len(wavenumbers) == 0:
+                    QMessageBox.warning(
+                        self, 
+                        "No Data in Range", 
+                        f"The truncation range ({min_wn}-{max_wn} cm⁻¹) does not overlap with your data range ({data_min:.1f}-{data_max:.1f} cm⁻¹).\n\n"
+                        f"Please adjust the truncation range to overlap with your data."
+                    )
+                    return
+                
+                self.status_text.append(f"Truncated from {len(self.current_wavenumbers)} to {len(wavenumbers)} data points.")
             else:
                 wavenumbers = self.current_wavenumbers
                 intensities = corrected_intensities
             
-            # Save processed file
-            self.save_processed_data(wavenumbers, intensities, self.file_path.text())
+            # Validate we have data to save
+            if len(wavenumbers) == 0 or len(intensities) == 0:
+                QMessageBox.warning(self, "No Data", "No data to save after processing.")
+                return
             
-            # Update plot
-            self.current_baseline = baseline
+            # Save processed file
+            output_path = self.save_processed_data(wavenumbers, intensities, self.file_path.text())
+            
+            # Update plot to show the processed result
+            self.current_wavenumbers = wavenumbers
+            self.current_intensities = intensities
+            self.current_baseline = None  # Clear baseline since we're showing corrected data
             self.plot_data()
             
-            self.status_text.append(f"Processed single file successfully.")
+            # Show success message with file location
+            success_msg = f"Processed single file successfully.\n\nSaved to:\n{output_path}"
+            self.status_text.append(success_msg)
+            QMessageBox.information(self, "Processing Complete", success_msg)
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to process file: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def process_batch(self):
         """Process all files in the selected folder."""
@@ -7292,6 +7369,7 @@ class AdvancedBaselineWindow(QMainWindow):
             
             # Process each file
             processed_count = 0
+            skipped_count = 0
             for file_path in files:
                 try:
                     # Load data
@@ -7306,9 +7384,27 @@ class AdvancedBaselineWindow(QMainWindow):
                         min_wn = self.min_wn.value()
                         max_wn = self.max_wn.value()
                         
+                        # Validate truncation range
+                        if min_wn >= max_wn:
+                            print(f"Skipping {os.path.basename(file_path)}: Invalid truncation range")
+                            skipped_count += 1
+                            continue
+                        
                         mask = (wavenumbers >= min_wn) & (wavenumbers <= max_wn)
                         wavenumbers = wavenumbers[mask]
                         corrected_intensities = corrected_intensities[mask]
+                        
+                        # Skip files with no data in range
+                        if len(wavenumbers) == 0:
+                            print(f"Skipping {os.path.basename(file_path)}: No data in truncation range")
+                            skipped_count += 1
+                            continue
+                    
+                    # Validate we have data to save
+                    if len(wavenumbers) == 0 or len(corrected_intensities) == 0:
+                        print(f"Skipping {os.path.basename(file_path)}: No data after processing")
+                        skipped_count += 1
+                        continue
                     
                     # Save processed file
                     self.save_processed_data(wavenumbers, corrected_intensities, file_path)
@@ -7316,15 +7412,23 @@ class AdvancedBaselineWindow(QMainWindow):
                     
                 except Exception as e:
                     print(f"Error processing {file_path}: {e}")
+                    skipped_count += 1
             
-            self.status_text.append(f"Batch processing complete. Processed {processed_count}/{len(files)} files.")
-            QMessageBox.information(self, "Batch Processing", f"Successfully processed {processed_count} out of {len(files)} files.")
+            message = f"Batch processing complete. Processed {processed_count}/{len(files)} files."
+            if skipped_count > 0:
+                message += f" ({skipped_count} skipped)"
+            self.status_text.append(message)
+            
+            result_msg = f"Successfully processed {processed_count} out of {len(files)} files."
+            if skipped_count > 0:
+                result_msg += f"\n\n{skipped_count} files were skipped (no data in truncation range or errors)."
+            QMessageBox.information(self, "Batch Processing", result_msg)
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to process batch: {str(e)}")
     
     def save_processed_data(self, wavenumbers, intensities, original_path):
-        """Save processed data to a new file."""
+        """Save processed data to a new file and return the output path."""
         try:
             import os
             
@@ -7351,6 +7455,7 @@ class AdvancedBaselineWindow(QMainWindow):
                     f.write(f"{wn:.2f}\t{intensity:.6f}\n")
             
             print(f"Saved processed data to: {output_path}")
+            return output_path
             
         except Exception as e:
             raise Exception(f"Error saving processed data: {str(e)}")
