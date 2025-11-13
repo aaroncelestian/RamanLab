@@ -64,6 +64,10 @@ class DatabaseBrowserQt6(QDialog):
         self.current_spectrum = None
         self.current_peaks = None
         
+        # Lazy loading for performance with large databases
+        self.all_spectrum_names = []  # Full list of spectrum names
+        self.MAX_INITIAL_ITEMS = 100  # Only show first 100 initially
+        
         # Hey Index tab variables
         self.current_hey_spectrum = None
         
@@ -1115,13 +1119,29 @@ class DatabaseBrowserQt6(QDialog):
     
     # Event handlers and functionality methods
     def update_spectrum_list(self):
-        """Update the spectrum list."""
+        """Update the spectrum list with lazy loading for performance."""
+        start_time = time.time()
+        
         self.spectrum_list.clear()
         
-        # Get all spectra from database
-        for name in sorted(self.raman_db.database.keys()):
+        # Store full sorted list
+        self.all_spectrum_names = sorted(self.raman_db.database.keys())
+        total_spectra = len(self.all_spectrum_names)
+        
+        # Only populate first MAX_INITIAL_ITEMS for instant loading
+        items_to_show = min(self.MAX_INITIAL_ITEMS, total_spectra)
+        
+        print(f"🚀 LAZY LOADING: Populating {items_to_show} of {total_spectra:,} spectra")
+        
+        for name in self.all_spectrum_names[:items_to_show]:
             item = QListWidgetItem(name)
             self.spectrum_list.addItem(item)
+        
+        elapsed = time.time() - start_time
+        print(f"⏱️  Spectrum list populated: {elapsed:.2f}s ({items_to_show} items)")
+        
+        if total_spectra > self.MAX_INITIAL_ITEMS:
+            print(f"ℹ️  Showing first {items_to_show} of {total_spectra:,} spectra. Use search to find specific spectra.")
     
     def on_spectrum_select(self, current, previous):
         """Handle spectrum selection."""
@@ -1536,16 +1556,39 @@ class DatabaseBrowserQt6(QDialog):
         dialog.exec()
     
     def perform_search(self):
-        """Perform search based on the search term."""
+        """Perform search based on the search term with lazy loading."""
+        start_time = time.time()
         search_term = self.search_entry.text().lower()
         
-        # Clear and repopulate list based on search
+        # Clear list
         self.spectrum_list.clear()
         
-        for name in sorted(self.raman_db.database.keys()):
-            if search_term in name.lower():
+        if not search_term:
+            # No search term - show first MAX_INITIAL_ITEMS
+            items_to_show = min(self.MAX_INITIAL_ITEMS, len(self.all_spectrum_names))
+            for name in self.all_spectrum_names[:items_to_show]:
                 item = QListWidgetItem(name)
                 self.spectrum_list.addItem(item)
+            
+            if len(self.all_spectrum_names) > self.MAX_INITIAL_ITEMS:
+                print(f"ℹ️  Showing first {items_to_show} of {len(self.all_spectrum_names):,} spectra")
+        else:
+            # Search in full list (fast - just string matching)
+            matching_names = [name for name in self.all_spectrum_names if search_term in name.lower()]
+            
+            # Limit results to 1000 for performance
+            MAX_SEARCH_RESULTS = 1000
+            items_to_show = min(MAX_SEARCH_RESULTS, len(matching_names))
+            
+            for name in matching_names[:items_to_show]:
+                item = QListWidgetItem(name)
+                self.spectrum_list.addItem(item)
+            
+            elapsed = time.time() - start_time
+            print(f"⏱️  Search completed: {elapsed:.2f}s ({len(matching_names)} matches, showing {items_to_show})")
+            
+            if len(matching_names) > MAX_SEARCH_RESULTS:
+                print(f"ℹ️  Showing first {items_to_show} of {len(matching_names):,} matching spectra. Refine search for more specific results.")
     
     def clear_search(self):
         """Clear the search."""

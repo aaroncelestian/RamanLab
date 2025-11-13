@@ -5,12 +5,29 @@ This module contains the main cluster analysis class that orchestrates
 the clustering workflow using the refactored components.
 """
 
+# Fix OpenMP conflict before importing numpy/sklearn
+# This prevents deadlocks with multiple OpenMP libraries on macOS
+import os
+import warnings
+
+# Set all threading environment variables before any imports
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Allow duplicate OpenMP libraries
+os.environ['OMP_NUM_THREADS'] = '1'  # Force single-threaded for safety
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['NUMEXPR_NUM_THREADS'] = '1'
+
+# Suppress the warning
+warnings.filterwarnings('ignore', message='.*Found Intel OpenMP.*')
+warnings.filterwarnings('ignore', category=RuntimeWarning, module='threadpoolctl')
+
 import sys
 import numpy as np
 import pandas as pd
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, 
                               QTabWidget, QPushButton, QLabel, QProgressBar, 
-                              QMessageBox, QApplication, QFileDialog, QDialog)
+                              QMessageBox, QApplication, QFileDialog, QDialog,
+                              QProgressDialog)
 from PySide6.QtCore import Qt
 
 # Import refactored components
@@ -145,7 +162,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
     # Core functionality methods (using refactored components)
     
     def select_import_folder(self):
-        """Select folder for data import."""
+        """Select folder for data import and automatically start loading."""
         folder = QFileDialog.getExistingDirectory(self, "Select Folder with Spectra")
         if folder:
             self.selected_folder = folder
@@ -153,56 +170,215 @@ class RamanClusterAnalysisQt6(QMainWindow):
             if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_folder_path_label'):
                 folder_label = self.import_tab.get_folder_path_label()
                 folder_label.setText(folder)
+            
+            # Automatically start import (consistent with other import methods)
+            self.start_batch_import()
     
     def import_single_file_map(self):
-        """Import a single spectrum file for mapping/analysis."""
+        """Import a single file containing all spectra with X,Y positions (2D map format)."""
         try:
             import os
+            from sklearn.preprocessing import StandardScaler
             
-            # Let user select a single file
-            file_path, _ = QFileDialog.getOpenFileName(self, "Select Spectrum File",
-                                                      filter="Spectrum files (*.txt *.csv *.dat *.asc)")
+            # Create file dialog
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Select Single-File 2D Raman Map",
+                filter="Text Files (*.txt *.csv *.dat);;All Files (*)"
+            )
+            
             if not file_path:
                 return
             
-            # Update status
-            if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_import_status'):
-                status_label = self.import_tab.get_import_status()
-                status_label.setText(f"Loading single spectrum: {os.path.basename(file_path)}")
+            # Import the single-file loader
+            from map_analysis_2d.core.single_file_map_loader import SingleFileRamanMapData
+            from map_analysis_2d.core.cosmic_ray_detection import CosmicRayConfig
             
-            self.statusBar().showMessage(f"Loading spectrum: {os.path.basename(file_path)}")
+            # Configure cosmic ray detection
+            cosmic_config = CosmicRayConfig(
+                apply_during_load=False,
+                enabled=True
+            )
             
-            # Read the spectrum file
-            spectrum = self._read_spectrum_file(file_path)
-            if spectrum is None:
-                QMessageBox.warning(self, "Import Failed", 
-                                  f"Could not read spectrum file:\n{file_path}\n\n"
-                                  "Please ensure the file contains two columns:\n"
-                                  "Column 1: Wavenumbers (cm⁻¹)\n"
-                                  "Column 2: Intensities")
-                return
+            # Create progress dialog
+            progress_dialog = QProgressDialog("Loading single-file map...", "Cancel", 0, 100, self)
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setMinimumDuration(0)
             
-            # Store as single spectrum dataset
-            self.cluster_data['intensities'] = np.array([spectrum['intensities']])
-            self.cluster_data['wavenumbers'] = spectrum['wavenumbers']
+            def progress_callback(progress, message):
+                progress_dialog.setValue(progress)
+                progress_dialog.setLabelText(message)
+                QApplication.processEvents()
+                if progress_dialog.wasCanceled():
+                    raise Exception("Import cancelled by user")
             
-            # Update status
-            if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_import_status'):
-                status_label = self.import_tab.get_import_status()
-                status_label.setText(f"Loaded single spectrum\n" +
-                                    f"File: {os.path.basename(file_path)}\n" +
-                                    f"Wavenumber range: {np.min(spectrum['wavenumbers']):.1f} - {np.max(spectrum['wavenumbers']):.1f} cm⁻¹\n" +
-                                    f"Data points: {len(spectrum['intensities'])}")
+            # Load the map
+            map_data = SingleFileRamanMapData(
+                filepath=file_path,
+                cosmic_ray_config=cosmic_config,
+                progress_callback=progress_callback
+            )
             
-            self.statusBar().showMessage(f"Loaded spectrum: {os.path.basename(file_path)}")
+            progress_dialog.close()
             
-            QMessageBox.information(self, "Import Complete", 
-                                  f"Successfully loaded spectrum from:\n{file_path}\n\n"
-                                  f"Data points: {len(spectrum['intensities'])}\n"
-                                  f"Wavenumber range: {np.min(spectrum['wavenumbers']):.1f} - {np.max(spectrum['wavenumbers']):.1f} cm⁻¹")
+            # Get data matrix and metadata
+            data_matrix = map_data.get_processed_data_matrix()
+            wavenumbers = map_data.target_wavenumbers
+            positions = map_data.get_position_list()
+            
+            # Create filenames list
+            filenames = [f"pos_{x:.1f}_{y:.1f}" for x, y in positions]
+            
+            # Create spectrum metadata for each position
+            spectrum_metadata = []
+            for i, (filename, pos) in enumerate(zip(filenames, positions)):
+                metadata = {
+                    'filename': filename,
+                    'spectrum_index': i,
+                    'source': 'single_file_map',
+                    'x_position': pos[0],
+                    'y_position': pos[1],
+                    'file_path': file_path
+                }
+                spectrum_metadata.append(metadata)
+            
+            # Store data in cluster_data dictionary
+            self.cluster_data['wavenumbers'] = wavenumbers
+            self.cluster_data['intensities'] = data_matrix
+            self.cluster_data['metadata'] = spectrum_metadata
+            
+            # Store map metadata for spatial visualization
+            self.map_metadata = {
+                'x_positions': map_data.x_positions,
+                'y_positions': map_data.y_positions,
+                'width': map_data.width,
+                'height': map_data.height,
+                'position_map': {filename: pos for filename, pos in zip(filenames, positions)},
+                'source_file': file_path
+            }
+            
+            # Extract features
+            print(f"Extracting features from {len(data_matrix)} spectra...")
+            features = self.data_processor.extract_vibrational_features(data_matrix, wavenumbers)
+            self.cluster_data['features'] = features
+            
+            # Scale features with aggressive OpenMP workaround
+            print(f"Scaling features ({features.shape[0]} samples × {features.shape[1]} features)...")
+            print("⚠️  Applying OpenMP deadlock workaround...")
+            
+            # Aggressive workaround for OpenMP conflict
+            import os
+            import sys
+            
+            # Save all thread-related environment variables
+            env_backup = {}
+            thread_vars = ['OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 
+                          'NUMEXPR_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS']
+            
+            for var in thread_vars:
+                env_backup[var] = os.environ.get(var, None)
+                os.environ[var] = '1'
+            
+            # Force numpy to use single thread
+            try:
+                import numpy as np
+                if hasattr(np, '__config__'):
+                    np.show_config()
+            except:
+                pass
+            
+            try:
+                # Use manual scaling to avoid sklearn's threading issues
+                print("Using manual scaling to avoid threading conflicts...")
+                
+                # Calculate mean and std manually (single-threaded)
+                means = np.mean(features, axis=0)
+                stds = np.std(features, axis=0)
+                
+                # Avoid division by zero
+                stds[stds == 0] = 1.0
+                
+                # Scale manually
+                features_scaled = (features - means) / stds
+                self.cluster_data['features_scaled'] = features_scaled
+                
+                print("✓ Feature scaling complete (manual method)")
+                
+            except Exception as e:
+                print(f"Manual scaling failed: {e}, trying StandardScaler...")
+                # Fallback to StandardScaler
+                scaler = StandardScaler()
+                self.cluster_data['features_scaled'] = scaler.fit_transform(features)
+                print("✓ Feature scaling complete (StandardScaler)")
+                
+            finally:
+                # Restore original thread settings
+                for var, value in env_backup.items():
+                    if value is not None:
+                        os.environ[var] = value
+                    else:
+                        os.environ.pop(var, None)
+                print("✓ Thread settings restored")
+            
+            # Update UI
+            if hasattr(self, 'import_tab'):
+                folder_label = self.import_tab.folder_path_label
+                folder_label.setText(f"Single-file map: {os.path.basename(file_path)}")
+            
+            self.statusBar().showMessage(f"Loaded {len(filenames)} spectra from single-file map")
+            
+            # Show success message with auto-save option
+            reply = QMessageBox.question(
+                self,
+                "Import Complete",
+                f"Successfully imported single-file 2D map:\n\n"
+                f"File: {os.path.basename(file_path)}\n"
+                f"Spectra: {len(filenames):,}\n"
+                f"Map size: {map_data.width} × {map_data.height}\n"
+                f"Wavenumber points: {len(wavenumbers)}\n\n"
+                f"💾 Save as .pkl for 100x faster loading next time?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Auto-save with suggested filename
+                base_name = os.path.splitext(os.path.basename(file_path))[0]
+                suggested_name = f"{base_name}_preprocessed.pkl"
+                suggested_path = os.path.join(os.path.dirname(file_path), suggested_name)
+                
+                save_path, _ = QFileDialog.getSaveFileName(
+                    self, "Save Preprocessed Data",
+                    suggested_path,
+                    "Pickle Files (*.pkl);;All Files (*)"
+                )
+                
+                if save_path:
+                    import pickle
+                    data_package = {
+                        'cluster_data': self.cluster_data,
+                        'map_metadata': self.map_metadata,
+                        'version': '1.0',
+                        'timestamp': pd.Timestamp.now().isoformat(),
+                        'source_file': file_path
+                    }
+                    
+                    with open(save_path, 'wb') as f:
+                        pickle.dump(data_package, f, protocol=pickle.HIGHEST_PROTOCOL)
+                    
+                    file_size_mb = os.path.getsize(save_path) / (1024 * 1024)
+                    QMessageBox.information(
+                        self, "Saved!",
+                        f"✓ Preprocessed data saved!\n\n"
+                        f"File: {os.path.basename(save_path)}\n"
+                        f"Size: {file_size_mb:.1f} MB\n\n"
+                        f"Next time, use 'Load Preprocessed Data (.pkl)'\n"
+                        f"to load in seconds instead of minutes!"
+                    )
             
         except Exception as e:
-            QMessageBox.critical(self, "Import Error", f"Failed to import spectrum file:\n{str(e)}")
+            QMessageBox.critical(self, "Import Error", f"Failed to import single-file map:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def open_database_import_dialog(self):
         """Open the database import dialog."""
@@ -393,10 +569,15 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             # Get parameters from clustering tab
             clustering_controls = self.clustering_tab.get_clustering_controls()
+            algorithm = clustering_controls['algorithm_combo'].currentText()
             n_clusters = clustering_controls['n_clusters_spinbox'].value()
             linkage_method = clustering_controls['linkage_method_combo'].currentText()
             distance_metric = clustering_controls['distance_metric_combo'].currentText()
             preprocessing_method = clustering_controls['phase_method_combo'].currentText()
+            
+            # Get DBSCAN parameters
+            dbscan_eps = clustering_controls['dbscan_eps'].value()
+            dbscan_min_samples = clustering_controls['dbscan_min_samples'].value()
             
             # Update status
             clustering_controls['clustering_status'].setText("Applying preprocessing...")
@@ -458,11 +639,55 @@ class RamanClusterAnalysisQt6(QMainWindow):
             QApplication.processEvents()
             
             # Perform clustering using clustering engine
-            clustering_controls['clustering_status'].setText("Running clustering...")
-            labels, linkage_matrix, distance_matrix, algorithm_used = \
-                self.clustering_engine.perform_hierarchical_clustering(
-                    features_scaled, n_clusters, linkage_method, distance_metric
+            n_samples = len(features_scaled)
+            clustering_controls['clustering_status'].setText(f"Running {algorithm} on {n_samples:,} samples...")
+            QApplication.processEvents()
+            
+            # Select clustering method based on algorithm
+            if algorithm == 'K-Means':
+                labels, linkage_matrix, distance_matrix, algorithm_used = \
+                    self.clustering_engine.perform_kmeans_clustering(
+                        features_scaled, n_clusters, use_minibatch=False
+                    )
+            elif algorithm == 'MiniBatchKMeans':
+                labels, linkage_matrix, distance_matrix, algorithm_used = \
+                    self.clustering_engine.perform_kmeans_clustering(
+                        features_scaled, n_clusters, use_minibatch=True
+                    )
+            elif algorithm == 'Hierarchical':
+                labels, linkage_matrix, distance_matrix, algorithm_used = \
+                    self.clustering_engine.perform_hierarchical_clustering(
+                        features_scaled, n_clusters, linkage_method, distance_metric
+                    )
+            elif algorithm == 'DBSCAN':
+                labels, linkage_matrix, distance_matrix, algorithm_used = \
+                    self.clustering_engine.perform_dbscan_clustering(
+                        features_scaled, dbscan_eps, dbscan_min_samples
+                    )
+            elif algorithm == 'GMM (Probabilistic)':
+                results = self.clustering_engine.run_probabilistic_clustering(
+                    features_scaled, n_clusters
                 )
+                labels = results['labels']
+                linkage_matrix = None
+                distance_matrix = None
+                algorithm_used = 'GMM'
+                # Store probability information
+                self.cluster_data['cluster_probs'] = results['cluster_probs']
+                self.cluster_data['gmm_model'] = results['gmm']
+                self.cluster_data['subtypes'] = results['subtypes']
+                # Show GMM-specific visualization buttons
+                clustering_controls['prob_viz_btn'].setVisible(True)
+                clustering_controls['prob_viz_btn'].setEnabled(True)
+                clustering_controls['subtype_viz_btn'].setVisible(True)
+                clustering_controls['subtype_viz_btn'].setEnabled(True)
+            else:
+                raise ValueError(f"Unknown algorithm: {algorithm}")
+            
+            # Hide GMM buttons for non-GMM algorithms
+            if algorithm != 'GMM (Probabilistic)':
+                clustering_controls['prob_viz_btn'].setVisible(False)
+                clustering_controls['subtype_viz_btn'].setVisible(False)
             
             # Store results
             self.cluster_data['labels'] = labels
@@ -482,6 +707,10 @@ class RamanClusterAnalysisQt6(QMainWindow):
             method_text = f" (using {preprocessing_method})" if preprocessing_method != 'None' else ""
             algo_text = f" via {algorithm_used}" if algorithm_used else ""
             clustering_controls['clustering_status'].setText(f"Clustering complete: {n_clusters} clusters found{method_text}{algo_text}")
+            
+            # Update all visualization plots
+            print("Updating visualization plots after clustering...")
+            self.update_visualization_tabs()
             
             # Switch to visualization tab
             self.tab_widget.setCurrentIndex(2)
@@ -639,8 +868,127 @@ class RamanClusterAnalysisQt6(QMainWindow):
         with open(filename, 'w') as f:
             json.dump(export_data, f, indent=2)
     
+    def save_preprocessed_data(self):
+        """Save preprocessed data to pickle file for fast loading."""
+        try:
+            import pickle
+            
+            # Check if we have data to save
+            if self.cluster_data.get('intensities') is None:
+                QMessageBox.warning(self, "No Data", "No data loaded to save.")
+                return
+            
+            # Get save location
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Preprocessed Data",
+                "cluster_data.pkl",
+                "Pickle Files (*.pkl);;All Files (*)"
+            )
+            
+            if not file_path:
+                return
+            
+            # Prepare data package
+            data_package = {
+                'cluster_data': self.cluster_data,
+                'map_metadata': getattr(self, 'map_metadata', None),
+                'version': '1.0',
+                'timestamp': pd.Timestamp.now().isoformat()
+            }
+            
+            # Save with progress
+            progress = QProgressDialog("Saving preprocessed data...", None, 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            QApplication.processEvents()
+            
+            with open(file_path, 'wb') as f:
+                pickle.dump(data_package, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            progress.close()
+            
+            # Show file size
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            n_spectra = len(self.cluster_data['intensities'])
+            
+            QMessageBox.information(
+                self, "Save Complete",
+                f"Preprocessed data saved successfully!\n\n"
+                f"File: {os.path.basename(file_path)}\n"
+                f"Size: {file_size_mb:.1f} MB\n"
+                f"Spectra: {n_spectra:,}\n\n"
+                f"Loading this file will be ~100x faster than re-importing!"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save data:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def load_preprocessed_data(self):
+        """Load preprocessed data from pickle file."""
+        try:
+            import pickle
+            
+            # Get file to load
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Load Preprocessed Data",
+                "",
+                "Pickle Files (*.pkl);;All Files (*)"
+            )
+            
+            if not file_path:
+                return
+            
+            # Load with progress
+            progress = QProgressDialog("Loading preprocessed data...", None, 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+            QApplication.processEvents()
+            
+            import time
+            start_time = time.time()
+            
+            with open(file_path, 'rb') as f:
+                data_package = pickle.load(f)
+            
+            # Restore data
+            self.cluster_data = data_package['cluster_data']
+            if 'map_metadata' in data_package and data_package['map_metadata']:
+                self.map_metadata = data_package['map_metadata']
+            
+            elapsed = time.time() - start_time
+            progress.close()
+            
+            # Update UI
+            n_spectra = len(self.cluster_data['intensities'])
+            if hasattr(self, 'import_tab'):
+                self.import_tab.folder_path_label.setText(f"Loaded from: {os.path.basename(file_path)}")
+            
+            self.statusBar().showMessage(f"Loaded {n_spectra:,} spectra from preprocessed data")
+            
+            # Show success with timing
+            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+            QMessageBox.information(
+                self, "Load Complete",
+                f"Preprocessed data loaded successfully!\n\n"
+                f"File: {os.path.basename(file_path)}\n"
+                f"Size: {file_size_mb:.1f} MB\n"
+                f"Spectra: {n_spectra:,}\n"
+                f"Load time: {elapsed:.2f}s\n\n"
+                f"✓ Features already extracted and scaled\n"
+                f"✓ Ready for clustering!"
+            )
+            
+            print(f"⚡ Loaded {n_spectra:,} spectra in {elapsed:.2f}s ({n_spectra/elapsed:.0f} spectra/sec)")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Failed to load data:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+    
     def import_from_main_app(self):
-        """Import data from the main RamanLab application."""
+        """Import spectra from the main RamanLab application."""
         try:
             # Check if we have access to main app data
             if not self.raman_app:
@@ -1005,11 +1353,18 @@ class RamanClusterAnalysisQt6(QMainWindow):
     def generate_analysis_text(self):
         """Generate text summary of clustering results."""
         try:
-            if not self.cluster_data.get('labels'):
+            # Check if labels exist
+            if 'labels' not in self.cluster_data or self.cluster_data['labels'] is None:
                 return "No clustering results available."
             
-            labels = self.cluster_data['labels']
-            n_clusters = len(np.unique(labels))
+            labels = np.array(self.cluster_data['labels'])  # Ensure it's a numpy array
+            
+            # Check if labels array is empty
+            if len(labels) == 0:
+                return "No clustering results available."
+            
+            unique_labels = np.unique(labels)
+            n_clusters = len(unique_labels)
             n_spectra = len(labels)
             
             text = f"CLUSTERING ANALYSIS RESULTS\n"
@@ -1020,33 +1375,33 @@ class RamanClusterAnalysisQt6(QMainWindow):
             # Cluster sizes
             text += f"CLUSTER SIZES:\n"
             text += f"{'-'*30}\n"
-            for i in range(n_clusters):
-                cluster_size = np.sum(labels == i)
+            for cluster_id in unique_labels:
+                cluster_size = int(np.sum(labels == cluster_id))
                 percentage = (cluster_size / n_spectra) * 100
-                text += f"Cluster {i+1}: {cluster_size} spectra ({percentage:.1f}%)\n"
+                text += f"Cluster {int(cluster_id)+1}: {cluster_size} spectra ({percentage:.1f}%)\n"
             
             text += f"\n"
             
             # Validation metrics
-            if 'silhouette_score' in self.cluster_data:
+            if 'silhouette_score' in self.cluster_data and self.cluster_data['silhouette_score'] is not None:
                 text += f"VALIDATION METRICS:\n"
                 text += f"{'-'*30}\n"
                 text += f"Silhouette Score: {self.cluster_data['silhouette_score']:.3f}\n"
             
-            if 'davies_bouldin_score' in self.cluster_data:
+            if 'davies_bouldin_score' in self.cluster_data and self.cluster_data['davies_bouldin_score'] is not None:
                 text += f"Davies-Bouldin Index: {self.cluster_data['davies_bouldin_score']:.3f}\n"
             
-            if 'calinski_harabasz_score' in self.cluster_data:
+            if 'calinski_harabasz_score' in self.cluster_data and self.cluster_data['calinski_harabasz_score'] is not None:
                 text += f"Calinski-Harabasz Index: {self.cluster_data['calinski_harabasz_score']:.1f}\n"
             
             return text
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Error in generate_analysis_text: {error_details}")
             return f"Error generating analysis text: {str(e)}"
     
-    def run_probabilistic_clustering(self):
-        """Run probabilistic clustering."""
-        pass
     
     def print_carbon_feature_analysis(self):
         """Print carbon feature analysis."""
@@ -1077,64 +1432,89 @@ class RamanClusterAnalysisQt6(QMainWindow):
             QMessageBox.critical(self, "Export Error", f"Failed to export visualization:\n{str(e)}")
     
     def update_dendrogram(self):
-        """Update dendrogram visualization."""
+        """Update dendrogram visualization with truncation support for large datasets."""
         try:
-            print("DEBUG: Starting dendrogram update...")
-            
             if self.cluster_data.get('linkage_matrix') is None:
                 print("No linkage matrix available for dendrogram")
                 return
             
-            print(f"DEBUG: Has visualization_tab: {hasattr(self, 'visualization_tab')}")
-            if hasattr(self, 'visualization_tab'):
-                print(f"DEBUG: Has get_dendrogram_tab: {hasattr(self.visualization_tab, 'get_dendrogram_tab')}")
-            
             # Get the dendrogram tab and its controls
-            if hasattr(self, 'visualization_tab') and hasattr(self.visualization_tab, 'get_dendrogram_tab'):
-                dendrogram_tab = self.visualization_tab.get_dendrogram_tab()
-                print(f"DEBUG: Dendrogram tab type: {type(dendrogram_tab)}")
-                
-                if hasattr(dendrogram_tab, 'get_dendrogram_controls'):
-                    controls = dendrogram_tab.get_dendrogram_controls()
-                    print(f"DEBUG: Controls retrieved: {list(controls.keys())}")
-                    
-                    fig = controls['figure']
-                    ax = controls['axis']
-                    canvas = controls['canvas']
-                    
-                    print(f"DEBUG: Figure type: {type(fig)}")
-                    print(f"DEBUG: Axis type: {type(ax)}")
-                    print(f"DEBUG: Canvas type: {type(canvas)}")
-                    
-                    # Clear previous plot
-                    ax.clear()
-                    
-                    # Plot dendrogram
-                    from scipy.cluster.hierarchy import dendrogram
-                    import matplotlib.pyplot as plt
-                    
-                    linkage_matrix = self.cluster_data['linkage_matrix']
-                    labels = self.cluster_data.get('labels', [])
-                    
-                    print(f"DEBUG: Linkage matrix shape: {linkage_matrix.shape}")
-                    print(f"DEBUG: Labels length: {len(labels)}")
-                    
-                    # Create dendrogram
-                    dendrogram(linkage_matrix, ax=ax, labels=labels, leaf_rotation=90)
-                    ax.set_title('Hierarchical Clustering Dendrogram')
-                    ax.set_xlabel('Sample Index')
-                    ax.set_ylabel('Distance')
-                    
-                    print("DEBUG: About to draw canvas...")
-                    # Update canvas
-                    fig.tight_layout()
-                    canvas.draw_idle()
-                    canvas.flush_events()
-                    print("DEBUG: Canvas draw completed")
+            if not (hasattr(self, 'visualization_tab') and hasattr(self.visualization_tab, 'get_dendrogram_tab')):
+                return
+            
+            dendrogram_tab = self.visualization_tab.get_dendrogram_tab()
+            if not hasattr(dendrogram_tab, 'get_dendrogram_controls'):
+                return
+            
+            controls = dendrogram_tab.get_dendrogram_controls()
+            fig = controls['figure']
+            ax = controls['axis']
+            canvas = controls['canvas']
+            
+            # Clear previous plot
+            ax.clear()
+            
+            # Get control values
+            orientation = controls['orientation'].currentText()
+            max_samples = controls['max_samples'].value()
+            show_labels = controls['show_labels'].isChecked()
+            truncate_mode = controls['truncate_mode'].currentText()
+            truncate_p = controls['truncate_p'].value()
+            color_threshold = controls['color_threshold'].value()
+            info_label = controls['info_label']
+            
+            # Plot dendrogram with truncation
+            from scipy.cluster.hierarchy import dendrogram
+            
+            linkage_matrix = self.cluster_data['linkage_matrix']
+            n_samples = linkage_matrix.shape[0] + 1
+            
+            # Build dendrogram parameters
+            dendro_params = {
+                'orientation': orientation,
+                'no_labels': not show_labels,
+                'ax': ax
+            }
+            
+            # Add truncation if enabled
+            if truncate_mode != 'None':
+                dendro_params['truncate_mode'] = truncate_mode
+                dendro_params['p'] = truncate_p
+                info_text = f"Showing {truncate_p} {'clusters' if truncate_mode == 'lastp' else 'levels'} of {n_samples} total samples"
+            else:
+                # Limit samples if too many
+                if n_samples > max_samples:
+                    dendro_params['truncate_mode'] = 'lastp'
+                    dendro_params['p'] = max_samples
+                    info_text = f"Showing {max_samples} of {n_samples} samples (auto-truncated)"
                 else:
-                    print("DEBUG: Dendrogram tab has no get_dendrogram_controls method")
-                
-            print("Dendrogram updated with new clustering results")
+                    info_text = f"Showing all {n_samples} samples"
+            
+            # Add color threshold if specified
+            if color_threshold > 0:
+                dendro_params['color_threshold'] = color_threshold
+            
+            # Create dendrogram
+            dendrogram(linkage_matrix, **dendro_params)
+            
+            # Set labels and title
+            ax.set_title(f'Hierarchical Clustering Dendrogram\n{info_text}')
+            if orientation in ['top', 'bottom']:
+                ax.set_xlabel('Sample Index')
+                ax.set_ylabel('Distance')
+            else:
+                ax.set_xlabel('Distance')
+                ax.set_ylabel('Sample Index')
+            
+            # Update info label
+            info_label.setText(info_text)
+            
+            # Update canvas
+            fig.tight_layout()
+            canvas.draw_idle()
+            canvas.flush_events()
+            
+            print(f"Dendrogram updated: {info_text}")
             
         except Exception as e:
             print(f"Error updating dendrogram: {str(e)}")
@@ -1273,6 +1653,12 @@ class RamanClusterAnalysisQt6(QMainWindow):
                         title_suffix = '(t-SNE)'
                         
                     elif method == 'UMAP':
+                        # Import progress dialog outside try block to avoid catching its ImportError
+                        try:
+                            from dialogs.progress_dialog import ProgressDialog
+                        except ImportError:
+                            ProgressDialog = None  # Fallback if dialog not available
+                        
                         try:
                             import umap
                             
@@ -1282,27 +1668,122 @@ class RamanClusterAnalysisQt6(QMainWindow):
                             metric = controls['umap_metric'].currentText()
                             spread = controls['umap_spread'].value()
                             
-                            print(f"Running UMAP with n_neighbors={n_neighbors}, min_dist={min_dist}, metric={metric}, spread={spread}")
+                            # Parse epochs selection
+                            epochs_text = controls['umap_epochs'].currentText()
+                            if 'Auto' in epochs_text:
+                                n_epochs = None  # Will be set based on dataset size
+                            else:
+                                # Extract number from text like "50 (Fast)"
+                                n_epochs = int(epochs_text.split()[0])
                             
-                            # Create UMAP with enhanced parameters
-                            reducer = umap.UMAP(
-                                n_components=2,
-                                n_neighbors=min(n_neighbors, len(intensities) - 1),
-                                min_dist=min_dist,
-                                metric=metric,
-                                spread=spread,
-                                random_state=None,  # Remove random_state to enable parallel processing
-                                n_jobs=-1,  # Use all available CPU cores
-                                local_connectivity=2.0,
-                                repulsion_strength=2.0,
-                                negative_sample_rate=10,
-                                transform_queue_size=8.0,
-                                init='spectral',
-                                verbose=True
-                            )
+                            # Use scaled features instead of raw intensities for better results
+                            if self.cluster_data.get('features_scaled') is not None:
+                                umap_input = self.cluster_data['features_scaled']
+                                print(f"Using scaled features ({umap_input.shape[1]} dimensions)")
+                            else:
+                                umap_input = intensities
+                                print(f"Warning: Using raw intensities (features not available)")
                             
-                            coords = reducer.fit_transform(intensities)
-                            title_suffix = f'(UMAP: {metric}, n={n_neighbors}, d={min_dist:.3f})'
+                            n_samples = len(umap_input)
+                            
+                            # For very large datasets, apply PCA pre-reduction for massive speedup
+                            if n_samples > 10000 and umap_input.shape[1] > 50:
+                                from sklearn.decomposition import PCA
+                                print(f"   Applying PCA pre-reduction: {umap_input.shape[1]} → 50 dimensions")
+                                pca = PCA(n_components=50, random_state=42)
+                                umap_input = pca.fit_transform(umap_input)
+                                variance_explained = pca.explained_variance_ratio_.sum()
+                                print(f"   PCA retained {variance_explained*100:.1f}% variance")
+                            
+                            print(f"Running UMAP on {n_samples:,} samples with n_neighbors={n_neighbors}, min_dist={min_dist}, metric={metric}, spread={spread}")
+                            
+                            # Optimize UMAP parameters for large datasets
+                            # Determine epochs to use
+                            if n_epochs is None:
+                                # Auto mode: use 50 for large datasets, 200 for small
+                                actual_epochs = 50 if n_samples > 10000 else 200
+                            else:
+                                actual_epochs = n_epochs
+                            
+                            # For datasets >10k samples, use optimized parameters
+                            if n_samples > 10000:
+                                print(f"⚡ Large dataset detected ({n_samples:,} samples) - using optimized UMAP parameters")
+                                # Use user's metric choice, but optimize other parameters
+                                # Key insight: For Raman spectroscopy, euclidean often works better than cosine
+                                actual_metric = metric if metric != 'cosine' else 'euclidean'
+                                actual_neighbors = min(n_neighbors, 15, n_samples - 1)  # Cap at 15 for large datasets
+                                
+                                reducer = umap.UMAP(
+                                    n_components=2,
+                                    n_neighbors=actual_neighbors,
+                                    min_dist=min_dist,
+                                    metric=actual_metric,
+                                    spread=spread,
+                                    n_epochs=actual_epochs,
+                                    random_state=42,
+                                    low_memory=True,
+                                    verbose=True,
+                                    init='spectral',  # Better initialization
+                                    negative_sample_rate=5
+                                )
+                                print(f"   Optimized: {actual_epochs} epochs, {actual_neighbors} neighbors, {actual_metric} metric")
+                                if actual_metric != metric:
+                                    print(f"   Note: Using {actual_metric} instead of {metric} for better results")
+                            else:
+                                # Standard parameters for smaller datasets
+                                reducer = umap.UMAP(
+                                    n_components=2,
+                                    n_neighbors=min(n_neighbors, n_samples - 1),
+                                    min_dist=min_dist,
+                                    metric=metric,
+                                    spread=spread,
+                                    n_epochs=actual_epochs,
+                                    random_state=42,
+                                    verbose=True
+                                )
+                                print(f"   Using {actual_epochs} epochs")
+                            
+                            # Check if we have cached UMAP results with same parameters
+                            cache_key = f"umap_{n_neighbors}_{min_dist}_{metric}_{spread}_{actual_epochs}"
+                            if hasattr(self, '_umap_cache') and cache_key in self._umap_cache:
+                                coords = self._umap_cache[cache_key]
+                                print(f"✓ Using cached UMAP results (instant!)")
+                                title_suffix = f'(UMAP cached: {metric}, n={n_neighbors}, d={min_dist:.3f})'
+                            else:
+                                # Create progress dialog if available
+                                progress_dialog = None
+                                if ProgressDialog is not None:
+                                    progress_dialog = ProgressDialog(self, "UMAP Computation")
+                                    progress_dialog.set_status(f"Running UMAP on {n_samples:,} samples...")
+                                    progress_dialog.show()
+                                    progress_dialog.start_capture()
+                                
+                                try:
+                                    import time
+                                    start_time = time.time()
+                                    
+                                    # Process events to show dialog
+                                    QApplication.processEvents()
+                                    
+                                    coords = reducer.fit_transform(umap_input)
+                                    elapsed = time.time() - start_time
+                                    print(f"⏱️  UMAP completed in {elapsed:.1f}s ({n_samples/elapsed:.0f} samples/sec)")
+                                    
+                                    # Cache the results
+                                    if not hasattr(self, '_umap_cache'):
+                                        self._umap_cache = {}
+                                    self._umap_cache[cache_key] = coords
+                                    print(f"   Cached UMAP results for instant replay")
+                                    
+                                    title_suffix = f'(UMAP: {metric}, n={n_neighbors}, d={min_dist:.3f})'
+                                    
+                                    if progress_dialog:
+                                        progress_dialog.set_status("✓ UMAP completed successfully!")
+                                    
+                                finally:
+                                    if progress_dialog:
+                                        progress_dialog.stop_capture()
+                                        progress_dialog.close()
                             
                             print("UMAP completed successfully")
                             
@@ -1359,6 +1840,19 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     canvas.draw_idle()
                     canvas.flush_events()
                     print("DEBUG: Scatter canvas draw completed")
+                    
+                    # Enable export buttons after successful clustering
+                    unique_labels = np.unique(labels)
+                    if len(unique_labels) > 0:
+                        if 'export_folders_btn' in controls:
+                            controls['export_folders_btn'].setEnabled(True)
+                        if 'export_summed_btn' in controls:
+                            controls['export_summed_btn'].setEnabled(True)
+                        if 'export_overview_btn' in controls:
+                            controls['export_overview_btn'].setEnabled(True)
+                        if 'export_xy_btn' in controls:
+                            controls['export_xy_btn'].setEnabled(True)
+                        print(f"Export buttons enabled for {len(unique_labels)} clusters")
                 else:
                     print("DEBUG: Scatter tab has no get_scatter_controls method")
                 
@@ -1386,6 +1880,327 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
         except Exception as e:
             print(f"Error plotting probability heatmap: {str(e)}")
+    
+    def export_clusters_to_folders(self):
+        """Export each cluster's spectra to separate folders."""
+        if ('labels' not in self.cluster_data or self.cluster_data['labels'] is None or
+            'intensities' not in self.cluster_data or self.cluster_data['intensities'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get export directory
+            export_dir = QFileDialog.getExistingDirectory(
+                self, "Select Export Directory", "",
+                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            )
+            
+            if not export_dir:
+                return
+            
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            wavenumbers = self.cluster_data['wavenumbers']
+            metadata = self.cluster_data.get('metadata', [{}] * len(labels))
+            unique_labels = np.unique(labels)
+            
+            # Create progress dialog
+            progress = QProgressDialog("Exporting clusters to folders...", "Cancel", 0, len(unique_labels), self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setAutoClose(True)
+            
+            exported_clusters = 0
+            
+            for i, cluster_id in enumerate(unique_labels):
+                if progress.wasCanceled():
+                    break
+                
+                progress.setValue(i)
+                progress.setLabelText(f"Exporting cluster {int(cluster_id)}...")
+                
+                # Create cluster folder
+                cluster_folder = os.path.join(export_dir, f"Cluster_{int(cluster_id)}")
+                os.makedirs(cluster_folder, exist_ok=True)
+                
+                # Get spectra for this cluster
+                cluster_mask = labels == cluster_id
+                cluster_intensities = intensities[cluster_mask]
+                
+                # Export individual spectra
+                for j, spectrum_intensity in enumerate(cluster_intensities):
+                    filename = f'spectrum_{j}.txt'
+                    filepath = os.path.join(cluster_folder, filename)
+                    
+                    # Write spectrum data
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(f"# Cluster: {int(cluster_id)}\n")
+                        f.write("# Wavenumber\tIntensity\n")
+                        
+                        # Write spectrum data
+                        for wavenumber, intensity in zip(wavenumbers, spectrum_intensity):
+                            f.write(f"{wavenumber:.2f}\t{intensity:.6f}\n")
+                
+                # Create cluster summary file
+                summary_file = os.path.join(cluster_folder, f"cluster_{int(cluster_id)}_summary.txt")
+                with open(summary_file, 'w', encoding='utf-8') as f:
+                    f.write(f"Cluster {int(cluster_id)} Summary\n")
+                    f.write("=" * 50 + "\n")
+                    f.write(f"Number of spectra: {int(np.sum(cluster_mask))}\n")
+                    from datetime import datetime
+                    f.write(f"Export date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                
+                exported_clusters += 1
+            
+            progress.setValue(len(unique_labels))
+            
+            QMessageBox.information(
+                self, "Export Complete", 
+                f"Successfully exported {exported_clusters} clusters to:\n{export_dir}"
+            )
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting clusters: {str(e)}")
+            print(f"Export error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def export_summed_cluster_spectra(self):
+        """Export summed spectra for each cluster (plot + data files)."""
+        if ('labels' not in self.cluster_data or self.cluster_data['labels'] is None or
+            'intensities' not in self.cluster_data or self.cluster_data['intensities'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get export directory
+            export_dir = QFileDialog.getExistingDirectory(
+                self, "Select Export Directory for Summed Spectra", "",
+                QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+            )
+            
+            if not export_dir:
+                return
+            
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            wavenumbers = self.cluster_data['wavenumbers']
+            unique_labels = np.unique(labels)
+            
+            # Create figure for plot
+            import matplotlib.pyplot as plt
+            fig, axes = plt.subplots(len(unique_labels), 1, figsize=(10, 3*len(unique_labels)))
+            if len(unique_labels) == 1:
+                axes = [axes]
+            
+            # Export each cluster
+            for idx, cluster_id in enumerate(unique_labels):
+                cluster_mask = labels == cluster_id
+                cluster_spectra = intensities[cluster_mask]
+                
+                # Calculate mean spectrum
+                mean_spectrum = np.mean(cluster_spectra, axis=0)
+                
+                # Plot
+                axes[idx].plot(wavenumbers, mean_spectrum, linewidth=1.5)
+                axes[idx].set_title(f'Cluster {int(cluster_id)} (n={int(np.sum(cluster_mask))} spectra)')
+                axes[idx].set_xlabel('Wavenumber (cm⁻¹)')
+                axes[idx].set_ylabel('Intensity')
+                axes[idx].grid(True, alpha=0.3)
+                
+                # Export data file for this cluster (for search/match)
+                data_filepath = os.path.join(export_dir, f'cluster_{int(cluster_id)}_summed.txt')
+                with open(data_filepath, 'w', encoding='utf-8') as f:
+                    f.write(f"# Cluster {int(cluster_id)} Summed Spectrum\n")
+                    f.write(f"# Number of spectra: {int(np.sum(cluster_mask))}\n")
+                    from datetime import datetime
+                    f.write(f"# Export date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write("# Wavenumber\tIntensity\n")
+                    for wn, intensity in zip(wavenumbers, mean_spectrum):
+                        f.write(f"{wn:.2f}\t{intensity:.6f}\n")
+            
+            # Save plot
+            plot_filepath = os.path.join(export_dir, 'summed_cluster_spectra.png')
+            plt.tight_layout()
+            plt.savefig(plot_filepath, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            QMessageBox.information(self, "Export Complete", 
+                f"Summed spectra exported to:\n{export_dir}\n\n"
+                f"Files created:\n"
+                f"- summed_cluster_spectra.png (plot)\n"
+                f"- cluster_X_summed.txt (data files for each cluster)")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting summed spectra: {str(e)}")
+            print(f"Export error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def export_cluster_overview(self):
+        """Export comprehensive cluster overview with all clusters in a grid layout."""
+        if ('labels' not in self.cluster_data or self.cluster_data['labels'] is None or
+            'intensities' not in self.cluster_data or self.cluster_data['intensities'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get export file path
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Cluster Overview", "",
+                "PNG Image (*.png);;PDF Document (*.pdf);;SVG Vector (*.svg)"
+            )
+            
+            if not file_path:
+                return
+            
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            wavenumbers = self.cluster_data['wavenumbers']
+            unique_labels = np.unique(labels)
+            n_clusters = len(unique_labels)
+            
+            # Calculate grid layout
+            import math
+            n_cols = min(3, n_clusters)  # Max 3 columns
+            n_rows = math.ceil(n_clusters / n_cols)
+            
+            # Create figure with subplots
+            import matplotlib.pyplot as plt
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(6*n_cols, 4*n_rows))
+            
+            # Flatten axes array for easy iteration
+            if n_clusters == 1:
+                axes = np.array([axes])
+            else:
+                axes = axes.flatten()
+            
+            # Plot each cluster
+            for idx, cluster_id in enumerate(unique_labels):
+                ax = axes[idx]
+                cluster_mask = labels == cluster_id
+                cluster_spectra = intensities[cluster_mask]
+                n_spectra = int(np.sum(cluster_mask))
+                
+                # Calculate mean and std
+                mean_spectrum = np.mean(cluster_spectra, axis=0)
+                std_spectrum = np.std(cluster_spectra, axis=0)
+                
+                # Plot mean with shaded std
+                ax.plot(wavenumbers, mean_spectrum, linewidth=2, label='Mean', color='blue')
+                ax.fill_between(wavenumbers, 
+                               mean_spectrum - std_spectrum,
+                               mean_spectrum + std_spectrum,
+                               alpha=0.3, color='blue', label='±1 Std Dev')
+                
+                # Plot a few individual spectra for reference
+                n_samples_to_show = min(5, n_spectra)
+                sample_indices = np.random.choice(len(cluster_spectra), n_samples_to_show, replace=False)
+                for sample_idx in sample_indices:
+                    ax.plot(wavenumbers, cluster_spectra[sample_idx], 
+                           alpha=0.2, linewidth=0.5, color='gray')
+                
+                ax.set_title(f'Cluster {int(cluster_id)}\n({n_spectra:,} spectra)', 
+                           fontweight='bold', fontsize=12)
+                ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=10)
+                ax.set_ylabel('Intensity', fontsize=10)
+                ax.grid(True, alpha=0.3)
+                ax.legend(fontsize=8, loc='best')
+            
+            # Hide unused subplots
+            for idx in range(n_clusters, len(axes)):
+                axes[idx].set_visible(False)
+            
+            # Add overall title
+            algorithm_used = self.cluster_data.get('algorithm_used', 'Unknown')
+            fig.suptitle(f'Cluster Overview - {n_clusters} Clusters ({algorithm_used})', 
+                        fontsize=16, fontweight='bold', y=0.995)
+            
+            plt.tight_layout(rect=[0, 0, 1, 0.99])
+            
+            # Save with high quality
+            dpi = 300 if file_path.endswith('.png') else None
+            plt.savefig(file_path, dpi=dpi, bbox_inches='tight')
+            plt.close()
+            
+            QMessageBox.information(self, "Export Complete", 
+                f"Cluster overview exported to:\n{file_path}\n\n"
+                f"Grid layout: {n_rows} rows × {n_cols} columns\n"
+                f"Total clusters: {n_clusters}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting cluster overview: {str(e)}")
+            print(f"Export error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    def export_xy_plot_data(self):
+        """Export XY plot data."""
+        if ('labels' not in self.cluster_data or self.cluster_data['labels'] is None):
+            QMessageBox.warning(self, "No Data", "No cluster data available for export.")
+            return
+        
+        try:
+            # Get the current visualization method from the scatter tab
+            method = 'PCA'  # Default
+            if hasattr(self, 'visualization_tab') and hasattr(self.visualization_tab, 'get_scatter_tab'):
+                scatter_tab = self.visualization_tab.get_scatter_tab()
+                if hasattr(scatter_tab, 'get_scatter_controls'):
+                    controls = scatter_tab.get_scatter_controls()
+                    method = controls['method'].currentText()
+            
+            # Get export file path
+            filepath, _ = QFileDialog.getSaveFileName(
+                self, f"Save {method} Coordinates", 
+                f"{method.lower()}_coordinates.csv",
+                "CSV files (*.csv);;All files (*)"
+            )
+            
+            if not filepath:
+                return
+            
+            # We need to recompute the coordinates since we don't store them
+            labels = self.cluster_data['labels']
+            intensities = self.cluster_data['intensities']
+            
+            # Apply dimensionality reduction
+            if method == 'PCA':
+                from sklearn.decomposition import PCA
+                reducer = PCA(n_components=2)
+                coords = reducer.fit_transform(intensities)
+                x_label, y_label = 'PC1', 'PC2'
+            elif method == 't-SNE':
+                from sklearn.manifold import TSNE
+                reducer = TSNE(n_components=2, random_state=42)
+                coords = reducer.fit_transform(intensities)
+                x_label, y_label = 'tSNE1', 'tSNE2'
+            elif method == 'UMAP':
+                import umap
+                reducer = umap.UMAP(n_components=2, random_state=None, n_jobs=-1)
+                coords = reducer.fit_transform(intensities)
+                x_label, y_label = 'UMAP1', 'UMAP2'
+            else:
+                coords = intensities[:, :2]
+                x_label, y_label = 'X', 'Y'
+            
+            # Create DataFrame and export
+            import pandas as pd
+            df = pd.DataFrame({
+                x_label: coords[:, 0],
+                y_label: coords[:, 1],
+                'Cluster': labels
+            })
+            
+            df.to_csv(filepath, index=False)
+            
+            QMessageBox.information(self, "Export Complete", 
+                f"{method} coordinates saved to:\n{filepath}\n\n"
+                f"Exported {len(coords)} points with cluster labels.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Error exporting XY data: {str(e)}")
+            print(f"Export error: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def merge_selected_clusters(self):
         """Merge selected clusters."""

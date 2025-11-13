@@ -28,23 +28,52 @@ class ClusteringTab(QWidget):
         controls_group = QGroupBox("Clustering Controls")
         controls_layout = QFormLayout(controls_group)
         
+        # Add algorithm selection
+        self.algorithm_combo = QComboBox()
+        self.algorithm_combo.addItems(['K-Means', 'MiniBatchKMeans', 'Hierarchical', 'DBSCAN', 'GMM (Probabilistic)'])
+        self.algorithm_combo.setCurrentText('MiniBatchKMeans')
+        self.algorithm_combo.currentTextChanged.connect(self.on_algorithm_changed)
+        self.algorithm_combo.setToolTip(
+            "K-Means: Standard, good quality\n"
+            "MiniBatchKMeans: Fast, best for large datasets (>10k)\n"
+            "Hierarchical: Best quality, slow for large datasets\n"
+            "DBSCAN: Density-based, finds arbitrary shapes\n"
+            "GMM: Probabilistic, gives cluster probabilities"
+        )
+        controls_layout.addRow("Algorithm:", self.algorithm_combo)
+        
         # Add number of clusters selection
         self.n_clusters_spinbox = QSpinBox()
-        self.n_clusters_spinbox.setRange(2, 20)
+        self.n_clusters_spinbox.setRange(2, 50)
         self.n_clusters_spinbox.setValue(5)
         controls_layout.addRow("Number of Clusters:", self.n_clusters_spinbox)
         
-        # Add linkage method selection
+        # Add linkage method selection (for Hierarchical)
         self.linkage_method_combo = QComboBox()
         self.linkage_method_combo.addItems(['ward', 'complete', 'average', 'single'])
         self.linkage_method_combo.setCurrentText('ward')
-        controls_layout.addRow("Linkage Method:", self.linkage_method_combo)
+        self.linkage_method_row = controls_layout.addRow("Linkage Method:", self.linkage_method_combo)
         
-        # Add distance metric selection
+        # Add distance metric selection (for Hierarchical)
         self.distance_metric_combo = QComboBox()
         self.distance_metric_combo.addItems(['euclidean', 'cosine', 'correlation'])
         self.distance_metric_combo.setCurrentText('euclidean')
-        controls_layout.addRow("Distance Metric:", self.distance_metric_combo)
+        self.distance_metric_row = controls_layout.addRow("Distance Metric:", self.distance_metric_combo)
+        
+        # Add DBSCAN parameters
+        self.dbscan_eps = QSpinBox()
+        self.dbscan_eps.setRange(1, 100)
+        self.dbscan_eps.setValue(5)
+        self.dbscan_eps.setPrefix("eps: ")
+        self.dbscan_eps_row = controls_layout.addRow("DBSCAN Epsilon:", self.dbscan_eps)
+        
+        self.dbscan_min_samples = QSpinBox()
+        self.dbscan_min_samples.setRange(2, 100)
+        self.dbscan_min_samples.setValue(5)
+        self.dbscan_min_samples_row = controls_layout.addRow("DBSCAN Min Samples:", self.dbscan_min_samples)
+        
+        # Initially hide algorithm-specific controls
+        self.on_algorithm_changed('MiniBatchKMeans')
         
         layout.addWidget(controls_group)
         
@@ -121,35 +150,33 @@ class ClusteringTab(QWidget):
         carbon_params_frame.setVisible(False)
         self.carbon_controls = [carbon_params_frame]
         
-        # Add run buttons
+        # Add run button
         button_layout = QHBoxLayout()
         
-        # Standard clustering button
-        run_clustering_btn = QPushButton("Run Standard Clustering")
+        # Main clustering button
+        run_clustering_btn = QPushButton("Run Clustering")
         run_clustering_btn.clicked.connect(self.parent_window.run_clustering)
+        run_clustering_btn.setStyleSheet("font-weight: bold; font-size: 14px; padding: 8px;")
+        run_clustering_btn.setToolTip("Run clustering with selected algorithm")
         button_layout.addWidget(run_clustering_btn)
-        
-        # Probabilistic clustering button
-        run_prob_btn = QPushButton("Run Probabilistic Clustering")
-        run_prob_btn.clicked.connect(self.parent_window.run_probabilistic_clustering)
-        run_prob_btn.setToolTip("Perform clustering with probability estimates and sub-type identification")
-        button_layout.addWidget(run_prob_btn)
         
         layout.addLayout(button_layout)
         
-        # Add visualization buttons for probabilistic results
+        # Add GMM-specific visualization buttons (only shown when GMM is used)
         prob_vis_layout = QHBoxLayout()
         
         self.prob_viz_btn = QPushButton("Show Probability Heatmap")
-        self.prob_viz_btn.setToolTip("Visualize cluster assignment probabilities")
+        self.prob_viz_btn.setToolTip("Visualize cluster assignment probabilities (GMM only)")
         self.prob_viz_btn.clicked.connect(self.parent_window.plot_probability_heatmap)
-        self.prob_viz_btn.setEnabled(False)  # Disabled until clustering is run
+        self.prob_viz_btn.setEnabled(False)
+        self.prob_viz_btn.setVisible(False)  # Hidden until GMM is run
         prob_vis_layout.addWidget(self.prob_viz_btn)
         
         self.subtype_viz_btn = QPushButton("View Sub-type Hierarchies")
-        self.subtype_viz_btn.setToolTip("View hierarchical sub-type structures")
+        self.subtype_viz_btn.setToolTip("View hierarchical sub-type structures (GMM only)")
         self.subtype_viz_btn.clicked.connect(lambda: self.parent_window.plot_dendrogram(None))
-        self.subtype_viz_btn.setEnabled(False)  # Disabled until clustering is run
+        self.subtype_viz_btn.setEnabled(False)
+        self.subtype_viz_btn.setVisible(False)  # Hidden until GMM is run
         prob_vis_layout.addWidget(self.subtype_viz_btn)
         
         layout.addLayout(prob_vis_layout)
@@ -164,12 +191,35 @@ class ClusteringTab(QWidget):
         
         layout.addStretch()
     
+    def on_algorithm_changed(self, algorithm):
+        """Handle algorithm selection changes."""
+        # Hide all algorithm-specific controls first
+        self.linkage_method_combo.setVisible(False)
+        self.distance_metric_combo.setVisible(False)
+        self.dbscan_eps.setVisible(False)
+        self.dbscan_min_samples.setVisible(False)
+        
+        # Show relevant controls based on algorithm
+        if algorithm == 'Hierarchical':
+            self.linkage_method_combo.setVisible(True)
+            self.distance_metric_combo.setVisible(True)
+            self.n_clusters_spinbox.setEnabled(True)
+        elif algorithm == 'DBSCAN':
+            self.dbscan_eps.setVisible(True)
+            self.dbscan_min_samples.setVisible(True)
+            self.n_clusters_spinbox.setEnabled(False)  # DBSCAN finds clusters automatically
+        else:  # K-Means, MiniBatchKMeans, GMM
+            self.n_clusters_spinbox.setEnabled(True)
+    
     def get_clustering_controls(self):
         """Get all clustering control widgets."""
         return {
+            'algorithm_combo': self.algorithm_combo,
             'n_clusters_spinbox': self.n_clusters_spinbox,
             'linkage_method_combo': self.linkage_method_combo,
             'distance_metric_combo': self.distance_metric_combo,
+            'dbscan_eps': self.dbscan_eps,
+            'dbscan_min_samples': self.dbscan_min_samples,
             'phase_method_combo': self.phase_method_combo,
             'exclusion_regions_edit': self.exclusion_regions_edit,
             'nmf_components_spinbox': self.nmf_components_spinbox,

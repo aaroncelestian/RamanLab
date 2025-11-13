@@ -7,8 +7,64 @@ into the cluster analysis tool.
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, 
                               QLabel, QLineEdit, QPushButton, QTableWidget, 
-                              QTableWidgetItem, QComboBox, QCheckBox, QMessageBox)
-from PySide6.QtCore import Qt
+                              QTableWidgetItem, QComboBox, QCheckBox, QMessageBox,
+                              QProgressDialog, QApplication)
+from PySide6.QtCore import Qt, QThread, Signal
+from joblib import Parallel, delayed
+import multiprocessing
+import time
+
+
+def extract_spectrum_metadata(item_data):
+    """Extract metadata from a single spectrum (for parallel processing)."""
+    try:
+        if isinstance(item_data, tuple):
+            name, spectrum_data = item_data
+        else:
+            spectrum_data = item_data
+            name = getattr(spectrum_data, 'name', 'Unknown')
+        
+        # Extract metadata
+        metadata = spectrum_data.get('metadata', spectrum_data)
+        
+        mineral_name = (metadata.get('NAME') or metadata.get('name') or 
+                       metadata.get('mineral_name') or name or 'Unknown')
+        
+        formula = (metadata.get('FORMULA') or metadata.get('Formula') or 
+                  metadata.get('formula') or metadata.get('CHEMICAL_FORMULA') or 
+                  metadata.get('Chemical_Formula') or metadata.get('chemical_formula') or 
+                  metadata.get('IDEAL CHEMISTRY') or metadata.get('Ideal Chemistry') or 
+                  metadata.get('ideal_chemistry') or metadata.get('IDEAL_CHEMISTRY') or 
+                  metadata.get('composition') or spectrum_data.get('formula', ''))
+        
+        description = (metadata.get('DESCRIPTION') or metadata.get('Description') or 
+                      metadata.get('description') or metadata.get('desc') or '')
+        
+        hey_class = (metadata.get('HEY CLASSIFICATION') or metadata.get('Hey Classification') or 
+                    metadata.get('hey_classification') or metadata.get('HEY_CLASSIFICATION') or
+                    metadata.get('classification') or metadata.get('mineral_class') or
+                    metadata.get('MINERAL_CLASS') or '')
+        
+        chemical_family = (metadata.get('CHEMICAL FAMILY') or metadata.get('Chemical Family') or 
+                          metadata.get('chemical_family') or metadata.get('CHEMICAL_FAMILY') or
+                          metadata.get('family') or metadata.get('anion_group') or
+                          metadata.get('ANION_GROUP') or '')
+        
+        wavenumbers = spectrum_data.get('wavenumbers', [])
+        data_points = len(wavenumbers) if wavenumbers is not None else 0
+        
+        return {
+            'name': name,
+            'mineral': mineral_name,
+            'formula': formula,
+            'hey_classification': hey_class,
+            'chemical_family': chemical_family,
+            'description': description,
+            'data_points': data_points,
+            'spectrum_data': spectrum_data
+        }
+    except Exception as e:
+        return None
 
 
 class DatabaseImportDialog(QDialog):
@@ -19,11 +75,8 @@ class DatabaseImportDialog(QDialog):
         super().__init__(parent)
         self.raman_db = raman_db
         self.selected_spectra = {}
-        
-        self.setWindowTitle("Import Spectra from Database")
-        self.setMinimumSize(800, 600)
-        self.resize(1000, 700)
-        
+        self.all_spectra = []  # Store all spectra metadata
+        self.filtered_spectra = []  # Store currently filtered spectra
         self.setup_ui()
         self.load_database_spectra()
     
@@ -78,6 +131,9 @@ class DatabaseImportDialog(QDialog):
             "Select", "Name", "Mineral", "Formula", "Hey Classification", "Chemical Family", "Data Points", "Description"
         ])
         
+        # Connect itemChanged signal to update selection count
+        self.spectra_table.itemChanged.connect(self.update_selection_count)
+        
         # Set column widths
         header = self.spectra_table.horizontalHeader()
         header.setStretchLastSection(True)
@@ -126,6 +182,8 @@ class DatabaseImportDialog(QDialog):
     def load_database_spectra(self):
         """Load spectra from the Raman database into the table."""
         try:
+            overall_start = time.time()
+            print(f"\n{'='*60}")
             print(f"DEBUG: Loading database spectra...")
             print(f"DEBUG: raman_db type = {type(self.raman_db)}")
             
@@ -186,171 +244,191 @@ class DatabaseImportDialog(QDialog):
                     print(f"DEBUG: Error in initial processing: {str(e)}")
                     continue
             
-            # Now process ALL spectra for the actual table
+            # Process ALL spectra with parallel processing for speed
+            metadata_start = time.time()
             print("DEBUG: Processing all spectra for table...")
-            if hasattr(spectra_source, 'items'):
-                full_iterator = spectra_source.items()
-            else:
-                full_iterator = spectra_source
-                
-            for item in full_iterator:
-                try:
-                    if hasattr(spectra_source, 'items'):
-                        name, spectrum_data = item
-                    else:
-                        spectrum_data = item
-                        name = getattr(spectrum_data, 'name', f'Spectrum_{len(spectra_list)}')
-                    
-                    # Extract metadata - handle both nested metadata and direct structure
-                    metadata = spectrum_data.get('metadata', spectrum_data)
-                    
-                    # Extract mineral name with multiple fallbacks
-                    mineral_name = (metadata.get('NAME') or 
-                                   metadata.get('name') or 
-                                   metadata.get('mineral_name') or 
-                                   name or 'Unknown')
-                    
-                    # Extract formula with comprehensive fallback options
-                    formula = (metadata.get('FORMULA') or 
-                              metadata.get('Formula') or 
-                              metadata.get('formula') or 
-                              metadata.get('CHEMICAL_FORMULA') or 
-                              metadata.get('Chemical_Formula') or 
-                              metadata.get('chemical_formula') or 
-                              metadata.get('IDEAL CHEMISTRY') or
-                              metadata.get('Ideal Chemistry') or
-                              metadata.get('ideal_chemistry') or
-                              metadata.get('IDEAL_CHEMISTRY') or
-                              metadata.get('composition') or 
-                              spectrum_data.get('formula', ''))
-                    
-                    # Extract description with multiple fallbacks
-                    description = (metadata.get('DESCRIPTION') or 
-                                  metadata.get('Description') or 
-                                  metadata.get('description') or 
-                                  metadata.get('desc') or '')
-                    
-                    # Hey classification with comprehensive fallbacks
-                    hey_class = (metadata.get('HEY CLASSIFICATION') or 
-                               metadata.get('Hey Classification') or 
-                               metadata.get('hey_classification') or 
-                               metadata.get('HEY_CLASSIFICATION') or
-                               metadata.get('classification') or
-                               metadata.get('mineral_class') or
-                               metadata.get('MINERAL_CLASS') or '')
-                    
-                    # Chemical family (anion type) with comprehensive fallbacks
-                    chemical_family = (metadata.get('CHEMICAL FAMILY') or 
-                                     metadata.get('Chemical Family') or 
-                                     metadata.get('chemical_family') or 
-                                     metadata.get('CHEMICAL_FAMILY') or
-                                     metadata.get('family') or
-                                     metadata.get('anion_group') or
-                                     metadata.get('ANION_GROUP') or '')
-                    
-                    # Get data points count
-                    wavenumbers = spectrum_data.get('wavenumbers', [])
-                    data_points = len(wavenumbers) if wavenumbers is not None else 0
-                    
-                    spectra_list.append({
-                        'name': name,
-                        'mineral': mineral_name,
-                        'formula': formula,
-                        'hey_classification': hey_class,
-                        'chemical_family': chemical_family,
-                        'description': description,
-                        'data_points': data_points,
-                        'spectrum_data': spectrum_data
-                    })
-                    
-                except Exception as e:
-                    print(f"Error processing spectrum: {str(e)}")
-                    continue
             
+            total_spectra = len(spectra_source)
+            
+            # Show progress dialog
+            progress = QProgressDialog("Loading database spectra...", None, 0, 100, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setValue(10)
+            progress.setLabelText(f"Processing {total_spectra:,} spectra in parallel...")
+            QApplication.processEvents()
+            
+            # Convert to list for parallel processing
+            list_start = time.time()
+            if hasattr(spectra_source, 'items'):
+                items_list = list(spectra_source.items())
+            else:
+                items_list = list(spectra_source)
+            list_time = time.time() - list_start
+            print(f"⏱️  List conversion: {list_time:.2f}s")
+            
+            progress.setValue(20)
+            progress.setLabelText(f"Extracting metadata using {multiprocessing.cpu_count()} cores...")
+            QApplication.processEvents()
+            
+            # Use parallel processing for metadata extraction
+            parallel_start = time.time()
+            n_jobs = -1  # Use all available cores
+            spectra_list = Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
+                delayed(extract_spectrum_metadata)(item) for item in items_list
+            )
+            parallel_time = time.time() - parallel_start
+            print(f"⏱️  Parallel metadata extraction: {parallel_time:.2f}s")
+            
+            # Filter out None results (failed extractions)
+            spectra_list = [s for s in spectra_list if s is not None]
+            
+            progress.setValue(90)
+            progress.setLabelText(f"Processed {len(spectra_list):,} spectra successfully")
+            QApplication.processEvents()
+            
+            metadata_time = time.time() - metadata_start
+            print(f"⏱️  TOTAL metadata processing: {metadata_time:.2f}s")
             print(f"DEBUG: Total processed {len(spectra_list)} spectra successfully")
             
             # Sort by name
             spectra_list.sort(key=lambda x: x['name'])
             
-            # Populate table
-            self.spectra_table.setRowCount(len(spectra_list))
-            self.all_spectra = spectra_list  # Store for filtering
+            # Store all spectra for filtering
+            self.all_spectra = spectra_list
             
-            # Collect unique values for filters
+            # Collect unique values for filters (fast - no UI updates)
+            progress.setValue(92)
+            progress.setLabelText("Collecting filter options...")
+            QApplication.processEvents()
+            
             hey_classifications = set()
             chemical_families = set()
-            
-            for row, spectrum_info in enumerate(spectra_list):
-                # Collect filter values
+            for spectrum_info in spectra_list:
                 if spectrum_info['hey_classification']:
                     hey_classifications.add(spectrum_info['hey_classification'])
                 if spectrum_info['chemical_family']:
                     chemical_families.add(spectrum_info['chemical_family'])
-                
-                # Checkbox for selection
-                checkbox = QCheckBox()
-                checkbox.stateChanged.connect(self.update_selection_count)
-                self.spectra_table.setCellWidget(row, 0, checkbox)
-                
-                # Spectrum information
-                self.spectra_table.setItem(row, 1, QTableWidgetItem(spectrum_info['name']))
-                self.spectra_table.setItem(row, 2, QTableWidgetItem(spectrum_info['mineral']))
-                self.spectra_table.setItem(row, 3, QTableWidgetItem(spectrum_info['formula']))
-                self.spectra_table.setItem(row, 4, QTableWidgetItem(spectrum_info['hey_classification']))
-                self.spectra_table.setItem(row, 5, QTableWidgetItem(spectrum_info['chemical_family']))
-                self.spectra_table.setItem(row, 6, QTableWidgetItem(str(spectrum_info['data_points'])))
-                self.spectra_table.setItem(row, 7, QTableWidgetItem(spectrum_info['description']))
-                
-                # Store spectrum data in the table item
-                self.spectra_table.item(row, 1).setData(Qt.UserRole, spectrum_info['spectrum_data'])
             
-            # Populate filter dropdowns with improved organization
+            # Populate filter dropdowns
             self._populate_hey_filter(hey_classifications)
             self._populate_family_filter(chemical_families)
             
-            self.update_selection_count()
+            # Use lazy loading - only populate first 100 rows for instant loading
+            progress.setValue(94)
+            progress.setLabelText(f"Preparing table (lazy loading {len(spectra_list):,} spectra)...")
+            QApplication.processEvents()
+            
+            # CRITICAL: Only populate first 100 rows for instant loading
+            MAX_INITIAL_ROWS = 100
+            initial_rows = min(MAX_INITIAL_ROWS, len(spectra_list))
+            
+            print(f"🚀 LAZY LOADING: Populating only first {initial_rows} rows (out of {len(spectra_list):,})")
+            
+            # Use helper function to populate initial rows
+            self._populate_table_rows(spectra_list[:initial_rows])
+            
+            # Add info message about lazy loading
+            if len(spectra_list) > MAX_INITIAL_ROWS:
+                print(f"ℹ️  Showing first {initial_rows} of {len(spectra_list):,} spectra. Use search/filter to find specific spectra.")
+            
+            progress.setValue(100)
+            progress.close()
+            
+            overall_time = time.time() - overall_start
+            print(f"\n{'='*60}")
+            print(f"⏱️  OVERALL DIALOG LOAD TIME: {overall_time:.2f}s")
+            print(f"{'='*60}\n")
             
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"Failed to load database spectra:\n{str(e)}")
     
+    def _populate_table_rows(self, spectra_list):
+        """Populate table with a list of spectra (helper for filtering and initial load)."""
+        populate_start = time.time()
+        
+        # Disable updates during population
+        self.spectra_table.setUpdatesEnabled(False)
+        self.spectra_table.setSortingEnabled(False)
+        self.spectra_table.setRowCount(len(spectra_list))
+        
+        for row, spectrum_info in enumerate(spectra_list):
+            # Use checkable item instead of QCheckBox widget
+            select_item = QTableWidgetItem()
+            select_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            select_item.setCheckState(Qt.Unchecked)
+            self.spectra_table.setItem(row, 0, select_item)
+            
+            # Spectrum information
+            name_item = QTableWidgetItem(spectrum_info['name'])
+            name_item.setData(Qt.UserRole, spectrum_info['spectrum_data'])
+            self.spectra_table.setItem(row, 1, name_item)
+            self.spectra_table.setItem(row, 2, QTableWidgetItem(spectrum_info['mineral']))
+            self.spectra_table.setItem(row, 3, QTableWidgetItem(spectrum_info['formula']))
+            self.spectra_table.setItem(row, 4, QTableWidgetItem(spectrum_info['hey_classification']))
+            self.spectra_table.setItem(row, 5, QTableWidgetItem(spectrum_info['chemical_family']))
+            self.spectra_table.setItem(row, 6, QTableWidgetItem(str(spectrum_info['data_points'])))
+            self.spectra_table.setItem(row, 7, QTableWidgetItem(spectrum_info['description']))
+        
+        # Re-enable updates
+        self.spectra_table.setSortingEnabled(True)
+        self.spectra_table.setUpdatesEnabled(True)
+        
+        populate_time = time.time() - populate_start
+        print(f"⏱️  Table repopulation: {populate_time:.2f}s ({len(spectra_list)} rows)")
+        
+        self.update_selection_count()
+    
     def filter_spectra(self):
         """Filter the spectra table based on search text and dropdown filters."""
+        filter_start = time.time()
         search_text = self.search_entry.text().lower()
         hey_filter = self.hey_filter.currentText().strip()
         family_filter = self.family_filter.currentText().strip()
         
-        for row in range(self.spectra_table.rowCount()):
+        # Filter from the full spectra list
+        filtered_list = []
+        for spectrum_info in self.all_spectra:
             should_show = True
             
             # Text search filter
             if search_text:
                 text_match = False
-                # Check all text columns
-                for col in range(1, self.spectra_table.columnCount()):
-                    item = self.spectra_table.item(row, col)
-                    if item and search_text in item.text().lower():
-                        text_match = True
-                        break
+                # Check all text fields
+                searchable_text = f"{spectrum_info['name']} {spectrum_info['mineral']} {spectrum_info['formula']} {spectrum_info['description']}".lower()
+                if search_text in searchable_text:
+                    text_match = True
                 if not text_match:
                     should_show = False
             
-            # Hey classification filter - improved selective matching
+            # Hey classification filter
             if should_show and hey_filter:
-                hey_item = self.spectra_table.item(row, 4)
-                if not hey_item:
-                    should_show = False
-                else:
-                    should_show = self._matches_hey_classification(hey_item.text(), hey_filter)
+                should_show = self._matches_hey_classification(spectrum_info['hey_classification'], hey_filter)
             
-            # Chemical family filter - improved selective matching
+            # Chemical family filter
             if should_show and family_filter:
-                family_item = self.spectra_table.item(row, 5)
-                if not family_item:
-                    should_show = False
-                else:
-                    should_show = self._matches_chemical_family(family_item.text(), family_filter)
+                should_show = self._matches_chemical_family(spectrum_info['chemical_family'], family_filter)
             
-            self.spectra_table.setRowHidden(row, not should_show)
+            if should_show:
+                filtered_list.append(spectrum_info)
+        
+        filter_time = time.time() - filter_start
+        print(f"⏱️  Filtering: {filter_time:.2f}s ({len(filtered_list)} of {len(self.all_spectra)} spectra match)")
+        
+        # Store the full filtered list for "Select All" functionality
+        self.filtered_spectra = filtered_list
+        
+        # Repopulate table with filtered results (limit to 3000 for performance)
+        MAX_DISPLAY = 3000
+        self._populate_table_rows(filtered_list[:MAX_DISPLAY])
+        
+        if len(filtered_list) > MAX_DISPLAY:
+            print(f"ℹ️  Showing first {MAX_DISPLAY:,} of {len(filtered_list):,} filtered results. Refine search for more specific results.")
+            QMessageBox.information(self, "Large Result Set", 
+                f"Found {len(filtered_list):,} matching spectra.\n\n"
+                f"Showing first {MAX_DISPLAY:,} for performance.\n\n"
+                f"Note: 'Select All' will select ALL {len(filtered_list):,} matching spectra,\n"
+                f"not just the displayed {MAX_DISPLAY:,}.")
     
     def _matches_hey_classification(self, classification_text, filter_text):
         """
@@ -532,26 +610,32 @@ class DatabaseImportDialog(QDialog):
         self.family_filter.setCurrentText("")
     
     def select_all(self):
-        """Select all visible spectra."""
+        """Select all filtered spectra (including those not displayed)."""
+        # Check all visible rows in the table
         for row in range(self.spectra_table.rowCount()):
             if not self.spectra_table.isRowHidden(row):
-                checkbox = self.spectra_table.cellWidget(row, 0)
-                if checkbox:
-                    checkbox.setChecked(True)
+                item = self.spectra_table.item(row, 0)
+                if item:
+                    item.setCheckState(Qt.Checked)
+        
+        # If there are more filtered results than displayed, inform user
+        if len(self.filtered_spectra) > self.spectra_table.rowCount():
+            extra = len(self.filtered_spectra) - self.spectra_table.rowCount()
+            print(f"ℹ️  Selected all {self.spectra_table.rowCount()} displayed spectra + {extra} additional filtered spectra not shown")
     
     def select_none(self):
         """Deselect all spectra."""
         for row in range(self.spectra_table.rowCount()):
-            checkbox = self.spectra_table.cellWidget(row, 0)
-            if checkbox:
-                checkbox.setChecked(False)
+            item = self.spectra_table.item(row, 0)
+            if item:
+                item.setCheckState(Qt.Unchecked)
     
     def update_selection_count(self):
         """Update the selection count label."""
         count = 0
         for row in range(self.spectra_table.rowCount()):
-            checkbox = self.spectra_table.cellWidget(row, 0)
-            if checkbox and checkbox.isChecked():
+            item = self.spectra_table.item(row, 0)
+            if item and item.checkState() == Qt.Checked:
                 count += 1
         
         self.selection_label.setText(f"{count} spectra selected")
@@ -560,9 +644,10 @@ class DatabaseImportDialog(QDialog):
         """Accept the current selection and close the dialog."""
         self.selected_spectra = {}
         
+        # Get selected from visible table rows
         for row in range(self.spectra_table.rowCount()):
-            checkbox = self.spectra_table.cellWidget(row, 0)
-            if checkbox and checkbox.isChecked():
+            select_item = self.spectra_table.item(row, 0)
+            if select_item and select_item.checkState() == Qt.Checked:
                 name_item = self.spectra_table.item(row, 1)
                 if name_item:
                     spectrum_name = name_item.text()
@@ -570,10 +655,22 @@ class DatabaseImportDialog(QDialog):
                     if spectrum_data:
                         self.selected_spectra[spectrum_name] = spectrum_data
         
+        # If "Select All" was used and there are more filtered results, include them all
+        if (len(self.selected_spectra) == self.spectra_table.rowCount() and 
+            len(self.filtered_spectra) > self.spectra_table.rowCount()):
+            # User selected all visible rows - import ALL filtered spectra
+            print(f"ℹ️  Importing all {len(self.filtered_spectra)} filtered spectra (not just the {self.spectra_table.rowCount()} displayed)")
+            for spectrum_info in self.filtered_spectra:
+                spectrum_name = spectrum_info['name']
+                spectrum_data = spectrum_info['spectrum_data']
+                if spectrum_data:
+                    self.selected_spectra[spectrum_name] = spectrum_data
+        
         if not self.selected_spectra:
             QMessageBox.warning(self, "No Selection", "Please select at least one spectrum to import.")
             return
         
+        print(f"✅ Importing {len(self.selected_spectra)} spectra")
         self.accept()
     
     def get_selected_spectra(self):

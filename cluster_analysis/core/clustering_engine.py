@@ -249,6 +249,120 @@ class ClusteringEngine:
         
         return subtypes
     
+    def perform_kmeans_clustering(self, features, n_clusters, use_minibatch=False):
+        """Perform K-Means or MiniBatchKMeans clustering.
+        
+        Args:
+            features: Feature matrix
+            n_clusters: Number of clusters
+            use_minibatch: If True, use MiniBatchKMeans; otherwise use standard KMeans
+        
+        Returns:
+            labels, linkage_matrix, distance_matrix, algorithm_used
+        """
+        try:
+            import inspect
+            n_samples = features.shape[0]
+            n_cores = multiprocessing.cpu_count()
+            
+            if use_minibatch:
+                print(f"Running MiniBatchKMeans on {n_samples:,} samples...")
+                batch_size = min(1000, n_samples // 10)
+                
+                # Build parameters, checking for n_jobs support
+                kmeans_params = {
+                    'n_clusters': n_clusters,
+                    'batch_size': batch_size,
+                    'max_iter': 100,
+                    'random_state': 42,
+                    'n_init': 3
+                }
+                
+                # Check if n_jobs is supported
+                sig = inspect.signature(MiniBatchKMeans.__init__)
+                if 'n_jobs' in sig.parameters:
+                    kmeans_params['n_jobs'] = -1
+                    print(f"   Using {n_cores} CPU cores")
+                else:
+                    print(f"   Single-threaded (sklearn version doesn't support n_jobs for MiniBatchKMeans)")
+                
+                kmeans = MiniBatchKMeans(**kmeans_params)
+                algorithm_used = "MiniBatchKMeans"
+            else:
+                print(f"Running KMeans on {n_samples:,} samples...")
+                
+                # Build parameters, checking for n_jobs support
+                kmeans_params = {
+                    'n_clusters': n_clusters,
+                    'max_iter': 300,
+                    'random_state': 42,
+                    'n_init': 10
+                }
+                
+                # Check if n_jobs is supported (should be available in KMeans)
+                sig = inspect.signature(KMeans.__init__)
+                if 'n_jobs' in sig.parameters:
+                    kmeans_params['n_jobs'] = -1
+                    print(f"   Using {n_cores} CPU cores")
+                else:
+                    print(f"   Single-threaded")
+                
+                kmeans = KMeans(**kmeans_params)
+                algorithm_used = "KMeans"
+            
+            labels = kmeans.fit_predict(features)
+            
+            # Create synthetic linkage matrix for compatibility
+            linkage_matrix = self._create_synthetic_linkage(features, labels, n_clusters)
+            distance_matrix = None  # Not needed for K-Means
+            
+            self.last_algorithm_used = algorithm_used
+            print(f"✓ {algorithm_used} completed: {n_clusters} clusters from {n_samples:,} spectra")
+            
+            return labels, linkage_matrix, distance_matrix, algorithm_used
+            
+        except Exception as e:
+            print(f"❌ K-Means clustering failed: {str(e)}")
+            raise e
+    
+    def perform_dbscan_clustering(self, features, eps, min_samples):
+        """Perform DBSCAN clustering.
+        
+        Args:
+            features: Feature matrix
+            eps: Maximum distance between samples
+            min_samples: Minimum samples in a neighborhood
+        
+        Returns:
+            labels, linkage_matrix, distance_matrix, algorithm_used
+        """
+        try:
+            from sklearn.cluster import DBSCAN
+            
+            n_samples = features.shape[0]
+            print(f"Running DBSCAN on {n_samples:,} samples (eps={eps}, min_samples={min_samples})...")
+            
+            dbscan = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1)
+            labels = dbscan.fit_predict(features)
+            
+            # DBSCAN labels: -1 for noise, 0+ for clusters
+            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+            n_noise = list(labels).count(-1)
+            
+            print(f"✓ DBSCAN completed: {n_clusters} clusters, {n_noise} noise points")
+            
+            # Create synthetic linkage matrix for compatibility
+            linkage_matrix = None
+            distance_matrix = None
+            algorithm_used = "DBSCAN"
+            self.last_algorithm_used = algorithm_used
+            
+            return labels, linkage_matrix, distance_matrix, algorithm_used
+            
+        except Exception as e:
+            print(f"❌ DBSCAN clustering failed: {str(e)}")
+            raise e
+    
     def scale_features(self, features):
         """Scale features using StandardScaler."""
         return self.scaler.fit_transform(features)

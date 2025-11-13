@@ -53,6 +53,23 @@ class ImportTab(QWidget):
         import_main_btn.clicked.connect(self.parent_window.import_from_main_app)
         folder_layout.addWidget(import_main_btn)
         
+        # Add separator
+        separator = QLabel("─" * 50)
+        separator.setStyleSheet("color: #ccc;")
+        folder_layout.addWidget(separator)
+        
+        # Add load/save preprocessed data buttons
+        load_pkl_btn = QPushButton("Load Preprocessed Data (.pkl)")
+        load_pkl_btn.clicked.connect(self.parent_window.load_preprocessed_data)
+        load_pkl_btn.setToolTip("Load previously saved preprocessed data (much faster!)")
+        load_pkl_btn.setStyleSheet("background-color: #10b981; color: white; font-weight: bold;")
+        folder_layout.addWidget(load_pkl_btn)
+        
+        save_pkl_btn = QPushButton("Save Preprocessed Data (.pkl)")
+        save_pkl_btn.clicked.connect(self.parent_window.save_preprocessed_data)
+        save_pkl_btn.setToolTip("Save current data for fast loading later")
+        folder_layout.addWidget(save_pkl_btn)
+        
         layout.addWidget(folder_group)
         
         # Create data configuration frame - simplified since we're using smart parsing
@@ -145,12 +162,7 @@ class ImportTab(QWidget):
         
         layout.addWidget(perf_group)
         
-        # Add start import button
-        start_import_btn = QPushButton("Start Import")
-        start_import_btn.clicked.connect(self.parent_window.start_batch_import)
-        layout.addWidget(start_import_btn)
-        
-        # Add progress bar
+        # Add progress bar (import starts automatically when folder is selected)
         self.import_progress = QProgressBar()
         layout.addWidget(self.import_progress)
         

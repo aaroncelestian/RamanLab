@@ -180,6 +180,7 @@ class MapAnalysisMainWindow(QMainWindow):
         self.create_dimensionality_reduction_tab()
         self.create_ml_tab()
         self.create_results_tab()
+        self.create_microplastic_tab()
         
         parent.addWidget(viz_widget)
         
@@ -256,6 +257,17 @@ class MapAnalysisMainWindow(QMainWindow):
         results_layout.addWidget(self.results_statistics)
         
         self.tab_widget.addTab(results_widget, "ML Results")
+    
+    def create_microplastic_tab(self):
+        """Create the microplastic detection tab."""
+        from map_analysis_2d.ui.tabs.microplastic_tab import MicroplasticDetectionTab
+        
+        self.microplastic_tab = MicroplasticDetectionTab(self)
+        
+        # Connect signals
+        self.microplastic_tab.detection_started.connect(self.run_microplastic_detection)
+        
+        self.tab_widget.addTab(self.microplastic_tab, "🔬 Microplastic Detection")
         
     def setup_menu_bar(self):
         """Set up the menu bar."""
@@ -9005,3 +9017,89 @@ The map is now ready for analysis!"""
                 f"• .csv (single-file maps)\n\n"
                 f"For folder-based maps, use File → Load Map Folder"
             )
+    
+    def run_microplastic_detection(self):
+        """Run microplastic detection on loaded map data."""
+        if self.map_data is None:
+            QMessageBox.warning(self, "No Data", "Load map data first.")
+            return
+        
+        try:
+            from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
+            from PySide6.QtCore import QThread
+            import numpy as np
+            
+            # Get detection parameters
+            params = self.microplastic_tab.get_detection_parameters()
+            
+            self.microplastic_tab.log_status("🔬 Initializing microplastic detector...")
+            self.microplastic_tab.update_progress(10, "Loading data...")
+            
+            # Create detector
+            detector = MicroplasticDetector()
+            
+            # Load plastic references from database if available
+            if hasattr(self, 'database') and self.database:
+                n_refs = detector.load_plastic_references(self.database, 'Plastics')
+                self.microplastic_tab.log_status(f"✓ Loaded {n_refs} plastic reference spectra")
+            
+            self.microplastic_tab.update_progress(20, "Preparing spectra...")
+            
+            # Get map data - handle both RamanMapData and SingleFileRamanMapData objects
+            wavenumbers = self.map_data.target_wavenumbers
+            intensities = self.map_data.get_processed_data_matrix()  # Shape: (n_spectra, n_wavenumbers)
+            
+            self.microplastic_tab.log_status(f"📊 Processing {len(intensities):,} spectra...")
+            self.microplastic_tab.update_progress(30, "Scanning for microplastics...")
+            
+            # Create progress callback
+            def progress_callback(current, total, message):
+                progress = 30 + int((current / total) * 60)  # 30-90% range
+                self.microplastic_tab.update_progress(progress, message)
+            
+            # Run detection with parallel processing and fast mode
+            results = detector.scan_map_for_plastics(
+                wavenumbers=wavenumbers,
+                intensity_map=intensities,
+                plastic_types=params['plastic_types'],
+                threshold=params['threshold'],
+                progress_callback=progress_callback,
+                n_jobs=-1,  # Use all CPU cores
+                fast_mode=True  # Use fast baseline removal (10-20x faster)
+            )
+            
+            self.microplastic_tab.update_progress(90, "Generating visualizations...")
+            
+            # Display results
+            self.microplastic_tab.display_results(results)
+            
+            self.microplastic_tab.update_progress(100, "✅ Detection complete!")
+            
+            # Summary statistics
+            total_detections = 0
+            for plastic_type, score_map in results.items():
+                n_detected = np.sum(score_map > params['threshold'])
+                total_detections += n_detected
+                if n_detected > 0:
+                    self.microplastic_tab.log_status(
+                        f"  • {plastic_type}: {n_detected:,} locations (max score: {np.max(score_map):.3f})"
+                    )
+            
+            if total_detections == 0:
+                self.microplastic_tab.log_status(
+                    "⚠️ No microplastics detected above threshold. Try:"
+                    "\n  • Lowering detection threshold"
+                    "\n  • Increasing baseline correction"
+                    "\n  • Checking if plastic types are in your data"
+                )
+            else:
+                self.microplastic_tab.log_status(
+                    f"\n🎯 Total: {total_detections:,} potential microplastic locations detected!"
+                )
+            
+        except Exception as e:
+            self.microplastic_tab.log_status(f"❌ Detection failed: {str(e)}")
+            QMessageBox.critical(self, "Detection Error", f"Error during microplastic detection:\n{str(e)}")
+            logger.error(f"Microplastic detection error: {e}")
+            import traceback
+            traceback.print_exc()

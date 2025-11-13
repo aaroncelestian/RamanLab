@@ -5,11 +5,11 @@ This module contains all visualization-related tabs and functionality.
 """
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, 
-                              QLabel, QComboBox, QSpinBox, QCheckBox, QPushButton,
+                              QPushButton, QLabel, QComboBox, QCheckBox, QSpinBox,
                               QTabWidget, QGridLayout, QDoubleSpinBox, QSizePolicy)
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
+from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar
 
 
 class VisualizationTab(QWidget):
@@ -76,36 +76,83 @@ class DendrogramTab(QWidget):
         
         # Add controls
         controls_frame = QFrame()
-        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout = QVBoxLayout(controls_frame)
+        
+        # First row of controls
+        row1 = QHBoxLayout()
         
         # Orientation control
-        controls_layout.addWidget(QLabel("Orientation:"))
+        row1.addWidget(QLabel("Orientation:"))
         self.dendro_orientation = QComboBox()
         self.dendro_orientation.addItems(['top', 'bottom', 'left', 'right'])
         self.dendro_orientation.setCurrentText('top')
         self.dendro_orientation.currentTextChanged.connect(self.parent_window.update_dendrogram)
-        controls_layout.addWidget(self.dendro_orientation)
+        row1.addWidget(self.dendro_orientation)
         
         # Max samples to show
-        controls_layout.addWidget(QLabel("Max Samples:"))
+        row1.addWidget(QLabel("Max Samples:"))
         self.dendro_max_samples = QSpinBox()
-        self.dendro_max_samples.setRange(10, 200)
-        self.dendro_max_samples.setValue(50)
+        self.dendro_max_samples.setRange(10, 1000)
+        self.dendro_max_samples.setValue(100)
+        self.dendro_max_samples.setSingleStep(50)
         self.dendro_max_samples.valueChanged.connect(self.parent_window.update_dendrogram)
-        controls_layout.addWidget(self.dendro_max_samples)
+        row1.addWidget(self.dendro_max_samples)
+        
+        # Truncation mode
+        row1.addWidget(QLabel("Truncate:"))
+        self.dendro_truncate = QComboBox()
+        self.dendro_truncate.addItems(['None', 'lastp', 'level'])
+        self.dendro_truncate.setCurrentText('lastp')
+        self.dendro_truncate.setToolTip("lastp: Show only last p merged clusters\nlevel: Show only last p levels")
+        self.dendro_truncate.currentTextChanged.connect(self.parent_window.update_dendrogram)
+        row1.addWidget(self.dendro_truncate)
+        
+        # Truncation parameter
+        row1.addWidget(QLabel("p:"))
+        self.dendro_p = QSpinBox()
+        self.dendro_p.setRange(5, 100)
+        self.dendro_p.setValue(30)
+        self.dendro_p.setToolTip("Number of clusters/levels to show when truncating")
+        self.dendro_p.valueChanged.connect(self.parent_window.update_dendrogram)
+        row1.addWidget(self.dendro_p)
+        
+        row1.addStretch()
+        controls_layout.addLayout(row1)
+        
+        # Second row of controls
+        row2 = QHBoxLayout()
         
         # Label display option
         self.dendro_show_labels = QCheckBox("Show Labels")
-        self.dendro_show_labels.setChecked(True)
+        self.dendro_show_labels.setChecked(False)  # Default off for large datasets
         self.dendro_show_labels.toggled.connect(self.parent_window.update_dendrogram)
-        controls_layout.addWidget(self.dendro_show_labels)
+        row2.addWidget(self.dendro_show_labels)
+        
+        # Color threshold
+        row2.addWidget(QLabel("Color Threshold:"))
+        self.dendro_color_threshold = QDoubleSpinBox()
+        self.dendro_color_threshold.setRange(0, 1000)
+        self.dendro_color_threshold.setValue(0)
+        self.dendro_color_threshold.setSingleStep(10)
+        self.dendro_color_threshold.setDecimals(1)
+        self.dendro_color_threshold.setSpecialValueText("Auto")
+        self.dendro_color_threshold.setToolTip("Distance threshold for coloring clusters (0 = auto)")
+        self.dendro_color_threshold.valueChanged.connect(self.parent_window.update_dendrogram)
+        row2.addWidget(self.dendro_color_threshold)
         
         # Update button
         update_btn = QPushButton("Update")
         update_btn.clicked.connect(self.parent_window.update_dendrogram)
-        controls_layout.addWidget(update_btn)
+        row2.addWidget(update_btn)
         
-        controls_layout.addStretch()
+        # Info label
+        self.dendro_info = QLabel("")
+        self.dendro_info.setStyleSheet("color: #666; font-style: italic;")
+        row2.addWidget(self.dendro_info)
+        
+        row2.addStretch()
+        controls_layout.addLayout(row2)
+        
         layout.addWidget(controls_frame)
         
         # Create dendrogram figure
@@ -125,6 +172,10 @@ class DendrogramTab(QWidget):
             'orientation': self.dendro_orientation,
             'max_samples': self.dendro_max_samples,
             'show_labels': self.dendro_show_labels,
+            'truncate_mode': self.dendro_truncate,
+            'truncate_p': self.dendro_p,
+            'color_threshold': self.dendro_color_threshold,
+            'info_label': self.dendro_info,
             'figure': self.dendro_fig,
             'axis': self.dendrogram_ax,
             'canvas': self.dendro_canvas,
@@ -275,11 +326,20 @@ class ScatterTab(QWidget):
         self.umap_spread.setToolTip("Effective scale of embedded points")
         umap_params_layout.addWidget(self.umap_spread, 1, 3)
         
+        # epochs parameter
+        umap_params_layout.addWidget(QLabel("Epochs:"), 1, 4)
+        self.umap_epochs = QComboBox()
+        self.umap_epochs.addItems(['Auto (50 for large datasets)', '20 (Very Fast)', '50 (Fast)', '100 (Balanced)', '200 (High Quality)', '500 (Publication)'])
+        self.umap_epochs.setCurrentText('Auto (50 for large datasets)')
+        self.umap_epochs.setToolTip("Number of optimization iterations\n20-50: Fast exploration\n100-200: Better quality\n500+: Publication-ready")
+        umap_params_layout.addWidget(self.umap_epochs, 1, 5)
+        
         # UMAP presets
         umap_params_layout.addWidget(QLabel("UMAP Presets:"), 2, 0)
         self.umap_preset_combo = QComboBox()
         self.umap_preset_combo.addItems([
             'Custom',
+            '⚡ Fast Mode (Large Datasets)',
             'General Spectroscopy',
             'Tight Clustering',
             'Broad Clusters', 
@@ -287,7 +347,7 @@ class ScatterTab(QWidget):
             'High Noise Data'
         ])
         self.umap_preset_combo.currentTextChanged.connect(self.apply_umap_preset)
-        self.umap_preset_combo.setToolTip("Apply optimized UMAP parameters for different data types")
+        self.umap_preset_combo.setToolTip("Apply optimized UMAP parameters for different data types\n⚡ Fast Mode: Optimized for 10k+ spectra (10-20x faster)")
         umap_params_layout.addWidget(self.umap_preset_combo, 2, 1, 1, 3)
         
         # Update button
@@ -308,12 +368,55 @@ class ScatterTab(QWidget):
         # Add toolbar
         self.scatter_toolbar = NavigationToolbar(self.scatter_canvas, self)
         layout.addWidget(self.scatter_toolbar)
+        
+        # Add export buttons below the plot
+        export_buttons_frame = QFrame()
+        export_buttons_layout = QHBoxLayout(export_buttons_frame)
+        
+        # Export to folders button
+        self.export_folders_btn = QPushButton("Export to Folders")
+        self.export_folders_btn.setToolTip("Export each cluster's spectra to separate folders")
+        self.export_folders_btn.setEnabled(False)
+        self.export_folders_btn.clicked.connect(self.parent_window.export_clusters_to_folders)
+        export_buttons_layout.addWidget(self.export_folders_btn)
+        
+        # Export summed spectra button
+        self.export_summed_btn = QPushButton("Export Summed Spectra")
+        self.export_summed_btn.setToolTip("Export summed/averaged spectra for each cluster as a single plot")
+        self.export_summed_btn.setEnabled(False)
+        self.export_summed_btn.clicked.connect(self.parent_window.export_summed_cluster_spectra)
+        export_buttons_layout.addWidget(self.export_summed_btn)
+        
+        # Export cluster overview button
+        self.export_overview_btn = QPushButton("Export Cluster Overview")
+        self.export_overview_btn.setToolTip("Export a comprehensive overview with all clusters in a grid layout")
+        self.export_overview_btn.setEnabled(False)
+        self.export_overview_btn.clicked.connect(self.parent_window.export_cluster_overview)
+        export_buttons_layout.addWidget(self.export_overview_btn)
+        
+        # Export XY plot data button
+        self.export_xy_btn = QPushButton("Export XY Plot Data")
+        self.export_xy_btn.setToolTip("Export the XY coordinates of the current scatter plot (PCA or UMAP)")
+        self.export_xy_btn.setEnabled(False)
+        self.export_xy_btn.clicked.connect(self.parent_window.export_xy_plot_data)
+        export_buttons_layout.addWidget(self.export_xy_btn)
+        
+        export_buttons_layout.addStretch()
+        layout.addWidget(export_buttons_frame)
     
     def apply_umap_preset(self):
         """Apply UMAP parameter presets optimized for different data types."""
         preset = self.umap_preset_combo.currentText()
         
-        if preset == 'Tight Clustering':
+        if preset == '⚡ Fast Mode (Large Datasets)':
+            # Optimized for speed AND quality on large datasets (10k+ spectra)
+            self.umap_n_neighbors.setValue(15)  # Good balance
+            self.umap_min_dist.setValue(0.1)
+            self.umap_metric.setCurrentText('euclidean')  # Better for Raman features
+            self.umap_spread.setValue(1.0)
+            # Note: n_epochs=50 and other optimizations set automatically in main.py
+            
+        elif preset == 'Tight Clustering':
             self.umap_n_neighbors.setValue(5)
             self.umap_min_dist.setValue(0.01)
             self.umap_metric.setCurrentText('cosine')
@@ -358,6 +461,11 @@ class ScatterTab(QWidget):
             'umap_min_dist': self.umap_min_dist,
             'umap_metric': self.umap_metric,
             'umap_spread': self.umap_spread,
+            'umap_epochs': self.umap_epochs,
             'umap_preset_combo': self.umap_preset_combo,
-            'update_umap_btn': self.update_umap_btn
+            'update_umap_btn': self.update_umap_btn,
+            'export_folders_btn': self.export_folders_btn,
+            'export_summed_btn': self.export_summed_btn,
+            'export_overview_btn': self.export_overview_btn,
+            'export_xy_btn': self.export_xy_btn
         }
