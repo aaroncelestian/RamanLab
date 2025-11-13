@@ -85,6 +85,11 @@ class MicroplasticDetector:
         self.database = None
         self.plastic_references = {}
         
+    @property
+    def reference_spectra(self):
+        """Get reference spectra dictionary."""
+        return self.plastic_references
+    
     def load_plastic_references(self, database: Dict, chemical_family: str = 'Plastics'):
         """
         Load plastic reference spectra from database.
@@ -190,52 +195,127 @@ class MicroplasticDetector:
         
         return peak_intensities
     
-    def calculate_plastic_score(self, wavenumbers: np.ndarray,
+    def calculate_multi_window_score(self, wavenumbers: np.ndarray,
+                                    intensities: np.ndarray,
+                                    ref_wavenumbers: np.ndarray,
+                                    ref_intensities: np.ndarray) -> Tuple[float, Dict[str, float]]:
+        """
+        Calculate correlation score using multiple diagnostic frequency windows.
+        Based on proven search/match algorithm from raman_analysis_app.
+        
+        Returns:
+            Tuple of (overall_score, window_scores_dict)
+        """
+        # Define diagnostic frequency windows for plastics
+        windows = [
+            {"name": "C-C Backbone", "range": (800, 1200), "weight": 0.35},   # Most diagnostic
+            {"name": "C-H Bending", "range": (1200, 1500), "weight": 0.30},   # Very characteristic
+            {"name": "C-H Stretching", "range": (2800, 3100), "weight": 0.25}, # Strong peaks
+            {"name": "Fingerprint", "range": (400, 800), "weight": 0.10}      # Additional info
+        ]
+        
+        total_weighted_score = 0.0
+        total_weight = 0.0
+        window_scores = {}
+        
+        for window in windows:
+            window_start, window_end = window["range"]
+            
+            # Check overlap
+            query_mask = (wavenumbers >= window_start) & (wavenumbers <= window_end)
+            ref_mask = (ref_wavenumbers >= window_start) & (ref_wavenumbers <= window_end)
+            
+            if not np.any(query_mask) or not np.any(ref_mask):
+                window_scores[window["name"]] = 0.0
+                continue
+            
+            # Get overlapping range
+            overlap_start = max(window_start, 
+                              max(wavenumbers[query_mask].min(), ref_wavenumbers[ref_mask].min()))
+            overlap_end = min(window_end,
+                            min(wavenumbers[query_mask].max(), ref_wavenumbers[ref_mask].max()))
+            
+            if overlap_end <= overlap_start:
+                window_scores[window["name"]] = 0.0
+                continue
+            
+            # Create common grid
+            n_points = min(50, np.sum(query_mask), np.sum(ref_mask))
+            if n_points < 5:
+                window_scores[window["name"]] = 0.0
+                continue
+            
+            common_wavenumbers = np.linspace(overlap_start, overlap_end, n_points)
+            
+            # Interpolate
+            query_interp = np.interp(common_wavenumbers, wavenumbers, intensities)
+            ref_interp = np.interp(common_wavenumbers, ref_wavenumbers, ref_intensities)
+            
+            # Check variance
+            query_std = np.std(query_interp)
+            ref_std = np.std(ref_interp)
+            
+            if query_std == 0 or ref_std == 0:
+                window_scores[window["name"]] = 0.0
+                continue
+            
+            # Normalize
+            query_norm = (query_interp - np.mean(query_interp)) / query_std
+            ref_norm = (ref_interp - np.mean(ref_interp)) / ref_std
+            
+            # Calculate correlation
+            correlation = np.corrcoef(query_norm, ref_norm)[0, 1]
+            window_similarity = abs(correlation)
+            
+            window_scores[window["name"]] = window_similarity
+            total_weighted_score += window_similarity * window["weight"]
+            total_weight += window["weight"]
+        
+        if total_weight == 0:
+            return 0.0, window_scores
+        
+        final_score = total_weighted_score / total_weight
+        return max(0, min(1, final_score)), window_scores
+
+    def calculate_plastic_score(self, wavenumbers: np.ndarray, 
                                intensities: np.ndarray,
                                plastic_type: str,
-                               baseline_corrected: bool = False) -> float:
+                               baseline_corrected: bool = False) -> Tuple[float, Dict[str, float]]:
         """
         Calculate detection score for a specific plastic type.
         
         Args:
             wavenumbers: Wavenumber array
             intensities: Intensity array
-            plastic_type: Plastic type code (e.g., 'PE', 'PP', 'PS')
-            baseline_corrected: Whether intensities are already baseline-corrected
+            plastic_type: Type of plastic to detect
+            baseline_corrected: If True, skip baseline correction
             
         Returns:
-            Detection score (0-1, higher = more likely)
+            Tuple of (detection_score, window_scores_dict)
         """
         if plastic_type not in self.PLASTIC_SIGNATURES:
-            logger.warning(f"Unknown plastic type: {plastic_type}")
-            return 0.0
+            return 0.0, {}
         
-        # Baseline correction if needed
+        # Apply baseline correction if needed
         if not baseline_corrected:
             intensities = self.baseline_als(intensities)
         
-        # Get plastic signature
-        signature = self.PLASTIC_SIGNATURES[plastic_type]
-        strong_peaks = signature['strong_peaks']
+        # Use multi-window correlation if reference available
+        if plastic_type in self.reference_spectra:
+            ref_wn, ref_int = self.reference_spectra[plastic_type]
+            score, window_scores = self.calculate_multi_window_score(
+                wavenumbers, intensities, ref_wn, ref_int
+            )
+            return score, window_scores
         
-        # Detect peaks
-        peak_intensities = self.detect_peaks_at_positions(
-            wavenumbers, intensities, strong_peaks
+        # Fallback: Peak detection at expected positions
+        expected_peaks = self.PLASTIC_SIGNATURES[plastic_type]['strong_peaks']
+        detected_peaks = self.detect_peaks_at_positions(
+            wavenumbers, intensities, expected_peaks, tolerance=10
         )
+        peak_score = len(detected_peaks) / len(expected_peaks)
         
-        # Calculate score based on peak presence and intensity
-        if len(peak_intensities) == 0:
-            return 0.0
-        
-        # Normalize by number of expected peaks
-        total_intensity = sum(peak_intensities.values())
-        avg_intensity = total_intensity / len(strong_peaks)
-        
-        # Score is normalized average intensity (0-1 range)
-        # Adjust threshold based on your data
-        score = min(1.0, avg_intensity / 1000.0)  # Adjust denominator as needed
-        
-        return score
+        return peak_score, {}
     
     def correlate_with_reference(self, wavenumbers: np.ndarray,
                                  intensities: np.ndarray,
@@ -282,18 +362,18 @@ class MicroplasticDetector:
                                 wavenumbers: np.ndarray,
                                 intensity_map: np.ndarray,
                                 plastic_types: List[str],
-                                skip_baseline: bool = False) -> Dict[str, List[Tuple[int, float]]]:
+                                skip_baseline: bool = False) -> Dict[str, List[Tuple[int, float, Dict]]]:
         """Process a batch of spectra in parallel."""
         results = {ptype: [] for ptype in plastic_types}
         
         for idx in batch_indices:
             spectrum = intensity_map[idx]
             for ptype in plastic_types:
-                score = self.calculate_plastic_score(
+                score, window_scores = self.calculate_plastic_score(
                     wavenumbers, spectrum, ptype, 
                     baseline_corrected=skip_baseline  # If skip_baseline=True, don't do it again
                 )
-                results[ptype].append((idx, score))
+                results[ptype].append((idx, score, window_scores))
         
         return results
     
@@ -325,6 +405,9 @@ class MicroplasticDetector:
         n_cores = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
         logger.info(f"Scanning map for plastics: {plastic_types} using {n_cores} cores")
         
+        # Import threading for progress tracking
+        from threading import Lock
+        
         # Get map dimensions
         if intensity_map.ndim == 2:
             # Flat array of spectra
@@ -344,34 +427,75 @@ class MicroplasticDetector:
             # Pre-process: Apply fast baseline correction if in fast mode
             if fast_mode:
                 if progress_callback:
-                    progress_callback(0, len(batches), "Fast baseline removal...")
-                # Simple baseline: subtract minimum rolling window
+                    progress_callback(0, n_spectra, "Fast baseline removal...")
+                
+                # Parallel baseline removal
                 from scipy.ndimage import minimum_filter1d
-                for i in range(n_spectra):
-                    baseline = minimum_filter1d(intensity_map[i], size=50, mode='nearest')
-                    intensity_map[i] = intensity_map[i] - baseline
-                    if i % 10000 == 0 and progress_callback:
-                        prog = int((i / n_spectra) * 100)
-                        progress_callback(i, n_spectra, f"Baseline removal: {prog}%")
+                
+                def remove_baseline_batch(indices):
+                    """Remove baseline from a batch of spectra."""
+                    for i in indices:
+                        baseline = minimum_filter1d(intensity_map[i], size=50, mode='nearest')
+                        intensity_map[i] = intensity_map[i] - baseline
+                
+                # Create batches for baseline removal
+                baseline_batch_size = max(100, n_spectra // (n_cores * 4))
+                baseline_batches = [list(range(i, min(i + baseline_batch_size, n_spectra))) 
+                                  for i in range(0, n_spectra, baseline_batch_size)]
+                
+                logger.info(f"Removing baseline from {n_spectra} spectra in {len(baseline_batches)} batches")
+                
+                # Process baseline removal in parallel
+                completed_baseline = [0]
+                baseline_lock = Lock()
+                
+                def baseline_with_progress(batch):
+                    remove_baseline_batch(batch)
+                    with baseline_lock:
+                        completed_baseline[0] += 1
+                        if progress_callback and completed_baseline[0] % max(1, len(baseline_batches) // 10) == 0:
+                            prog = int((completed_baseline[0] / len(baseline_batches)) * 100)
+                            progress_callback(completed_baseline[0], len(baseline_batches), 
+                                            f"Baseline removal: {prog}%")
+                
+                Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
+                    delayed(baseline_with_progress)(batch) for batch in baseline_batches
+                )
+                
+                if progress_callback:
+                    progress_callback(len(baseline_batches), len(baseline_batches), 
+                                    "Baseline removal complete!")
             
             if progress_callback:
                 progress_callback(0, len(batches), f"Detecting plastics in {len(batches)} batches...")
             
-            # Process batches in parallel
-            batch_results = Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
-                delayed(self._process_spectrum_batch)(
+            # Process batches with progress tracking
+            detection_lock = Lock()
+            completed_batches = [0]  # Use list to allow modification in nested function
+            
+            def process_with_progress(batch):
+                result = self._process_spectrum_batch(
                     batch, wavenumbers, intensity_map, plastic_types, skip_baseline=fast_mode
-                ) for batch in batches
+                )
+                with detection_lock:
+                    completed_batches[0] += 1
+                    if progress_callback and completed_batches[0] % max(1, len(batches) // 20) == 0:
+                        progress_callback(completed_batches[0], len(batches), 
+                                        f"Processed {completed_batches[0]}/{len(batches)} batches")
+                return result
+            
+            # Process batches in parallel with progress
+            batch_results = Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
+                delayed(process_with_progress)(batch) for batch in batches
             )
             
-            # Combine results with progress updates
-            for batch_idx, batch_result in enumerate(batch_results):
-                if progress_callback:
-                    progress_callback(batch_idx + 1, len(batches), 
-                                    f"Processed {batch_idx + 1}/{len(batches)} batches")
-                
+            # Combine results
+            if progress_callback:
+                progress_callback(len(batches), len(batches), "Combining results...")
+            
+            for batch_result in batch_results:
                 for ptype in plastic_types:
-                    for idx, score in batch_result[ptype]:
+                    for idx, score, window_scores in batch_result[ptype]:
                         score_maps[ptype][idx] = score
         
         else:

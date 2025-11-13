@@ -9019,14 +9019,14 @@ The map is now ready for analysis!"""
             )
     
     def run_microplastic_detection(self):
-        """Run microplastic detection on loaded map data."""
+        """Run microplastic detection on loaded map data using worker thread."""
         if self.map_data is None:
             QMessageBox.warning(self, "No Data", "Load map data first.")
             return
         
         try:
             from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
-            from PySide6.QtCore import QThread
+            from map_analysis_2d.workers.microplastic_worker import MicroplasticDetectionWorker
             import numpy as np
             
             # Get detection parameters
@@ -9050,52 +9050,20 @@ The map is now ready for analysis!"""
             intensities = self.map_data.get_processed_data_matrix()  # Shape: (n_spectra, n_wavenumbers)
             
             self.microplastic_tab.log_status(f"📊 Processing {len(intensities):,} spectra...")
-            self.microplastic_tab.update_progress(30, "Scanning for microplastics...")
+            self.microplastic_tab.update_progress(30, "Starting detection...")
             
-            # Create progress callback
-            def progress_callback(current, total, message):
-                progress = 30 + int((current / total) * 60)  # 30-90% range
-                self.microplastic_tab.update_progress(progress, message)
-            
-            # Run detection with parallel processing and fast mode
-            results = detector.scan_map_for_plastics(
-                wavenumbers=wavenumbers,
-                intensity_map=intensities,
-                plastic_types=params['plastic_types'],
-                threshold=params['threshold'],
-                progress_callback=progress_callback,
-                n_jobs=-1,  # Use all CPU cores
-                fast_mode=True  # Use fast baseline removal (10-20x faster)
+            # Create and configure worker thread
+            self.detection_worker = MicroplasticDetectionWorker(
+                detector, wavenumbers, intensities, params
             )
             
-            self.microplastic_tab.update_progress(90, "Generating visualizations...")
+            # Connect signals
+            self.detection_worker.progress_updated.connect(self._on_detection_progress)
+            self.detection_worker.detection_complete.connect(self._on_detection_complete)
+            self.detection_worker.detection_failed.connect(self._on_detection_failed)
             
-            # Display results
-            self.microplastic_tab.display_results(results)
-            
-            self.microplastic_tab.update_progress(100, "✅ Detection complete!")
-            
-            # Summary statistics
-            total_detections = 0
-            for plastic_type, score_map in results.items():
-                n_detected = np.sum(score_map > params['threshold'])
-                total_detections += n_detected
-                if n_detected > 0:
-                    self.microplastic_tab.log_status(
-                        f"  • {plastic_type}: {n_detected:,} locations (max score: {np.max(score_map):.3f})"
-                    )
-            
-            if total_detections == 0:
-                self.microplastic_tab.log_status(
-                    "⚠️ No microplastics detected above threshold. Try:"
-                    "\n  • Lowering detection threshold"
-                    "\n  • Increasing baseline correction"
-                    "\n  • Checking if plastic types are in your data"
-                )
-            else:
-                self.microplastic_tab.log_status(
-                    f"\n🎯 Total: {total_detections:,} potential microplastic locations detected!"
-                )
+            # Start detection in background thread
+            self.detection_worker.start()
             
         except Exception as e:
             self.microplastic_tab.log_status(f"❌ Detection failed: {str(e)}")
@@ -9103,3 +9071,50 @@ The map is now ready for analysis!"""
             logger.error(f"Microplastic detection error: {e}")
             import traceback
             traceback.print_exc()
+    
+    def _on_detection_progress(self, current, total, message):
+        """Handle progress updates from worker thread."""
+        progress = 30 + int((current / total) * 60)  # 30-90% range
+        self.microplastic_tab.update_progress(progress, message)
+    
+    def _on_detection_complete(self, results):
+        """Handle detection completion."""
+        import numpy as np
+        
+        self.microplastic_tab.update_progress(90, "Generating visualizations...")
+        
+        # Display results
+        self.microplastic_tab.display_results(results)
+        
+        self.microplastic_tab.update_progress(100, "✅ Detection complete!")
+        
+        # Get parameters for threshold
+        params = self.microplastic_tab.get_detection_parameters()
+        
+        # Summary statistics
+        total_detections = 0
+        for plastic_type, score_map in results.items():
+            n_detected = np.sum(score_map > params['threshold'])
+            total_detections += n_detected
+            if n_detected > 0:
+                self.microplastic_tab.log_status(
+                    f"  • {plastic_type}: {n_detected:,} locations (max score: {np.max(score_map):.3f})"
+                )
+        
+        if total_detections == 0:
+            self.microplastic_tab.log_status(
+                "⚠️ No microplastics detected above threshold. Try:"
+                "\n  • Lowering detection threshold"
+                "\n  • Increasing baseline correction"
+                "\n  • Checking if plastic types are in your data"
+            )
+        else:
+            self.microplastic_tab.log_status(
+                f"\n🎯 Total: {total_detections:,} potential microplastic locations detected!"
+            )
+    
+    def _on_detection_failed(self, error_msg):
+        """Handle detection failure."""
+        self.microplastic_tab.log_status(f"❌ Detection failed: {error_msg}")
+        QMessageBox.critical(self, "Detection Error", f"Error during microplastic detection:\n{error_msg}")
+        logger.error(f"Microplastic detection error: {error_msg}")

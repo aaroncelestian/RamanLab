@@ -11,8 +11,20 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
 from PySide6.QtCore import Qt, Signal
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 import numpy as np
+
+# Import custom toolbar from RamanLab core
+try:
+    import sys
+    from pathlib import Path
+    # Add parent directory to path to access core module
+    core_path = Path(__file__).parent.parent.parent.parent / 'core'
+    if str(core_path) not in sys.path:
+        sys.path.insert(0, str(core_path))
+    from matplotlib_config import CompactNavigationToolbar as NavigationToolbar
+except ImportError:
+    # Fallback to standard toolbar
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 
 
 class MicroplasticDetectionTab(QWidget):
@@ -168,8 +180,15 @@ class MicroplasticDetectionTab(QWidget):
         panel = QGroupBox("Detection Results - Spatial Maps")
         layout = QVBoxLayout(panel)
         
+        # Apply compact matplotlib theme
+        try:
+            from matplotlib_config import configure_compact_ui
+            configure_compact_ui()
+        except ImportError:
+            pass  # Use default matplotlib settings
+        
         # Create matplotlib figure with subplots
-        self.figure = Figure(figsize=(12, 8))
+        self.figure = Figure(figsize=(12, 8), dpi=100)
         self.canvas = FigureCanvas(self.figure)
         self.toolbar = NavigationToolbar(self.canvas, self)
         
