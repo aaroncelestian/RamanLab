@@ -90,7 +90,7 @@ class MicroplasticDetector:
         """Get reference spectra dictionary."""
         return self.plastic_references
     
-    def load_plastic_references(self, database: Dict, chemical_family: str = 'Plastics'):
+    def load_plastic_references(self, database: Dict, chemical_family: str = 'Plastic'):
         """
         Load plastic reference spectra from database.
         

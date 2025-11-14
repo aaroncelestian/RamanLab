@@ -58,6 +58,23 @@ class MicroplasticDetectionTab(QWidget):
         panel = QGroupBox("Microplastic Detection Settings")
         layout = QVBoxLayout(panel)
         
+        # === Database Loading ===
+        db_button = QPushButton("📁 Load Reference Database")
+        db_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        db_button.clicked.connect(lambda: self.parent_window.load_database_file() if hasattr(self.parent_window, 'load_database_file') else None)
+        layout.addWidget(db_button)
+        
         # === Plastic Type Selection ===
         plastic_group = QGroupBox("Plastic Types to Detect")
         plastic_layout = QGridLayout(plastic_group)

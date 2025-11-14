@@ -52,7 +52,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Initialize data and analysis objects
         self.map_data: Optional[RamanMapData] = None
-        self.database = None  # Raman database for reference matching
+        self.database = None  # Raman database for microplastic reference matching
         self.pca_analyzer = PCAAnalyzer()
         self.nmf_analyzer = NMFAnalyzer()
         
@@ -113,6 +113,61 @@ class MapAnalysisMainWindow(QMainWindow):
             logger.info(f"Loaded database from parent with {len(self.database)} entries")
         
         logger.info("Main window initialized")
+    
+    def load_database_file(self):
+        """Load Raman database from pickle file and filter for plastics only."""
+        import pickle
+        
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Raman Database", "",
+            "Pickle Files (*.pkl);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'rb') as f:
+                    full_database = pickle.load(f)
+                
+                # Filter for plastics only
+                self.database = {}
+                families_found = set()
+                
+                for key, spectrum_data in full_database.items():
+                    metadata = spectrum_data.get('metadata', {})
+                    family = metadata.get('chemical_family', '')
+                    
+                    if family:  # Track all non-empty families
+                        families_found.add(family)
+                    
+                    if family.lower() == 'plastic':
+                        self.database[key] = spectrum_data
+                
+                # Log what families were found
+                logger.info(f"Chemical families found in database: {sorted(families_found)}")
+                
+                n_total = len(full_database) if full_database else 0
+                n_plastics = len(self.database)
+                
+                logger.info(f"Loaded {n_plastics} plastic spectra from {n_total} total entries")
+                
+                # Show success message
+                QMessageBox.information(
+                    self, "Database Loaded",
+                    f"Successfully loaded {n_plastics} plastic reference spectra\n"
+                    f"(filtered from {n_total} total database entries).\n\n"
+                    f"Plastic references are now available for microplastic detection."
+                )
+                
+                # Log to microplastic tab if available
+                if hasattr(self, 'microplastic_tab'):
+                    self.microplastic_tab.log_status(f"✓ Loaded {n_plastics} plastic reference spectra from database")
+                
+            except Exception as e:
+                logger.error(f"Error loading database: {e}")
+                QMessageBox.critical(
+                    self, "Error Loading Database",
+                    f"Failed to load database:\n{str(e)}"
+                )
     
     def set_database(self, database):
         """Set the Raman database for reference matching."""
@@ -9059,7 +9114,7 @@ The map is now ready for analysis!"""
             # Load plastic references from database if available
             n_refs = 0
             if hasattr(self, 'database') and self.database:
-                n_refs = detector.load_plastic_references(self.database, 'Plastics')
+                n_refs = detector.load_plastic_references(self.database, 'Plastic')
                 self.microplastic_tab.log_status(f"✓ Loaded {n_refs} plastic reference spectra")
             
             # Warn if using database correlation without references
