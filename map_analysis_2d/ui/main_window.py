@@ -52,6 +52,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Initialize data and analysis objects
         self.map_data: Optional[RamanMapData] = None
+        self.database = None  # Raman database for reference matching
         self.pca_analyzer = PCAAnalyzer()
         self.nmf_analyzer = NMFAnalyzer()
         
@@ -106,7 +107,17 @@ class MapAnalysisMainWindow(QMainWindow):
         # Enable drag and drop
         self.setAcceptDrops(True)
         
+        # Try to get database from parent if available
+        if parent and hasattr(parent, 'database'):
+            self.database = parent.database
+            logger.info(f"Loaded database from parent with {len(self.database)} entries")
+        
         logger.info("Main window initialized")
+    
+    def set_database(self, database):
+        """Set the Raman database for reference matching."""
+        self.database = database
+        logger.info(f"Database set with {len(database) if database else 0} entries")
         
     def setup_ui(self):
         """Set up the user interface."""
@@ -544,6 +555,12 @@ class MapAnalysisMainWindow(QMainWindow):
             
             # Automatically refresh comprehensive results when switching to results tab
             self.plot_comprehensive_results()
+            
+        elif index == 5:  # Microplastic Detection
+            # Get the control panel from the microplastic tab
+            if hasattr(self, 'microplastic_tab'):
+                control_panel = self.microplastic_tab.create_control_panel()
+                self.controls_panel.add_section("microplastic_controls", control_panel)
             
         # Add stretch to push all controls to the top
         self.controls_panel.add_stretch()

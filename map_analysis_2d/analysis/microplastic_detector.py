@@ -225,81 +225,103 @@ class MicroplasticDetector:
                                     ref_intensities: np.ndarray) -> Tuple[float, Dict[str, float]]:
         """
         Calculate correlation score using multiple diagnostic frequency windows.
-        Based on proven search/match algorithm from raman_analysis_app.
+        EXACT COPY of proven algorithm from raman_analysis_app_qt6.py
         
+        Args:
+            wavenumbers: Query wavenumber array
+            intensities: Query intensity array (baseline-corrected)
+            ref_wavenumbers: Reference wavenumber array
+            ref_intensities: Reference intensity array
+            
         Returns:
             Tuple of (overall_score, window_scores_dict)
         """
-        # Define diagnostic frequency windows for plastics
-        windows = [
-            {"name": "C-C Backbone", "range": (800, 1200), "weight": 0.35},   # Most diagnostic
-            {"name": "C-H Bending", "range": (1200, 1500), "weight": 0.30},   # Very characteristic
-            {"name": "C-H Stretching", "range": (2800, 3100), "weight": 0.25}, # Strong peaks
-            {"name": "Fingerprint", "range": (400, 800), "weight": 0.10}      # Additional info
-        ]
-        
-        total_weighted_score = 0.0
-        total_weight = 0.0
-        window_scores = {}
-        
-        for window in windows:
-            window_start, window_end = window["range"]
+        try:
+            # Convert to numpy arrays with explicit float conversion
+            ref_wavenumbers = np.array(ref_wavenumbers, dtype=float)
+            ref_intensities = np.array(ref_intensities, dtype=float)
             
-            # Check overlap
-            query_mask = (wavenumbers >= window_start) & (wavenumbers <= window_end)
-            ref_mask = (ref_wavenumbers >= window_start) & (ref_wavenumbers <= window_end)
+            # Check for empty or invalid data
+            if len(ref_wavenumbers) == 0 or len(ref_intensities) == 0:
+                return 0.0, {}
             
-            if not np.any(query_mask) or not np.any(ref_mask):
-                window_scores[window["name"]] = 0.0
-                continue
+            # Define diagnostic windows for plastics (C-H, C-C, C=C vibrations)
+            windows = [
+                {"name": "C-H stretch", "range": (2800, 3100), "weight": 0.25},
+                {"name": "C=C stretch", "range": (1600, 1700), "weight": 0.20},
+                {"name": "C-H bend", "range": (1400, 1500), "weight": 0.20},
+                {"name": "C-C stretch", "range": (1000, 1200), "weight": 0.20},
+                {"name": "Fingerprint", "range": (600, 900), "weight": 0.15}
+            ]
             
-            # Get overlapping range
-            overlap_start = max(window_start, 
-                              max(wavenumbers[query_mask].min(), ref_wavenumbers[ref_mask].min()))
-            overlap_end = min(window_end,
-                            min(wavenumbers[query_mask].max(), ref_wavenumbers[ref_mask].max()))
+            total_weighted_score = 0.0
+            total_weight = 0.0
+            window_scores = {}
             
-            if overlap_end <= overlap_start:
-                window_scores[window["name"]] = 0.0
-                continue
+            for window in windows:
+                window_start, window_end = window["range"]
+                
+                # Find overlapping region
+                query_mask = (wavenumbers >= window_start) & (wavenumbers <= window_end)
+                db_mask = (ref_wavenumbers >= window_start) & (ref_wavenumbers <= window_end)
+                
+                if not np.any(query_mask) or not np.any(db_mask):
+                    window_scores[window["name"]] = 0.0
+                    continue
+                
+                # Calculate actual overlap
+                overlap_start = max(window_start, 
+                                  max(wavenumbers[query_mask].min(), ref_wavenumbers[db_mask].min()))
+                overlap_end = min(window_end,
+                                min(wavenumbers[query_mask].max(), ref_wavenumbers[db_mask].max()))
+                
+                if overlap_end <= overlap_start:
+                    window_scores[window["name"]] = 0.0
+                    continue  # No meaningful overlap
+                
+                # Create common wavenumber grid for this window
+                n_points = min(50, np.sum(query_mask), np.sum(db_mask))  # Adaptive resolution
+                if n_points < 5:
+                    window_scores[window["name"]] = 0.0
+                    continue  # Too few points for reliable correlation
+                
+                common_wavenumbers = np.linspace(overlap_start, overlap_end, n_points)
+                
+                # Interpolate both spectra to common grid
+                query_interp = np.interp(common_wavenumbers, wavenumbers, intensities)
+                db_interp = np.interp(common_wavenumbers, ref_wavenumbers, ref_intensities)
+                
+                # Check for zero variance
+                query_std = np.std(query_interp)
+                db_std = np.std(db_interp)
+                
+                if query_std == 0 or db_std == 0:
+                    window_scores[window["name"]] = 0.0
+                    continue  # Skip windows with no variation
+                
+                # Normalize to zero mean, unit variance
+                query_norm = (query_interp - np.mean(query_interp)) / query_std
+                db_norm = (db_interp - np.mean(db_interp)) / db_std
+                
+                # Calculate correlation for this window
+                correlation = np.corrcoef(query_norm, db_norm)[0, 1]
+                window_similarity = abs(correlation)  # Use absolute correlation
+                
+                window_scores[window["name"]] = window_similarity
+                # Add to weighted sum
+                total_weighted_score += window_similarity * window["weight"]
+                total_weight += window["weight"]
             
-            # Create common grid
-            n_points = min(50, np.sum(query_mask), np.sum(ref_mask))
-            if n_points < 5:
-                window_scores[window["name"]] = 0.0
-                continue
+            if total_weight == 0:
+                return 0.0, window_scores  # No valid windows
             
-            common_wavenumbers = np.linspace(overlap_start, overlap_end, n_points)
+            # Return weighted average
+            final_score = total_weighted_score / total_weight
+            return max(0, min(1, final_score)), window_scores
             
-            # Interpolate
-            query_interp = np.interp(common_wavenumbers, wavenumbers, intensities)
-            ref_interp = np.interp(common_wavenumbers, ref_wavenumbers, ref_intensities)
-            
-            # Check variance
-            query_std = np.std(query_interp)
-            ref_std = np.std(ref_interp)
-            
-            if query_std == 0 or ref_std == 0:
-                window_scores[window["name"]] = 0.0
-                continue
-            
-            # Normalize
-            query_norm = (query_interp - np.mean(query_interp)) / query_std
-            ref_norm = (ref_interp - np.mean(ref_interp)) / ref_std
-            
-            # Calculate correlation
-            correlation = np.corrcoef(query_norm, ref_norm)[0, 1]
-            window_similarity = abs(correlation)
-            
-            window_scores[window["name"]] = window_similarity
-            total_weighted_score += window_similarity * window["weight"]
-            total_weight += window["weight"]
-        
-        if total_weight == 0:
-            return 0.0, window_scores
-        
-        final_score = total_weighted_score / total_weight
-        return max(0, min(1, final_score)), window_scores
+        except Exception as e:
+            logger.error(f"Error in multi-window score calculation: {e}")
+            return 0.0, {}
 
     def calculate_plastic_score(self, wavenumbers: np.ndarray, 
                                intensities: np.ndarray,

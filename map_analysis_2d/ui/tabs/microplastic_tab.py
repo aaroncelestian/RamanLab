@@ -45,10 +45,6 @@ class MicroplasticDetectionTab(QWidget):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
         
-        # ===== Control Panel =====
-        control_panel = self.create_control_panel()
-        layout.addWidget(control_panel)
-        
         # ===== Visualization Area =====
         viz_panel = self.create_visualization_panel()
         layout.addWidget(viz_panel, stretch=1)
@@ -191,6 +187,32 @@ class MicroplasticDetectionTab(QWidget):
         
         layout.addLayout(button_layout)
         
+        # === Spectrum Display (in control panel) ===
+        spectrum_group = QGroupBox("Selected Spectrum (Click map to view)")
+        spectrum_layout = QVBoxLayout(spectrum_group)
+        spectrum_layout.setContentsMargins(5, 5, 5, 5)
+        
+        # Create matplotlib figure for spectrum with proper DPI
+        self.spectrum_figure = Figure(figsize=(5, 4), dpi=100)
+        self.spectrum_canvas = FigureCanvas(self.spectrum_figure)
+        self.spectrum_canvas.setMinimumHeight(300)
+        
+        # Add navigation toolbar for spectrum
+        spectrum_toolbar = NavigationToolbar(self.spectrum_canvas, self)
+        
+        spectrum_layout.addWidget(spectrum_toolbar)
+        spectrum_layout.addWidget(self.spectrum_canvas)
+        layout.addWidget(spectrum_group)
+        
+        # Create initial empty spectrum plot
+        ax = self.spectrum_figure.add_subplot(111)
+        ax.text(0.5, 0.5, 'Click on detection map\nto view spectrum',
+               ha='center', va='center', fontsize=10, color='gray')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        self.spectrum_figure.tight_layout()
+        self.spectrum_canvas.draw_idle()
+        
         return panel
     
     def create_visualization_panel(self):
@@ -203,7 +225,7 @@ class MicroplasticDetectionTab(QWidget):
         maps_layout = QVBoxLayout(maps_group)
         
         # Create matplotlib figure for detection maps
-        self.figure = Figure(figsize=(12, 6))
+        self.figure = Figure(figsize=(12, 8))
         self.canvas = FigureCanvas(self.figure)
         
         # Add navigation toolbar for maps
@@ -212,21 +234,6 @@ class MicroplasticDetectionTab(QWidget):
         maps_layout.addWidget(toolbar)
         maps_layout.addWidget(self.canvas)
         layout.addWidget(maps_group)
-        
-        # === Spectrum Display ===
-        spectrum_group = QGroupBox("Selected Spectrum")
-        spectrum_layout = QVBoxLayout(spectrum_group)
-        
-        # Create matplotlib figure for spectrum
-        self.spectrum_figure = Figure(figsize=(12, 3))
-        self.spectrum_canvas = FigureCanvas(self.spectrum_figure)
-        
-        # Add navigation toolbar for spectrum
-        spectrum_toolbar = NavigationToolbar(self.spectrum_canvas, self)
-        
-        spectrum_layout.addWidget(spectrum_toolbar)
-        spectrum_layout.addWidget(self.spectrum_canvas)
-        layout.addWidget(spectrum_group)
         
         # Connect click event
         self.canvas.mpl_connect('button_press_event', self.on_map_click)
@@ -503,7 +510,7 @@ class MicroplasticDetectionTab(QWidget):
         if event.inaxes is None or not hasattr(self.parent_window, 'map_data'):
             return
         
-        # Get click coordinates
+        # Get click coordinates (these are image pixel coordinates)
         x_click = int(round(event.xdata))
         y_click = int(round(event.ydata))
         
@@ -514,24 +521,40 @@ class MicroplasticDetectionTab(QWidget):
         
         # Find the spectrum at this position
         try:
-            # Get the spectrum at the clicked position
-            spectrum = None
-            for spec in map_data.spectra.values():
-                if int(spec.x_pos) == x_click and int(spec.y_pos) == y_click:
-                    spectrum = spec
-                    break
+            # Get all unique positions
+            all_positions = [(spec.x_pos, spec.y_pos) for spec in map_data.spectra.values()]
+            unique_x = sorted(set(pos[0] for pos in all_positions))
+            unique_y = sorted(set(pos[1] for pos in all_positions))
             
-            if spectrum is not None:
-                self.selected_position = (x_click, y_click)
-                self.display_spectrum(spectrum, x_click, y_click)
+            # Map click coordinates to actual spectrum positions
+            # The click coordinates are indices into the 2D map array
+            if y_click < len(unique_y) and x_click < len(unique_x):
+                actual_x = unique_x[x_click]
+                actual_y = unique_y[y_click]
+                
+                # Find spectrum at this actual position
+                spectrum = None
+                for spec in map_data.spectra.values():
+                    if spec.x_pos == actual_x and spec.y_pos == actual_y:
+                        spectrum = spec
+                        break
+                
+                if spectrum is not None:
+                    self.selected_position = (x_click, y_click)
+                    self.display_spectrum(spectrum, x_click, y_click)
+                    self.log_status(f"📊 Spectrum at map position ({x_click}, {y_click}) = actual position ({actual_x}, {actual_y})")
+                else:
+                    self.log_status(f"⚠️ No spectrum found at actual position ({actual_x}, {actual_y})")
             else:
-                self.log_status(f"⚠️ No spectrum found at position ({x_click}, {y_click})")
+                self.log_status(f"⚠️ Click outside map bounds: ({x_click}, {y_click})")
         
         except Exception as e:
             self.log_status(f"❌ Error displaying spectrum: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def display_spectrum(self, spectrum, x_pos, y_pos):
-        """Display the selected spectrum."""
+        """Display the selected spectrum with overlaid reference spectra."""
         self.spectrum_figure.clear()
         ax = self.spectrum_figure.add_subplot(111)
         
@@ -539,19 +562,41 @@ class MicroplasticDetectionTab(QWidget):
         wavenumbers = spectrum.wavenumbers
         intensities = spectrum.intensities
         
-        # Use processed intensities if available
-        if hasattr(spectrum, 'processed_intensities') and spectrum.processed_intensities is not None:
-            intensities = spectrum.processed_intensities
-            label = 'Processed Spectrum'
+        # Apply baseline correction using the same method as detection
+        from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
+        
+        # Get baseline parameters from UI
+        params = self.get_detection_parameters()
+        baseline_params = params.get('baseline', {})
+        
+        # Apply baseline correction
+        if baseline_params.get('method') == 'rolling_ball':
+            # Use fast rolling ball
+            from scipy.ndimage import minimum_filter1d
+            baseline = minimum_filter1d(intensities, size=100, mode='nearest')
+            intensities = intensities - baseline
         else:
-            label = 'Raw Spectrum'
+            # Use ALS
+            intensities = MicroplasticDetector.baseline_als(
+                intensities,
+                lam=baseline_params.get('lam', 1e6),
+                p=baseline_params.get('p', 0.001),
+                niter=baseline_params.get('niter', 10)
+            )
+        
+        # Normalize spectrum for comparison
+        intensities_norm = intensities - np.min(intensities)
+        if np.max(intensities_norm) > 0:
+            intensities_norm = intensities_norm / np.max(intensities_norm)
         
         # Plot spectrum
-        ax.plot(wavenumbers, intensities, 'b-', linewidth=1, label=label)
+        ax.plot(wavenumbers, intensities_norm, 'b-', linewidth=2, label='Map Spectrum (baseline corrected)', alpha=0.8)
         
-        # Get detection scores for this position if available
+        # Get detection scores and overlay reference spectra
         if self.detection_results is not None:
             score_text = f"Position: ({x_pos}, {y_pos})\\n"
+            scores_list = []
+            
             for plastic_type, score_map in self.detection_results.items():
                 # Get score at this position
                 if score_map.ndim == 2:
@@ -565,19 +610,83 @@ class MicroplasticDetectionTab(QWidget):
                     else:
                         score = 0.0
                 
+                scores_list.append((plastic_type, score))
                 score_text += f"{plastic_type}: {score:.3f}\\n"
             
-            ax.text(0.02, 0.98, score_text, transform=ax.transAxes,
-                   verticalalignment='top', fontsize=9,
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            # Sort by score and overlay top matches
+            scores_list.sort(key=lambda x: x[1], reverse=True)
+            
+            # Get reference spectra from parent's detector
+            from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
+            detector = MicroplasticDetector()
+            
+            # Try to load references if available
+            n_refs = 0
+            if hasattr(self.parent_window, 'database') and self.parent_window.database:
+                n_refs = detector.load_plastic_references(self.parent_window.database, 'Plastics')
+                self.log_status(f"Loaded {n_refs} plastic references for overlay")
+            else:
+                self.log_status("⚠️ No database available for reference overlay")
+            
+            # Overlay top 3 matches with score > 0.1
+            if n_refs > 0:
+                colors = ['r', 'g', 'orange']
+                overlays_added = 0
+                
+                for i, (plastic_type, score) in enumerate(scores_list[:3]):
+                    if score > 0.1 and i < len(colors):
+                        # Try to find reference spectrum
+                        ref_spectrum = None
+                        plastic_name = detector.PLASTIC_SIGNATURES[plastic_type]['name'].lower()
+                        
+                        # Try exact match first
+                        if plastic_type in detector.reference_spectra:
+                            ref_spectrum = detector.reference_spectra[plastic_type]
+                            self.log_status(f"Found exact match for {plastic_type}")
+                        else:
+                            # Try fuzzy match
+                            for key, spectrum in detector.reference_spectra.items():
+                                if plastic_name in key.lower() or plastic_type.lower() in key.lower():
+                                    ref_spectrum = spectrum
+                                    self.log_status(f"Matched {plastic_type} to reference: {key}")
+                                    break
+                        
+                        if ref_spectrum is not None:
+                            ref_wn, ref_int = ref_spectrum
+                            
+                            # Normalize reference spectrum
+                            ref_int_norm = ref_int - np.min(ref_int)
+                            if np.max(ref_int_norm) > 0:
+                                ref_int_norm = ref_int_norm / np.max(ref_int_norm)
+                            
+                            # Plot reference spectrum
+                            ax.plot(ref_wn, ref_int_norm, colors[i], linewidth=2, 
+                                   label=f'{plastic_type} Ref (score: {score:.3f})',
+                                   alpha=0.7, linestyle='--')
+                            overlays_added += 1
+                        else:
+                            self.log_status(f"⚠️ No reference found for {plastic_type}")
+                
+                if overlays_added == 0:
+                    self.log_status("⚠️ No reference spectra could be matched")
+            else:
+                self.log_status("⚠️ No plastic references in database")
+            
+            # Position text box in upper left, but below the title
+            ax.text(0.02, 0.95, score_text, transform=ax.transAxes,
+                   verticalalignment='top', fontsize=8,
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7))
         
-        ax.set_xlabel('Wavenumber (cm⁻¹)')
-        ax.set_ylabel('Intensity')
-        ax.set_title(f'Spectrum at Position ({x_pos}, {y_pos})')
-        ax.legend()
+        ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
+        ax.set_ylabel('Intensity (normalized)', fontsize=9)
+        ax.set_title(f'Spectrum at Position ({x_pos}, {y_pos})', fontsize=10, fontweight='bold')
+        ax.legend(fontsize=8, loc='upper right')
         ax.grid(True, alpha=0.3)
+        ax.tick_params(labelsize=8)
         
+        # Force proper layout and canvas update
         self.spectrum_figure.tight_layout()
-        self.spectrum_canvas.draw()
+        self.spectrum_canvas.draw_idle()
+        self.spectrum_canvas.flush_events()
         
         self.log_status(f"📊 Displaying spectrum at ({x_pos}, {y_pos})")
