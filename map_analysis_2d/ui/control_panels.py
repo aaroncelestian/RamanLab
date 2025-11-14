@@ -7,9 +7,9 @@ from typing import Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, 
     QLabel, QCheckBox, QComboBox, QLineEdit, QListWidget, QTabWidget,
-    QTextEdit, QSlider, QDoubleSpinBox, QSizePolicy
+    QTextEdit, QSlider, QDoubleSpinBox, QSizePolicy, QFrame
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QTimer
 
 from .base_widgets import (
     ParameterGroupBox, ButtonGroup, TitleLabel, StandardButton,
@@ -130,17 +130,22 @@ class MapViewControlPanel(BaseControlPanel):
         slider_layout.addWidget(self.center_wavenumber_slider)
         self.range_controls.layout.addWidget(slider_widget)
 
-        # Integration range width (fixed at 100 cm⁻¹) - below slider
-        width_layout = QHBoxLayout()
-        width_layout.addWidget(QLabel("Range Width (cm⁻¹):"))
+        # Integration range width - stacked vertically below slider
+        width_layout = QVBoxLayout()
+        width_layout.setContentsMargins(0, 0, 0, 0)
+        width_layout.setSpacing(2)
+        
+        width_label = QLabel("Range Width (cm⁻¹):")
+        width_label.setStyleSheet("QLabel { font-size: 10px; }")
+        width_layout.addWidget(width_label)
+        
         self.range_width_spin = QDoubleSpinBox()
         self.range_width_spin.setRange(50.0, 500.0)
         self.range_width_spin.setValue(100.0)
         self.range_width_spin.setSingleStep(25.0)
         self.range_width_spin.setToolTip("Width of integration range")
-        self.range_width_spin.setMaximumWidth(80)
+        self.range_width_spin.setMaximumWidth(100)
         width_layout.addWidget(self.range_width_spin)
-        width_layout.addStretch()  # Push everything to the left
 
         width_widget = QWidget()
         width_widget.setLayout(width_layout)
@@ -155,8 +160,14 @@ class MapViewControlPanel(BaseControlPanel):
         # Initially hide range controls
         self.range_controls.setVisible(False)
         
-        # Connect parameter changes
-        self.center_wavenumber_slider.valueChanged.connect(self._update_wavenumber_range)
+        # Create debounce timer for slider (only update map after user stops dragging)
+        self._range_update_timer = QTimer()
+        self._range_update_timer.setSingleShot(True)
+        self._range_update_timer.setInterval(300)  # 300ms delay after slider stops
+        self._range_update_timer.timeout.connect(self._emit_wavenumber_range)
+        
+        # Connect parameter changes with debouncing
+        self.center_wavenumber_slider.valueChanged.connect(self._on_slider_value_changed)
         self.range_width_spin.valueChanged.connect(self._update_wavenumber_range)
         
         wavenumber_layout.addWidget(self.range_controls)
@@ -352,25 +363,46 @@ class MapViewControlPanel(BaseControlPanel):
         if mode == "Custom Range":
             self.range_controls.setVisible(True)
             # Emit initial range when switching to custom mode
-            self._update_wavenumber_range()
+            self._emit_wavenumber_range()
         else:
             self.range_controls.setVisible(False)
+            # Stop any pending timer
+            self._range_update_timer.stop()
             # Emit signal to use full spectrum integration
             self.wavenumber_range_changed.emit(0.0, 0.0)  # Special values for full spectrum
     
+    def _on_slider_value_changed(self):
+        """Handle slider value changes with debouncing."""
+        # Update display immediately for visual feedback
+        center = self.center_wavenumber_slider.value()
+        width = self.range_width_spin.value()
+        min_wavenumber = center - width / 2
+        max_wavenumber = center + width / 2
+        self.range_display.setText(f"Range: {min_wavenumber:.0f} - {max_wavenumber:.0f} cm⁻¹")
+        
+        # Restart debounce timer (delays signal emission until slider stops)
+        self._range_update_timer.stop()
+        self._range_update_timer.start()
+    
     def _update_wavenumber_range(self):
-        """Update wavenumber range display and emit signal."""
+        """Update wavenumber range display and emit signal immediately (for spinbox)."""
         center = self.center_wavenumber_slider.value()
         width = self.range_width_spin.value()
         
         min_wavenumber = center - width / 2
         max_wavenumber = center + width / 2
         
-        # Update range display label (center value is now shown in tooltip)
+        # Update range display label
         self.range_display.setText(f"Range: {min_wavenumber:.0f} - {max_wavenumber:.0f} cm⁻¹")
         
-        # Emit signal if in custom range mode
+        # Emit signal immediately (for spinbox changes)
+        self._emit_wavenumber_range()
+    
+    def _emit_wavenumber_range(self):
+        """Emit the wavenumber range changed signal."""
         if self.integration_mode.currentText() == "Custom Range":
+            center = self.center_wavenumber_slider.value()
+            width = self.range_width_spin.value()
             self.wavenumber_range_changed.emit(center, width)
     
     def get_integration_mode(self) -> str:

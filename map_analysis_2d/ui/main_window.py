@@ -266,6 +266,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Connect signals
         self.microplastic_tab.detection_started.connect(self.run_microplastic_detection)
+        self.microplastic_tab.detection_stopped.connect(self.stop_microplastic_detection)
         
         self.tab_widget.addTab(self.microplastic_tab, "🔬 Microplastic Detection")
         
@@ -9039,9 +9040,19 @@ The map is now ready for analysis!"""
             detector = MicroplasticDetector()
             
             # Load plastic references from database if available
+            n_refs = 0
             if hasattr(self, 'database') and self.database:
                 n_refs = detector.load_plastic_references(self.database, 'Plastics')
                 self.microplastic_tab.log_status(f"✓ Loaded {n_refs} plastic reference spectra")
+            
+            # Warn if using database correlation without references
+            if params['method'] == 'Database Correlation (Accurate)' and n_refs == 0:
+                self.microplastic_tab.log_status(
+                    "⚠️ WARNING: Database Correlation selected but no plastic references loaded!"
+                )
+                self.microplastic_tab.log_status(
+                    "   Using peak-based detection instead. Load database or use 'Peak-based (Fast)' method."
+                )
             
             self.microplastic_tab.update_progress(20, "Preparing spectra...")
             
@@ -9061,12 +9072,14 @@ The map is now ready for analysis!"""
             self.detection_worker.progress_updated.connect(self._on_detection_progress)
             self.detection_worker.detection_complete.connect(self._on_detection_complete)
             self.detection_worker.detection_failed.connect(self._on_detection_failed)
+            self.detection_worker.finished.connect(self._on_worker_finished)
             
             # Start detection in background thread
             self.detection_worker.start()
             
         except Exception as e:
             self.microplastic_tab.log_status(f"❌ Detection failed: {str(e)}")
+            self.microplastic_tab.reset_buttons()
             QMessageBox.critical(self, "Detection Error", f"Error during microplastic detection:\n{str(e)}")
             logger.error(f"Microplastic detection error: {e}")
             import traceback
@@ -9116,5 +9129,30 @@ The map is now ready for analysis!"""
     def _on_detection_failed(self, error_msg):
         """Handle detection failure."""
         self.microplastic_tab.log_status(f"❌ Detection failed: {error_msg}")
+        self.microplastic_tab.reset_buttons()
         QMessageBox.critical(self, "Detection Error", f"Error during microplastic detection:\n{error_msg}")
         logger.error(f"Microplastic detection error: {error_msg}")
+    
+    def stop_microplastic_detection(self):
+        """Stop the running microplastic detection worker."""
+        if hasattr(self, 'detection_worker') and self.detection_worker is not None:
+            if self.detection_worker.isRunning():
+                self.microplastic_tab.log_status("⏹ Stopping worker thread...")
+                self.detection_worker.stop()
+                # Wait for thread to finish (with timeout)
+                if not self.detection_worker.wait(5000):  # 5 second timeout
+                    self.microplastic_tab.log_status("⚠️ Worker thread did not stop gracefully, terminating...")
+                    self.detection_worker.terminate()
+                    self.detection_worker.wait()
+                self.microplastic_tab.log_status("✓ Detection stopped")
+                self.microplastic_tab.reset_buttons()
+            else:
+                self.microplastic_tab.log_status("⚠️ No detection running")
+                self.microplastic_tab.reset_buttons()
+    
+    def _on_worker_finished(self):
+        """Handle worker thread finishing (cleanup)."""
+        # Clean up worker reference
+        if hasattr(self, 'detection_worker'):
+            self.detection_worker.deleteLater()
+            self.detection_worker = None

@@ -97,6 +97,9 @@ class MicroplasticDetector:
         Args:
             database: RamanLab database dictionary
             chemical_family: Chemical family to filter (default: 'Plastics')
+        
+        Returns:
+            Number of reference spectra loaded
         """
         logger.info(f"Loading plastic references from database (family: {chemical_family})")
         
@@ -109,7 +112,14 @@ class MicroplasticDetector:
             family = metadata.get('chemical_family', '')
             
             if family.lower() == chemical_family.lower():
-                self.plastic_references[key] = spectrum_data
+                # Extract wavenumbers and intensities as numpy arrays
+                wavenumbers = np.array(spectrum_data.get('wavenumbers', []))
+                intensities = np.array(spectrum_data.get('intensities', []))
+                
+                # Store as tuple (wavenumbers, intensities) for correlation
+                if len(wavenumbers) > 0 and len(intensities) > 0:
+                    self.plastic_references[key] = (wavenumbers, intensities)
+                    logger.debug(f"Loaded reference: {key} ({len(wavenumbers)} points)")
         
         logger.info(f"Loaded {len(self.plastic_references)} plastic reference spectra")
         return len(self.plastic_references)
@@ -121,13 +131,16 @@ class MicroplasticDetector:
         Asymmetric Least Squares baseline correction.
         
         Optimized for removing strong fluorescence backgrounds while preserving
-        weak Raman peaks.
+        weak Raman peaks. Uses the same ALS algorithm as the main app's Process tab.
         
         Args:
             intensities: Raw intensity array
             lam: Smoothness parameter (higher = smoother baseline)
+                 Typical range: 10^4 to 10^8
             p: Asymmetry parameter (lower = more aggressive removal)
-            niter: Number of iterations
+               Typical range: 0.001 to 0.1
+            niter: Number of iterations (default: 10)
+                   Typical range: 5 to 20
             
         Returns:
             Baseline-corrected intensities
@@ -169,7 +182,8 @@ class MicroplasticDetector:
     def detect_peaks_at_positions(self, wavenumbers: np.ndarray, 
                                   intensities: np.ndarray,
                                   peak_positions: List[float],
-                                  tolerance: float = 10.0) -> Dict[float, float]:
+                                  tolerance: float = 10.0,
+                                  min_intensity: float = 50.0) -> Dict[float, float]:
         """
         Detect peak intensities at specific wavenumber positions.
         
@@ -178,20 +192,30 @@ class MicroplasticDetector:
             intensities: Intensity array (baseline-corrected)
             peak_positions: Expected peak positions (cm⁻¹)
             tolerance: Wavenumber tolerance (±cm⁻¹)
+            min_intensity: Minimum intensity to count as a peak
             
         Returns:
-            Dictionary mapping peak position to intensity
+            Dictionary mapping peak position to intensity (only significant peaks)
         """
         peak_intensities = {}
+        
+        # Calculate noise level as median absolute deviation
+        median_intensity = np.median(intensities)
+        mad = np.median(np.abs(intensities - median_intensity))
+        noise_threshold = median_intensity + 3 * mad  # 3-sigma threshold
+        
+        # Use the higher of min_intensity or noise threshold
+        threshold = max(min_intensity, noise_threshold)
         
         for peak_pos in peak_positions:
             # Find wavenumbers within tolerance
             mask = np.abs(wavenumbers - peak_pos) <= tolerance
             if np.any(mask):
                 # Get maximum intensity in this region
-                peak_intensities[peak_pos] = np.max(intensities[mask])
-            else:
-                peak_intensities[peak_pos] = 0.0
+                max_intensity = np.max(intensities[mask])
+                # Only count if significantly above threshold
+                if max_intensity > threshold:
+                    peak_intensities[peak_pos] = max_intensity
         
         return peak_intensities
     
@@ -280,7 +304,10 @@ class MicroplasticDetector:
     def calculate_plastic_score(self, wavenumbers: np.ndarray, 
                                intensities: np.ndarray,
                                plastic_type: str,
-                               baseline_corrected: bool = False) -> Tuple[float, Dict[str, float]]:
+                               baseline_corrected: bool = False,
+                               lam: float = 1e6,
+                               p: float = 0.001,
+                               niter: int = 10) -> Tuple[float, Dict[str, float]]:
         """
         Calculate detection score for a specific plastic type.
         
@@ -289,6 +316,9 @@ class MicroplasticDetector:
             intensities: Intensity array
             plastic_type: Type of plastic to detect
             baseline_corrected: If True, skip baseline correction
+            lam: ALS lambda parameter (smoothness)
+            p: ALS p parameter (asymmetry)
+            niter: ALS iterations
             
         Returns:
             Tuple of (detection_score, window_scores_dict)
@@ -298,11 +328,26 @@ class MicroplasticDetector:
         
         # Apply baseline correction if needed
         if not baseline_corrected:
-            intensities = self.baseline_als(intensities)
+            intensities = self.baseline_als(intensities, lam=lam, p=p, niter=niter)
         
         # Use multi-window correlation if reference available
+        # Try to find a matching reference spectrum by plastic type
+        ref_spectrum = None
+        plastic_name = self.PLASTIC_SIGNATURES[plastic_type]['name'].lower()
+        
+        # First try exact match with plastic_type code
         if plastic_type in self.reference_spectra:
-            ref_wn, ref_int = self.reference_spectra[plastic_type]
+            ref_spectrum = self.reference_spectra[plastic_type]
+        else:
+            # Try to find by matching plastic name in spectrum key
+            for key, spectrum in self.reference_spectra.items():
+                if plastic_name in key.lower() or plastic_type.lower() in key.lower():
+                    ref_spectrum = spectrum
+                    logger.debug(f"Matched {plastic_type} to reference: {key}")
+                    break
+        
+        if ref_spectrum is not None:
+            ref_wn, ref_int = ref_spectrum
             score, window_scores = self.calculate_multi_window_score(
                 wavenumbers, intensities, ref_wn, ref_int
             )
@@ -362,7 +407,10 @@ class MicroplasticDetector:
                                 wavenumbers: np.ndarray,
                                 intensity_map: np.ndarray,
                                 plastic_types: List[str],
-                                skip_baseline: bool = False) -> Dict[str, List[Tuple[int, float, Dict]]]:
+                                skip_baseline: bool = False,
+                                lam: float = 1e6,
+                                p: float = 0.001,
+                                niter: int = 10) -> Dict[str, List[Tuple[int, float, Dict]]]:
         """Process a batch of spectra in parallel."""
         results = {ptype: [] for ptype in plastic_types}
         
@@ -371,7 +419,8 @@ class MicroplasticDetector:
             for ptype in plastic_types:
                 score, window_scores = self.calculate_plastic_score(
                     wavenumbers, spectrum, ptype, 
-                    baseline_corrected=skip_baseline  # If skip_baseline=True, don't do it again
+                    baseline_corrected=skip_baseline,  # If skip_baseline=True, don't do it again
+                    lam=lam, p=p, niter=niter
                 )
                 results[ptype].append((idx, score, window_scores))
         
@@ -383,7 +432,10 @@ class MicroplasticDetector:
                              threshold: float = 0.3,
                              progress_callback: Optional[Callable] = None,
                              n_jobs: int = -1,
-                             fast_mode: bool = True) -> Dict[str, np.ndarray]:
+                             fast_mode: bool = True,
+                             lam: float = 1e6,
+                             p: float = 0.001,
+                             niter: int = 10) -> Dict[str, np.ndarray]:
         """
         Scan entire 2D map for multiple plastic types using parallel processing.
         
@@ -395,6 +447,9 @@ class MicroplasticDetector:
             progress_callback: Optional callback function(current, total, message)
             n_jobs: Number of parallel jobs (-1 = all cores)
             fast_mode: If True, uses simple baseline removal instead of ALS (much faster)
+            lam: ALS lambda parameter (smoothness) - used when fast_mode=False
+            p: ALS p parameter (asymmetry) - used when fast_mode=False
+            niter: ALS iterations - used when fast_mode=False
             
         Returns:
             Dictionary mapping plastic type to 2D score map
@@ -424,19 +479,37 @@ class MicroplasticDetector:
             if progress_callback:
                 progress_callback(0, len(batches), f"Starting parallel processing with {n_cores} cores...")
             
-            # Pre-process: Apply fast baseline correction if in fast mode
+            # Pre-process: Apply baseline correction if in fast mode
             if fast_mode:
-                if progress_callback:
-                    progress_callback(0, n_spectra, "Fast baseline removal...")
+                # Determine which baseline method to use based on parameters
+                # If lam is very high and p is very low, use fast rolling ball
+                # Otherwise use ALS
+                use_rolling_ball = (lam >= 1e6 and p <= 0.001 and niter == 10)
                 
-                # Parallel baseline removal
-                from scipy.ndimage import minimum_filter1d
-                
-                def remove_baseline_batch(indices):
-                    """Remove baseline from a batch of spectra."""
-                    for i in indices:
-                        baseline = minimum_filter1d(intensity_map[i], size=50, mode='nearest')
-                        intensity_map[i] = intensity_map[i] - baseline
+                if use_rolling_ball:
+                    # Fast rolling ball baseline (original fast method)
+                    if progress_callback:
+                        progress_callback(0, n_spectra, "Fast baseline removal (Rolling Ball)...")
+                    
+                    from scipy.ndimage import minimum_filter1d
+                    
+                    def remove_baseline_batch(indices):
+                        """Remove baseline from a batch of spectra using rolling ball."""
+                        for i in indices:
+                            baseline = minimum_filter1d(intensity_map[i], size=100, mode='nearest')
+                            intensity_map[i] = intensity_map[i] - baseline
+                else:
+                    # ALS baseline removal
+                    if progress_callback:
+                        progress_callback(0, n_spectra, f"ALS baseline removal (λ={lam:.0e}, p={p:.3f})...")
+                    
+                    def remove_baseline_batch(indices):
+                        """Remove baseline from a batch of spectra using ALS."""
+                        for i in indices:
+                            # Apply ALS baseline correction
+                            intensity_map[i] = MicroplasticDetector.baseline_als(
+                                intensity_map[i], lam=lam, p=p, niter=niter
+                            )
                 
                 # Create batches for baseline removal
                 baseline_batch_size = max(100, n_spectra // (n_cores * 4))
@@ -444,6 +517,11 @@ class MicroplasticDetector:
                                   for i in range(0, n_spectra, baseline_batch_size)]
                 
                 logger.info(f"Removing baseline from {n_spectra} spectra in {len(baseline_batches)} batches")
+                
+                # Initial progress message
+                if progress_callback:
+                    progress_callback(0, len(baseline_batches), 
+                                    f"Starting ALS baseline on {n_spectra:,} spectra with {n_cores} cores...")
                 
                 # Process baseline removal in parallel
                 completed_baseline = [0]
@@ -453,10 +531,13 @@ class MicroplasticDetector:
                     remove_baseline_batch(batch)
                     with baseline_lock:
                         completed_baseline[0] += 1
-                        if progress_callback and completed_baseline[0] % max(1, len(baseline_batches) // 10) == 0:
+                        # Update every 5% or every 10 batches, whichever is more frequent
+                        update_interval = max(1, min(10, len(baseline_batches) // 20))
+                        if progress_callback and completed_baseline[0] % update_interval == 0:
                             prog = int((completed_baseline[0] / len(baseline_batches)) * 100)
+                            spectra_done = completed_baseline[0] * baseline_batch_size
                             progress_callback(completed_baseline[0], len(baseline_batches), 
-                                            f"Baseline removal: {prog}%")
+                                            f"ALS baseline: {prog}% ({spectra_done:,}/{n_spectra:,} spectra)")
                 
                 Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
                     delayed(baseline_with_progress)(batch) for batch in baseline_batches
@@ -475,7 +556,8 @@ class MicroplasticDetector:
             
             def process_with_progress(batch):
                 result = self._process_spectrum_batch(
-                    batch, wavenumbers, intensity_map, plastic_types, skip_baseline=fast_mode
+                    batch, wavenumbers, intensity_map, plastic_types, 
+                    skip_baseline=fast_mode, lam=lam, p=p, niter=niter
                 )
                 with detection_lock:
                     completed_batches[0] += 1
@@ -509,7 +591,7 @@ class MicroplasticDetector:
             # Process using the 2D method
             flat_scores = self.scan_map_for_plastics(
                 wavenumbers, flat_map, plastic_types, threshold, 
-                progress_callback, n_jobs
+                progress_callback, n_jobs, fast_mode, lam, p, niter
             )
             
             # Reshape back to 3D

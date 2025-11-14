@@ -32,6 +32,7 @@ class MicroplasticDetectionTab(QWidget):
     
     # Signals
     detection_started = Signal()
+    detection_stopped = Signal()
     detection_completed = Signal(dict)
     
     def __init__(self, parent=None):
@@ -118,13 +119,30 @@ class MicroplasticDetectionTab(QWidget):
         self.threshold_label.setMinimumWidth(50)
         params_layout.addWidget(self.threshold_label, 0, 2)
         
-        # Baseline correction aggressiveness
+        # Baseline Correction Presets
         params_layout.addWidget(QLabel("Baseline Correction:"), 1, 0)
-        self.baseline_combo = QComboBox()
-        self.baseline_combo.addItems(['Mild', 'Moderate', 'Aggressive', 'Very Aggressive'])
-        self.baseline_combo.setCurrentText('Aggressive')
-        self.baseline_combo.setToolTip("Higher = more fluorescence removal")
-        params_layout.addWidget(self.baseline_combo, 1, 1, 1, 2)
+        self.baseline_preset_combo = QComboBox()
+        self.baseline_preset_combo.addItems([
+            "Rolling Ball (Fast) - Recommended",
+            "ALS (Fast)",
+            "ALS (Moderate)",
+            "ALS (Aggressive)",
+            "ALS (Balanced)",
+            "ALS (Conservative)",
+            "ALS (Ultra Smooth)"
+        ])
+        self.baseline_preset_combo.setCurrentText("Rolling Ball (Fast) - Recommended")  # Default
+        self.baseline_preset_combo.setToolTip(
+            "Baseline correction methods:\n"
+            "• Rolling Ball (Fast): Very fast, good for fluorescence (~30 sec for 82k spectra)\n"
+            "• ALS (Fast): λ=1e5, p=0.01, 5 iter - Quick ALS (~2-5 min)\n"
+            "• ALS (Moderate): λ=1e5, p=0.01, 10 iter - Standard (~4-8 min)\n"
+            "• ALS (Aggressive): λ=1e4, p=0.05, 15 iter - Strong removal (~6-12 min)\n"
+            "• ALS (Balanced): λ=5e5, p=0.02, 12 iter - Middle ground (~5-10 min)\n"
+            "• ALS (Conservative): λ=1e6, p=0.001, 10 iter - Gentle (~4-8 min)\n"
+            "• ALS (Ultra Smooth): λ=1e7, p=0.002, 20 iter - Very smooth (~8-15 min)"
+        )
+        params_layout.addWidget(self.baseline_preset_combo, 1, 1, 1, 2)
         
         # Peak enhancement
         params_layout.addWidget(QLabel("Peak Enhancement:"), 2, 0)
@@ -177,23 +195,44 @@ class MicroplasticDetectionTab(QWidget):
     
     def create_visualization_panel(self):
         """Create the visualization panel with matplotlib figures."""
-        panel = QGroupBox("Detection Results - Spatial Maps")
+        panel = QWidget()
         layout = QVBoxLayout(panel)
         
-        # Apply compact matplotlib theme
-        try:
-            from matplotlib_config import configure_compact_ui
-            configure_compact_ui()
-        except ImportError:
-            pass  # Use default matplotlib settings
+        # === Detection Maps ===
+        maps_group = QGroupBox("Detection Results - Spatial Maps (Click to view spectrum)")
+        maps_layout = QVBoxLayout(maps_group)
         
-        # Create matplotlib figure with subplots
-        self.figure = Figure(figsize=(12, 8), dpi=100)
+        # Create matplotlib figure for detection maps
+        self.figure = Figure(figsize=(12, 6))
         self.canvas = FigureCanvas(self.figure)
-        self.toolbar = NavigationToolbar(self.canvas, self)
         
-        layout.addWidget(self.toolbar)
-        layout.addWidget(self.canvas)
+        # Add navigation toolbar for maps
+        toolbar = NavigationToolbar(self.canvas, self)
+        
+        maps_layout.addWidget(toolbar)
+        maps_layout.addWidget(self.canvas)
+        layout.addWidget(maps_group)
+        
+        # === Spectrum Display ===
+        spectrum_group = QGroupBox("Selected Spectrum")
+        spectrum_layout = QVBoxLayout(spectrum_group)
+        
+        # Create matplotlib figure for spectrum
+        self.spectrum_figure = Figure(figsize=(12, 3))
+        self.spectrum_canvas = FigureCanvas(self.spectrum_figure)
+        
+        # Add navigation toolbar for spectrum
+        spectrum_toolbar = NavigationToolbar(self.spectrum_canvas, self)
+        
+        spectrum_layout.addWidget(spectrum_toolbar)
+        spectrum_layout.addWidget(self.spectrum_canvas)
+        layout.addWidget(spectrum_group)
+        
+        # Connect click event
+        self.canvas.mpl_connect('button_press_event', self.on_map_click)
+        
+        # Store for later use
+        self.selected_position = None
         
         # Create initial empty plots
         self.create_empty_plots()
@@ -252,29 +291,36 @@ class MicroplasticDetectionTab(QWidget):
         for checkbox in self.plastic_checkboxes.values():
             checkbox.setChecked(False)
     
-    def update_threshold_label(self, value):
-        """Update threshold label when slider changes."""
-        self.threshold_label.setText(f"{value/100:.2f}")
-    
     def get_selected_plastics(self):
         """Get list of selected plastic types."""
         return [code for code, checkbox in self.plastic_checkboxes.items() 
                 if checkbox.isChecked()]
     
+    def update_threshold_label(self):
+        """Update threshold label when slider changes."""
+        value = self.threshold_slider.value() / 100.0
+        self.threshold_label.setText(f"{value:.2f}")
+    
     def get_detection_parameters(self):
         """Get current detection parameters."""
-        # Baseline correction parameters
-        baseline_params = {
-            'Mild': {'lam': 1e5, 'p': 0.01},
-            'Moderate': {'lam': 1e6, 'p': 0.005},
-            'Aggressive': {'lam': 1e7, 'p': 0.001},
-            'Very Aggressive': {'lam': 1e8, 'p': 0.0001}
+        # Baseline correction presets
+        baseline_presets = {
+            "Rolling Ball (Fast) - Recommended": {"method": "rolling_ball", "window": 100},
+            "ALS (Fast)": {"method": "als", "lam": 1e5, "p": 0.01, "niter": 5},
+            "ALS (Moderate)": {"method": "als", "lam": 1e5, "p": 0.01, "niter": 10},
+            "ALS (Aggressive)": {"method": "als", "lam": 1e4, "p": 0.05, "niter": 15},
+            "ALS (Balanced)": {"method": "als", "lam": 5e5, "p": 0.02, "niter": 12},
+            "ALS (Conservative)": {"method": "als", "lam": 1e6, "p": 0.001, "niter": 10},
+            "ALS (Ultra Smooth)": {"method": "als", "lam": 1e7, "p": 0.002, "niter": 20}
         }
+        
+        selected_preset = self.baseline_preset_combo.currentText()
+        baseline_params = baseline_presets.get(selected_preset, baseline_presets["Rolling Ball (Fast) - Recommended"])
         
         return {
             'plastic_types': self.get_selected_plastics(),
             'threshold': self.threshold_slider.value() / 100.0,
-            'baseline': baseline_params[self.baseline_combo.currentText()],
+            'baseline': baseline_params,
             'enhancement_window': self.enhancement_spin.value(),
             'method': self.method_combo.currentText()
         }
@@ -296,9 +342,10 @@ class MicroplasticDetectionTab(QWidget):
     
     def stop_detection(self):
         """Stop ongoing detection."""
-        self.log_status("⏹ Detection stopped by user")
-        self.scan_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
+        self.log_status("⏹ Stopping detection...")
+        self.stop_btn.setEnabled(False)  # Disable stop button immediately
+        # Emit signal to parent to stop the worker thread
+        self.detection_stopped.emit()
     
     def update_progress(self, value, message=""):
         """Update progress bar and status."""
@@ -313,10 +360,18 @@ class MicroplasticDetectionTab(QWidget):
         scrollbar = self.status_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
     
+    def reset_buttons(self):
+        """Reset button states after detection completes or fails."""
+        self.scan_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+    
     def display_results(self, results):
         """Display detection results as spatial maps."""
         self.detection_results = results
         self.figure.clear()
+        
+        # Get current threshold
+        threshold = self.threshold_slider.value() / 100.0
         
         plastic_types = list(results.keys())
         n_types = len(plastic_types)
@@ -348,10 +403,14 @@ class MicroplasticDetectionTab(QWidget):
                 if size * size == len(score_map):
                     score_map = score_map.reshape(size, size)
             
+            # Mask out scores below threshold for clearer visualization
+            masked_map = np.copy(score_map)
+            masked_map[masked_map < threshold] = 0
+            
             # Plot heatmap
-            im = ax.imshow(score_map, cmap='hot', interpolation='nearest',
+            im = ax.imshow(masked_map, cmap='hot', interpolation='nearest',
                           vmin=0, vmax=1, aspect='auto')
-            ax.set_title(f'{plastic_name}\n({np.sum(score_map > 0.3)} detections)',
+            ax.set_title(f'{plastic_name}\n({np.sum(score_map > threshold)} detections)',
                         fontweight='bold')
             ax.set_xlabel('X Position')
             ax.set_ylabel('Y Position')
@@ -369,8 +428,8 @@ class MicroplasticDetectionTab(QWidget):
         self.stop_btn.setEnabled(False)
         
         # Log summary
-        total_detections = sum(np.sum(results[pt] > 0.3) for pt in plastic_types)
-        self.log_status(f"✅ Detection complete! Found {total_detections} potential microplastic locations")
+        total_detections = sum(np.sum(results[pt] > threshold) for pt in plastic_types)
+        self.log_status(f"✅ Detection complete! Found {total_detections} potential microplastic locations (threshold: {threshold:.2f})")
     
     def export_results(self):
         """Export detection results."""
@@ -438,3 +497,87 @@ class MicroplasticDetectionTab(QWidget):
     def export_to_npy(self, file_path):
         """Export results to NumPy format."""
         np.save(file_path, self.detection_results)
+    
+    def on_map_click(self, event):
+        """Handle click on detection map to show spectrum."""
+        if event.inaxes is None or not hasattr(self.parent_window, 'map_data'):
+            return
+        
+        # Get click coordinates
+        x_click = int(round(event.xdata))
+        y_click = int(round(event.ydata))
+        
+        # Get map data from parent
+        map_data = self.parent_window.map_data
+        if map_data is None:
+            return
+        
+        # Find the spectrum at this position
+        try:
+            # Get the spectrum at the clicked position
+            spectrum = None
+            for spec in map_data.spectra.values():
+                if int(spec.x_pos) == x_click and int(spec.y_pos) == y_click:
+                    spectrum = spec
+                    break
+            
+            if spectrum is not None:
+                self.selected_position = (x_click, y_click)
+                self.display_spectrum(spectrum, x_click, y_click)
+            else:
+                self.log_status(f"⚠️ No spectrum found at position ({x_click}, {y_click})")
+        
+        except Exception as e:
+            self.log_status(f"❌ Error displaying spectrum: {str(e)}")
+    
+    def display_spectrum(self, spectrum, x_pos, y_pos):
+        """Display the selected spectrum."""
+        self.spectrum_figure.clear()
+        ax = self.spectrum_figure.add_subplot(111)
+        
+        # Get wavenumbers and intensities
+        wavenumbers = spectrum.wavenumbers
+        intensities = spectrum.intensities
+        
+        # Use processed intensities if available
+        if hasattr(spectrum, 'processed_intensities') and spectrum.processed_intensities is not None:
+            intensities = spectrum.processed_intensities
+            label = 'Processed Spectrum'
+        else:
+            label = 'Raw Spectrum'
+        
+        # Plot spectrum
+        ax.plot(wavenumbers, intensities, 'b-', linewidth=1, label=label)
+        
+        # Get detection scores for this position if available
+        if self.detection_results is not None:
+            score_text = f"Position: ({x_pos}, {y_pos})\\n"
+            for plastic_type, score_map in self.detection_results.items():
+                # Get score at this position
+                if score_map.ndim == 2:
+                    score = score_map[y_pos, x_pos]
+                else:
+                    # Flatten index
+                    size = int(np.sqrt(len(score_map)))
+                    idx = y_pos * size + x_pos
+                    if idx < len(score_map):
+                        score = score_map[idx]
+                    else:
+                        score = 0.0
+                
+                score_text += f"{plastic_type}: {score:.3f}\\n"
+            
+            ax.text(0.02, 0.98, score_text, transform=ax.transAxes,
+                   verticalalignment='top', fontsize=9,
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title(f'Spectrum at Position ({x_pos}, {y_pos})')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        self.spectrum_figure.tight_layout()
+        self.spectrum_canvas.draw()
+        
+        self.log_status(f"📊 Displaying spectrum at ({x_pos}, {y_pos})")
