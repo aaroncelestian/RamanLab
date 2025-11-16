@@ -249,21 +249,23 @@ For optimal performance on multi-core systems:
 **Problem**: `check_dependencies.py` reports missing or outdated packages
 
 **Solution**:
-1. **Install all requirements**:
+1. **Ensure virtual environment is activated** (if you created one):
+   ```bash
+   # macOS/Linux:
+   source ramanlab_env/bin/activate
+   
+   # Windows:
+   ramanlab_env\Scripts\activate
+   ```
+
+2. **Install all requirements**:
    ```bash
    pip install -r requirements_qt6.txt
    ```
 
-2. **Upgrade outdated packages**:
+3. **Upgrade outdated packages**:
    ```bash
    pip install --upgrade <package-name>
-   ```
-
-3. **Use virtual environment** (recommended):
-   ```bash
-   python -m venv ramanlab_env
-   source ramanlab_env/bin/activate  # Windows: ramanlab_env\Scripts\activate
-   pip install -r requirements_qt6.txt
    ```
 
 4. **Check Python version**:
