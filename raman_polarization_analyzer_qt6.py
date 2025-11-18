@@ -63,18 +63,22 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 # Try to import pymatgen for professional CIF parsing
+# Use lazy imports to avoid network timeouts during module initialization
+PYMATGEN_AVAILABLE = False
 try:
-    from pymatgen.io.cif import CifParser
-    from pymatgen.core import Structure
-    from pymatgen.analysis.bond_valence import BVAnalyzer
-    from pymatgen.analysis.local_env import CrystalNN
-    from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-    PYMATGEN_AVAILABLE = True
-    print("✓ pymatgen available - using professional CIF parser")
-except ImportError:
+    # Test if pymatgen can be imported without actually importing it yet
+    import importlib.util
+    spec = importlib.util.find_spec("pymatgen")
+    if spec is not None:
+        PYMATGEN_AVAILABLE = True
+        print("✓ pymatgen available - using professional CIF parser")
+    else:
+        print("⚠ pymatgen not available - using simplified CIF parser")
+        print("  Install with: pip install pymatgen")
+except Exception as e:
     PYMATGEN_AVAILABLE = False
-    print("⚠ pymatgen not available - using simplified CIF parser")
-    print("  Install with: pip install pymatgen")
+    print(f"⚠ pymatgen check failed: {e}")
+    print("  Using simplified CIF parser")
 
 
 class RamanPolarizationAnalyzerQt6(QMainWindow):
@@ -3686,6 +3690,11 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
     def load_cif_with_pymatgen(self, file_path):
         """Load CIF using pymatgen library."""
         try:
+            # Lazy import pymatgen modules only when needed
+            from pymatgen.io.cif import CifParser
+            from pymatgen.core import Structure
+            from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+            
             # Parse CIF file
             parser = CifParser(file_path)
             structures = parser.parse_structures(primitive=False)  # Use conventional cell, not primitive
@@ -3699,7 +3708,6 @@ class RamanPolarizationAnalyzerQt6(QMainWindow):
             
             # Get crystal system using SpacegroupAnalyzer
             try:
-                from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
                 sga = SpacegroupAnalyzer(structure)
                 crystal_system = sga.get_crystal_system()
                 space_group = sga.get_space_group_symbol()

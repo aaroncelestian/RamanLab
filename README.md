@@ -23,12 +23,32 @@ RamanLab is a comprehensive Python-based application for Raman spectroscopy data
    cd RamanLab
    ```
 
-2. **Install dependencies:**
+2. **Create a dedicated Python environment** (Recommended):
+   
+   It is strongly recommended to create a dedicated virtual environment for RamanLab to avoid dependency conflicts:
+   
+   ```bash
+   python -m venv ramanlab_env
+   ```
+   
+   **Activate the environment:**
+   - **macOS/Linux**:
+     ```bash
+     source ramanlab_env/bin/activate
+     ```
+   - **Windows**:
+     ```bash
+     ramanlab_env\Scripts\activate
+     ```
+   
+   You should see `(ramanlab_env)` in your terminal prompt when the environment is active.
+
+3. **Install dependencies:**
    ```bash
    pip install -r requirements_qt6.txt
    ```
 
-3. **Verify installation** (Recommended):
+4. **Verify installation** (Recommended):
    ```bash
    python check_dependencies.py
    ```
@@ -43,7 +63,7 @@ RamanLab is a comprehensive Python-based application for Raman spectroscopy data
    
    If issues are found, the script provides specific installation commands.
 
-4. **Download the database file** (Required - 200MB+):
+5. **Download the database file** (Required - 200MB+):
    
    The main Raman spectra database is not included in the repository due to its size.
    
@@ -59,7 +79,7 @@ RamanLab is a comprehensive Python-based application for Raman spectroscopy data
    - **Option 2**: Application directory
      - Place `RamanLab_Database_20250602.pkl` in the same folder as the Python scripts
 
-4. **Launch RamanLab:**
+6. **Launch RamanLab:**
    ```bash
    python main_qt6.py
    ```
@@ -229,21 +249,23 @@ For optimal performance on multi-core systems:
 **Problem**: `check_dependencies.py` reports missing or outdated packages
 
 **Solution**:
-1. **Install all requirements**:
+1. **Ensure virtual environment is activated** (if you created one):
+   ```bash
+   # macOS/Linux:
+   source ramanlab_env/bin/activate
+   
+   # Windows:
+   ramanlab_env\Scripts\activate
+   ```
+
+2. **Install all requirements**:
    ```bash
    pip install -r requirements_qt6.txt
    ```
 
-2. **Upgrade outdated packages**:
+3. **Upgrade outdated packages**:
    ```bash
    pip install --upgrade <package-name>
-   ```
-
-3. **Use virtual environment** (recommended):
-   ```bash
-   python -m venv ramanlab_env
-   source ramanlab_env/bin/activate  # Windows: ramanlab_env\Scripts\activate
-   pip install -r requirements_qt6.txt
    ```
 
 4. **Check Python version**:

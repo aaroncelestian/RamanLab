@@ -121,14 +121,13 @@ def check_qt6_framework():
     print("="*70)
     
     pyside6_ok = False
-    pyqt6_ok = False
     
-    # Check PySide6 (recommended)
+    # Check PySide6 (required)
     try:
         import PySide6
         from PySide6 import QtCore, QtWidgets, QtGui
         version = get_package_version("PySide6") or "Unknown"
-        print(f"✅ PySide6: Installed (version: {version}) - Official Qt6 bindings (RECOMMENDED)")
+        print(f"✅ PySide6: Installed (version: {version}) - Official Qt6 bindings")
         pyside6_ok = True
         
         # Check Qt version
@@ -139,31 +138,15 @@ def check_qt6_framework():
             pass
             
     except ImportError:
-        print("❌ PySide6: Not installed - Official Qt6 bindings (RECOMMENDED)")
+        print("❌ PySide6: Not installed - Required for RamanLab")
     
-    # Check PyQt6 (alternative)
-    try:
-        import PyQt6
-        from PyQt6 import QtCore, QtWidgets, QtGui
-        version = get_package_version("PyQt6") or "Unknown"
-        status = "✅ PyQt6: Installed" if not pyside6_ok else "ℹ️ PyQt6: Also installed"
-        print(f"{status} (version: {version}) - Alternative Qt6 bindings")
-        pyqt6_ok = True
-    except ImportError:
-        print("❌ PyQt6: Not installed - Alternative Qt6 bindings")
-    
-    if pyside6_ok or pyqt6_ok:
+    if pyside6_ok:
         print("\n✅ Qt6 GUI Framework: Available")
-        if pyside6_ok and pyqt6_ok:
-            print("   📋 Note: Both PySide6 and PyQt6 are installed. PySide6 is recommended for RamanLab.")
-        elif pyside6_ok:
-            print("   🎯 Using PySide6 (recommended)")
-        else:
-            print("   ⚠️ Using PyQt6 (consider switching to PySide6 for better compatibility)")
+        print("   🎯 Using PySide6")
         return True
     else:
         print("\n❌ Qt6 GUI Framework: NOT AVAILABLE")
-        print("   🚨 CRITICAL: RamanLab Qt6 requires either PySide6 or PyQt6")
+        print("   🚨 CRITICAL: RamanLab requires PySide6")
         print("   📦 Install with: pip install PySide6")
         return False
 
@@ -225,7 +208,6 @@ def check_optional_advanced_packages():
     optional_packages = [
         ("pymatgen", "2022.0.0", "Advanced crystallography and materials analysis"),
         ("reportlab", "3.5.0", "PDF report generation"),
-        ("pyinstaller", "5.0.0", "Standalone executable creation"),
         ("emcee", "3.0.0", "MCMC sampling for Bayesian analysis"),
         ("tensorflow", "2.12.0", "Deep learning framework"),
         ("umap-learn", "0.5.0", "UMAP dimensionality reduction"),
@@ -270,7 +252,6 @@ def check_component_availability(qt6_ok, core_ok, advanced_features):
         "🔍 Polarization Analysis": "pymatgen" in advanced_features,
         "📄 PDF Reports": "reportlab" in advanced_features,
         "🤖 Deep Learning": "tensorflow" in advanced_features,
-        "📦 Executable Creation": "pyinstaller" in advanced_features,
         "🐍 Interactive Console": "qtconsole" in advanced_features and "jupyter-client" in advanced_features
     }
     
@@ -477,7 +458,6 @@ def check_file_structure():
         'peak_fitting_qt6.py',
         'advanced_analysis/__init__.py',
         'advanced_analysis/density_analysis.py',
-        'advanced_analysis/batch_geothermometry_analysis.py',
         'advanced_analysis/raman_density_analysis.py',
         'utils/__init__.py',
         'utils/file_loaders.py'
@@ -592,7 +572,6 @@ def test_batch_peak_fitting_imports():
     batch_modules = [
         ('peak_fitting_qt6', 'Integrated peak fitting with batch processing'),
         ('advanced_analysis.density_analysis', 'Density analysis module'),
-        ('advanced_analysis.batch_geothermometry_analysis', 'Geothermometry analysis'),
         ('advanced_analysis.raman_density_analysis', 'Raman density analysis core'),
     ]
     
