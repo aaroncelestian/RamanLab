@@ -329,7 +329,7 @@ class MicroplasticDetector:
                                baseline_corrected: bool = False,
                                lam: float = 1e6,
                                p: float = 0.001,
-                               niter: int = 10) -> Tuple[float, Dict[str, float]]:
+                               niter: int = 10) -> Tuple[float, Dict[str, float], Optional[str]]:
         """
         Calculate detection score for a specific plastic type.
         
@@ -343,10 +343,10 @@ class MicroplasticDetector:
             niter: ALS iterations
             
         Returns:
-            Tuple of (detection_score, window_scores_dict)
+            Tuple of (detection_score, window_scores_dict, matched_spectrum_name)
         """
         if plastic_type not in self.PLASTIC_SIGNATURES:
-            return 0.0, {}
+            return 0.0, {}, None
         
         # Apply baseline correction if needed
         if not baseline_corrected:
@@ -355,16 +355,19 @@ class MicroplasticDetector:
         # Use multi-window correlation if reference available
         # Try to find a matching reference spectrum by plastic type
         ref_spectrum = None
+        matched_name = None
         plastic_name = self.PLASTIC_SIGNATURES[plastic_type]['name'].lower()
         
         # First try exact match with plastic_type code
         if plastic_type in self.reference_spectra:
             ref_spectrum = self.reference_spectra[plastic_type]
+            matched_name = plastic_type
         else:
             # Try to find by matching plastic name in spectrum key
             for key, spectrum in self.reference_spectra.items():
                 if plastic_name in key.lower() or plastic_type.lower() in key.lower():
                     ref_spectrum = spectrum
+                    matched_name = key
                     logger.debug(f"Matched {plastic_type} to reference: {key}")
                     break
         
@@ -373,7 +376,7 @@ class MicroplasticDetector:
             score, window_scores = self.calculate_multi_window_score(
                 wavenumbers, intensities, ref_wn, ref_int
             )
-            return score, window_scores
+            return score, window_scores, matched_name
         
         # Fallback: Peak detection at expected positions
         expected_peaks = self.PLASTIC_SIGNATURES[plastic_type]['strong_peaks']
@@ -382,7 +385,7 @@ class MicroplasticDetector:
         )
         peak_score = len(detected_peaks) / len(expected_peaks)
         
-        return peak_score, {}
+        return peak_score, {}, None  # No matched name for peak-based detection
     
     def correlate_with_reference(self, wavenumbers: np.ndarray,
                                  intensities: np.ndarray,
@@ -439,12 +442,12 @@ class MicroplasticDetector:
         for idx in batch_indices:
             spectrum = intensity_map[idx]
             for ptype in plastic_types:
-                score, window_scores = self.calculate_plastic_score(
+                score, window_scores, matched_name = self.calculate_plastic_score(
                     wavenumbers, spectrum, ptype, 
                     baseline_corrected=skip_baseline,  # If skip_baseline=True, don't do it again
                     lam=lam, p=p, niter=niter
                 )
-                results[ptype].append((idx, score, window_scores))
+                results[ptype].append((idx, score, window_scores, matched_name))
         
         return results
     
@@ -490,6 +493,7 @@ class MicroplasticDetector:
             # Flat array of spectra
             n_spectra = intensity_map.shape[0]
             score_maps = {ptype: np.zeros(n_spectra) for ptype in plastic_types}
+            match_details = {}  # Store match info for each position
             
             # Create batches for parallel processing
             batch_size = max(100, n_spectra // (n_cores * 10))
@@ -599,8 +603,19 @@ class MicroplasticDetector:
             
             for batch_result in batch_results:
                 for ptype in plastic_types:
-                    for idx, score, window_scores in batch_result[ptype]:
+                    for idx, score, window_scores, matched_name in batch_result[ptype]:
                         score_maps[ptype][idx] = score
+                        
+                        # Store match details if score is above threshold and we have a match
+                        if score >= threshold and matched_name is not None:
+                            # Only store if this is the best match for this position
+                            if idx not in match_details or score > match_details[idx]['score']:
+                                match_details[idx] = {
+                                    'plastic_type': ptype,
+                                    'score': score,
+                                    'matched_name': matched_name,
+                                    'window_scores': window_scores
+                                }
         
         else:
             # 3D map (x, y, wavenumbers) - flatten and process
@@ -623,5 +638,8 @@ class MicroplasticDetector:
         logger.info("Map scanning complete")
         if progress_callback:
             progress_callback(100, 100, "✅ Scanning complete!")
+        
+        # Add match details to results
+        score_maps['_match_details'] = match_details
         
         return score_maps

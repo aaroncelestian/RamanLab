@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
                               QPushButton, QCheckBox, QLabel, QSlider, 
                               QProgressBar, QTextEdit, QComboBox, QDoubleSpinBox,
                               QGridLayout, QFrame, QSpinBox)
+from typing import Dict, Optional
 from PySide6.QtCore import Qt, Signal
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -55,25 +56,28 @@ class MicroplasticDetectionTab(QWidget):
         
     def create_control_panel(self):
         """Create the control panel with detection settings."""
-        panel = QGroupBox("Microplastic Detection Settings")
-        layout = QVBoxLayout(panel)
+        from PySide6.QtWidgets import QScrollArea
         
-        # === Database Loading ===
-        db_button = QPushButton("📁 Load Reference Database")
-        db_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                font-weight: bold;
-                padding: 8px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        db_button.clicked.connect(lambda: self.parent_window.load_database_file() if hasattr(self.parent_window, 'load_database_file') else None)
-        layout.addWidget(db_button)
+        # Main panel container
+        panel = QWidget()
+        main_layout = QVBoxLayout(panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # === Scrollable Controls Section ===
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setMaximumHeight(400)  # Limit height to make room for spectrum
+        
+        # Controls widget inside scroll area
+        controls_widget = QWidget()
+        layout = QVBoxLayout(controls_widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        # === Database Info (read-only, shows status) ===
+        self.db_info_label = QLabel()
+        self.update_database_status()
+        layout.addWidget(self.db_info_label)
         
         # === Plastic Type Selection ===
         plastic_group = QGroupBox("Plastic Types to Detect")
@@ -101,14 +105,33 @@ class MicroplasticDetectionTab(QWidget):
             
             plastic_layout.addWidget(checkbox, row, col, 1, 2)
         
-        # Select/Deselect all buttons
+        # Select/Deselect all buttons + Conservative Mode
         button_layout = QHBoxLayout()
         select_all_btn = QPushButton("Select All")
         select_all_btn.clicked.connect(self.select_all_plastics)
         deselect_all_btn = QPushButton("Deselect All")
         deselect_all_btn.clicked.connect(self.deselect_all_plastics)
+        
+        # Conservative Mode button
+        conservative_btn = QPushButton("🎯 Conservative Mode")
+        conservative_btn.setToolTip("Select only PE, PP, PS (most common) and use high threshold")
+        conservative_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-weight: bold;
+                padding: 4px 8px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        conservative_btn.clicked.connect(self.set_conservative_mode)
+        
         button_layout.addWidget(select_all_btn)
         button_layout.addWidget(deselect_all_btn)
+        button_layout.addWidget(conservative_btn)
         button_layout.addStretch()
         
         plastic_layout.addLayout(button_layout, (len(plastic_types) + 1) // 2, 0, 1, 4)
@@ -116,6 +139,7 @@ class MicroplasticDetectionTab(QWidget):
         
         # === Detection Parameters ===
         params_group = QGroupBox("Detection Parameters")
+        params_group.setMaximumWidth(400)  # Limit width
         params_layout = QGridLayout(params_group)
         
         # Detection threshold
@@ -185,41 +209,72 @@ class MicroplasticDetectionTab(QWidget):
         layout.addWidget(params_group)
         
         # === Action Buttons ===
-        button_layout = QHBoxLayout()
+        # Row 1: Start and Stop buttons
+        button_row1 = QHBoxLayout()
         
         self.scan_btn = QPushButton("🔍 Scan Map for Microplastics")
         self.scan_btn.setStyleSheet("QPushButton { font-weight: bold; padding: 10px; }")
         self.scan_btn.clicked.connect(self.start_detection)
-        button_layout.addWidget(self.scan_btn)
+        button_row1.addWidget(self.scan_btn)
         
         self.stop_btn = QPushButton("⏹ Stop")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_detection)
-        button_layout.addWidget(self.stop_btn)
+        button_row1.addWidget(self.stop_btn)
+        
+        layout.addLayout(button_row1)
+        
+        # Row 2: Export and Stats buttons
+        button_row2 = QHBoxLayout()
         
         self.export_btn = QPushButton("💾 Export Results")
         self.export_btn.setEnabled(False)
         self.export_btn.clicked.connect(self.export_results)
-        button_layout.addWidget(self.export_btn)
+        button_row2.addWidget(self.export_btn)
         
-        layout.addLayout(button_layout)
+        self.stats_btn = QPushButton("📊 Show Statistics")
+        self.stats_btn.setEnabled(False)
+        self.stats_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9b59b6;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #8e44ad;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.stats_btn.clicked.connect(self.show_statistics)
+        button_row2.addWidget(self.stats_btn)
         
-        # === Spectrum Display (in control panel) ===
+        layout.addLayout(button_row2)
+        
+        # Set the controls widget in the scroll area
+        scroll_area.setWidget(controls_widget)
+        main_layout.addWidget(scroll_area)
+        
+        # === Spectrum Display (below scroll area, always visible) ===
         spectrum_group = QGroupBox("Selected Spectrum (Click map to view)")
         spectrum_layout = QVBoxLayout(spectrum_group)
         spectrum_layout.setContentsMargins(5, 5, 5, 5)
         
         # Create matplotlib figure for spectrum with proper DPI
-        self.spectrum_figure = Figure(figsize=(5, 4), dpi=100)
+        self.spectrum_figure = Figure(figsize=(5, 3.5), dpi=100)
         self.spectrum_canvas = FigureCanvas(self.spectrum_figure)
-        self.spectrum_canvas.setMinimumHeight(300)
+        self.spectrum_canvas.setMinimumHeight(250)
+        self.spectrum_canvas.setMaximumHeight(350)
         
         # Add navigation toolbar for spectrum
         spectrum_toolbar = NavigationToolbar(self.spectrum_canvas, self)
         
         spectrum_layout.addWidget(spectrum_toolbar)
         spectrum_layout.addWidget(self.spectrum_canvas)
-        layout.addWidget(spectrum_group)
+        main_layout.addWidget(spectrum_group)
         
         # Create initial empty spectrum plot
         ax = self.spectrum_figure.add_subplot(111)
@@ -305,6 +360,36 @@ class MicroplasticDetectionTab(QWidget):
         
         return panel
     
+    def update_database_status(self):
+        """Update the database status label."""
+        # Check if parent window has database loaded
+        # The database is loaded from RamanLab_Database_20250602.pkl and filtered for plastics
+        if hasattr(self.parent_window, 'database') and self.parent_window.database:
+            n_entries = len(self.parent_window.database)
+            self.db_info_label.setText(f"📚 Database: {n_entries:,} plastic spectra loaded")
+            self.db_info_label.setStyleSheet("""
+                QLabel {
+                    background-color: #e8f5e9;
+                    color: #2e7d32;
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+            """)
+            self.log_status(f"✓ Using {n_entries} plastic reference spectra from database")
+        else:
+            self.db_info_label.setText("⚠️ No plastic spectra in database\n(Use File → Load Database to load plastic references)")
+            self.db_info_label.setStyleSheet("""
+                QLabel {
+                    background-color: #fff3e0;
+                    color: #e65100;
+                    padding: 8px;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }
+            """)
+            self.log_status("ℹ️ No plastic database loaded - will use peak-based detection only")
+    
     def select_all_plastics(self):
         """Select all plastic types."""
         for checkbox in self.plastic_checkboxes.values():
@@ -314,6 +399,21 @@ class MicroplasticDetectionTab(QWidget):
         """Deselect all plastic types."""
         for checkbox in self.plastic_checkboxes.values():
             checkbox.setChecked(False)
+    
+    def set_conservative_mode(self):
+        """Set conservative detection mode: PE, PP, PS only with high threshold."""
+        # Deselect all first
+        for code, checkbox in self.plastic_checkboxes.items():
+            checkbox.setChecked(code in ['PE', 'PP', 'PS'])
+        
+        # Set high threshold (60%)
+        self.threshold_slider.setValue(60)
+        
+        # Log the change
+        self.log_status("🎯 Conservative Mode enabled:")
+        self.log_status("  • Detecting only PE, PP, PS (most common microplastics)")
+        self.log_status("  • Threshold set to 0.60 (reduces false positives)")
+        self.log_status("  • Recommended for environmental samples")
     
     def get_selected_plastics(self):
         """Get list of selected plastic types."""
@@ -351,18 +451,18 @@ class MicroplasticDetectionTab(QWidget):
     
     def start_detection(self):
         """Start microplastic detection."""
-        selected = self.get_selected_plastics()
-        if not selected:
-            self.log_status("⚠️ Please select at least one plastic type to detect")
-            return
+        # Update database status before starting
+        self.update_database_status()
         
-        self.log_status(f"🔍 Starting detection for: {', '.join(selected)}")
+        # Enable stop button, disable start button
         self.scan_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.export_btn.setEnabled(False)
+        self.stats_btn.setEnabled(False)
         
-        # Emit signal to parent window
-        self.detection_started.emit()
+        # This will be connected to the parent window's detection method
+        if hasattr(self.parent_window, 'run_microplastic_detection'):
+            self.parent_window.run_microplastic_detection()
     
     def stop_detection(self):
         """Stop ongoing detection."""
@@ -388,35 +488,41 @@ class MicroplasticDetectionTab(QWidget):
         """Reset button states after detection completes or fails."""
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-    
-    def display_results(self, results):
-        """Display detection results as spatial maps."""
+        
+    def display_results(self, results: Dict[str, np.ndarray]):
+        """Display detection results in the visualization panel."""
+        from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
+        
+        # Store full results (including metadata like _match_details)
         self.detection_results = results
+        self.log_status(f"✓ Stored detection results with {len(results)} entries")
+        
+        # Filter out metadata entries (starting with _) for visualization
+        score_maps = {k: v for k, v in results.items() if not k.startswith('_')}
+        
+        # Clear previous plots
         self.figure.clear()
         
-        # Get current threshold
+        # Get threshold from UI
         threshold = self.threshold_slider.value() / 100.0
         
-        plastic_types = list(results.keys())
-        n_types = len(plastic_types)
+        # Create detector instance for plastic info
+        detector = MicroplasticDetector()
         
-        # Determine grid layout
-        if n_types <= 4:
-            nrows, ncols = 1, n_types
-        else:
-            nrows, ncols = 2, 4
+        # Create subplots for each plastic type
+        n_plastics = len(score_maps)
+        if n_plastics == 0:
+            return
         
-        # Plot each plastic type
-        for idx, plastic_type in enumerate(plastic_types):
-            if idx >= 8:  # Max 8 plots
-                break
-            
-            ax = self.figure.add_subplot(nrows, ncols, idx + 1)
-            score_map = results[plastic_type]
+        # Calculate grid layout
+        cols = min(3, n_plastics)
+        rows = (n_plastics + cols - 1) // cols
+        
+        for i, (plastic_type, score_map) in enumerate(score_maps.items()):
+            # Create subplot
+            ax = self.figure.add_subplot(rows, cols, i + 1)
             
             # Get plastic info
-            from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
-            detector = MicroplasticDetector()
             plastic_info = detector.PLASTIC_SIGNATURES.get(plastic_type, {})
             plastic_name = plastic_info.get('name', plastic_type)
             plastic_color = plastic_info.get('color', '#FF6B6B')
@@ -446,14 +552,67 @@ class MicroplasticDetectionTab(QWidget):
         self.figure.tight_layout()
         self.canvas.draw()
         
-        # Enable export
+        # Enable export and statistics
         self.export_btn.setEnabled(True)
+        self.stats_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         
         # Log summary
-        total_detections = sum(np.sum(results[pt] > threshold) for pt in plastic_types)
+        total_detections = sum(np.sum(score_map > threshold) for score_map in score_maps.values())
         self.log_status(f"✅ Detection complete! Found {total_detections} potential microplastic locations (threshold: {threshold:.2f})")
+    
+    def show_statistics(self):
+        """Show comprehensive statistics dialog."""
+        if self.detection_results is None:
+            self.log_status("⚠️ No detection results available")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Results", "Please run a detection first before viewing statistics.")
+            return
+        
+        self.log_status("📊 Opening statistics dialog...")
+        
+        try:
+            from map_analysis_2d.ui.dialogs.statistics_dialog import MicroplasticStatisticsDialog
+            from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
+            
+            self.log_status("✓ Imported statistics dialog")
+            
+            # Create detector instance
+            detector = MicroplasticDetector()
+            
+            # Load references if available
+            if hasattr(self.parent_window, 'database') and self.parent_window.database:
+                # Database is already filtered for plastics
+                detector.load_plastic_references(self.parent_window.database)
+                self.log_status(f"✓ Loaded {len(self.parent_window.database)} references")
+            
+            # Show dialog
+            self.log_status("Creating statistics dialog...")
+            dialog = MicroplasticStatisticsDialog(
+                self.detection_results,
+                self.parent_window.map_data if hasattr(self.parent_window, 'map_data') else None,
+                detector,
+                self
+            )
+            self.log_status("✓ Dialog created, showing...")
+            dialog.exec()
+            self.log_status("✓ Statistics dialog closed")
+            
+        except ImportError as e:
+            self.log_status(f"❌ Import error: {str(e)}")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Import Error", 
+                               f"Could not import statistics dialog:\n{str(e)}\n\nMake sure statistics_dialog.py exists.")
+            import traceback
+            traceback.print_exc()
+        except Exception as e:
+            self.log_status(f"❌ Error showing statistics: {str(e)}")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Statistics Error", 
+                               f"Error showing statistics:\n{str(e)}\n\nCheck console for details.")
+            import traceback
+            traceback.print_exc()
     
     def export_results(self):
         """Export detection results."""
@@ -611,10 +770,19 @@ class MicroplasticDetectionTab(QWidget):
         
         # Get detection scores and overlay reference spectra
         if self.detection_results is not None:
-            score_text = f"Position: ({x_pos}, {y_pos})\\n"
+            score_text = f"Position: ({x_pos}, {y_pos})\\n\\n"
             scores_list = []
             
+            # Test against negative controls
+            detector = MicroplasticDetector()
+            negative_match, negative_score = detector.test_negative_controls(
+                wavenumbers, intensities_norm, baseline_corrected=True
+            )
+            
             for plastic_type, score_map in self.detection_results.items():
+                if plastic_type.startswith('_'):
+                    continue  # Skip metadata
+                
                 # Get score at this position
                 if score_map.ndim == 2:
                     score = score_map[y_pos, x_pos]
@@ -627,8 +795,26 @@ class MicroplasticDetectionTab(QWidget):
                     else:
                         score = 0.0
                 
-                scores_list.append((plastic_type, score))
-                score_text += f"{plastic_type}: {score:.3f}\\n"
+                # Calculate confidence level
+                window_scores = {}  # Would need to store these during detection
+                confidence, conf_details = detector.calculate_confidence_level(
+                    score, window_scores, negative_score
+                )
+                
+                # Color code by confidence
+                conf_emoji = {
+                    'HIGH': '🟢',
+                    'MEDIUM': '🟡',
+                    'LOW': '🟠',
+                    'VERY_LOW': '🔴'
+                }.get(confidence, '⚪')
+                
+                scores_list.append((plastic_type, score, confidence))
+                score_text += f"{conf_emoji} {plastic_type}: {score:.3f} ({confidence})\\n"
+            
+            # Add negative control info
+            score_text += f"\\n⚠️ Best Non-Plastic Match:\\n"
+            score_text += f"   {negative_match}: {negative_score:.3f}"
             
             # Sort by score and overlay top matches
             scores_list.sort(key=lambda x: x[1], reverse=True)
@@ -640,59 +826,124 @@ class MicroplasticDetectionTab(QWidget):
             # Try to load references if available
             n_refs = 0
             if hasattr(self.parent_window, 'database') and self.parent_window.database:
-                n_refs = detector.load_plastic_references(self.parent_window.database, 'Plastics')
+                # Database is already filtered for plastics, so pass it directly
+                n_refs = len(self.parent_window.database)
+                detector.load_plastic_references(self.parent_window.database)
                 self.log_status(f"Loaded {n_refs} plastic references for overlay")
             else:
                 self.log_status("⚠️ No database available for reference overlay")
             
-            # Overlay top 3 matches with score > 0.1
-            if n_refs > 0:
-                colors = ['r', 'g', 'orange']
-                overlays_added = 0
-                
-                for i, (plastic_type, score) in enumerate(scores_list[:3]):
-                    if score > 0.1 and i < len(colors):
-                        # Try to find reference spectrum
-                        ref_spectrum = None
-                        plastic_name = detector.PLASTIC_SIGNATURES[plastic_type]['name'].lower()
-                        
-                        # Try exact match first
-                        if plastic_type in detector.reference_spectra:
-                            ref_spectrum = detector.reference_spectra[plastic_type]
-                            self.log_status(f"Found exact match for {plastic_type}")
-                        else:
-                            # Try fuzzy match
-                            for key, spectrum in detector.reference_spectra.items():
-                                if plastic_name in key.lower() or plastic_type.lower() in key.lower():
-                                    ref_spectrum = spectrum
-                                    self.log_status(f"Matched {plastic_type} to reference: {key}")
-                                    break
-                        
-                        if ref_spectrum is not None:
-                            ref_wn, ref_int = ref_spectrum
-                            
-                            # Normalize reference spectrum
-                            ref_int_norm = ref_int - np.min(ref_int)
-                            if np.max(ref_int_norm) > 0:
-                                ref_int_norm = ref_int_norm / np.max(ref_int_norm)
-                            
-                            # Plot reference spectrum
-                            ax.plot(ref_wn, ref_int_norm, colors[i], linewidth=2, 
-                                   label=f'{plastic_type} Ref (score: {score:.3f})',
-                                   alpha=0.7, linestyle='--')
-                            overlays_added += 1
-                        else:
-                            self.log_status(f"⚠️ No reference found for {plastic_type}")
-                
-                if overlays_added == 0:
-                    self.log_status("⚠️ No reference spectra could be matched")
-            else:
-                self.log_status("⚠️ No plastic references in database")
+            # Check if we have stored match details for this position
+            match_details = self.detection_results.get('_match_details', {})
+            self.log_status(f"🔍 Found {len(match_details)} stored matches in detection results")
             
-            # Position text box in upper left, but below the title
-            ax.text(0.02, 0.95, score_text, transform=ax.transAxes,
-                   verticalalignment='top', fontsize=8,
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.7))
+            # Calculate flat index for this position
+            flat_idx = None
+            if hasattr(self.parent_window, 'map_data'):
+                map_data = self.parent_window.map_data
+                all_positions = [(spec.x_pos, spec.y_pos) for spec in map_data.spectra.values()]
+                unique_y = sorted(set(pos[1] for pos in all_positions))
+                unique_x = sorted(set(pos[0] for pos in all_positions))
+                
+                # Find the index in the flattened array
+                # The detector processes spectra in row-major order
+                try:
+                    y_idx = unique_y.index(y_pos)
+                    x_idx = unique_x.index(x_pos)
+                    flat_idx = y_idx * len(unique_x) + x_idx
+                    self.log_status(f"📍 Position ({x_pos}, {y_pos}) → flat index {flat_idx}")
+                except ValueError:
+                    self.log_status(f"⚠️ Position ({x_pos}, {y_pos}) not found in map")
+            
+            # Get match info from stored details
+            match_info = match_details.get(flat_idx) if flat_idx is not None else None
+            if match_info:
+                self.log_status(f"✓ Found match info: {match_info.get('matched_name', 'Unknown')}")
+            else:
+                self.log_status(f"ℹ️ No match info stored for this position")
+            
+            # Overlay best match (highest score)
+            best_match_type, best_score = scores_list[0] if scores_list else (None, 0)
+            
+            if best_score > 0.1:  # Only overlay if score is significant
+                # Get reference spectrum for best match
+                ref_spectrum = None
+                matched_name = None
+                
+                # First try to use stored match info
+                if match_info and match_info.get('matched_name'):
+                    matched_name = match_info['matched_name']
+                    self.log_status(f"✓ Using stored match: {matched_name}")
+                    
+                    # Get the actual reference spectrum from database
+                    if n_refs > 0 and matched_name in self.parent_window.database:
+                        db_entry = self.parent_window.database[matched_name]
+                        ref_wn = db_entry['wavenumbers']
+                        ref_int = db_entry['intensities']
+                        ref_spectrum = (ref_wn, ref_int)
+                        self.log_status(f"✓ Loaded reference spectrum: {matched_name}")
+                
+                # Fallback: Try to get from loaded references by plastic type
+                if ref_spectrum is None and n_refs > 0 and best_match_type in detector.reference_spectra:
+                    ref_wn, ref_int = detector.reference_spectra[best_match_type]
+                    ref_spectrum = (ref_wn, ref_int)
+                    matched_name = best_match_type
+                    self.log_status(f"✓ Using database reference for {best_match_type}")
+                
+                # If no database reference, create synthetic reference from peak signatures
+                if ref_spectrum is None:
+                    self.log_status(f"ℹ️ No database reference for {best_match_type}, using peak signatures")
+                    plastic_info = detector.PLASTIC_SIGNATURES.get(best_match_type, {})
+                    if 'peaks' in plastic_info:
+                        # Create synthetic spectrum from peak positions
+                        ref_wn = wavenumbers  # Use same wavenumber range
+                        ref_int = np.zeros_like(wavenumbers)
+                        
+                        # Add Gaussian peaks at expected positions
+                        for peak_pos in plastic_info['peaks']:
+                            # Find closest wavenumber
+                            idx = np.argmin(np.abs(wavenumbers - peak_pos))
+                            # Add Gaussian peak (width ~20 cm-1)
+                            sigma = 20 / 2.355  # FWHM to sigma
+                            gaussian = np.exp(-((wavenumbers - peak_pos)**2) / (2 * sigma**2))
+                            ref_int += gaussian
+                        
+                        ref_spectrum = (ref_wn, ref_int)
+                
+                # Overlay the reference spectrum
+                if ref_spectrum is not None:
+                    ref_wn, ref_int = ref_spectrum
+                    
+                    # Normalize reference spectrum
+                    ref_int_norm = ref_int - np.min(ref_int)
+                    if np.max(ref_int_norm) > 0:
+                        ref_int_norm = ref_int_norm / np.max(ref_int_norm)
+                    
+                    # Interpolate to match wavenumber range if needed
+                    if not np.array_equal(ref_wn, wavenumbers):
+                        ref_int_interp = np.interp(wavenumbers, ref_wn, ref_int_norm)
+                    else:
+                        ref_int_interp = ref_int_norm
+                    
+                    # Get plastic info for color and name
+                    plastic_info = detector.PLASTIC_SIGNATURES.get(best_match_type, {})
+                    plastic_name = plastic_info.get('name', best_match_type)
+                    plastic_color = plastic_info.get('color', '#FF0000')
+                    
+                    # Use matched name if available, otherwise use plastic type
+                    display_name = matched_name if matched_name else plastic_name
+                    
+                    # Plot reference spectrum with offset for visibility
+                    ax.plot(wavenumbers, ref_int_interp * 0.9, color=plastic_color, 
+                           linewidth=2, linestyle='--', alpha=0.7,
+                           label=f'{display_name}\n(score: {best_score:.3f})')
+                    
+                    self.log_status(f"📊 Overlaid {display_name} reference (score: {best_score:.3f})")
+            
+            # Add score text to plot
+            ax.text(0.02, 0.98, score_text, transform=ax.transAxes,
+                   verticalalignment='top', fontsize=9,
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
         ax.set_ylabel('Intensity (normalized)', fontsize=9)

@@ -107,12 +107,99 @@ class MapAnalysisMainWindow(QMainWindow):
         # Enable drag and drop
         self.setAcceptDrops(True)
         
-        # Try to get database from parent if available
-        if parent and hasattr(parent, 'database'):
-            self.database = parent.database
-            logger.info(f"Loaded database from parent with {len(self.database)} entries")
-        
         logger.info("Main window initialized")
+        
+        # Try to auto-load database matching pattern RamanLab_Database_*.pkl
+        # Do this AFTER UI is fully initialized
+        self.auto_load_database()
+    
+    def auto_load_database(self):
+        """Automatically load database matching pattern RamanLab_Database_*.pkl"""
+        import pickle
+        import glob
+        from pathlib import Path
+        
+        # Search in common locations
+        search_paths = [
+            Path.home() / "Documents" / "RamanLab_Qt6",  # Documents folder
+            Path.home() / "Documents",  # Documents root
+            Path.cwd(),  # Current working directory
+            Path(__file__).parent.parent.parent,  # RamanLab root directory
+        ]
+        
+        database_file = None
+        
+        # Look for RamanLab_Database_*.pkl in each location
+        for search_path in search_paths:
+            if search_path.exists():
+                pattern = str(search_path / "RamanLab_Database_*.pkl")
+                matches = glob.glob(pattern)
+                
+                if matches:
+                    # Use the most recent file if multiple matches
+                    database_file = max(matches, key=lambda p: Path(p).stat().st_mtime)
+                    logger.info(f"Found database file: {database_file}")
+                    break
+        
+        if database_file:
+            try:
+                logger.info(f"Auto-loading database from: {database_file}")
+                
+                with open(database_file, 'rb') as f:
+                    full_database = pickle.load(f)
+                
+                # Filter for plastics only
+                self.database = {}
+                families_found = set()
+                plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                                   'polystyrene', 'pet', 'pvc', 'pmma', 'nylon']
+                
+                for key, spectrum_data in full_database.items():
+                    metadata = spectrum_data.get('metadata', {})
+                    
+                    # Check multiple possible keys for chemical family (with space AND underscore)
+                    family = ''
+                    family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                                  'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                                  'family', 'Family', 'FAMILY']
+                    
+                    for family_key in family_keys:
+                        if family_key in metadata:
+                            family = metadata[family_key]
+                            if family:
+                                break
+                    
+                    if family:  # Track all non-empty families
+                        families_found.add(family)
+                    
+                    # Check if family contains any plastic-related keywords
+                    family_lower = family.lower() if family else ''
+                    if any(keyword in family_lower for keyword in plastic_keywords):
+                        self.database[key] = spectrum_data
+                        logger.debug(f"Found plastic: {key} with family '{family}'")
+                
+                n_total = len(full_database) if full_database else 0
+                n_plastics = len(self.database)
+                
+                logger.info(f"Auto-loaded {n_plastics} plastic spectra from {n_total} total entries")
+                logger.info(f"Chemical families found in database: {sorted(families_found)}")
+                
+                # If no plastics found, show what families ARE available
+                if n_plastics == 0 and families_found:
+                    logger.warning(f"No plastics found! Available families: {sorted(families_found)}")
+                    logger.warning(f"Looking for keywords: {plastic_keywords}")
+                
+                # Update microplastic tab if available and fully initialized
+                if hasattr(self, 'microplastic_tab') and hasattr(self.microplastic_tab, 'db_info_label'):
+                    self.microplastic_tab.log_status(f"✓ Auto-loaded {n_plastics} plastic reference spectra")
+                    self.microplastic_tab.update_database_status()
+                
+            except Exception as e:
+                logger.warning(f"Could not auto-load database: {e}")
+                self.database = None
+        else:
+            logger.info("No database file matching 'RamanLab_Database_*.pkl' found in common locations")
+            self.database = None
     
     def load_database_file(self):
         """Load Raman database from pickle file and filter for plastics only."""
@@ -131,16 +218,32 @@ class MapAnalysisMainWindow(QMainWindow):
                 # Filter for plastics only
                 self.database = {}
                 families_found = set()
+                plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                                   'polystyrene', 'pet', 'pvc', 'pmma', 'nylon']
                 
                 for key, spectrum_data in full_database.items():
                     metadata = spectrum_data.get('metadata', {})
-                    family = metadata.get('chemical_family', '')
+                    
+                    # Check multiple possible keys for chemical family (with space AND underscore)
+                    family = ''
+                    family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                                  'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                                  'family', 'Family', 'FAMILY']
+                    
+                    for family_key in family_keys:
+                        if family_key in metadata:
+                            family = metadata[family_key]
+                            if family:
+                                break
                     
                     if family:  # Track all non-empty families
                         families_found.add(family)
                     
-                    if family.lower() == 'plastic':
+                    # Check if family contains any plastic-related keywords
+                    family_lower = family.lower() if family else ''
+                    if any(keyword in family_lower for keyword in plastic_keywords):
                         self.database[key] = spectrum_data
+                        logger.debug(f"Found plastic: {key} with family '{family}'")
                 
                 # Log what families were found
                 logger.info(f"Chemical families found in database: {sorted(families_found)}")
@@ -150,6 +253,11 @@ class MapAnalysisMainWindow(QMainWindow):
                 
                 logger.info(f"Loaded {n_plastics} plastic spectra from {n_total} total entries")
                 
+                # If no plastics found, show what families ARE available
+                if n_plastics == 0 and families_found:
+                    logger.warning(f"No plastics found! Available families: {sorted(families_found)}")
+                    logger.warning(f"Looking for keywords: {plastic_keywords}")
+                
                 # Show success message
                 QMessageBox.information(
                     self, "Database Loaded",
@@ -158,9 +266,10 @@ class MapAnalysisMainWindow(QMainWindow):
                     f"Plastic references are now available for microplastic detection."
                 )
                 
-                # Log to microplastic tab if available
+                # Update microplastic tab if available
                 if hasattr(self, 'microplastic_tab'):
                     self.microplastic_tab.log_status(f"✓ Loaded {n_plastics} plastic reference spectra from database")
+                    self.microplastic_tab.update_database_status()
                 
             except Exception as e:
                 logger.error(f"Error loading database: {e}")
@@ -370,6 +479,15 @@ class MapAnalysisMainWindow(QMainWindow):
         save_pkl_action.setStatusTip('Save current map data to PKL file (preserves all processing)')
         save_pkl_action.triggered.connect(self.save_map_to_pkl)
         file_menu.addAction(save_pkl_action)
+        
+        file_menu.addSeparator()
+        
+        # Database Loading section
+        load_db_action = QAction('Load &Database (for Microplastics)...', self)
+        load_db_action.setShortcut('Ctrl+D')
+        load_db_action.setStatusTip('Load Raman database for microplastic reference matching')
+        load_db_action.triggered.connect(self.load_database_file)
+        file_menu.addAction(load_db_action)
         
         # Analysis menu
         analysis_menu = menubar.addMenu('&Analysis')
@@ -9115,7 +9233,14 @@ The map is now ready for analysis!"""
             n_refs = 0
             if hasattr(self, 'database') and self.database:
                 n_refs = detector.load_plastic_references(self.database, 'Plastic')
-                self.microplastic_tab.log_status(f"✓ Loaded {n_refs} plastic reference spectra")
+                if n_refs > 0:
+                    self.microplastic_tab.log_status(f"✓ Loaded {n_refs} plastic reference spectra")
+                else:
+                    self.microplastic_tab.log_status("ℹ️ No plastic references in database - using peak-based detection")
+                    self.microplastic_tab.log_status("   (Built-in signatures: PE, PP, PS, PET, PVC, PMMA, PA)")
+            else:
+                self.microplastic_tab.log_status("ℹ️ No database available - using peak-based detection")
+                self.microplastic_tab.log_status("   (Built-in signatures: PE, PP, PS, PET, PVC, PMMA, PA)")
             
             # Warn if using database correlation without references
             if params['method'] == 'Database Correlation (Accurate)' and n_refs == 0:
@@ -9176,9 +9301,14 @@ The map is now ready for analysis!"""
         # Get parameters for threshold
         params = self.microplastic_tab.get_detection_parameters()
         
-        # Summary statistics
+        # Get background statistics
+        background_stats = results.get('_background_stats', {})
+        
+        # Summary statistics with adaptive thresholds
         total_detections = 0
         for plastic_type, score_map in results.items():
+            if plastic_type.startswith('_'):
+                continue  # Skip metadata
             n_detected = np.sum(score_map > params['threshold'])
             total_detections += n_detected
             if n_detected > 0:
@@ -9186,16 +9316,54 @@ The map is now ready for analysis!"""
                     f"  • {plastic_type}: {n_detected:,} locations (max score: {np.max(score_map):.3f})"
                 )
         
+        # Display background analysis
+        if background_stats:
+            self.microplastic_tab.log_status("\n📊 Background Analysis:")
+            self.microplastic_tab.log_status(
+                f"  • Background mean: {background_stats['background_mean']:.3f} "
+                f"± {background_stats['background_std']:.3f}"
+            )
+            self.microplastic_tab.log_status(
+                f"  • Your threshold {params['threshold']:.3f} = "
+                f"{background_stats['user_zscore']:.1f}σ above background"
+            )
+            
+            # Suggest adaptive thresholds
+            adaptive_3sigma = background_stats['adaptive_threshold_3sigma']
+            adaptive_95plus = background_stats['adaptive_threshold_95plus']
+            
+            self.microplastic_tab.log_status("\n💡 Adaptive Thresholds:")
+            self.microplastic_tab.log_status(
+                f"  • 3σ threshold: {adaptive_3sigma:.3f} "
+                f"({background_stats['n_detections_3sigma']:,} detections, "
+                f"{background_stats['detection_rate_3sigma']*100:.1f}% of data)"
+            )
+            self.microplastic_tab.log_status(
+                f"  • 95th+1σ threshold: {adaptive_95plus:.3f} "
+                f"({background_stats['n_detections_95plus']:,} detections, "
+                f"{background_stats['detection_rate_95plus']*100:.1f}% of data)"
+            )
+            
+            # Check if user threshold is too low
+            if background_stats['detection_rate_user'] > 0.10:  # >10% detection rate
+                self.microplastic_tab.log_status(
+                    "\n⚠️ High detection rate detected! Consider:"
+                    "\n  • Using 3σ threshold for fewer false positives"
+                    "\n  • Checking if fluorescence is causing high correlations"
+                )
+        
         if total_detections == 0:
             self.microplastic_tab.log_status(
-                "⚠️ No microplastics detected above threshold. Try:"
+                "\n⚠️ No microplastics detected above threshold. Try:"
                 "\n  • Lowering detection threshold"
+                "\n  • Using adaptive 3σ threshold from background analysis"
                 "\n  • Increasing baseline correction"
-                "\n  • Checking if plastic types are in your data"
             )
         else:
+            detection_rate = total_detections / background_stats.get('n_total_spectra', 1)
             self.microplastic_tab.log_status(
-                f"\n🎯 Total: {total_detections:,} potential microplastic locations detected!"
+                f"\n🎯 Total: {total_detections:,} potential microplastics "
+                f"({detection_rate*100:.1f}% of {background_stats.get('n_total_spectra', 0):,} spectra)"
             )
     
     def _on_detection_failed(self, error_msg):

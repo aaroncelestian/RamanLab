@@ -102,6 +102,7 @@ class DatabaseBrowserQt6(QDialog):
         self.update_spectrum_list()
         self.update_stats()
         self.update_hey_index_data()
+        self.update_family_filter_list()  # Populate chemical family filter
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -458,17 +459,51 @@ class DatabaseBrowserQt6(QDialog):
         left_layout = QVBoxLayout(left_widget)
         
         # Search group
-        search_group = QGroupBox("Search")
+        search_group = QGroupBox("Search & Filter")
         search_layout = QVBoxLayout(search_group)
         
+        # Text search
         self.search_entry = QLineEdit()
         self.search_entry.setPlaceholderText("Search spectra...")
         self.search_entry.textChanged.connect(self.perform_search)
         search_layout.addWidget(self.search_entry)
         
+        # Chemical family filter
+        family_filter_layout = QHBoxLayout()
+        family_filter_layout.addWidget(QLabel("Chemical Family:"))
+        self.family_filter_combo = QComboBox()
+        self.family_filter_combo.addItem("All Families")
+        self.family_filter_combo.currentTextChanged.connect(self.apply_family_filter)
+        family_filter_layout.addWidget(self.family_filter_combo)
+        search_layout.addLayout(family_filter_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
         clear_search_btn = QPushButton("Clear Search")
         clear_search_btn.clicked.connect(self.clear_search)
-        search_layout.addWidget(clear_search_btn)
+        button_layout.addWidget(clear_search_btn)
+        
+        refresh_families_btn = QPushButton("Refresh Families")
+        refresh_families_btn.clicked.connect(self.update_family_filter_list)
+        button_layout.addWidget(refresh_families_btn)
+        search_layout.addLayout(button_layout)
+        
+        # Plastic types analysis button
+        analyze_plastics_btn = QPushButton("📊 Analyze Plastic Types")
+        analyze_plastics_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9C27B0;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #7B1FA2;
+            }
+        """)
+        analyze_plastics_btn.clicked.connect(self.analyze_plastic_types)
+        search_layout.addWidget(analyze_plastics_btn)
         
         left_layout.addWidget(search_group)
         
@@ -1655,7 +1690,244 @@ class DatabaseBrowserQt6(QDialog):
     def clear_search(self):
         """Clear the search."""
         self.search_entry.clear()
+        self.family_filter_combo.setCurrentIndex(0)  # Reset to "All Families"
         self.update_spectrum_list()
+    
+    def update_family_filter_list(self):
+        """Update the chemical family filter dropdown with all unique families in database."""
+        print("🔍 Scanning database for chemical families...")
+        
+        families = set()
+        for key, spectrum_data in self.raman_db.database.items():
+            metadata = spectrum_data.get('metadata', {})
+            
+            # Check multiple possible keys for chemical family
+            family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY', 
+                          'family', 'Family', 'FAMILY']
+            
+            for family_key in family_keys:
+                if family_key in metadata:
+                    family = metadata[family_key]
+                    if family and isinstance(family, str):
+                        families.add(family.strip())
+                    break
+        
+        # Update combo box
+        current_selection = self.family_filter_combo.currentText()
+        self.family_filter_combo.clear()
+        self.family_filter_combo.addItem("All Families")
+        
+        for family in sorted(families):
+            self.family_filter_combo.addItem(family)
+        
+        # Restore selection if it still exists
+        index = self.family_filter_combo.findText(current_selection)
+        if index >= 0:
+            self.family_filter_combo.setCurrentIndex(index)
+        
+        print(f"✓ Found {len(families)} unique chemical families:")
+        for family in sorted(families):
+            # Count how many spectra have this family
+            count = sum(1 for key, data in self.raman_db.database.items() 
+                       if any(data.get('metadata', {}).get(k, '') == family 
+                             for k in ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY', 
+                                      'family', 'Family', 'FAMILY']))
+            print(f"  • {family}: {count} spectra")
+    
+    def apply_family_filter(self):
+        """Apply chemical family filter to spectrum list."""
+        selected_family = self.family_filter_combo.currentText()
+        
+        if selected_family == "All Families":
+            # No filter - show all (respecting search if active)
+            self.perform_search()
+            return
+        
+        print(f"🔍 Filtering for chemical family: {selected_family}")
+        
+        # Get search term if any
+        search_term = self.search_entry.text().lower()
+        
+        # Filter by family
+        filtered_names = []
+        for key in self.all_spectrum_names:
+            spectrum_data = self.raman_db.database.get(key)
+            if not spectrum_data:
+                continue
+            
+            metadata = spectrum_data.get('metadata', {})
+            
+            # Check multiple possible keys
+            family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY', 
+                          'family', 'Family', 'FAMILY']
+            
+            family_match = False
+            for family_key in family_keys:
+                if family_key in metadata:
+                    family = metadata[family_key]
+                    if family == selected_family:
+                        family_match = True
+                        break
+            
+            # Apply both family and search filters
+            if family_match:
+                if not search_term or search_term in key.lower():
+                    filtered_names.append(key)
+        
+        # Update list
+        self.spectrum_list.clear()
+        MAX_RESULTS = 1000
+        items_to_show = min(MAX_RESULTS, len(filtered_names))
+        
+        for name in filtered_names[:items_to_show]:
+            item = QListWidgetItem(name)
+            self.spectrum_list.addItem(item)
+        
+        print(f"✓ Found {len(filtered_names)} spectra with family '{selected_family}' (showing {items_to_show})")
+        
+        if len(filtered_names) > MAX_RESULTS:
+            print(f"ℹ️  Showing first {items_to_show} of {len(filtered_names):,} matching spectra")
+    
+    def analyze_plastic_types(self):
+        """Analyze and display breakdown of plastic types in database."""
+        print("\n" + "="*60)
+        print("🔬 PLASTIC TYPES ANALYSIS")
+        print("="*60)
+        
+        # Find all plastic entries
+        plastic_entries = {}
+        plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                           'polystyrene', 'pet', 'pvc', 'pmma', 'nylon', 'polycarbonate',
+                           'polyester', 'acrylic', 'teflon', 'ptfe']
+        
+        for key, spectrum_data in self.raman_db.database.items():
+            metadata = spectrum_data.get('metadata', {})
+            
+            # Check multiple possible keys for chemical family
+            family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                          'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                          'family', 'Family', 'FAMILY']
+            
+            family = ''
+            for family_key in family_keys:
+                if family_key in metadata:
+                    family = metadata[family_key]
+                    if family:
+                        break
+            
+            # Check if it's a plastic
+            family_lower = family.lower() if family else ''
+            if any(keyword in family_lower for keyword in plastic_keywords):
+                plastic_entries[key] = {
+                    'name': key,
+                    'family': family,
+                    'metadata': metadata
+                }
+        
+        if not plastic_entries:
+            QMessageBox.information(
+                self, "No Plastics Found",
+                "No plastic entries found in database.\n\n"
+                "Plastics should be tagged with chemical_family containing:\n"
+                "plastic, polymer, polyethylene, polypropylene, etc."
+            )
+            return
+        
+        # Categorize by plastic type
+        plastic_types = {}
+        
+        for key, entry in plastic_entries.items():
+            name = entry['name'].lower()
+            
+            # Identify plastic type from name
+            plastic_type = 'Other/Unknown'
+            
+            if 'polyethylene' in name or ' pe ' in name or name.startswith('pe '):
+                plastic_type = 'Polyethylene (PE)'
+            elif 'polypropylene' in name or ' pp ' in name or name.startswith('pp '):
+                plastic_type = 'Polypropylene (PP)'
+            elif 'polystyrene' in name or ' ps ' in name or name.startswith('ps '):
+                plastic_type = 'Polystyrene (PS)'
+            elif 'pet' in name or 'polyethylene terephthalate' in name:
+                plastic_type = 'PET (Polyethylene Terephthalate)'
+            elif 'pvc' in name or 'polyvinyl chloride' in name:
+                plastic_type = 'PVC (Polyvinyl Chloride)'
+            elif 'pmma' in name or 'acrylic' in name or 'polymethyl methacrylate' in name:
+                plastic_type = 'PMMA (Acrylic)'
+            elif 'nylon' in name or ' pa ' in name or 'polyamide' in name:
+                plastic_type = 'Nylon (PA/Polyamide)'
+            elif 'polycarbonate' in name or ' pc ' in name:
+                plastic_type = 'Polycarbonate (PC)'
+            elif 'polyester' in name:
+                plastic_type = 'Polyester'
+            elif 'teflon' in name or 'ptfe' in name or 'polytetrafluoroethylene' in name:
+                plastic_type = 'PTFE (Teflon)'
+            
+            if plastic_type not in plastic_types:
+                plastic_types[plastic_type] = []
+            plastic_types[plastic_type].append(entry)
+        
+        # Create results dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Plastic Types Analysis")
+        dialog.setMinimumSize(800, 600)
+        layout = QVBoxLayout(dialog)
+        
+        # Summary label
+        summary = QLabel(f"<h2>📊 Found {len(plastic_entries)} plastic spectra</h2>")
+        summary.setAlignment(Qt.AlignCenter)
+        layout.addWidget(summary)
+        
+        # Create text display
+        text_display = QTextEdit()
+        text_display.setReadOnly(True)
+        text_display.setFont(QFont("Courier", 10))
+        
+        # Build report
+        report = []
+        report.append("="*70)
+        report.append(f"PLASTIC TYPES BREAKDOWN ({len(plastic_entries)} total spectra)")
+        report.append("="*70)
+        report.append("")
+        
+        # Sort by count
+        sorted_types = sorted(plastic_types.items(), key=lambda x: len(x[1]), reverse=True)
+        
+        for plastic_type, entries in sorted_types:
+            count = len(entries)
+            percentage = (count / len(plastic_entries)) * 100
+            report.append(f"📦 {plastic_type}: {count} spectra ({percentage:.1f}%)")
+            report.append("-" * 70)
+            
+            # Show first 5 examples
+            for i, entry in enumerate(entries[:5]):
+                report.append(f"   {i+1}. {entry['name']}")
+            
+            if len(entries) > 5:
+                report.append(f"   ... and {len(entries) - 5} more")
+            report.append("")
+        
+        report.append("="*70)
+        report.append("SUMMARY BY TYPE:")
+        report.append("="*70)
+        for plastic_type, entries in sorted_types:
+            count = len(entries)
+            percentage = (count / len(plastic_entries)) * 100
+            report.append(f"{plastic_type:40s} {count:4d} ({percentage:5.1f}%)")
+        
+        text_display.setPlainText("\n".join(report))
+        layout.addWidget(text_display)
+        
+        # Print to console
+        print("\n".join(report))
+        print("="*60 + "\n")
+        
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.close)
+        layout.addWidget(close_btn)
+        
+        dialog.exec()
     
     def view_metadata(self):
         """View metadata for the current spectrum."""
