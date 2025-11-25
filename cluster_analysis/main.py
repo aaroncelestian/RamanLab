@@ -2263,40 +2263,1307 @@ class RamanClusterAnalysisQt6(QMainWindow):
         pass
     
     def calculate_silhouette_score(self):
-        """Calculate silhouette score."""
-        pass
+        """Calculate silhouette score for current clustering."""
+        try:
+            # Check if we have clustering results
+            if self.cluster_data.get('labels') is None or self.cluster_data.get('features_scaled') is None:
+                QMessageBox.warning(self, "No Clustering Results", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.metrics import silhouette_score, silhouette_samples
+            import matplotlib.pyplot as plt
+            
+            labels = self.cluster_data['labels']
+            features = self.cluster_data['features_scaled']
+            n_clusters = len(np.unique(labels))
+            
+            # Check if we have enough clusters
+            if n_clusters < 2:
+                QMessageBox.warning(self, "Insufficient Clusters", 
+                                  "Silhouette analysis requires at least 2 clusters.")
+                return
+            
+            # Calculate overall silhouette score
+            self.statusBar().showMessage("Calculating silhouette score...")
+            QApplication.processEvents()
+            
+            silhouette_avg = silhouette_score(features, labels)
+            self.cluster_data['silhouette_score'] = silhouette_avg
+            
+            # Calculate per-sample silhouette values
+            sample_silhouette_values = silhouette_samples(features, labels)
+            
+            # Update results text
+            results_text = "SILHOUETTE ANALYSIS\n"
+            results_text += "=" * 50 + "\n\n"
+            results_text += f"Overall Silhouette Score: {silhouette_avg:.3f}\n\n"
+            results_text += "Interpretation:\n"
+            if silhouette_avg > 0.7:
+                results_text += "  ✓ Excellent: Strong, well-separated clusters\n"
+            elif silhouette_avg > 0.5:
+                results_text += "  ✓ Good: Reasonable cluster structure\n"
+            elif silhouette_avg > 0.25:
+                results_text += "  ⚠ Fair: Weak cluster structure\n"
+            else:
+                results_text += "  ✗ Poor: Clusters may be artificial\n"
+            
+            results_text += "\n" + "-" * 50 + "\n"
+            results_text += "Per-Cluster Silhouette Scores:\n\n"
+            
+            # Calculate per-cluster statistics
+            for i in range(n_clusters):
+                cluster_mask = labels == i
+                cluster_silhouette = sample_silhouette_values[cluster_mask]
+                cluster_size = np.sum(cluster_mask)
+                
+                results_text += f"Cluster {i}:\n"
+                results_text += f"  Size: {cluster_size} samples\n"
+                results_text += f"  Mean: {cluster_silhouette.mean():.3f}\n"
+                results_text += f"  Std:  {cluster_silhouette.std():.3f}\n"
+                results_text += f"  Range: [{cluster_silhouette.min():.3f}, {cluster_silhouette.max():.3f}]\n\n"
+            
+            # Display results
+            if hasattr(self, 'validation_tab'):
+                self.validation_tab.validation_results_text.setText(results_text)
+            
+            # Create silhouette plot
+            if hasattr(self, 'validation_tab'):
+                fig = self.validation_tab.validation_fig
+                ax = self.validation_tab.validation_ax
+                ax.clear()
+                
+                y_lower = 10
+                colors = plt.cm.tab10(np.linspace(0, 1, n_clusters))
+                
+                for i in range(n_clusters):
+                    cluster_silhouette_values = sample_silhouette_values[labels == i]
+                    cluster_silhouette_values.sort()
+                    
+                    size_cluster_i = cluster_silhouette_values.shape[0]
+                    y_upper = y_lower + size_cluster_i
+                    
+                    ax.fill_betweenx(np.arange(y_lower, y_upper),
+                                    0, cluster_silhouette_values,
+                                    facecolor=colors[i], edgecolor=colors[i], alpha=0.7)
+                    
+                    ax.text(-0.05, y_lower + 0.5 * size_cluster_i, str(i))
+                    y_lower = y_upper + 10
+                
+                ax.set_title(f'Silhouette Plot (Score: {silhouette_avg:.3f})', fontsize=12, fontweight='bold')
+                ax.set_xlabel('Silhouette Coefficient', fontsize=10)
+                ax.set_ylabel('Cluster', fontsize=10)
+                ax.axvline(x=silhouette_avg, color="red", linestyle="--", label=f'Average: {silhouette_avg:.3f}')
+                ax.set_xlim([-0.1, 1])
+                ax.set_ylim([0, len(features) + (n_clusters + 1) * 10])
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                
+                fig.tight_layout()
+                self.validation_tab.validation_canvas.draw()
+            
+            self.statusBar().showMessage(f"Silhouette score: {silhouette_avg:.3f}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Calculation Error", 
+                               f"Failed to calculate silhouette score:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def calculate_davies_bouldin(self):
-        """Calculate Davies-Bouldin index."""
-        pass
+        """Calculate Davies-Bouldin index for current clustering."""
+        try:
+            # Check if we have clustering results
+            if self.cluster_data.get('labels') is None or self.cluster_data.get('features_scaled') is None:
+                QMessageBox.warning(self, "No Clustering Results", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.metrics import davies_bouldin_score
+            
+            labels = self.cluster_data['labels']
+            features = self.cluster_data['features_scaled']
+            n_clusters = len(np.unique(labels))
+            
+            # Check if we have enough clusters
+            if n_clusters < 2:
+                QMessageBox.warning(self, "Insufficient Clusters", 
+                                  "Davies-Bouldin analysis requires at least 2 clusters.")
+                return
+            
+            # Calculate Davies-Bouldin index
+            self.statusBar().showMessage("Calculating Davies-Bouldin index...")
+            QApplication.processEvents()
+            
+            db_score = davies_bouldin_score(features, labels)
+            self.cluster_data['davies_bouldin_score'] = db_score
+            
+            # Update results text
+            results_text = "DAVIES-BOULDIN INDEX\n"
+            results_text += "=" * 50 + "\n\n"
+            results_text += f"Davies-Bouldin Index: {db_score:.3f}\n\n"
+            results_text += "Interpretation:\n"
+            results_text += "  Lower values indicate better clustering\n"
+            results_text += "  (0 = perfect separation)\n\n"
+            
+            if db_score < 0.5:
+                results_text += "  ✓ Excellent: Very well-separated clusters\n"
+            elif db_score < 1.0:
+                results_text += "  ✓ Good: Well-separated clusters\n"
+            elif db_score < 1.5:
+                results_text += "  ⚠ Fair: Moderate cluster separation\n"
+            else:
+                results_text += "  ✗ Poor: Overlapping clusters\n"
+            
+            results_text += "\n" + "-" * 50 + "\n"
+            results_text += "\nAbout Davies-Bouldin Index:\n"
+            results_text += "  • Measures average similarity between clusters\n"
+            results_text += "  • Ratio of within-cluster to between-cluster distances\n"
+            results_text += "  • Lower values = better defined clusters\n"
+            results_text += "  • Does not require ground truth labels\n"
+            
+            # Display results
+            if hasattr(self, 'validation_tab'):
+                self.validation_tab.validation_results_text.setText(results_text)
+            
+            # Create visualization
+            if hasattr(self, 'validation_tab'):
+                fig = self.validation_tab.validation_fig
+                ax = self.validation_tab.validation_ax
+                ax.clear()
+                
+                # Create bar chart showing quality interpretation
+                categories = ['Excellent\n(<0.5)', 'Good\n(0.5-1.0)', 'Fair\n(1.0-1.5)', 'Poor\n(>1.5)']
+                ranges = [0.5, 1.0, 1.5, 3.0]
+                colors_map = ['#2ecc71', '#3498db', '#f39c12', '#e74c3c']
+                
+                bars = ax.barh(categories, ranges, color=colors_map, alpha=0.3, edgecolor='black')
+                
+                # Add current score marker
+                if db_score < 0.5:
+                    y_pos = 0
+                elif db_score < 1.0:
+                    y_pos = 1
+                elif db_score < 1.5:
+                    y_pos = 2
+                else:
+                    y_pos = 3
+                
+                ax.plot([db_score], [y_pos], 'ro', markersize=15, label=f'Your Score: {db_score:.3f}', zorder=5)
+                ax.axvline(x=db_score, color='red', linestyle='--', alpha=0.5, zorder=4)
+                
+                ax.set_xlabel('Davies-Bouldin Index', fontsize=10, fontweight='bold')
+                ax.set_title('Davies-Bouldin Index Interpretation', fontsize=12, fontweight='bold')
+                ax.set_xlim([0, min(3.0, db_score + 0.5)])
+                ax.legend(loc='lower right')
+                ax.grid(True, alpha=0.3, axis='x')
+                
+                fig.tight_layout()
+                self.validation_tab.validation_canvas.draw()
+            
+            self.statusBar().showMessage(f"Davies-Bouldin index: {db_score:.3f}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Calculation Error", 
+                               f"Failed to calculate Davies-Bouldin index:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def calculate_calinski_harabasz(self):
-        """Calculate Calinski-Harabasz index."""
-        pass
+        """Calculate Calinski-Harabasz index for current clustering."""
+        try:
+            # Check if we have clustering results
+            if self.cluster_data.get('labels') is None or self.cluster_data.get('features_scaled') is None:
+                QMessageBox.warning(self, "No Clustering Results", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.metrics import calinski_harabasz_score
+            
+            labels = self.cluster_data['labels']
+            features = self.cluster_data['features_scaled']
+            n_clusters = len(np.unique(labels))
+            
+            # Check if we have enough clusters
+            if n_clusters < 2:
+                QMessageBox.warning(self, "Insufficient Clusters", 
+                                  "Calinski-Harabasz analysis requires at least 2 clusters.")
+                return
+            
+            # Calculate Calinski-Harabasz index
+            self.statusBar().showMessage("Calculating Calinski-Harabasz index...")
+            QApplication.processEvents()
+            
+            ch_score = calinski_harabasz_score(features, labels)
+            self.cluster_data['calinski_harabasz_score'] = ch_score
+            
+            # Update results text
+            results_text = "CALINSKI-HARABASZ INDEX\n"
+            results_text += "=" * 50 + "\n\n"
+            results_text += f"Calinski-Harabasz Index: {ch_score:.1f}\n\n"
+            results_text += "Interpretation:\n"
+            results_text += "  Higher values indicate better clustering\n"
+            results_text += "  (no upper bound)\n\n"
+            
+            # Provide context-aware interpretation
+            n_samples = len(labels)
+            if ch_score > 1000:
+                results_text += "  ✓ Excellent: Very dense, well-separated clusters\n"
+            elif ch_score > 500:
+                results_text += "  ✓ Good: Dense, well-separated clusters\n"
+            elif ch_score > 100:
+                results_text += "  ⚠ Fair: Moderate cluster quality\n"
+            else:
+                results_text += "  ✗ Poor: Weak or overlapping clusters\n"
+            
+            results_text += "\n" + "-" * 50 + "\n"
+            results_text += "\nAbout Calinski-Harabasz Index:\n"
+            results_text += "  • Also known as Variance Ratio Criterion\n"
+            results_text += "  • Ratio of between-cluster to within-cluster variance\n"
+            results_text += "  • Higher values = better defined clusters\n"
+            results_text += "  • Scale depends on dataset size and dimensionality\n"
+            results_text += f"  • Your dataset: {n_samples:,} samples, {n_clusters} clusters\n"
+            
+            # Display results
+            if hasattr(self, 'validation_tab'):
+                self.validation_tab.validation_results_text.setText(results_text)
+            
+            # Create visualization
+            if hasattr(self, 'validation_tab'):
+                fig = self.validation_tab.validation_fig
+                ax = self.validation_tab.validation_ax
+                ax.clear()
+                
+                # Create bar chart showing quality interpretation
+                categories = ['Poor\n(<100)', 'Fair\n(100-500)', 'Good\n(500-1000)', 'Excellent\n(>1000)']
+                ranges = [100, 500, 1000, max(1500, ch_score * 1.2)]
+                colors_map = ['#e74c3c', '#f39c12', '#3498db', '#2ecc71']
+                
+                bars = ax.barh(categories, ranges, color=colors_map, alpha=0.3, edgecolor='black')
+                
+                # Add current score marker
+                if ch_score < 100:
+                    y_pos = 0
+                elif ch_score < 500:
+                    y_pos = 1
+                elif ch_score < 1000:
+                    y_pos = 2
+                else:
+                    y_pos = 3
+                
+                ax.plot([ch_score], [y_pos], 'ro', markersize=15, label=f'Your Score: {ch_score:.1f}', zorder=5)
+                ax.axvline(x=ch_score, color='red', linestyle='--', alpha=0.5, zorder=4)
+                
+                ax.set_xlabel('Calinski-Harabasz Index', fontsize=10, fontweight='bold')
+                ax.set_title('Calinski-Harabasz Index Interpretation', fontsize=12, fontweight='bold')
+                ax.legend(loc='lower right')
+                ax.grid(True, alpha=0.3, axis='x')
+                
+                fig.tight_layout()
+                self.validation_tab.validation_canvas.draw()
+            
+            self.statusBar().showMessage(f"Calinski-Harabasz index: {ch_score:.1f}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Calculation Error", 
+                               f"Failed to calculate Calinski-Harabasz index:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def find_optimal_clusters(self):
-        """Find optimal number of clusters."""
-        pass
+        """Find optimal number of clusters using multiple metrics."""
+        try:
+            # Check if we have data
+            if self.cluster_data.get('features_scaled') is None:
+                QMessageBox.warning(self, "No Data", 
+                                  "Please import and process data first.")
+                return
+            
+            from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+            from sklearn.cluster import KMeans
+            
+            features = self.cluster_data['features_scaled']
+            
+            # Get max clusters from spinbox
+            if hasattr(self, 'validation_tab'):
+                max_clusters = self.validation_tab.max_clusters_spinbox.value()
+            else:
+                max_clusters = 10
+            
+            # Limit based on dataset size
+            n_samples = len(features)
+            max_possible = min(max_clusters, n_samples // 2)
+            
+            if max_possible < 2:
+                QMessageBox.warning(self, "Insufficient Data", 
+                                  "Not enough samples for cluster analysis.")
+                return
+            
+            # Create progress dialog
+            progress = QProgressDialog("Evaluating cluster configurations...", "Cancel", 2, max_possible, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            
+            # Store metrics for each k
+            k_range = range(2, max_possible + 1)
+            silhouette_scores = []
+            davies_bouldin_scores = []
+            calinski_harabasz_scores = []
+            inertias = []
+            
+            self.statusBar().showMessage("Finding optimal number of clusters...")
+            
+            for k in k_range:
+                if progress.wasCanceled():
+                    return
+                
+                progress.setValue(k)
+                progress.setLabelText(f"Testing {k} clusters...")
+                QApplication.processEvents()
+                
+                # Perform clustering
+                kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+                labels = kmeans.fit_predict(features)
+                
+                # Calculate metrics
+                silhouette_scores.append(silhouette_score(features, labels))
+                davies_bouldin_scores.append(davies_bouldin_score(features, labels))
+                calinski_harabasz_scores.append(calinski_harabasz_score(features, labels))
+                inertias.append(kmeans.inertia_)
+            
+            progress.close()
+            
+            # Find optimal k for each metric
+            optimal_silhouette = k_range[np.argmax(silhouette_scores)]
+            optimal_davies = k_range[np.argmin(davies_bouldin_scores)]
+            optimal_calinski = k_range[np.argmax(calinski_harabasz_scores)]
+            
+            # Calculate elbow using second derivative
+            if len(inertias) > 2:
+                # Normalize inertias
+                inertias_norm = (np.array(inertias) - np.min(inertias)) / (np.max(inertias) - np.min(inertias))
+                # Calculate second derivative
+                second_deriv = np.diff(np.diff(inertias_norm))
+                optimal_elbow = k_range[np.argmax(second_deriv) + 2] if len(second_deriv) > 0 else k_range[0]
+            else:
+                optimal_elbow = k_range[0]
+            
+            # Update results text
+            results_text = "OPTIMAL CLUSTER ANALYSIS\n"
+            results_text += "=" * 50 + "\n\n"
+            results_text += f"Tested cluster range: {k_range[0]} to {k_range[-1]}\n\n"
+            results_text += "Recommended Number of Clusters:\n"
+            results_text += "-" * 50 + "\n"
+            results_text += f"  Silhouette Score:      {optimal_silhouette} clusters\n"
+            results_text += f"  Davies-Bouldin Index:  {optimal_davies} clusters\n"
+            results_text += f"  Calinski-Harabasz:     {optimal_calinski} clusters\n"
+            results_text += f"  Elbow Method:          {optimal_elbow} clusters\n\n"
+            
+            # Consensus recommendation
+            from collections import Counter
+            votes = [optimal_silhouette, optimal_davies, optimal_calinski, optimal_elbow]
+            vote_counts = Counter(votes)
+            consensus = vote_counts.most_common(1)[0][0]
+            
+            results_text += f"📊 Consensus Recommendation: {consensus} clusters\n"
+            results_text += f"   (based on {vote_counts[consensus]}/4 metrics)\n\n"
+            
+            results_text += "-" * 50 + "\n"
+            results_text += "\nDetailed Scores:\n\n"
+            
+            for i, k in enumerate(k_range):
+                results_text += f"k={k}:\n"
+                results_text += f"  Silhouette: {silhouette_scores[i]:.3f}\n"
+                results_text += f"  Davies-Bouldin: {davies_bouldin_scores[i]:.3f}\n"
+                results_text += f"  Calinski-Harabasz: {calinski_harabasz_scores[i]:.1f}\n"
+                results_text += f"  Inertia: {inertias[i]:.1f}\n\n"
+            
+            # Display results
+            if hasattr(self, 'validation_tab'):
+                self.validation_tab.validation_results_text.setText(results_text)
+            
+            # Create visualization
+            if hasattr(self, 'validation_tab'):
+                import matplotlib.pyplot as plt
+                
+                fig = self.validation_tab.validation_fig
+                fig.clear()
+                
+                # Create 2x2 subplot
+                axes = fig.subplots(2, 2)
+                
+                # Silhouette score
+                axes[0, 0].plot(k_range, silhouette_scores, 'o-', color='#3498db', linewidth=2, markersize=6)
+                axes[0, 0].axvline(optimal_silhouette, color='red', linestyle='--', alpha=0.7, label=f'Optimal: {optimal_silhouette}')
+                axes[0, 0].set_xlabel('Number of Clusters')
+                axes[0, 0].set_ylabel('Silhouette Score')
+                axes[0, 0].set_title('Silhouette Score (Higher is Better)', fontweight='bold')
+                axes[0, 0].grid(True, alpha=0.3)
+                axes[0, 0].legend()
+                
+                # Davies-Bouldin index
+                axes[0, 1].plot(k_range, davies_bouldin_scores, 'o-', color='#e74c3c', linewidth=2, markersize=6)
+                axes[0, 1].axvline(optimal_davies, color='red', linestyle='--', alpha=0.7, label=f'Optimal: {optimal_davies}')
+                axes[0, 1].set_xlabel('Number of Clusters')
+                axes[0, 1].set_ylabel('Davies-Bouldin Index')
+                axes[0, 1].set_title('Davies-Bouldin Index (Lower is Better)', fontweight='bold')
+                axes[0, 1].grid(True, alpha=0.3)
+                axes[0, 1].legend()
+                
+                # Calinski-Harabasz index
+                axes[1, 0].plot(k_range, calinski_harabasz_scores, 'o-', color='#2ecc71', linewidth=2, markersize=6)
+                axes[1, 0].axvline(optimal_calinski, color='red', linestyle='--', alpha=0.7, label=f'Optimal: {optimal_calinski}')
+                axes[1, 0].set_xlabel('Number of Clusters')
+                axes[1, 0].set_ylabel('Calinski-Harabasz Index')
+                axes[1, 0].set_title('Calinski-Harabasz Index (Higher is Better)', fontweight='bold')
+                axes[1, 0].grid(True, alpha=0.3)
+                axes[1, 0].legend()
+                
+                # Elbow method (inertia)
+                axes[1, 1].plot(k_range, inertias, 'o-', color='#f39c12', linewidth=2, markersize=6)
+                axes[1, 1].axvline(optimal_elbow, color='red', linestyle='--', alpha=0.7, label=f'Elbow: {optimal_elbow}')
+                axes[1, 1].set_xlabel('Number of Clusters')
+                axes[1, 1].set_ylabel('Inertia')
+                axes[1, 1].set_title('Elbow Method (Look for "Elbow")', fontweight='bold')
+                axes[1, 1].grid(True, alpha=0.3)
+                axes[1, 1].legend()
+                
+                fig.suptitle(f'Optimal Clusters Analysis (Consensus: {consensus})', fontsize=14, fontweight='bold')
+                fig.tight_layout()
+                self.validation_tab.validation_canvas.draw()
+            
+            self.statusBar().showMessage(f"Optimal cluster analysis complete. Recommendation: {consensus} clusters")
+            
+            # Ask if user wants to re-cluster with optimal k
+            reply = QMessageBox.question(
+                self, "Apply Optimal Clustering?",
+                f"The analysis recommends {consensus} clusters.\n\n"
+                f"Would you like to re-run clustering with {consensus} clusters?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                # Update clustering tab with optimal k
+                if hasattr(self, 'clustering_tab'):
+                    controls = self.clustering_tab.get_clustering_controls()
+                    controls['n_clusters_spinbox'].setValue(consensus)
+                    # Switch to clustering tab
+                    self.tab_widget.setCurrentWidget(self.clustering_tab)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Error", 
+                               f"Failed to find optimal clusters:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def perform_anova_test(self):
-        """Perform ANOVA test."""
-        pass
+        """Calculate feature importance for cluster discrimination (renamed from ANOVA for clarity)."""
+        try:
+            if 'labels' not in self.cluster_data or 'intensities' not in self.cluster_data:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            # Use Random Forest as default method (most robust)
+            method = 'Random Forest'
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            wavenumbers = self.cluster_data['wavenumbers']
+            
+            self.statusBar().showMessage(f"Calculating feature importance using {method}...")
+            
+            # Calculate feature importance
+            importance_scores = self._calculate_rf_importance(intensities, labels)
+            
+            # Find top features
+            top_indices = np.argsort(importance_scores)[-20:][::-1]  # Top 20 features
+            top_wavenumbers = wavenumbers[top_indices]
+            top_scores = importance_scores[top_indices]
+            
+            # Plot results
+            self._plot_feature_importance(wavenumbers, importance_scores, 
+                                        top_wavenumbers, top_scores, method)
+            
+            # Display results
+            self._display_feature_importance_results(top_wavenumbers, top_scores, method, importance_scores)
+            
+            self.statusBar().showMessage(f"Feature importance analysis complete", 5000)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Feature Importance Error", 
+                               f"Failed to calculate feature importance:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def perform_kruskal_test(self):
-        """Perform Kruskal-Wallis test."""
-        pass
+        """Perform Linear Discriminant Analysis (renamed from Kruskal for clarity)."""
+        try:
+            if 'labels' not in self.cluster_data or 'intensities' not in self.cluster_data:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.model_selection import cross_val_score
+            import matplotlib.pyplot as plt
+            
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            
+            self.statusBar().showMessage("Performing Linear Discriminant Analysis...")
+            
+            # Standardize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(intensities)
+            
+            # Perform LDA
+            lda = LinearDiscriminantAnalysis()
+            lda.fit(X_scaled, labels)
+            
+            # Transform data to LDA space
+            X_lda = lda.transform(X_scaled)
+            
+            # Calculate cross-validation accuracy
+            cv_scores = cross_val_score(lda, X_scaled, labels, cv=5)
+            
+            # Calculate explained variance ratio
+            explained_variance = lda.explained_variance_ratio_
+            
+            # Plot results
+            self._plot_discriminant_analysis(X_lda, labels, explained_variance, cv_scores)
+            
+            # Display results
+            self._display_discriminant_results(cv_scores, explained_variance, lda)
+            
+            self.statusBar().showMessage(f"LDA complete: {np.mean(cv_scores):.1%} accuracy", 5000)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Discriminant Analysis Error", 
+                               f"Failed to perform discriminant analysis:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def perform_manova_test(self):
-        """Perform MANOVA test."""
-        pass
+        """Test statistical significance of cluster differences (renamed from MANOVA for clarity)."""
+        try:
+            if 'labels' not in self.cluster_data or 'intensities' not in self.cluster_data:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from scipy import stats
+            import matplotlib.pyplot as plt
+            
+            # Use ANOVA as default (most common and interpretable)
+            method = 'ANOVA'
+            alpha = 0.05
+            
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            
+            self.statusBar().showMessage(f"Performing {method} significance testing...")
+            
+            # Perform ANOVA
+            results = self._perform_anova(intensities, labels, alpha)
+            
+            # Plot results
+            self._plot_significance_results(results, method)
+            
+            # Display results
+            self._display_significance_results(results, method, alpha)
+            
+            sig_pct = results['significant_features']/results['total_features']*100
+            self.statusBar().showMessage(f"Significance testing complete: {sig_pct:.1f}% significant features", 5000)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Significance Testing Error", 
+                               f"Failed to test statistical significance:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def perform_detailed_pca(self):
-        """Perform detailed PCA analysis."""
-        pass
+        """Perform detailed PCA analysis with comprehensive visualizations."""
+        try:
+            if 'labels' not in self.cluster_data or 'intensities' not in self.cluster_data:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.decomposition import PCA
+            from sklearn.preprocessing import StandardScaler
+            import matplotlib.pyplot as plt
+            
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            wavenumbers = self.cluster_data['wavenumbers']
+            
+            self.statusBar().showMessage("Performing detailed PCA analysis...")
+            
+            # Standardize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(intensities)
+            
+            # Perform PCA
+            pca = PCA()
+            X_pca = pca.fit_transform(X_scaled)
+            
+            # Get explained variance
+            explained_variance = pca.explained_variance_ratio_
+            cumulative_variance = np.cumsum(explained_variance)
+            
+            # Find number of components for 80%, 90%, 95% variance
+            n_80 = np.argmax(cumulative_variance >= 0.80) + 1
+            n_90 = np.argmax(cumulative_variance >= 0.90) + 1
+            n_95 = np.argmax(cumulative_variance >= 0.95) + 1
+            
+            # Plot results
+            self._plot_detailed_pca(X_pca, labels, explained_variance, cumulative_variance, 
+                                   pca.components_, wavenumbers)
+            
+            # Display results
+            self._display_pca_results(explained_variance, cumulative_variance, n_80, n_90, n_95, 
+                                     pca.components_, wavenumbers)
+            
+            self.statusBar().showMessage(f"PCA complete: {n_90} components capture 90% variance", 5000)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "PCA Error", 
+                               f"Failed to perform PCA analysis:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def perform_factor_analysis(self):
-        """Perform factor analysis."""
-        pass
+        """Perform Factor Analysis to identify latent factors."""
+        try:
+            if 'labels' not in self.cluster_data or 'intensities' not in self.cluster_data:
+                QMessageBox.warning(self, "No Clustering Data", 
+                                  "Please run clustering analysis first.")
+                return
+            
+            from sklearn.decomposition import FactorAnalysis
+            from sklearn.preprocessing import StandardScaler
+            import matplotlib.pyplot as plt
+            
+            intensities = np.array(self.cluster_data['intensities'])
+            labels = self.cluster_data['labels']
+            wavenumbers = self.cluster_data['wavenumbers']
+            
+            self.statusBar().showMessage("Performing Factor Analysis...")
+            
+            # Standardize features
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(intensities)
+            
+            # Determine optimal number of factors (use number of clusters as starting point)
+            n_clusters = len(np.unique(labels))
+            n_factors = min(n_clusters + 2, 10)  # Add 2 extra factors, max 10
+            
+            # Perform Factor Analysis
+            fa = FactorAnalysis(n_components=n_factors, random_state=42)
+            X_fa = fa.fit_transform(X_scaled)
+            
+            # Get factor loadings
+            loadings = fa.components_.T
+            
+            # Calculate variance explained (approximation)
+            variance_explained = np.var(X_fa, axis=0)
+            variance_explained /= np.sum(variance_explained)
+            
+            # Plot results
+            self._plot_factor_analysis(X_fa, labels, loadings, wavenumbers, variance_explained)
+            
+            # Display results
+            self._display_factor_results(n_factors, loadings, wavenumbers, variance_explained)
+            
+            self.statusBar().showMessage(f"Factor Analysis complete: {n_factors} factors extracted", 5000)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Factor Analysis Error", 
+                               f"Failed to perform Factor Analysis:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    # Helper methods for statistical analysis
+    def _calculate_rf_importance(self, intensities, labels):
+        """Calculate feature importance using Random Forest."""
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.preprocessing import StandardScaler
+        
+        # Standardize features
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(intensities)
+        
+        # Train Random Forest with parallel processing
+        rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+        rf.fit(X_scaled, labels)
+        
+        return rf.feature_importances_
+    
+    def _plot_feature_importance(self, wavenumbers, importance_scores, 
+                                top_wavenumbers, top_scores, method):
+        """Plot feature importance results."""
+        import matplotlib.pyplot as plt
+        
+        fig = self.stats_tab.stats_fig
+        fig.clear()
+        
+        # Create subplots
+        ax1 = fig.add_subplot(2, 2, 1)  # Full spectrum importance
+        ax2 = fig.add_subplot(2, 2, 2)  # Top features bar plot
+        ax3 = fig.add_subplot(2, 2, 3)  # Cumulative importance
+        ax4 = fig.add_subplot(2, 2, 4)  # Importance distribution
+        
+        # 1. Full spectrum importance plot
+        ax1.plot(wavenumbers, importance_scores, 'b-', alpha=0.7)
+        ax1.scatter(top_wavenumbers, top_scores, color='red', s=30, zorder=5)
+        ax1.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
+        ax1.set_ylabel('Feature Importance', fontsize=9)
+        ax1.set_title(f'Feature Importance - {method}', fontsize=10, fontweight='bold')
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Top features bar plot
+        x_pos = np.arange(len(top_wavenumbers))
+        bars = ax2.bar(x_pos, top_scores, color='skyblue', edgecolor='navy')
+        ax2.set_xlabel('Top Features (Wavenumber)', fontsize=9)
+        ax2.set_ylabel('Importance Score', fontsize=9)
+        ax2.set_title('Top 20 Most Important Features', fontsize=10, fontweight='bold')
+        ax2.set_xticks(x_pos[::2])  # Show every other tick
+        ax2.set_xticklabels([f'{int(wn)}' for wn in top_wavenumbers[::2]], rotation=45, fontsize=8)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Cumulative importance
+        sorted_importance = np.sort(importance_scores)[::-1]
+        cumulative_importance = np.cumsum(sorted_importance)
+        cumulative_importance /= cumulative_importance[-1]  # Normalize to 1
+        
+        ax3.plot(range(len(cumulative_importance)), cumulative_importance, 'g-', linewidth=2)
+        ax3.axhline(y=0.8, color='red', linestyle='--', alpha=0.7, label='80% threshold')
+        ax3.axhline(y=0.9, color='orange', linestyle='--', alpha=0.7, label='90% threshold')
+        ax3.set_xlabel('Number of Features', fontsize=9)
+        ax3.set_ylabel('Cumulative Importance', fontsize=9)
+        ax3.set_title('Cumulative Feature Importance', fontsize=10, fontweight='bold')
+        ax3.legend(fontsize=8)
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Importance distribution
+        ax4.hist(importance_scores, bins=30, alpha=0.7, color='purple', edgecolor='black')
+        ax4.axvline(x=np.mean(importance_scores), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(importance_scores):.4f}')
+        ax4.axvline(x=np.median(importance_scores), color='orange', linestyle='--', 
+                   label=f'Median: {np.median(importance_scores):.4f}')
+        ax4.set_xlabel('Importance Score', fontsize=9)
+        ax4.set_ylabel('Frequency', fontsize=9)
+        ax4.set_title('Distribution of Feature Importance', fontsize=10, fontweight='bold')
+        ax4.legend(fontsize=8)
+        ax4.grid(True, alpha=0.3)
+        
+        fig.tight_layout()
+        self.stats_tab.stats_canvas.draw()
+    
+    def _display_feature_importance_results(self, top_wavenumbers, top_scores, method, all_scores):
+        """Display feature importance results in the text area."""
+        results_text = f"Feature Importance Analysis - {method}\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Top 20 Most Important Features:\n"
+        results_text += "-" * 35 + "\n"
+        
+        for i, (wavenumber, score) in enumerate(zip(top_wavenumbers, top_scores)):
+            results_text += f"{i+1:2d}. {wavenumber:6.1f} cm⁻¹ : {score:.6f}\n"
+        
+        # Calculate some statistics
+        total_importance = np.sum(top_scores)
+        mean_importance = np.mean(top_scores)
+        std_importance = np.std(top_scores)
+        
+        results_text += f"\nStatistics for Top Features:\n"
+        results_text += f"• Total importance: {total_importance:.6f}\n"
+        results_text += f"• Mean importance: {mean_importance:.6f}\n"
+        results_text += f"• Std deviation: {std_importance:.6f}\n"
+        results_text += f"• Highest importance: {top_scores[0]:.6f} at {top_wavenumbers[0]:.1f} cm⁻¹\n"
+        
+        # Find how many features needed for 80% and 90% cumulative importance
+        sorted_importance = np.sort(all_scores)[::-1]
+        cumulative = np.cumsum(sorted_importance) / np.sum(sorted_importance)
+        n_80 = np.argmax(cumulative >= 0.80) + 1
+        n_90 = np.argmax(cumulative >= 0.90) + 1
+        
+        results_text += f"\nCumulative Importance:\n"
+        results_text += f"• {n_80} features capture 80% of importance\n"
+        results_text += f"• {n_90} features capture 90% of importance\n"
+        
+        results_text += f"\nInterpretation:\n"
+        results_text += f"The {method} method identified {len(top_wavenumbers)} key spectral features "
+        results_text += f"that best distinguish between clusters. Higher importance scores indicate "
+        results_text += f"wavenumbers that contribute more to cluster separation. Focus on these "
+        results_text += f"peaks for chemical interpretation of your clusters.\n"
+        
+        self.stats_tab.stats_results_text.setText(results_text)
+    
+    def _plot_discriminant_analysis(self, X_lda, labels, explained_variance, cv_scores):
+        """Plot discriminant analysis results."""
+        import matplotlib.pyplot as plt
+        
+        fig = self.stats_tab.stats_fig
+        fig.clear()
+        
+        # Create subplots
+        ax1 = fig.add_subplot(2, 2, 1)  # LDA scatter plot
+        ax2 = fig.add_subplot(2, 2, 2)  # Explained variance
+        ax3 = fig.add_subplot(2, 2, 3)  # Cross-validation scores
+        ax4 = fig.add_subplot(2, 2, 4)  # Cluster separation
+        
+        # 1. LDA scatter plot (first two components)
+        unique_labels = np.unique(labels)
+        colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+        
+        for i, label in enumerate(unique_labels):
+            mask = labels == label
+            if X_lda.shape[1] >= 2:
+                ax1.scatter(X_lda[mask, 0], X_lda[mask, 1], 
+                           c=[colors[i]], label=f'Cluster {label}', alpha=0.7, s=20)
+            else:
+                # If only one component, plot against index
+                ax1.scatter(range(np.sum(mask)), X_lda[mask, 0], 
+                           c=[colors[i]], label=f'Cluster {label}', alpha=0.7, s=20)
+        
+        if X_lda.shape[1] >= 2:
+            ax1.set_xlabel(f'LD1 ({explained_variance[0]:.1%} variance)', fontsize=9)
+            ax1.set_ylabel(f'LD2 ({explained_variance[1]:.1%} variance)', fontsize=9)
+        else:
+            ax1.set_xlabel('Sample Index', fontsize=9)
+            ax1.set_ylabel(f'LD1 ({explained_variance[0]:.1%} variance)', fontsize=9)
+        ax1.set_title('Linear Discriminant Analysis', fontsize=10, fontweight='bold')
+        ax1.legend(fontsize=8)
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Explained variance plot
+        components = range(1, len(explained_variance) + 1)
+        ax2.bar(components, explained_variance, color='skyblue', edgecolor='navy')
+        ax2.set_xlabel('Linear Discriminant', fontsize=9)
+        ax2.set_ylabel('Explained Variance Ratio', fontsize=9)
+        ax2.set_title('Explained Variance by Component', fontsize=10, fontweight='bold')
+        ax2.set_xticks(components)
+        ax2.grid(True, alpha=0.3)
+        
+        # 3. Cross-validation scores
+        fold_numbers = range(1, len(cv_scores) + 1)
+        bars = ax3.bar(fold_numbers, cv_scores, color='lightgreen', edgecolor='darkgreen')
+        ax3.axhline(y=np.mean(cv_scores), color='red', linestyle='--', 
+                   label=f'Mean: {np.mean(cv_scores):.3f}')
+        ax3.set_xlabel('Cross-Validation Fold', fontsize=9)
+        ax3.set_ylabel('Accuracy Score', fontsize=9)
+        ax3.set_title('Cross-Validation Performance', fontsize=10, fontweight='bold')
+        ax3.set_ylim(0, 1)
+        ax3.legend(fontsize=8)
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. Cluster separation analysis
+        if X_lda.shape[1] >= 1:
+            # Calculate pairwise distances between cluster centroids
+            centroids = []
+            for label in unique_labels:
+                mask = labels == label
+                centroid = np.mean(X_lda[mask], axis=0)
+                centroids.append(centroid)
+            
+            centroids = np.array(centroids)
+            n_clusters = len(unique_labels)
+            
+            # Calculate separation matrix
+            separation_matrix = np.zeros((n_clusters, n_clusters))
+            for i in range(n_clusters):
+                for j in range(n_clusters):
+                    if i != j:
+                        separation_matrix[i, j] = np.linalg.norm(centroids[i] - centroids[j])
+            
+            # Plot separation heatmap
+            im = ax4.imshow(separation_matrix, cmap='viridis', aspect='auto')
+            ax4.set_xticks(range(n_clusters))
+            ax4.set_yticks(range(n_clusters))
+            ax4.set_xticklabels([f'C{label}' for label in unique_labels], fontsize=8)
+            ax4.set_yticklabels([f'C{label}' for label in unique_labels], fontsize=8)
+            ax4.set_title('Cluster Separation Matrix', fontsize=10, fontweight='bold')
+            
+            # Add text annotations
+            for i in range(n_clusters):
+                for j in range(n_clusters):
+                    if i != j:
+                        ax4.text(j, i, f'{separation_matrix[i, j]:.2f}', 
+                               ha='center', va='center', color='white', fontsize=8)
+            
+            fig.colorbar(im, ax=ax4)
+        
+        fig.tight_layout()
+        self.stats_tab.stats_canvas.draw()
+
+    def _display_discriminant_results(self, cv_scores, explained_variance, lda):
+        """Display discriminant analysis results."""
+        results_text = "Linear Discriminant Analysis Results\n"
+        results_text += "=" * 40 + "\n\n"
+        
+        results_text += f"Cross-Validation Performance:\n"
+        results_text += f"• Mean accuracy: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}\n"
+        results_text += f"• Best fold: {np.max(cv_scores):.3f}\n"
+        results_text += f"• Worst fold: {np.min(cv_scores):.3f}\n\n"
+        
+        results_text += f"Explained Variance by Component:\n"
+        for i, var in enumerate(explained_variance):
+            results_text += f"• LD{i+1}: {var:.3f} ({var*100:.1f}%)\n"
+        
+        cumulative_var = np.cumsum(explained_variance)
+        results_text += f"\nCumulative Explained Variance:\n"
+        for i, cum_var in enumerate(cumulative_var):
+            results_text += f"• First {i+1} component(s): {cum_var:.3f} ({cum_var*100:.1f}%)\n"
+        
+        # Model interpretation
+        results_text += f"\nModel Interpretation:\n"
+        if np.mean(cv_scores) >= 0.9:
+            interpretation = "Excellent cluster separation"
+        elif np.mean(cv_scores) >= 0.8:
+            interpretation = "Good cluster separation"
+        elif np.mean(cv_scores) >= 0.7:
+            interpretation = "Moderate cluster separation"
+        else:
+            interpretation = "Poor cluster separation"
+        
+        results_text += f"• Classification quality: {interpretation}\n"
+        results_text += f"• Number of discriminant functions: {len(explained_variance)}\n"
+        results_text += f"\nInterpretation:\n"
+        results_text += f"LDA finds the linear combinations of features that best separate clusters.\n"
+        results_text += f"The cross-validation accuracy shows how well clusters can be predicted.\n"
+        results_text += f"High accuracy ({np.mean(cv_scores):.1%}) indicates well-separated, distinct clusters.\n"
+        
+        self.stats_tab.stats_results_text.setText(results_text)
+    
+    def _perform_anova(self, intensities, labels, alpha):
+        """Perform ANOVA test on all features."""
+        from scipy import stats
+        
+        n_features = intensities.shape[1]
+        unique_labels = np.unique(labels)
+        n_clusters = len(unique_labels)
+        
+        f_statistics = []
+        p_values = []
+        
+        for i in range(n_features):
+            # Group data by cluster
+            groups = [intensities[labels == label, i] for label in unique_labels]
+            f_stat, p_val = stats.f_oneway(*groups)
+            f_statistics.append(f_stat)
+            p_values.append(p_val)
+        
+        f_statistics = np.array(f_statistics)
+        p_values = np.array(p_values)
+        
+        # Apply Bonferroni correction
+        corrected_alpha = alpha / n_features
+        significant_features = np.sum(p_values < corrected_alpha)
+        
+        return {
+            'test_statistic': np.mean(f_statistics),
+            'p_value': np.min(p_values),
+            'significant_features': significant_features,
+            'total_features': n_features,
+            'significant': significant_features > 0,
+            'f_statistics': f_statistics,
+            'p_values': p_values,
+            'corrected_alpha': corrected_alpha
+        }
+    
+    def _plot_significance_results(self, results, method):
+        """Plot statistical significance results."""
+        import matplotlib.pyplot as plt
+        
+        fig = self.stats_tab.stats_fig
+        fig.clear()
+        
+        if method == 'ANOVA':
+            # Create 2x2 subplot
+            ax1 = fig.add_subplot(2, 2, 1)
+            ax2 = fig.add_subplot(2, 2, 2)
+            ax3 = fig.add_subplot(2, 2, 3)
+            ax4 = fig.add_subplot(2, 2, 4)
+            
+            f_stats = results['f_statistics']
+            p_vals = results['p_values']
+            corrected_alpha = results['corrected_alpha']
+            
+            # 1. F-statistics across features
+            ax1.plot(f_stats, 'b-', linewidth=1)
+            ax1.set_xlabel('Feature Index', fontsize=9)
+            ax1.set_ylabel('F-statistic', fontsize=9)
+            ax1.set_title('F-statistics Across Features', fontsize=10, fontweight='bold')
+            ax1.grid(True, alpha=0.3)
+            
+            # 2. P-values across features
+            ax2.plot(p_vals, 'r-', linewidth=1)
+            ax2.axhline(y=corrected_alpha, color='g', linestyle='--', 
+                       label=f'Corrected α={corrected_alpha:.6f}')
+            ax2.set_xlabel('Feature Index', fontsize=9)
+            ax2.set_ylabel('p-value', fontsize=9)
+            ax2.set_title('P-values Across Features', fontsize=10, fontweight='bold')
+            ax2.set_yscale('log')
+            ax2.legend(fontsize=8)
+            ax2.grid(True, alpha=0.3)
+            
+            # 3. Distribution of F-statistics
+            ax3.hist(f_stats, bins=30, alpha=0.7, color='blue', edgecolor='black')
+            ax3.axvline(x=np.mean(f_stats), color='red', linestyle='--', 
+                       label=f'Mean: {np.mean(f_stats):.2f}')
+            ax3.set_xlabel('F-statistic', fontsize=9)
+            ax3.set_ylabel('Frequency', fontsize=9)
+            ax3.set_title('Distribution of F-statistics', fontsize=10, fontweight='bold')
+            ax3.legend(fontsize=8)
+            ax3.grid(True, alpha=0.3)
+            
+            # 4. Significant vs non-significant features
+            sig_count = results['significant_features']
+            nonsig_count = results['total_features'] - sig_count
+            ax4.bar(['Significant', 'Non-significant'], [sig_count, nonsig_count],
+                   color=['green', 'gray'], alpha=0.7, edgecolor='black')
+            ax4.set_ylabel('Number of Features', fontsize=9)
+            ax4.set_title('Feature Significance Summary', fontsize=10, fontweight='bold')
+            ax4.grid(True, alpha=0.3, axis='y')
+            
+            # Add percentage labels
+            total = results['total_features']
+            ax4.text(0, sig_count, f'{sig_count/total*100:.1f}%', 
+                    ha='center', va='bottom', fontweight='bold')
+            ax4.text(1, nonsig_count, f'{nonsig_count/total*100:.1f}%', 
+                    ha='center', va='bottom', fontweight='bold')
+        
+        fig.tight_layout()
+        self.stats_tab.stats_canvas.draw()
+    
+    def _display_significance_results(self, results, method, alpha):
+        """Display statistical significance results."""
+        results_text = f"Statistical Significance Testing - {method}\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Test Parameters:\n"
+        results_text += f"• Significance level (α): {alpha:.3f}\n"
+        results_text += f"• Bonferroni corrected α: {results['corrected_alpha']:.6f}\n\n"
+        
+        results_text += f"Test Results:\n"
+        results_text += f"• Average F-statistic: {results['test_statistic']:.4f}\n"
+        results_text += f"• Minimum p-value: {results['p_value']:.6f}\n"
+        results_text += f"• Significant features: {results['significant_features']}/{results['total_features']}\n"
+        results_text += f"• Percentage significant: {results['significant_features']/results['total_features']*100:.1f}%\n"
+        results_text += f"• Overall significant: {'Yes' if results['significant'] else 'No'}\n\n"
+        
+        # Interpretation
+        if results['significant']:
+            results_text += f"Interpretation:\n"
+            results_text += f"✓ Multiple spectral features show statistically significant "
+            results_text += f"differences between clusters after Bonferroni correction.\n"
+            results_text += f"✓ The clustering reveals meaningful chemical differences.\n"
+            results_text += f"✓ {results['significant_features']} features can be used to discriminate clusters.\n"
+        else:
+            results_text += f"Interpretation:\n"
+            results_text += f"⚠ No spectral features show statistically significant "
+            results_text += f"differences between clusters after multiple testing correction.\n"
+            results_text += f"⚠ The clustering may not reflect meaningful chemical differences.\n"
+            results_text += f"⚠ Consider using fewer clusters or different preprocessing.\n"
+        
+        results_text += f"\nNote: Bonferroni correction is conservative and controls for\n"
+        results_text += f"multiple testing. It reduces false positives but may miss weak effects.\n"
+        
+        self.stats_tab.stats_results_text.setText(results_text)
+    
+    def _plot_detailed_pca(self, X_pca, labels, explained_variance, cumulative_variance, 
+                          components, wavenumbers):
+        """Plot detailed PCA results."""
+        import matplotlib.pyplot as plt
+        
+        fig = self.stats_tab.stats_fig
+        fig.clear()
+        
+        # Create 2x2 subplots
+        ax1 = fig.add_subplot(2, 2, 1)  # PC1 vs PC2 scatter
+        ax2 = fig.add_subplot(2, 2, 2)  # Scree plot
+        ax3 = fig.add_subplot(2, 2, 3)  # Cumulative variance
+        ax4 = fig.add_subplot(2, 2, 4)  # PC1 loadings
+        
+        # 1. PC1 vs PC2 scatter plot
+        unique_labels = np.unique(labels)
+        colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+        
+        for i, label in enumerate(unique_labels):
+            mask = labels == label
+            ax1.scatter(X_pca[mask, 0], X_pca[mask, 1], 
+                       c=[colors[i]], label=f'Cluster {label}', alpha=0.7, s=20)
+        
+        ax1.set_xlabel(f'PC1 ({explained_variance[0]:.1%})', fontsize=9)
+        ax1.set_ylabel(f'PC2 ({explained_variance[1]:.1%})', fontsize=9)
+        ax1.set_title('PCA Projection (PC1 vs PC2)', fontsize=10, fontweight='bold')
+        ax1.legend(fontsize=8)
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Scree plot (first 20 components)
+        n_show = min(20, len(explained_variance))
+        ax2.bar(range(1, n_show + 1), explained_variance[:n_show], 
+               color='skyblue', edgecolor='navy')
+        ax2.set_xlabel('Principal Component', fontsize=9)
+        ax2.set_ylabel('Explained Variance Ratio', fontsize=9)
+        ax2.set_title('Scree Plot (First 20 PCs)', fontsize=10, fontweight='bold')
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        # 3. Cumulative variance
+        n_show_cum = min(50, len(cumulative_variance))
+        ax3.plot(range(1, n_show_cum + 1), cumulative_variance[:n_show_cum], 
+                'g-', linewidth=2)
+        ax3.axhline(y=0.8, color='red', linestyle='--', alpha=0.7, label='80%')
+        ax3.axhline(y=0.9, color='orange', linestyle='--', alpha=0.7, label='90%')
+        ax3.axhline(y=0.95, color='purple', linestyle='--', alpha=0.7, label='95%')
+        ax3.set_xlabel('Number of Components', fontsize=9)
+        ax3.set_ylabel('Cumulative Variance Explained', fontsize=9)
+        ax3.set_title('Cumulative Explained Variance', fontsize=10, fontweight='bold')
+        ax3.legend(fontsize=8)
+        ax3.grid(True, alpha=0.3)
+        
+        # 4. PC1 loadings (spectral pattern)
+        ax4.plot(wavenumbers, components[0, :], 'b-', linewidth=1)
+        ax4.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
+        ax4.set_ylabel('PC1 Loading', fontsize=9)
+        ax4.set_title('PC1 Spectral Pattern', fontsize=10, fontweight='bold')
+        ax4.grid(True, alpha=0.3)
+        ax4.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+        
+        fig.tight_layout()
+        self.stats_tab.stats_canvas.draw()
+    
+    def _display_pca_results(self, explained_variance, cumulative_variance, 
+                            n_80, n_90, n_95, components, wavenumbers):
+        """Display PCA results text."""
+        results_text = "Detailed PCA Analysis Results\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Variance Explained:\n"
+        results_text += f"• PC1: {explained_variance[0]:.3f} ({explained_variance[0]*100:.1f}%)\n"
+        results_text += f"• PC2: {explained_variance[1]:.3f} ({explained_variance[1]*100:.1f}%)\n"
+        results_text += f"• PC3: {explained_variance[2]:.3f} ({explained_variance[2]*100:.1f}%)\n\n"
+        
+        results_text += f"Components Needed:\n"
+        results_text += f"• 80% variance: {n_80} components\n"
+        results_text += f"• 90% variance: {n_90} components\n"
+        results_text += f"• 95% variance: {n_95} components\n\n"
+        
+        results_text += f"Total Components: {len(explained_variance)}\n"
+        results_text += f"Total Variance (first 10 PCs): {cumulative_variance[9]:.1%}\n\n"
+        
+        # Find top loadings for PC1
+        pc1_loadings = np.abs(components[0, :])
+        top_indices = np.argsort(pc1_loadings)[-10:][::-1]
+        
+        results_text += f"Top 10 PC1 Loadings (Most Important Wavenumbers):\n"
+        results_text += "-" * 40 + "\n"
+        for i, idx in enumerate(top_indices):
+            results_text += f"{i+1:2d}. {wavenumbers[idx]:6.1f} cm⁻¹ : {components[0, idx]:+.4f}\n"
+        
+        results_text += f"\nInterpretation:\n"
+        results_text += f"PCA reduces {len(wavenumbers)} spectral features to {n_90} principal components\n"
+        results_text += f"that capture 90% of the variance. PC1 captures the main spectral variation\n"
+        results_text += f"({explained_variance[0]:.1%}). The loadings show which wavenumbers contribute\n"
+        results_text += f"most to each component. Use this to identify key spectral patterns.\n"
+        
+        self.stats_tab.stats_results_text.setText(results_text)
+    
+    def _plot_factor_analysis(self, X_fa, labels, loadings, wavenumbers, variance_explained):
+        """Plot Factor Analysis results."""
+        import matplotlib.pyplot as plt
+        
+        fig = self.stats_tab.stats_fig
+        fig.clear()
+        
+        # Create 2x2 subplots
+        ax1 = fig.add_subplot(2, 2, 1)  # Factor 1 vs Factor 2 scatter
+        ax2 = fig.add_subplot(2, 2, 2)  # Variance by factor
+        ax3 = fig.add_subplot(2, 2, 3)  # Factor 1 loadings
+        ax4 = fig.add_subplot(2, 2, 4)  # Loading heatmap
+        
+        # 1. Factor 1 vs Factor 2 scatter
+        unique_labels = np.unique(labels)
+        colors = plt.cm.Set1(np.linspace(0, 1, len(unique_labels)))
+        
+        for i, label in enumerate(unique_labels):
+            mask = labels == label
+            ax1.scatter(X_fa[mask, 0], X_fa[mask, 1], 
+                       c=[colors[i]], label=f'Cluster {label}', alpha=0.7, s=20)
+        
+        ax1.set_xlabel(f'Factor 1 ({variance_explained[0]:.1%})', fontsize=9)
+        ax1.set_ylabel(f'Factor 2 ({variance_explained[1]:.1%})', fontsize=9)
+        ax1.set_title('Factor Analysis Projection', fontsize=10, fontweight='bold')
+        ax1.legend(fontsize=8)
+        ax1.grid(True, alpha=0.3)
+        
+        # 2. Variance by factor
+        n_factors = len(variance_explained)
+        ax2.bar(range(1, n_factors + 1), variance_explained, 
+               color='lightcoral', edgecolor='darkred')
+        ax2.set_xlabel('Factor', fontsize=9)
+        ax2.set_ylabel('Variance Explained', fontsize=9)
+        ax2.set_title('Variance by Factor', fontsize=10, fontweight='bold')
+        ax2.grid(True, alpha=0.3, axis='y')
+        
+        # 3. Factor 1 loadings spectrum
+        ax3.plot(wavenumbers, loadings[:, 0], 'r-', linewidth=1)
+        ax3.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
+        ax3.set_ylabel('Factor 1 Loading', fontsize=9)
+        ax3.set_title('Factor 1 Spectral Pattern', fontsize=10, fontweight='bold')
+        ax3.grid(True, alpha=0.3)
+        ax3.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+        
+        # 4. Loading heatmap (top features x factors)
+        # Show top 50 features with highest loadings
+        max_loadings = np.max(np.abs(loadings), axis=1)
+        top_features = np.argsort(max_loadings)[-50:][::-1]
+        
+        im = ax4.imshow(loadings[top_features, :].T, aspect='auto', cmap='RdBu_r', 
+                       vmin=-np.max(np.abs(loadings)), vmax=np.max(np.abs(loadings)))
+        ax4.set_xlabel('Top 50 Features', fontsize=9)
+        ax4.set_ylabel('Factor', fontsize=9)
+        ax4.set_title('Loading Heatmap', fontsize=10, fontweight='bold')
+        ax4.set_yticks(range(n_factors))
+        ax4.set_yticklabels([f'F{i+1}' for i in range(n_factors)], fontsize=8)
+        fig.colorbar(im, ax=ax4, label='Loading')
+        
+        fig.tight_layout()
+        self.stats_tab.stats_canvas.draw()
+    
+    def _display_factor_results(self, n_factors, loadings, wavenumbers, variance_explained):
+        """Display Factor Analysis results text."""
+        results_text = "Factor Analysis Results\n"
+        results_text += "=" * 50 + "\n\n"
+        
+        results_text += f"Number of Factors: {n_factors}\n\n"
+        
+        results_text += f"Variance Explained by Each Factor:\n"
+        for i in range(n_factors):
+            results_text += f"• Factor {i+1}: {variance_explained[i]:.3f} ({variance_explained[i]*100:.1f}%)\n"
+        
+        results_text += f"\nTotal Variance Explained: {np.sum(variance_explained):.1%}\n\n"
+        
+        # Top loadings for Factor 1
+        factor1_loadings = np.abs(loadings[:, 0])
+        top_indices = np.argsort(factor1_loadings)[-10:][::-1]
+        
+        results_text += f"Top 10 Factor 1 Loadings:\n"
+        results_text += "-" * 40 + "\n"
+        for i, idx in enumerate(top_indices):
+            results_text += f"{i+1:2d}. {wavenumbers[idx]:6.1f} cm⁻¹ : {loadings[idx, 0]:+.4f}\n"
+        
+        results_text += f"\nInterpretation:\n"
+        results_text += f"Factor Analysis identified {n_factors} latent factors that explain the\n"
+        results_text += f"underlying structure in your spectral data. Unlike PCA, Factor Analysis\n"
+        results_text += f"assumes that observed variables are influenced by hidden factors.\n"
+        results_text += f"High loadings indicate which wavenumbers are most influenced by each factor.\n"
+        results_text += f"Use this to identify common spectral patterns across your clusters.\n"
+        
+        self.stats_tab.stats_results_text.setText(results_text)
 
 
 def launch_cluster_analysis(parent=None, raman_app=None):
