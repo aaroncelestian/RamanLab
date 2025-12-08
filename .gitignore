@@ -76,3 +76,4 @@ dist/
 
 # Folder that I don't want to commit
 tkinter_legacy/
+demo_data/
