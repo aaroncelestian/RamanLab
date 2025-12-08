@@ -91,10 +91,10 @@ class MicroplasticStatisticsDialog(QDialog):
         
         # Table for each plastic type
         self.type_table = QTableWidget()
-        self.type_table.setColumnCount(7)
+        self.type_table.setColumnCount(9)
         self.type_table.setHorizontalHeaderLabels([
-            "Plastic Type", "Count", "Area (%)", "Mean Score", 
-            "95% CI Lower", "95% CI Upper", "Confidence"
+            "Plastic Type", "Pixels", "Clusters", "Cluster Sizes", 
+            "Mean Score", "Score Range", "Spatial Coherence", "Est. Particles", "Confidence"
         ])
         self.type_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.type_table)
@@ -146,6 +146,24 @@ class MicroplasticStatisticsDialog(QDialog):
         ci_lower = np.percentile(bootstrap_rates, 2.5)
         ci_upper = np.percentile(bootstrap_rates, 97.5)
         
+        # Calculate cluster-based statistics for summary
+        from scipy import ndimage
+        total_clusters = 0
+        high_conf_clusters = 0
+        
+        for plastic_type, score_map in score_maps.items():
+            if score_map.ndim == 2:
+                detection_mask = score_map > threshold
+                _, num_clusters = ndimage.label(detection_mask)
+                total_clusters += num_clusters
+                
+                # Count high-confidence clusters (mean score > 0.6)
+                labeled, n = ndimage.label(detection_mask)
+                for i in range(1, n + 1):
+                    cluster_scores = score_map[labeled == i]
+                    if np.mean(cluster_scores) > 0.6:
+                        high_conf_clusters += 1
+        
         # Populate summary text
         summary = f"""
 <h2>Microplastic Detection Summary</h2>
@@ -153,17 +171,35 @@ class MicroplasticStatisticsDialog(QDialog):
 <h3>Overall Statistics:</h3>
 <ul>
 <li><b>Total Spectra Analyzed:</b> {total_spectra:,}</li>
-<li><b>Total Detections:</b> {total_detections:,}</li>
+<li><b>Total Detection Pixels:</b> {total_detections:,}</li>
 <li><b>Detection Rate:</b> {detection_rate*100:.2f}%</li>
-<li><b>95% Confidence Interval:</b> {ci_lower*100:.2f}% - {ci_upper*100:.2f}%</li>
 <li><b>Detection Threshold:</b> {threshold:.2f}</li>
 </ul>
 
-<h3>Interpretation:</h3>
+<h3>Cluster Analysis:</h3>
 <ul>
-<li>Detection rate represents the percentage of spectra identified as containing microplastics</li>
-<li>95% CI provides statistical confidence bounds for the true detection rate</li>
-<li>Lower detection rates with conservative thresholds indicate higher confidence</li>
+<li><b>Total Clusters Found:</b> {total_clusters}</li>
+<li><b>High-Confidence Clusters:</b> {high_conf_clusters} (mean score > 0.6)</li>
+<li><b>Estimated Particle Count:</b> {high_conf_clusters} (based on spatial coherence)</li>
+</ul>
+
+<h3>Quality Metrics Explained:</h3>
+<table border="1" cellpadding="5" style="border-collapse: collapse;">
+<tr><th>Metric</th><th>Description</th><th>Good Value</th></tr>
+<tr><td><b>Clusters</b></td><td>Connected groups of detection pixels</td><td>Fewer, distinct clusters</td></tr>
+<tr><td><b>Cluster Sizes</b></td><td>Range of pixels per cluster</td><td>Consistent with particle size</td></tr>
+<tr><td><b>Mean Score</b></td><td>Average correlation with reference</td><td>> 0.55</td></tr>
+<tr><td><b>Score Range</b></td><td>Min-Max scores in detections</td><td>Narrow range = consistent</td></tr>
+<tr><td><b>Spatial Coherence</b></td><td>Cluster compactness (0-1)</td><td>> 0.5 = compact particle</td></tr>
+<tr><td><b>Est. Particles</b></td><td>Clusters with high score + coherence</td><td>Best estimate of real count</td></tr>
+</table>
+
+<h3>Confidence Levels:</h3>
+<ul>
+<li>🟢 <b>HIGH:</b> Mean score > 0.65, coherence > 0.5, particles detected</li>
+<li>🟡 <b>MEDIUM:</b> Mean score > 0.55, coherence > 0.3</li>
+<li>🟠 <b>LOW:</b> Mean score > 0.45 or clusters present</li>
+<li>🔴 <b>VERY LOW/NONE:</b> Below thresholds or no detections</li>
 </ul>
 """
         self.summary_text.setHtml(summary)
@@ -194,49 +230,128 @@ class MicroplasticStatisticsDialog(QDialog):
         self.generate_example_spectra(score_maps, threshold)
     
     def populate_by_type_table(self, score_maps, threshold, total_spectra):
-        """Populate the by-type statistics table."""
+        """Populate the by-type statistics table with cluster-based metrics."""
+        from scipy import ndimage
+        
         self.type_table.setRowCount(len(score_maps))
         
+        # Map full names to codes for lookup
+        name_to_code = {
+            'Polyethylene': 'PE',
+            'Polypropylene': 'PP',
+            'Polystyrene': 'PS',
+            'Polyethylene Terephthalate': 'PET',
+            'Polyamide': 'PA',
+            'Polycarbonate': 'PC',
+            'Polyurethane': 'PU',
+            'Acrylic': 'PMMA',
+            'PVC': 'PVC'
+        }
+        
         for row_idx, (plastic_type, score_map) in enumerate(score_maps.items()):
-            # Get plastic info
+            # Get plastic info - try both the key directly and mapped code
             plastic_info = self.detector.PLASTIC_SIGNATURES.get(plastic_type, {})
+            if not plastic_info:
+                code = name_to_code.get(plastic_type, plastic_type)
+                plastic_info = self.detector.PLASTIC_SIGNATURES.get(code, {})
             plastic_name = plastic_info.get('name', plastic_type)
             
-            # Calculate statistics
-            detections = np.sum(score_map > threshold)
-            area_percent = (detections / total_spectra * 100) if total_spectra > 0 else 0
+            # Ensure 2D for cluster analysis
+            if score_map.ndim == 1:
+                side = int(np.sqrt(len(score_map)))
+                if side * side == len(score_map):
+                    score_map_2d = score_map.reshape(side, side)
+                else:
+                    # Can't reshape, use basic stats
+                    score_map_2d = None
+            else:
+                score_map_2d = score_map
+            
+            # Basic pixel count
+            detection_mask = score_map > threshold
+            pixel_count = np.sum(detection_mask)
             
             # Get scores above threshold
-            scores_above = score_map[score_map > threshold]
+            scores_above = score_map[detection_mask]
             mean_score = np.mean(scores_above) if len(scores_above) > 0 else 0
+            min_score = np.min(scores_above) if len(scores_above) > 0 else 0
+            max_score = np.max(scores_above) if len(scores_above) > 0 else 0
             
-            # Calculate 95% CI for mean score
-            if len(scores_above) > 1:
-                ci = stats.t.interval(0.95, len(scores_above)-1,
-                                     loc=mean_score,
-                                     scale=stats.sem(scores_above))
-                ci_lower, ci_upper = ci
+            # Cluster analysis (if 2D available)
+            if score_map_2d is not None and pixel_count > 0:
+                detection_mask_2d = score_map_2d > threshold
+                labeled_array, num_clusters = ndimage.label(detection_mask_2d)
+                
+                # Get cluster sizes
+                cluster_sizes = []
+                cluster_mean_scores = []
+                for label_id in range(1, num_clusters + 1):
+                    cluster_mask = labeled_array == label_id
+                    cluster_size = np.sum(cluster_mask)
+                    cluster_scores = score_map_2d[cluster_mask]
+                    cluster_sizes.append(cluster_size)
+                    cluster_mean_scores.append(np.mean(cluster_scores))
+                
+                if cluster_sizes:
+                    min_cluster = min(cluster_sizes)
+                    max_cluster = max(cluster_sizes)
+                    median_cluster = int(np.median(cluster_sizes))
+                    cluster_size_str = f"{min_cluster}-{max_cluster} (med: {median_cluster})"
+                    
+                    # Spatial coherence: ratio of cluster pixels to bounding box
+                    # Higher = more compact/real, Lower = scattered/noise
+                    coherence_scores = []
+                    for label_id in range(1, num_clusters + 1):
+                        cluster_mask = labeled_array == label_id
+                        rows = np.any(cluster_mask, axis=1)
+                        cols = np.any(cluster_mask, axis=0)
+                        if np.any(rows) and np.any(cols):
+                            rmin, rmax = np.where(rows)[0][[0, -1]]
+                            cmin, cmax = np.where(cols)[0][[0, -1]]
+                            bbox_area = (rmax - rmin + 1) * (cmax - cmin + 1)
+                            cluster_area = np.sum(cluster_mask)
+                            coherence_scores.append(cluster_area / bbox_area)
+                    
+                    spatial_coherence = np.mean(coherence_scores) if coherence_scores else 0
+                    
+                    # Estimate real particles: clusters with high coherence AND high mean score
+                    est_particles = sum(1 for i, cs in enumerate(cluster_mean_scores) 
+                                       if cs > 0.55 and (len(coherence_scores) <= i or coherence_scores[i] > 0.3))
+                else:
+                    cluster_size_str = "N/A"
+                    spatial_coherence = 0
+                    est_particles = 0
             else:
-                ci_lower = ci_upper = mean_score
+                num_clusters = 0
+                cluster_size_str = "N/A"
+                spatial_coherence = 0
+                est_particles = 0
             
-            # Determine confidence level
-            if mean_score > 0.7 and area_percent < 5:
+            # Score range string
+            score_range_str = f"{min_score:.2f} - {max_score:.2f}" if pixel_count > 0 else "N/A"
+            
+            # Confidence based on multiple factors
+            if pixel_count == 0:
+                confidence = "🔴 NONE"
+            elif mean_score > 0.65 and spatial_coherence > 0.5 and est_particles > 0:
                 confidence = "🟢 HIGH"
-            elif mean_score > 0.5 and area_percent < 10:
+            elif mean_score > 0.55 and spatial_coherence > 0.3:
                 confidence = "🟡 MEDIUM"
-            elif mean_score > 0.3:
+            elif mean_score > 0.45 or num_clusters > 0:
                 confidence = "🟠 LOW"
             else:
                 confidence = "🔴 VERY LOW"
             
             # Populate row
             self.type_table.setItem(row_idx, 0, QTableWidgetItem(plastic_name))
-            self.type_table.setItem(row_idx, 1, QTableWidgetItem(f"{detections:,}"))
-            self.type_table.setItem(row_idx, 2, QTableWidgetItem(f"{area_percent:.2f}"))
-            self.type_table.setItem(row_idx, 3, QTableWidgetItem(f"{mean_score:.3f}"))
-            self.type_table.setItem(row_idx, 4, QTableWidgetItem(f"{ci_lower:.3f}"))
-            self.type_table.setItem(row_idx, 5, QTableWidgetItem(f"{ci_upper:.3f}"))
-            self.type_table.setItem(row_idx, 6, QTableWidgetItem(confidence))
+            self.type_table.setItem(row_idx, 1, QTableWidgetItem(f"{pixel_count:,}"))
+            self.type_table.setItem(row_idx, 2, QTableWidgetItem(f"{num_clusters}"))
+            self.type_table.setItem(row_idx, 3, QTableWidgetItem(cluster_size_str))
+            self.type_table.setItem(row_idx, 4, QTableWidgetItem(f"{mean_score:.3f}"))
+            self.type_table.setItem(row_idx, 5, QTableWidgetItem(score_range_str))
+            self.type_table.setItem(row_idx, 6, QTableWidgetItem(f"{spatial_coherence:.2f}"))
+            self.type_table.setItem(row_idx, 7, QTableWidgetItem(f"{est_particles}"))
+            self.type_table.setItem(row_idx, 8, QTableWidgetItem(confidence))
     
     def generate_example_spectra(self, score_maps, threshold):
         """Generate example spectra plots with reference overlays."""

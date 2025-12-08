@@ -196,13 +196,15 @@ class MicroplasticDetectionTab(QWidget):
         self.method_combo.addItems([
             'Peak-based (Fast)',
             'Database Correlation (Accurate)',
-            'Hybrid (Recommended)'
+            'Hybrid (Recommended)',
+            'Template Matching (Best for Noisy Data)'
         ])
-        self.method_combo.setCurrentIndex(2)
+        self.method_combo.setCurrentIndex(3)  # Default to Template Matching
         self.method_combo.setToolTip(
             "Peak-based: Fast, uses characteristic peaks\n"
             "Database: Slower, matches against reference spectra\n"
-            "Hybrid: Uses both methods"
+            "Hybrid: Uses both methods\n"
+            "Template Matching: Uses curated plastic spectra from database (best for noisy data)"
         )
         params_layout.addWidget(self.method_combo, 3, 1, 1, 2)
         
@@ -253,6 +255,31 @@ class MicroplasticDetectionTab(QWidget):
         button_row2.addWidget(self.stats_btn)
         
         layout.addLayout(button_row2)
+        
+        # Row 3: Refine Results button
+        button_row3 = QHBoxLayout()
+        
+        self.refine_btn = QPushButton("🎯 Refine Results (Spatial Filter)")
+        self.refine_btn.setEnabled(False)
+        self.refine_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #219a52;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.refine_btn.clicked.connect(self.refine_results)
+        button_row3.addWidget(self.refine_btn)
+        
+        layout.addLayout(button_row3)
         
         # Set the controls widget in the scroll area
         scroll_area.setWidget(controls_widget)
@@ -459,6 +486,7 @@ class MicroplasticDetectionTab(QWidget):
         self.stop_btn.setEnabled(True)
         self.export_btn.setEnabled(False)
         self.stats_btn.setEnabled(False)
+        self.refine_btn.setEnabled(False)
         
         # This will be connected to the parent window's detection method
         if hasattr(self.parent_window, 'run_microplastic_detection'):
@@ -552,9 +580,10 @@ class MicroplasticDetectionTab(QWidget):
         self.figure.tight_layout()
         self.canvas.draw()
         
-        # Enable export and statistics
+        # Enable export, statistics, and refine buttons
         self.export_btn.setEnabled(True)
         self.stats_btn.setEnabled(True)
+        self.refine_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         
@@ -736,7 +765,7 @@ class MicroplasticDetectionTab(QWidget):
         
         # Get wavenumbers and intensities
         wavenumbers = spectrum.wavenumbers
-        intensities = spectrum.intensities
+        intensities = spectrum.intensities.copy()
         
         # Apply baseline correction using the same method as detection
         from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
@@ -766,76 +795,12 @@ class MicroplasticDetectionTab(QWidget):
             intensities_norm = intensities_norm / np.max(intensities_norm)
         
         # Plot spectrum
-        ax.plot(wavenumbers, intensities_norm, 'b-', linewidth=2, label='Map Spectrum (baseline corrected)', alpha=0.8)
+        ax.plot(wavenumbers, intensities_norm, 'b-', linewidth=2, 
+                label='Map Spectrum (baseline corrected)', alpha=0.8)
         
         # Get detection scores and overlay reference spectra
         if self.detection_results is not None:
-            score_text = f"Position: ({x_pos}, {y_pos})\\n\\n"
             scores_list = []
-            
-            # Test against negative controls
-            detector = MicroplasticDetector()
-            negative_match, negative_score = detector.test_negative_controls(
-                wavenumbers, intensities_norm, baseline_corrected=True
-            )
-            
-            for plastic_type, score_map in self.detection_results.items():
-                if plastic_type.startswith('_'):
-                    continue  # Skip metadata
-                
-                # Get score at this position
-                if score_map.ndim == 2:
-                    score = score_map[y_pos, x_pos]
-                else:
-                    # Flatten index
-                    size = int(np.sqrt(len(score_map)))
-                    idx = y_pos * size + x_pos
-                    if idx < len(score_map):
-                        score = score_map[idx]
-                    else:
-                        score = 0.0
-                
-                # Calculate confidence level
-                window_scores = {}  # Would need to store these during detection
-                confidence, conf_details = detector.calculate_confidence_level(
-                    score, window_scores, negative_score
-                )
-                
-                # Color code by confidence
-                conf_emoji = {
-                    'HIGH': '🟢',
-                    'MEDIUM': '🟡',
-                    'LOW': '🟠',
-                    'VERY_LOW': '🔴'
-                }.get(confidence, '⚪')
-                
-                scores_list.append((plastic_type, score, confidence))
-                score_text += f"{conf_emoji} {plastic_type}: {score:.3f} ({confidence})\\n"
-            
-            # Add negative control info
-            score_text += f"\\n⚠️ Best Non-Plastic Match:\\n"
-            score_text += f"   {negative_match}: {negative_score:.3f}"
-            
-            # Sort by score and overlay top matches
-            scores_list.sort(key=lambda x: x[1], reverse=True)
-            
-            # Get reference spectra from parent's detector
-            from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
-            detector = MicroplasticDetector()
-            
-            # Try to load references if available
-            n_refs = 0
-            if hasattr(self.parent_window, 'database') and self.parent_window.database:
-                # Database is already filtered for plastics, so pass it directly
-                n_refs = len(self.parent_window.database)
-                detector.load_plastic_references(self.parent_window.database)
-                self.log_status(f"Loaded {n_refs} plastic references for overlay")
-            else:
-                self.log_status("⚠️ No database available for reference overlay")
-            
-            # Check if we have stored match details for this position
-            match_details = self.detection_results.get('_match_details', {})
-            self.log_status(f"🔍 Found {len(match_details)} stored matches in detection results")
             
             # Calculate flat index for this position
             flat_idx = None
@@ -845,70 +810,82 @@ class MicroplasticDetectionTab(QWidget):
                 unique_y = sorted(set(pos[1] for pos in all_positions))
                 unique_x = sorted(set(pos[0] for pos in all_positions))
                 
-                # Find the index in the flattened array
-                # The detector processes spectra in row-major order
                 try:
-                    y_idx = unique_y.index(y_pos)
-                    x_idx = unique_x.index(x_pos)
-                    flat_idx = y_idx * len(unique_x) + x_idx
-                    self.log_status(f"📍 Position ({x_pos}, {y_pos}) → flat index {flat_idx}")
-                except ValueError:
-                    self.log_status(f"⚠️ Position ({x_pos}, {y_pos}) not found in map")
+                    # Map click position to actual indices
+                    if x_pos < len(unique_x) and y_pos < len(unique_y):
+                        flat_idx = y_pos * len(unique_x) + x_pos
+                except (ValueError, IndexError):
+                    pass
             
-            # Get match info from stored details
-            match_info = match_details.get(flat_idx) if flat_idx is not None else None
-            if match_info:
-                self.log_status(f"✓ Found match info: {match_info.get('matched_name', 'Unknown')}")
-            else:
-                self.log_status(f"ℹ️ No match info stored for this position")
+            # Collect scores for each plastic type
+            for plastic_type, score_map in self.detection_results.items():
+                if plastic_type.startswith('_'):
+                    continue  # Skip metadata
+                
+                # Get score at this position
+                try:
+                    if hasattr(score_map, 'ndim') and score_map.ndim == 2:
+                        if y_pos < score_map.shape[0] and x_pos < score_map.shape[1]:
+                            score = score_map[y_pos, x_pos]
+                        else:
+                            score = 0.0
+                    elif flat_idx is not None and flat_idx < len(score_map):
+                        score = score_map[flat_idx]
+                    else:
+                        score = 0.0
+                except (IndexError, TypeError):
+                    score = 0.0
+                
+                scores_list.append((plastic_type, float(score)))
             
-            # Overlay best match (highest score)
+            # Sort by score
+            scores_list.sort(key=lambda x: x[1], reverse=True)
+            
+            # Get best match info from stored details (for template matching)
+            match_info = None
+            match_details = self.detection_results.get('_match_details', {})
+            match_info_dict = self.detection_results.get('_match_info', {})
+            
+            if flat_idx is not None:
+                match_info = match_details.get(flat_idx) or match_info_dict.get(flat_idx)
+            
+            # Overlay best matching reference spectrum
             best_match_type, best_score = scores_list[0] if scores_list else (None, 0)
             
-            if best_score > 0.1:  # Only overlay if score is significant
-                # Get reference spectrum for best match
+            if best_score > 0.3:  # Only overlay if score is significant
                 ref_spectrum = None
                 matched_name = None
                 
-                # First try to use stored match info
-                if match_info and match_info.get('matched_name'):
+                # Try to get reference from stored match info
+                if match_info and match_info.get('best_match'):
+                    matched_name = match_info['best_match']
+                elif match_info and match_info.get('matched_name'):
                     matched_name = match_info['matched_name']
-                    self.log_status(f"✓ Using stored match: {matched_name}")
-                    
-                    # Get the actual reference spectrum from database
-                    if n_refs > 0 and matched_name in self.parent_window.database:
+                
+                # Try to load reference spectrum from database
+                if matched_name and hasattr(self.parent_window, 'database') and self.parent_window.database:
+                    if matched_name in self.parent_window.database:
                         db_entry = self.parent_window.database[matched_name]
-                        ref_wn = db_entry['wavenumbers']
-                        ref_int = db_entry['intensities']
-                        ref_spectrum = (ref_wn, ref_int)
-                        self.log_status(f"✓ Loaded reference spectrum: {matched_name}")
+                        ref_wn = np.array(db_entry.get('wavenumbers', []))
+                        ref_int = np.array(db_entry.get('intensities', []))
+                        if len(ref_wn) > 0 and len(ref_int) > 0:
+                            ref_spectrum = (ref_wn, ref_int)
                 
-                # Fallback: Try to get from loaded references by plastic type
-                if ref_spectrum is None and n_refs > 0 and best_match_type in detector.reference_spectra:
-                    ref_wn, ref_int = detector.reference_spectra[best_match_type]
-                    ref_spectrum = (ref_wn, ref_int)
-                    matched_name = best_match_type
-                    self.log_status(f"✓ Using database reference for {best_match_type}")
-                
-                # If no database reference, create synthetic reference from peak signatures
+                # Fallback: Create synthetic reference from peak signatures
                 if ref_spectrum is None:
-                    self.log_status(f"ℹ️ No database reference for {best_match_type}, using peak signatures")
+                    detector = MicroplasticDetector()
                     plastic_info = detector.PLASTIC_SIGNATURES.get(best_match_type, {})
                     if 'peaks' in plastic_info:
-                        # Create synthetic spectrum from peak positions
-                        ref_wn = wavenumbers  # Use same wavenumber range
-                        ref_int = np.zeros_like(wavenumbers)
+                        ref_wn = wavenumbers
+                        ref_int = np.zeros_like(wavenumbers, dtype=float)
                         
-                        # Add Gaussian peaks at expected positions
                         for peak_pos in plastic_info['peaks']:
-                            # Find closest wavenumber
-                            idx = np.argmin(np.abs(wavenumbers - peak_pos))
-                            # Add Gaussian peak (width ~20 cm-1)
-                            sigma = 20 / 2.355  # FWHM to sigma
+                            sigma = 20 / 2.355
                             gaussian = np.exp(-((wavenumbers - peak_pos)**2) / (2 * sigma**2))
                             ref_int += gaussian
                         
                         ref_spectrum = (ref_wn, ref_int)
+                        matched_name = plastic_info.get('name', best_match_type)
                 
                 # Overlay the reference spectrum
                 if ref_spectrum is not None:
@@ -919,42 +896,262 @@ class MicroplasticDetectionTab(QWidget):
                     if np.max(ref_int_norm) > 0:
                         ref_int_norm = ref_int_norm / np.max(ref_int_norm)
                     
-                    # Interpolate to match wavenumber range if needed
-                    if not np.array_equal(ref_wn, wavenumbers):
+                    # Interpolate to match wavenumber range
+                    if len(ref_wn) > 0:
                         ref_int_interp = np.interp(wavenumbers, ref_wn, ref_int_norm)
                     else:
                         ref_int_interp = ref_int_norm
                     
-                    # Get plastic info for color and name
+                    # Get color for this plastic type
+                    detector = MicroplasticDetector()
                     plastic_info = detector.PLASTIC_SIGNATURES.get(best_match_type, {})
-                    plastic_name = plastic_info.get('name', best_match_type)
                     plastic_color = plastic_info.get('color', '#FF0000')
                     
-                    # Use matched name if available, otherwise use plastic type
-                    display_name = matched_name if matched_name else plastic_name
+                    display_name = matched_name if matched_name else best_match_type
                     
-                    # Plot reference spectrum with offset for visibility
+                    # Shorten display name for legend (truncate long database names)
+                    short_name = display_name
+                    if len(display_name) > 25:
+                        short_name = display_name[:22] + "..."
+                    
+                    # Plot reference spectrum
                     ax.plot(wavenumbers, ref_int_interp * 0.9, color=plastic_color, 
                            linewidth=2, linestyle='--', alpha=0.7,
-                           label=f'{display_name}\n(score: {best_score:.3f})')
-                    
-                    self.log_status(f"📊 Overlaid {display_name} reference (score: {best_score:.3f})")
+                           label=f'{short_name} ({best_score:.2f})')
             
-            # Add score text to plot
-            ax.text(0.02, 0.98, score_text, transform=ax.transAxes,
-                   verticalalignment='top', fontsize=9,
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            # Build compact score summary for title area
+            top_scores = scores_list[:3]  # Top 3 only
+            score_summary = " | ".join([f"{p}: {s:.2f}" for p, s in top_scores if s > 0.1])
         
+        # Set labels and title
         ax.set_xlabel('Wavenumber (cm⁻¹)', fontsize=9)
-        ax.set_ylabel('Intensity (normalized)', fontsize=9)
-        ax.set_title(f'Spectrum at Position ({x_pos}, {y_pos})', fontsize=10, fontweight='bold')
-        ax.legend(fontsize=8, loc='upper right')
+        ax.set_ylabel('Intensity (norm.)', fontsize=9)
+        
+        # Compact title with position and top score
+        title = f'Position ({x_pos}, {y_pos})'
+        if self.detection_results and score_summary:
+            title += f'  [{score_summary}]'
+        ax.set_title(title, fontsize=9, fontweight='bold')
+        
+        # Legend outside plot area or compact
+        ax.legend(fontsize=7, loc='upper right', framealpha=0.8, 
+                  handlelength=1.5, handletextpad=0.5)
         ax.grid(True, alpha=0.3)
-        ax.tick_params(labelsize=8)
+        ax.tick_params(labelsize=7)
+        
+        # Invert x-axis for Raman convention (high to low wavenumber)
+        ax.invert_xaxis()
         
         # Force proper layout and canvas update
-        self.spectrum_figure.tight_layout()
+        self.spectrum_figure.tight_layout(pad=0.5)
         self.spectrum_canvas.draw_idle()
         self.spectrum_canvas.flush_events()
         
         self.log_status(f"📊 Displaying spectrum at ({x_pos}, {y_pos})")
+    
+    def refine_results(self):
+        """Apply spatial filtering to refine detection results.
+        
+        This removes noise while keeping:
+        1. Clusters of detections (real particles have spatial extent)
+        2. Isolated high-score pixels that stand out from neighbors (small particles)
+        """
+        if self.detection_results is None:
+            self.log_status("⚠️ No detection results to refine")
+            return
+        
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QDoubleSpinBox, QPushButton, QCheckBox, QGroupBox
+        from scipy import ndimage
+        
+        # Create settings dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Refine Detection Results")
+        dialog.setMinimumWidth(400)
+        layout = QVBoxLayout(dialog)
+        
+        # Info label
+        info = QLabel(
+            "Spatial filtering removes random noise while keeping real detections.\n"
+            "• Clusters: Groups of adjacent pixels (real particles have area)\n"
+            "• Isolated pixels: Kept if score is significantly above neighbors"
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+        
+        # Settings group
+        settings_group = QGroupBox("Filter Settings")
+        settings_layout = QVBoxLayout(settings_group)
+        
+        # Erosion iterations (shrink detection regions)
+        erosion_row = QHBoxLayout()
+        erosion_row.addWidget(QLabel("Erosion iterations:"))
+        self.erosion_spin = QSpinBox()
+        self.erosion_spin.setRange(0, 10)
+        self.erosion_spin.setValue(1)
+        self.erosion_spin.setToolTip("Shrink detection regions by this many pixels.\nRemoves thin/noisy connections between clusters.")
+        erosion_row.addWidget(self.erosion_spin)
+        settings_layout.addLayout(erosion_row)
+        
+        # Minimum cluster size (after erosion)
+        cluster_row = QHBoxLayout()
+        cluster_row.addWidget(QLabel("Min cluster size (pixels):"))
+        self.min_cluster_spin = QSpinBox()
+        self.min_cluster_spin.setRange(1, 500)
+        self.min_cluster_spin.setValue(5)
+        self.min_cluster_spin.setToolTip("Minimum cluster size AFTER erosion.\nReal particles should have a core of at least this size.")
+        cluster_row.addWidget(self.min_cluster_spin)
+        settings_layout.addLayout(cluster_row)
+        
+        # Minimum mean score for cluster
+        score_row = QHBoxLayout()
+        score_row.addWidget(QLabel("Min cluster mean score:"))
+        self.min_score_spin = QDoubleSpinBox()
+        self.min_score_spin.setRange(0.0, 1.0)
+        self.min_score_spin.setValue(0.55)
+        self.min_score_spin.setSingleStep(0.05)
+        self.min_score_spin.setToolTip("Clusters with mean score below this are removed.\nReal plastics should have consistently high scores.")
+        score_row.addWidget(self.min_score_spin)
+        settings_layout.addLayout(score_row)
+        
+        # Keep high-confidence detections
+        self.keep_high_conf = QCheckBox("Always keep clusters with max score > 0.75")
+        self.keep_high_conf.setChecked(True)
+        settings_layout.addWidget(self.keep_high_conf)
+        
+        layout.addWidget(settings_group)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        apply_btn = QPushButton("Apply Filter")
+        apply_btn.clicked.connect(dialog.accept)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_layout.addWidget(apply_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        if dialog.exec() != QDialog.Accepted:
+            return
+        
+        # Get settings
+        erosion_iterations = self.erosion_spin.value()
+        min_cluster_size = self.min_cluster_spin.value()
+        min_mean_score = self.min_score_spin.value()
+        keep_high_conf = self.keep_high_conf.isChecked()
+        
+        self.log_status(f"🎯 Applying spatial filter (erosion: {erosion_iterations}, min cluster: {min_cluster_size}, min score: {min_mean_score:.2f})...")
+        
+        # Get current threshold
+        threshold = self.threshold_slider.value() / 100.0
+        
+        # Process each plastic type
+        refined_results = {}
+        total_before = 0
+        total_after = 0
+        
+        for plastic_type, score_map in self.detection_results.items():
+            if plastic_type.startswith('_'):
+                refined_results[plastic_type] = score_map
+                continue
+            
+            # Ensure score_map is 2D
+            original_shape = score_map.shape
+            if score_map.ndim == 1:
+                # Try to reshape to 2D - assume square or get from map_data
+                if hasattr(self.parent_window, 'map_data'):
+                    map_data = self.parent_window.map_data
+                    all_positions = [(spec.x_pos, spec.y_pos) for spec in map_data.spectra.values()]
+                    unique_x = sorted(set(pos[0] for pos in all_positions))
+                    unique_y = sorted(set(pos[1] for pos in all_positions))
+                    n_rows, n_cols = len(unique_y), len(unique_x)
+                    if n_rows * n_cols == len(score_map):
+                        score_map_2d = score_map.reshape(n_rows, n_cols)
+                    else:
+                        # Can't reshape properly, skip refinement for this type
+                        self.log_status(f"⚠️ Cannot reshape {plastic_type} score map for spatial filtering")
+                        refined_results[plastic_type] = score_map
+                        continue
+                else:
+                    # Assume square
+                    side = int(np.sqrt(len(score_map)))
+                    if side * side == len(score_map):
+                        score_map_2d = score_map.reshape(side, side)
+                    else:
+                        refined_results[plastic_type] = score_map
+                        continue
+            else:
+                score_map_2d = score_map
+            
+            # Create binary detection mask
+            detection_mask = score_map_2d > threshold
+            total_before += np.sum(detection_mask)
+            
+            # Apply morphological erosion to shrink regions and break weak connections
+            if erosion_iterations > 0:
+                eroded_mask = ndimage.binary_erosion(detection_mask, iterations=erosion_iterations)
+            else:
+                eroded_mask = detection_mask
+            
+            # Label connected components on eroded mask
+            labeled_array, num_features = ndimage.label(eroded_mask)
+            
+            # Create refined mask
+            refined_mask = np.zeros_like(detection_mask)
+            clusters_kept = 0
+            clusters_removed = 0
+            
+            for label_id in range(1, num_features + 1):
+                component_mask = labeled_array == label_id
+                component_size = np.sum(component_mask)
+                
+                # Get scores for this cluster (from original, not eroded)
+                component_scores = score_map_2d[component_mask]
+                max_score = np.max(component_scores)
+                mean_score = np.mean(component_scores)
+                
+                # Check if cluster passes filters
+                keep_cluster = False
+                
+                # Always keep high-confidence clusters
+                if keep_high_conf and max_score > 0.75:
+                    keep_cluster = True
+                # Keep if cluster is large enough AND has high enough mean score
+                elif component_size >= min_cluster_size and mean_score >= min_mean_score:
+                    keep_cluster = True
+                
+                if keep_cluster:
+                    # Dilate back to recover original extent (undo erosion)
+                    if erosion_iterations > 0:
+                        # Dilate this component back
+                        dilated = ndimage.binary_dilation(component_mask, iterations=erosion_iterations)
+                        # But only keep pixels that were in original detection
+                        recovered = dilated & detection_mask
+                        refined_mask |= recovered
+                    else:
+                        refined_mask |= component_mask
+                    clusters_kept += 1
+                else:
+                    clusters_removed += 1
+            
+            # Apply refined mask to scores (zero out filtered pixels)
+            refined_scores = score_map_2d.copy()
+            refined_scores[~refined_mask] = 0
+            
+            # Reshape back to original if needed
+            if score_map.ndim == 1:
+                refined_scores = refined_scores.flatten()
+            
+            refined_results[plastic_type] = refined_scores
+            total_after += np.sum(refined_mask)
+            
+            self.log_status(f"  {plastic_type}: kept {clusters_kept} clusters, removed {clusters_removed}")
+        
+        # Update results
+        self.detection_results = refined_results
+        
+        # Redisplay
+        self.display_results(refined_results)
+        
+        # Log summary
+        removed = total_before - total_after
+        self.log_status(f"✅ Refinement complete: {total_before:,} → {total_after:,} detections ({removed:,} removed, {removed/max(1,total_before)*100:.1f}% filtered)")

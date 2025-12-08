@@ -9,6 +9,8 @@ acquisition times.
 import numpy as np
 from scipy import signal, sparse
 from scipy.sparse.linalg import spsolve
+from scipy.optimize import curve_fit
+from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 from typing import Dict, List, Tuple, Optional, Callable
 import logging
 from joblib import Parallel, delayed
@@ -179,45 +181,672 @@ class MicroplasticDetector:
         
         return signal.savgol_filter(intensities, window_length, polyorder)
     
-    def detect_peaks_at_positions(self, wavenumbers: np.ndarray, 
-                                  intensities: np.ndarray,
-                                  peak_positions: List[float],
-                                  tolerance: float = 10.0,
-                                  min_intensity: float = 50.0) -> Dict[float, float]:
+    @staticmethod
+    def gaussian(x: np.ndarray, amplitude: float, center: float, 
+                 sigma: float, offset: float = 0) -> np.ndarray:
+        """Gaussian peak function."""
+        return amplitude * np.exp(-0.5 * ((x - center) / sigma) ** 2) + offset
+    
+    @staticmethod
+    def lorentzian(x: np.ndarray, amplitude: float, center: float, 
+                   gamma: float, offset: float = 0) -> np.ndarray:
+        """Lorentzian peak function."""
+        return amplitude * (gamma ** 2) / ((x - center) ** 2 + gamma ** 2) + offset
+    
+    @staticmethod
+    def pseudo_voigt(x: np.ndarray, amplitude: float, center: float, 
+                     width: float, eta: float = 0.5, offset: float = 0) -> np.ndarray:
+        """Pseudo-Voigt peak function (mix of Gaussian and Lorentzian)."""
+        sigma = width / (2 * np.sqrt(2 * np.log(2)))  # Convert FWHM to sigma
+        gaussian = np.exp(-0.5 * ((x - center) / sigma) ** 2)
+        lorentzian = (width / 2) ** 2 / ((x - center) ** 2 + (width / 2) ** 2)
+        return amplitude * (eta * lorentzian + (1 - eta) * gaussian) + offset
+    
+    def estimate_local_noise(self, intensities: np.ndarray, 
+                             window_size: int = 50) -> np.ndarray:
         """
-        Detect peak intensities at specific wavenumber positions.
+        Estimate local noise level using rolling MAD.
+        
+        Args:
+            intensities: Intensity array
+            window_size: Size of rolling window
+            
+        Returns:
+            Array of local noise estimates
+        """
+        # Use rolling median absolute deviation
+        half_window = window_size // 2
+        n = len(intensities)
+        noise = np.zeros(n)
+        
+        for i in range(n):
+            start = max(0, i - half_window)
+            end = min(n, i + half_window)
+            window = intensities[start:end]
+            median = np.median(window)
+            noise[i] = np.median(np.abs(window - median)) * 1.4826  # Scale to std
+        
+        return noise
+    
+    def fit_peak(self, wavenumbers: np.ndarray, intensities: np.ndarray,
+                 center_guess: float, window: float = 20.0,
+                 model: str = 'pseudo_voigt') -> Optional[Dict]:
+        """
+        Fit a peak at the specified position.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array (baseline-corrected)
+            center_guess: Initial guess for peak center (cm⁻¹)
+            window: Fitting window half-width (cm⁻¹)
+            model: Peak model ('gaussian', 'lorentzian', 'pseudo_voigt')
+            
+        Returns:
+            Dictionary with fit results or None if fit failed
+        """
+        # Extract fitting region
+        mask = np.abs(wavenumbers - center_guess) <= window
+        if np.sum(mask) < 5:
+            return None
+        
+        x = wavenumbers[mask]
+        y = intensities[mask]
+        
+        # Initial parameter estimates
+        offset_guess = np.percentile(y, 10)  # Use low percentile as baseline
+        y_corrected = y - offset_guess
+        amplitude_guess = np.max(y_corrected)
+        
+        if amplitude_guess <= 0:
+            return None
+        
+        # Find actual peak position in window
+        peak_idx = np.argmax(y_corrected)
+        center_guess_refined = x[peak_idx]
+        
+        # Estimate width from FWHM
+        half_max = amplitude_guess / 2
+        above_half = y_corrected > half_max
+        if np.sum(above_half) > 1:
+            width_guess = np.abs(x[above_half][-1] - x[above_half][0])
+            width_guess = max(2.0, min(width_guess, window))  # Clamp to reasonable range
+        else:
+            width_guess = 5.0  # Default width
+        
+        try:
+            if model == 'gaussian':
+                popt, pcov = curve_fit(
+                    self.gaussian, x, y,
+                    p0=[amplitude_guess, center_guess_refined, width_guess / 2.355, offset_guess],
+                    bounds=([0, x.min(), 0.5, -np.inf], 
+                           [np.inf, x.max(), window, np.inf]),
+                    maxfev=1000
+                )
+                fitted = self.gaussian(x, *popt)
+                amplitude, center, sigma, offset = popt
+                fwhm = 2.355 * sigma
+                
+            elif model == 'lorentzian':
+                popt, pcov = curve_fit(
+                    self.lorentzian, x, y,
+                    p0=[amplitude_guess, center_guess_refined, width_guess / 2, offset_guess],
+                    bounds=([0, x.min(), 0.5, -np.inf], 
+                           [np.inf, x.max(), window, np.inf]),
+                    maxfev=1000
+                )
+                fitted = self.lorentzian(x, *popt)
+                amplitude, center, gamma, offset = popt
+                fwhm = 2 * gamma
+                
+            else:  # pseudo_voigt
+                popt, pcov = curve_fit(
+                    self.pseudo_voigt, x, y,
+                    p0=[amplitude_guess, center_guess_refined, width_guess, 0.5, offset_guess],
+                    bounds=([0, x.min(), 1.0, 0, -np.inf], 
+                           [np.inf, x.max(), window * 2, 1, np.inf]),
+                    maxfev=1000
+                )
+                fitted = self.pseudo_voigt(x, *popt)
+                amplitude, center, fwhm, eta, offset = popt
+            
+            # Calculate fit quality metrics
+            residuals = y - fitted
+            ss_res = np.sum(residuals ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+            
+            # Calculate SNR
+            noise_estimate = np.std(residuals)
+            snr = amplitude / noise_estimate if noise_estimate > 0 else 0
+            
+            return {
+                'amplitude': amplitude,
+                'center': center,
+                'fwhm': fwhm,
+                'offset': offset,
+                'r_squared': r_squared,
+                'snr': snr,
+                'fitted_curve': fitted,
+                'x': x,
+                'y': y,
+                'residuals': residuals,
+                'model': model
+            }
+            
+        except (RuntimeError, ValueError) as e:
+            logger.debug(f"Peak fit failed at {center_guess}: {e}")
+            return None
+    
+    def detect_peaks_fast(self, wavenumbers: np.ndarray,
+                          intensities: np.ndarray,
+                          peak_positions: List[float],
+                          tolerance: float = 15.0,
+                          min_snr: float = 3.0) -> Tuple[int, float]:
+        """
+        FAST peak detection optimized for large datasets.
+        
+        Checks for actual peak SHAPE (local maximum above surroundings),
+        not just positive intensity.
         
         Args:
             wavenumbers: Wavenumber array
             intensities: Intensity array (baseline-corrected)
             peak_positions: Expected peak positions (cm⁻¹)
             tolerance: Wavenumber tolerance (±cm⁻¹)
-            min_intensity: Minimum intensity to count as a peak
+            min_snr: Minimum signal-to-noise ratio (default 3.0 for selectivity)
             
         Returns:
-            Dictionary mapping peak position to intensity (only significant peaks)
+            Tuple of (peaks_detected_count, average_snr)
         """
-        peak_intensities = {}
+        # Global noise estimate from spectrum variance
+        noise_level = np.median(np.abs(np.diff(intensities))) * 1.4826
+        if noise_level <= 0:
+            noise_level = np.std(intensities) * 0.1
+        if noise_level <= 0:
+            return 0, 0.0  # Can't estimate noise
         
-        # Calculate noise level as median absolute deviation
-        median_intensity = np.median(intensities)
-        mad = np.median(np.abs(intensities - median_intensity))
-        noise_threshold = median_intensity + 3 * mad  # 3-sigma threshold
+        # Also get baseline level (median of spectrum)
+        baseline = np.median(intensities)
         
-        # Use the higher of min_intensity or noise threshold
-        threshold = max(min_intensity, noise_threshold)
+        peaks_found = 0
+        total_snr = 0.0
+        
+        for peak_pos in peak_positions:
+            # Find indices within tolerance
+            mask = np.abs(wavenumbers - peak_pos) <= tolerance
+            if np.sum(mask) < 3:  # Need at least 3 points
+                continue
+            
+            # Get region data
+            region = intensities[mask]
+            region_wn = wavenumbers[mask]
+            
+            # Find local maximum
+            max_idx = np.argmax(region)
+            max_val = region[max_idx]
+            
+            # Check if it's actually a LOCAL maximum (peak shape)
+            # Must be higher than edges of the region
+            edge_val = (region[0] + region[-1]) / 2
+            prominence = max_val - edge_val
+            
+            # Also check it's above baseline
+            height_above_baseline = max_val - baseline
+            
+            # SNR based on prominence (peak height above local background)
+            snr = prominence / noise_level if noise_level > 0 else 0
+            
+            # Must have:
+            # 1. Positive prominence (actual peak shape)
+            # 2. SNR above threshold
+            # 3. Peak above baseline
+            if prominence > 0 and snr >= min_snr and height_above_baseline > noise_level:
+                peaks_found += 1
+                total_snr += snr
+        
+        avg_snr = total_snr / peaks_found if peaks_found > 0 else 0
+        return peaks_found, avg_snr
+    
+    def detect_peaks_derivative_fast(self, wavenumbers: np.ndarray,
+                                      intensities: np.ndarray,
+                                      peak_positions: List[float],
+                                      tolerance: float = 15.0,
+                                      min_snr: float = 4.0) -> Tuple[int, float]:
+        """
+        FAST derivative-based peak detection for weak signals.
+        
+        Second derivative is more sensitive to peak shapes and less affected
+        by sloping baselines. Optimized for speed with no curve fitting.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array
+            peak_positions: Expected peak positions (cm⁻¹)
+            tolerance: Wavenumber tolerance (±cm⁻¹)
+            min_snr: Minimum SNR in derivative space (default 4.0)
+            
+        Returns:
+            Tuple of (peaks_detected_count, average_derivative_snr)
+        """
+        # Smooth slightly and compute second derivative (vectorized)
+        smoothed = uniform_filter1d(intensities, size=5)
+        second_deriv = np.gradient(np.gradient(smoothed))
+        second_deriv = -second_deriv  # Invert so peaks are positive
+        
+        # Noise in derivative space - use MAD of derivative
+        deriv_noise = np.median(np.abs(second_deriv - np.median(second_deriv))) * 1.4826
+        if deriv_noise <= 0:
+            deriv_noise = np.std(second_deriv) * 0.1
+        if deriv_noise <= 0:
+            return 0, 0.0
+        
+        peaks_found = 0
+        total_snr = 0.0
+        
+        for peak_pos in peak_positions:
+            mask = np.abs(wavenumbers - peak_pos) <= tolerance
+            if np.sum(mask) < 3:
+                continue
+            
+            # Check derivative in region
+            region_deriv = second_deriv[mask]
+            max_deriv = np.max(region_deriv)
+            
+            # Must be a local maximum in derivative (peak center)
+            max_idx = np.argmax(region_deriv)
+            # Check it's not at the edge (would indicate slope, not peak)
+            if max_idx == 0 or max_idx == len(region_deriv) - 1:
+                continue
+            
+            # SNR in derivative space
+            snr = max_deriv / deriv_noise if deriv_noise > 0 else 0
+            
+            # Higher threshold for derivative detection
+            if snr >= min_snr and max_deriv > 0:
+                peaks_found += 1
+                total_snr += snr
+        
+        avg_snr = total_snr / peaks_found if peaks_found > 0 else 0
+        return peaks_found, avg_snr
+    
+    def detect_peaks_at_positions(self, wavenumbers: np.ndarray, 
+                                  intensities: np.ndarray,
+                                  peak_positions: List[float],
+                                  tolerance: float = 15.0,
+                                  min_snr: float = 2.0,
+                                  min_r_squared: float = 0.3,
+                                  use_fitting: bool = True) -> Dict[float, Dict]:
+        """
+        Detect and validate peaks at specific wavenumber positions.
+        
+        Uses peak fitting to distinguish real peaks from noise, with adaptive
+        thresholding based on local noise estimation.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array (baseline-corrected)
+            peak_positions: Expected peak positions (cm⁻¹)
+            tolerance: Wavenumber tolerance (±cm⁻¹)
+            min_snr: Minimum signal-to-noise ratio for valid peak
+            min_r_squared: Minimum R² for fit quality
+            use_fitting: If True, use peak fitting; if False, use simple detection
+            
+        Returns:
+            Dictionary mapping peak position to detection info
+        """
+        detected_peaks = {}
+        
+        # Estimate local noise across the spectrum
+        local_noise = self.estimate_local_noise(intensities)
         
         for peak_pos in peak_positions:
             # Find wavenumbers within tolerance
             mask = np.abs(wavenumbers - peak_pos) <= tolerance
-            if np.any(mask):
-                # Get maximum intensity in this region
-                max_intensity = np.max(intensities[mask])
-                # Only count if significantly above threshold
-                if max_intensity > threshold:
-                    peak_intensities[peak_pos] = max_intensity
+            if not np.any(mask):
+                continue
+            
+            if use_fitting:
+                # Try to fit a peak at this position
+                fit_result = self.fit_peak(
+                    wavenumbers, intensities, peak_pos, 
+                    window=tolerance, model='pseudo_voigt'
+                )
+                
+                if fit_result is not None:
+                    # Validate the fit
+                    if (fit_result['snr'] >= min_snr and 
+                        fit_result['r_squared'] >= min_r_squared and
+                        fit_result['amplitude'] > 0 and
+                        fit_result['fwhm'] >= 2.0 and fit_result['fwhm'] <= 50.0):
+                        
+                        detected_peaks[peak_pos] = {
+                            'intensity': fit_result['amplitude'],
+                            'center': fit_result['center'],
+                            'fwhm': fit_result['fwhm'],
+                            'snr': fit_result['snr'],
+                            'r_squared': fit_result['r_squared'],
+                            'fitted': True
+                        }
+            else:
+                # Simple detection (fallback for speed)
+                region_intensities = intensities[mask]
+                region_noise = local_noise[mask]
+                
+                max_idx = np.argmax(region_intensities)
+                max_intensity = region_intensities[max_idx]
+                local_noise_level = region_noise[max_idx]
+                
+                # Calculate local SNR
+                snr = max_intensity / local_noise_level if local_noise_level > 0 else 0
+                
+                if snr >= min_snr:
+                    detected_peaks[peak_pos] = {
+                        'intensity': max_intensity,
+                        'center': wavenumbers[mask][max_idx],
+                        'snr': snr,
+                        'fitted': False
+                    }
         
-        return peak_intensities
+        return detected_peaks
+    
+    def detect_all_peaks(self, wavenumbers: np.ndarray, intensities: np.ndarray,
+                         min_snr: float = 2.5, min_prominence: float = None,
+                         min_width: float = 2.0, max_width: float = 50.0) -> List[Dict]:
+        """
+        Detect all significant peaks in a spectrum using derivative analysis.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array (baseline-corrected)
+            min_snr: Minimum signal-to-noise ratio
+            min_prominence: Minimum peak prominence (auto-calculated if None)
+            min_width: Minimum peak width in cm⁻¹
+            max_width: Maximum peak width in cm⁻¹
+            
+        Returns:
+            List of detected peak dictionaries
+        """
+        # Smooth the spectrum slightly to reduce noise
+        smoothed = gaussian_filter1d(intensities, sigma=1.5)
+        
+        # Estimate noise level
+        noise_level = np.median(np.abs(np.diff(intensities))) / 0.6745
+        
+        if min_prominence is None:
+            min_prominence = 2.5 * noise_level
+        
+        # Calculate wavenumber spacing
+        wn_spacing = np.abs(np.median(np.diff(wavenumbers)))
+        min_distance = int(min_width / wn_spacing)
+        
+        # Find peaks using scipy
+        peaks, properties = signal.find_peaks(
+            smoothed,
+            prominence=min_prominence,
+            distance=max(1, min_distance),
+            width=(min_width / wn_spacing, max_width / wn_spacing)
+        )
+        
+        detected = []
+        for i, peak_idx in enumerate(peaks):
+            peak_wn = wavenumbers[peak_idx]
+            peak_intensity = intensities[peak_idx]
+            
+            # Calculate local SNR
+            local_noise = self.estimate_local_noise(intensities, window_size=30)
+            snr = peak_intensity / local_noise[peak_idx] if local_noise[peak_idx] > 0 else 0
+            
+            if snr >= min_snr:
+                # Try to fit the peak for better characterization
+                fit_result = self.fit_peak(wavenumbers, intensities, peak_wn, 
+                                          window=15.0, model='pseudo_voigt')
+                
+                if fit_result is not None and fit_result['r_squared'] > 0.3:
+                    detected.append({
+                        'position': fit_result['center'],
+                        'intensity': fit_result['amplitude'],
+                        'fwhm': fit_result['fwhm'],
+                        'snr': fit_result['snr'],
+                        'r_squared': fit_result['r_squared'],
+                        'prominence': properties['prominences'][i]
+                    })
+                else:
+                    # Use raw peak data
+                    detected.append({
+                        'position': peak_wn,
+                        'intensity': peak_intensity,
+                        'snr': snr,
+                        'prominence': properties['prominences'][i]
+                    })
+        
+        return detected
+    
+    def detect_weak_peaks_derivative(self, wavenumbers: np.ndarray, 
+                                      intensities: np.ndarray,
+                                      peak_positions: List[float],
+                                      tolerance: float = 15.0,
+                                      smoothing_sigma: float = 2.0) -> Dict[float, Dict]:
+        """
+        Detect weak peaks using second derivative analysis.
+        
+        Second derivative is more sensitive to peak shapes and less affected
+        by sloping baselines, making it ideal for weak peak detection.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array (baseline-corrected preferred)
+            peak_positions: Expected peak positions (cm⁻¹)
+            tolerance: Wavenumber tolerance (±cm⁻¹)
+            smoothing_sigma: Gaussian smoothing sigma for noise reduction
+            
+        Returns:
+            Dictionary mapping peak position to detection info
+        """
+        detected_peaks = {}
+        
+        # Smooth the spectrum
+        smoothed = gaussian_filter1d(intensities, sigma=smoothing_sigma)
+        
+        # Calculate second derivative (negative peaks indicate positive peaks in original)
+        # Use Savitzky-Golay for better derivative estimation
+        wn_spacing = np.abs(np.median(np.diff(wavenumbers)))
+        window = max(5, int(10 / wn_spacing))  # ~10 cm⁻¹ window
+        if window % 2 == 0:
+            window += 1
+        
+        try:
+            second_deriv = signal.savgol_filter(smoothed, window, 3, deriv=2)
+        except ValueError:
+            # Fallback to simple second derivative
+            second_deriv = np.gradient(np.gradient(smoothed))
+        
+        # Invert so peaks become positive
+        second_deriv = -second_deriv
+        
+        # Estimate noise in second derivative
+        deriv_noise = np.median(np.abs(second_deriv - np.median(second_deriv))) * 1.4826
+        
+        for peak_pos in peak_positions:
+            mask = np.abs(wavenumbers - peak_pos) <= tolerance
+            if not np.any(mask):
+                continue
+            
+            region_deriv = second_deriv[mask]
+            region_wn = wavenumbers[mask]
+            region_int = intensities[mask]
+            
+            # Find maximum in second derivative (indicates peak center)
+            max_idx = np.argmax(region_deriv)
+            max_deriv = region_deriv[max_idx]
+            
+            # Calculate SNR in derivative space
+            deriv_snr = max_deriv / deriv_noise if deriv_noise > 0 else 0
+            
+            # Also check original intensity
+            intensity_at_peak = region_int[max_idx]
+            
+            # A peak is detected if derivative SNR is significant
+            if deriv_snr >= 2.0:  # Lower threshold for weak peaks
+                detected_peaks[peak_pos] = {
+                    'center': region_wn[max_idx],
+                    'intensity': intensity_at_peak,
+                    'deriv_snr': deriv_snr,
+                    'deriv_value': max_deriv,
+                    'method': 'derivative'
+                }
+        
+        return detected_peaks
+    
+    def matched_filter_detection(self, wavenumbers: np.ndarray,
+                                  intensities: np.ndarray,
+                                  peak_positions: List[float],
+                                  expected_width: float = 10.0,
+                                  tolerance: float = 15.0) -> Dict[float, Dict]:
+        """
+        Detect peaks using matched filtering with expected peak shape.
+        
+        Matched filtering is optimal for detecting known signals in noise.
+        Uses a Gaussian template matched to expected Raman peak width.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array (baseline-corrected preferred)
+            peak_positions: Expected peak positions (cm⁻¹)
+            expected_width: Expected FWHM of peaks (cm⁻¹)
+            tolerance: Wavenumber tolerance (±cm⁻¹)
+            
+        Returns:
+            Dictionary mapping peak position to detection info
+        """
+        detected_peaks = {}
+        
+        # Create matched filter template (Gaussian peak)
+        wn_spacing = np.abs(np.median(np.diff(wavenumbers)))
+        template_width = int(expected_width * 3 / wn_spacing)  # 3 sigma width
+        if template_width % 2 == 0:
+            template_width += 1
+        template_width = max(5, template_width)
+        
+        # Create normalized Gaussian template
+        sigma = expected_width / (2.355 * wn_spacing)  # Convert FWHM to sigma in samples
+        template_x = np.arange(template_width) - template_width // 2
+        template = np.exp(-0.5 * (template_x / sigma) ** 2)
+        template = template / np.sqrt(np.sum(template ** 2))  # Normalize
+        
+        # Apply matched filter (cross-correlation)
+        filtered = signal.correlate(intensities, template, mode='same')
+        
+        # Estimate noise in filtered signal
+        noise_level = np.median(np.abs(filtered - np.median(filtered))) * 1.4826
+        
+        for peak_pos in peak_positions:
+            mask = np.abs(wavenumbers - peak_pos) <= tolerance
+            if not np.any(mask):
+                continue
+            
+            region_filtered = filtered[mask]
+            region_wn = wavenumbers[mask]
+            region_int = intensities[mask]
+            
+            # Find maximum in filtered signal
+            max_idx = np.argmax(region_filtered)
+            max_filtered = region_filtered[max_idx]
+            
+            # Calculate SNR
+            filter_snr = max_filtered / noise_level if noise_level > 0 else 0
+            
+            if filter_snr >= 2.5:  # Threshold for matched filter detection
+                detected_peaks[peak_pos] = {
+                    'center': region_wn[max_idx],
+                    'intensity': region_int[max_idx],
+                    'filter_snr': filter_snr,
+                    'filter_response': max_filtered,
+                    'method': 'matched_filter'
+                }
+        
+        return detected_peaks
+    
+    def detect_peaks_ensemble(self, wavenumbers: np.ndarray,
+                              intensities: np.ndarray,
+                              peak_positions: List[float],
+                              tolerance: float = 15.0,
+                              min_methods: int = 2) -> Dict[float, Dict]:
+        """
+        Detect peaks using ensemble of methods for robust weak signal detection.
+        
+        Combines peak fitting, derivative analysis, and matched filtering.
+        A peak is confirmed if detected by multiple methods.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array (baseline-corrected)
+            peak_positions: Expected peak positions (cm⁻¹)
+            tolerance: Wavenumber tolerance (±cm⁻¹)
+            min_methods: Minimum number of methods that must detect the peak
+            
+        Returns:
+            Dictionary mapping peak position to combined detection info
+        """
+        # Run all detection methods
+        fitting_results = self.detect_peaks_at_positions(
+            wavenumbers, intensities, peak_positions,
+            tolerance=tolerance, min_snr=1.5, min_r_squared=0.2, use_fitting=True
+        )
+        
+        derivative_results = self.detect_weak_peaks_derivative(
+            wavenumbers, intensities, peak_positions,
+            tolerance=tolerance, smoothing_sigma=2.0
+        )
+        
+        matched_results = self.matched_filter_detection(
+            wavenumbers, intensities, peak_positions,
+            expected_width=10.0, tolerance=tolerance
+        )
+        
+        # Combine results
+        combined = {}
+        for peak_pos in peak_positions:
+            methods_detected = 0
+            combined_info = {'position': peak_pos, 'methods': []}
+            
+            if peak_pos in fitting_results:
+                methods_detected += 1
+                combined_info['methods'].append('fitting')
+                combined_info['fitting'] = fitting_results[peak_pos]
+                combined_info['intensity'] = fitting_results[peak_pos].get('intensity', 0)
+                combined_info['snr'] = fitting_results[peak_pos].get('snr', 0)
+            
+            if peak_pos in derivative_results:
+                methods_detected += 1
+                combined_info['methods'].append('derivative')
+                combined_info['derivative'] = derivative_results[peak_pos]
+                if 'intensity' not in combined_info:
+                    combined_info['intensity'] = derivative_results[peak_pos].get('intensity', 0)
+                combined_info['deriv_snr'] = derivative_results[peak_pos].get('deriv_snr', 0)
+            
+            if peak_pos in matched_results:
+                methods_detected += 1
+                combined_info['methods'].append('matched_filter')
+                combined_info['matched_filter'] = matched_results[peak_pos]
+                if 'intensity' not in combined_info:
+                    combined_info['intensity'] = matched_results[peak_pos].get('intensity', 0)
+                combined_info['filter_snr'] = matched_results[peak_pos].get('filter_snr', 0)
+            
+            combined_info['methods_count'] = methods_detected
+            
+            # Only include if detected by minimum number of methods
+            if methods_detected >= min_methods:
+                combined[peak_pos] = combined_info
+            elif methods_detected == 1 and min_methods <= 1:
+                # For very weak signals, accept single method with high confidence
+                if 'snr' in combined_info and combined_info['snr'] >= 3.0:
+                    combined[peak_pos] = combined_info
+                elif 'deriv_snr' in combined_info and combined_info['deriv_snr'] >= 4.0:
+                    combined[peak_pos] = combined_info
+                elif 'filter_snr' in combined_info and combined_info['filter_snr'] >= 4.0:
+                    combined[peak_pos] = combined_info
+        
+        return combined
     
     def calculate_multi_window_score(self, wavenumbers: np.ndarray,
                                     intensities: np.ndarray,
@@ -329,9 +958,17 @@ class MicroplasticDetector:
                                baseline_corrected: bool = False,
                                lam: float = 1e6,
                                p: float = 0.001,
-                               niter: int = 10) -> Tuple[float, Dict[str, float], Optional[str]]:
+                               niter: int = 10,
+                               use_peak_fitting: bool = False,
+                               min_snr: float = 1.5,
+                               min_r_squared: float = 0.25,
+                               use_ensemble: bool = False,
+                               smoothing: int = 5) -> Tuple[float, Dict[str, float], Optional[str]]:
         """
         Calculate detection score for a specific plastic type.
+        
+        Uses a combination of reference correlation and peak fitting to detect
+        weak plastic signals in noisy spectra.
         
         Args:
             wavenumbers: Wavenumber array
@@ -341,6 +978,11 @@ class MicroplasticDetector:
             lam: ALS lambda parameter (smoothness)
             p: ALS p parameter (asymmetry)
             niter: ALS iterations
+            use_peak_fitting: If True, use peak fitting for validation
+            min_snr: Minimum SNR for peak detection (lower = more sensitive)
+            min_r_squared: Minimum R² for peak fit quality
+            use_ensemble: If True, use ensemble detection (fitting + derivative + matched filter)
+            smoothing: Smoothing window size (0 = no smoothing, 5-11 recommended)
             
         Returns:
             Tuple of (detection_score, window_scores_dict, matched_spectrum_name)
@@ -351,6 +993,13 @@ class MicroplasticDetector:
         # Apply baseline correction if needed
         if not baseline_corrected:
             intensities = self.baseline_als(intensities, lam=lam, p=p, niter=niter)
+        
+        # Apply smoothing to reduce noise (Savitzky-Golay filter preserves peak shapes)
+        if smoothing > 0:
+            window = smoothing if smoothing % 2 == 1 else smoothing + 1  # Must be odd
+            window = max(5, min(window, 21))  # Clamp to reasonable range
+            if len(intensities) > window:
+                intensities = signal.savgol_filter(intensities, window, 3)
         
         # Use multi-window correlation if reference available
         # Try to find a matching reference spectrum by plastic type
@@ -371,21 +1020,124 @@ class MicroplasticDetector:
                     logger.debug(f"Matched {plastic_type} to reference: {key}")
                     break
         
+        # Calculate reference correlation score if available
+        ref_score = 0.0
+        window_scores = {}
         if ref_spectrum is not None:
             ref_wn, ref_int = ref_spectrum
-            score, window_scores = self.calculate_multi_window_score(
+            ref_score, window_scores = self.calculate_multi_window_score(
                 wavenumbers, intensities, ref_wn, ref_int
             )
-            return score, window_scores, matched_name
         
-        # Fallback: Peak detection at expected positions
+        # Calculate peak-based score
         expected_peaks = self.PLASTIC_SIGNATURES[plastic_type]['strong_peaks']
-        detected_peaks = self.detect_peaks_at_positions(
-            wavenumbers, intensities, expected_peaks, tolerance=10
-        )
-        peak_score = len(detected_peaks) / len(expected_peaks)
+        all_peaks = self.PLASTIC_SIGNATURES[plastic_type]['peaks']
         
-        return peak_score, {}, None  # No matched name for peak-based detection
+        if use_ensemble or use_peak_fitting:
+            # SLOW methods - only for small datasets or validation
+            if use_ensemble:
+                detected_strong = self.detect_peaks_ensemble(
+                    wavenumbers, intensities, expected_peaks,
+                    tolerance=15, min_methods=1
+                )
+                detected_all = self.detect_peaks_ensemble(
+                    wavenumbers, intensities, all_peaks,
+                    tolerance=15, min_methods=1
+                )
+            else:
+                detected_strong = self.detect_peaks_at_positions(
+                    wavenumbers, intensities, expected_peaks, 
+                    tolerance=15, min_snr=min_snr, min_r_squared=min_r_squared,
+                    use_fitting=True
+                )
+                detected_all = self.detect_peaks_at_positions(
+                    wavenumbers, intensities, all_peaks, 
+                    tolerance=15, min_snr=min_snr, min_r_squared=min_r_squared,
+                    use_fitting=True
+                )
+            strong_peak_count = len(detected_strong)
+            all_peak_count = len(detected_all)
+            avg_snr = np.mean([p.get('snr', 0) for p in detected_strong.values()]) if detected_strong else 0
+        else:
+            # FAST mode - use vectorized detection for large datasets
+            # Combine intensity-based and derivative-based detection
+            strong_count_int, avg_snr_int = self.detect_peaks_fast(
+                wavenumbers, intensities, expected_peaks, 
+                tolerance=15, min_snr=min_snr
+            )
+            all_count_int, _ = self.detect_peaks_fast(
+                wavenumbers, intensities, all_peaks, 
+                tolerance=15, min_snr=min_snr
+            )
+            
+            # Also check with derivative (more sensitive to weak peaks)
+            strong_count_deriv, avg_snr_deriv = self.detect_peaks_derivative_fast(
+                wavenumbers, intensities, expected_peaks, tolerance=15
+            )
+            all_count_deriv, _ = self.detect_peaks_derivative_fast(
+                wavenumbers, intensities, all_peaks, tolerance=15
+            )
+            
+            # Take the better of the two methods
+            strong_peak_count = max(strong_count_int, strong_count_deriv)
+            all_peak_count = max(all_count_int, all_count_deriv)
+            avg_snr = max(avg_snr_int, avg_snr_deriv)
+        
+        # Calculate peak-based scores
+        strong_peak_ratio = strong_peak_count / len(expected_peaks) if expected_peaks else 0
+        all_peak_ratio = all_peak_count / len(all_peaks) if all_peaks else 0
+        
+        # CRITICAL: Require minimum number of peaks for a valid detection
+        # Single peak matches are likely false positives
+        min_strong_peaks = 2  # Must have at least 2 strong peaks
+        min_all_peaks = 3     # Must have at least 3 total peaks
+        
+        if strong_peak_count < min_strong_peaks and all_peak_count < min_all_peaks:
+            # Not enough peaks - return zero score
+            window_scores['strong_peaks_detected'] = strong_peak_count
+            window_scores['strong_peaks_expected'] = len(expected_peaks)
+            window_scores['all_peaks_detected'] = all_peak_count
+            window_scores['all_peaks_expected'] = len(all_peaks)
+            window_scores['avg_snr'] = avg_snr
+            window_scores['peak_score'] = 0.0
+            window_scores['ref_score'] = ref_score
+            window_scores['rejection_reason'] = 'insufficient_peaks'
+            return 0.0, window_scores, matched_name
+        
+        # Combine scores with weights
+        # - Reference correlation is most reliable when available
+        # - Strong peak detection is important for identification
+        # - All peaks ratio provides additional confirmation
+        # - Average SNR indicates signal quality
+        
+        if ref_spectrum is not None:
+            # Have reference: weight correlation heavily
+            peak_score = (
+                0.5 * strong_peak_ratio +  # Strong peaks detected
+                0.3 * all_peak_ratio +      # All peaks detected
+                0.2 * min(1.0, avg_snr / 10.0)  # SNR quality (normalized to 10)
+            )
+            # Combine reference and peak scores
+            final_score = 0.5 * ref_score + 0.5 * peak_score
+        else:
+            # No reference: rely on peak detection
+            peak_score = (
+                0.6 * strong_peak_ratio +   # Strong peaks detected
+                0.3 * all_peak_ratio +     # All peaks detected
+                0.1 * min(1.0, avg_snr / 10.0)  # SNR quality
+            )
+            final_score = peak_score
+        
+        # Add peak detection info to window_scores for diagnostics
+        window_scores['strong_peaks_detected'] = strong_peak_count
+        window_scores['strong_peaks_expected'] = len(expected_peaks)
+        window_scores['all_peaks_detected'] = all_peak_count
+        window_scores['all_peaks_expected'] = len(all_peaks)
+        window_scores['avg_snr'] = avg_snr
+        window_scores['peak_score'] = peak_score
+        window_scores['ref_score'] = ref_score
+        
+        return final_score, window_scores, matched_name
     
     def correlate_with_reference(self, wavenumbers: np.ndarray,
                                  intensities: np.ndarray,
@@ -435,7 +1187,12 @@ class MicroplasticDetector:
                                 skip_baseline: bool = False,
                                 lam: float = 1e6,
                                 p: float = 0.001,
-                                niter: int = 10) -> Dict[str, List[Tuple[int, float, Dict]]]:
+                                niter: int = 10,
+                                use_peak_fitting: bool = False,
+                                min_snr: float = 1.5,
+                                min_r_squared: float = 0.25,
+                                use_ensemble: bool = False,
+                                smoothing: int = 5) -> Dict[str, List[Tuple[int, float, Dict]]]:
         """Process a batch of spectra in parallel."""
         results = {ptype: [] for ptype in plastic_types}
         
@@ -445,7 +1202,12 @@ class MicroplasticDetector:
                 score, window_scores, matched_name = self.calculate_plastic_score(
                     wavenumbers, spectrum, ptype, 
                     baseline_corrected=skip_baseline,  # If skip_baseline=True, don't do it again
-                    lam=lam, p=p, niter=niter
+                    lam=lam, p=p, niter=niter,
+                    use_peak_fitting=use_peak_fitting,
+                    min_snr=min_snr,
+                    min_r_squared=min_r_squared,
+                    use_ensemble=use_ensemble,
+                    smoothing=smoothing
                 )
                 results[ptype].append((idx, score, window_scores, matched_name))
         
@@ -460,7 +1222,12 @@ class MicroplasticDetector:
                              fast_mode: bool = True,
                              lam: float = 1e6,
                              p: float = 0.001,
-                             niter: int = 10) -> Dict[str, np.ndarray]:
+                             niter: int = 10,
+                             use_peak_fitting: bool = False,
+                             min_snr: float = 1.5,
+                             min_r_squared: float = 0.25,
+                             use_ensemble: bool = False,
+                             smoothing: int = 5) -> Dict[str, np.ndarray]:
         """
         Scan entire 2D map for multiple plastic types using parallel processing.
         
@@ -475,6 +1242,11 @@ class MicroplasticDetector:
             lam: ALS lambda parameter (smoothness) - used when fast_mode=False
             p: ALS p parameter (asymmetry) - used when fast_mode=False
             niter: ALS iterations - used when fast_mode=False
+            use_peak_fitting: If True, use curve fitting (SLOW - only for small datasets)
+            min_snr: Minimum SNR for peak detection (lower = more sensitive)
+            min_r_squared: Minimum R² for peak fit quality
+            use_ensemble: If True, use ensemble detection (VERY SLOW - only for validation)
+            smoothing: Smoothing window size (0=none, 5-11 recommended for noisy data)
             
         Returns:
             Dictionary mapping plastic type to 2D score map
@@ -574,27 +1346,16 @@ class MicroplasticDetector:
                                     "Baseline removal complete!")
             
             if progress_callback:
-                progress_callback(0, len(batches), f"Detecting plastics in {len(batches)} batches...")
+                progress_callback(0, len(batches), f"Detecting plastics in {len(batches)} batches using {n_cores} cores...")
             
-            # Process batches with progress tracking
-            detection_lock = Lock()
-            completed_batches = [0]  # Use list to allow modification in nested function
-            
-            def process_with_progress(batch):
-                result = self._process_spectrum_batch(
+            # Process batches in parallel using multiprocessing
+            # Note: Progress updates not available during parallel execution
+            batch_results = Parallel(n_jobs=n_jobs, backend='loky', verbose=0)(
+                delayed(self._process_spectrum_batch)(
                     batch, wavenumbers, intensity_map, plastic_types, 
-                    skip_baseline=fast_mode, lam=lam, p=p, niter=niter
-                )
-                with detection_lock:
-                    completed_batches[0] += 1
-                    if progress_callback and completed_batches[0] % max(1, len(batches) // 20) == 0:
-                        progress_callback(completed_batches[0], len(batches), 
-                                        f"Processed {completed_batches[0]}/{len(batches)} batches")
-                return result
-            
-            # Process batches in parallel with progress
-            batch_results = Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
-                delayed(process_with_progress)(batch) for batch in batches
+                    fast_mode, lam, p, niter,
+                    use_peak_fitting, min_snr, min_r_squared, use_ensemble, smoothing
+                ) for batch in batches
             )
             
             # Combine results
@@ -628,7 +1389,8 @@ class MicroplasticDetector:
             # Process using the 2D method
             flat_scores = self.scan_map_for_plastics(
                 wavenumbers, flat_map, plastic_types, threshold, 
-                progress_callback, n_jobs, fast_mode, lam, p, niter
+                progress_callback, n_jobs, fast_mode, lam, p, niter,
+                use_peak_fitting, min_snr, min_r_squared, use_ensemble, smoothing
             )
             
             # Reshape back to 3D
@@ -641,5 +1403,299 @@ class MicroplasticDetector:
         
         # Add match details to results
         score_maps['_match_details'] = match_details
+        
+        return score_maps
+    
+    # ==================== TEMPLATE-BASED DETECTION ====================
+    
+    def load_plastic_templates_from_database(self, database: Dict, 
+                                             plastic_types: Optional[List[str]] = None,
+                                             max_per_type: int = 5) -> Dict[str, List[Tuple[np.ndarray, np.ndarray, str]]]:
+        """
+        Load curated plastic reference spectra from database for template matching.
+        
+        Args:
+            database: RamanLab database dictionary
+            plastic_types: List of plastic types to load (e.g., ['Polyethylene', 'Polypropylene'])
+                          If None, loads common microplastic types
+            max_per_type: Maximum number of reference spectra per plastic type
+        
+        Returns:
+            Dictionary mapping plastic type to list of (wavenumbers, intensities, name) tuples
+        """
+        if plastic_types is None:
+            plastic_types = [
+                'Polyethylene', 'Polypropylene', 'Polystyrene', 'Polyester',
+                'Polyethylene Terephthalate', 'Polyamide', 'Polycarbonate',
+                'Polyurethane', 'Acrylic', 'PVC'
+            ]
+        
+        self.plastic_templates = {}
+        
+        for ptype in plastic_types:
+            self.plastic_templates[ptype] = []
+            ptype_lower = ptype.lower()
+            
+            # Find matching entries in database
+            for key, spectrum_data in database.items():
+                key_lower = key.lower()
+                
+                # Check if this entry matches the plastic type
+                if ptype_lower in key_lower:
+                    # Skip if we already have enough for this type
+                    if len(self.plastic_templates[ptype]) >= max_per_type:
+                        break
+                    
+                    # Extract spectrum data
+                    wavenumbers = np.array(spectrum_data.get('wavenumbers', []))
+                    intensities = np.array(spectrum_data.get('intensities', []))
+                    
+                    if len(wavenumbers) > 100 and len(intensities) > 100:
+                        # Normalize intensities
+                        intensities = intensities - np.min(intensities)
+                        if np.max(intensities) > 0:
+                            intensities = intensities / np.max(intensities)
+                        
+                        self.plastic_templates[ptype].append((wavenumbers, intensities, key))
+                        logger.debug(f"Loaded template: {key}")
+            
+            logger.info(f"Loaded {len(self.plastic_templates[ptype])} templates for {ptype}")
+        
+        # Remove empty types
+        self.plastic_templates = {k: v for k, v in self.plastic_templates.items() if v}
+        
+        total = sum(len(v) for v in self.plastic_templates.values())
+        logger.info(f"Total plastic templates loaded: {total}")
+        
+        return self.plastic_templates
+    
+    def template_match_spectrum(self, wavenumbers: np.ndarray, 
+                                intensities: np.ndarray,
+                                baseline_correct: bool = True,
+                                smooth: bool = True,
+                                smoothing_window: int = 7) -> Dict[str, Dict]:
+        """
+        Match a spectrum against all loaded plastic templates.
+        
+        Uses non-negative least squares fitting to find the best template match.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensities: Intensity array
+            baseline_correct: Apply baseline correction before matching
+            smooth: Apply smoothing before matching
+            smoothing_window: Savitzky-Golay smoothing window
+        
+        Returns:
+            Dictionary with match results for each plastic type:
+            {
+                'Polyethylene': {
+                    'best_match': 'Polyethylene 1. Blue Sphere',
+                    'correlation': 0.85,
+                    'residual': 0.15,
+                    'coefficient': 1.2
+                },
+                ...
+            }
+        """
+        if not hasattr(self, 'plastic_templates') or not self.plastic_templates:
+            logger.warning("No plastic templates loaded. Call load_plastic_templates_from_database first.")
+            return {}
+        
+        # Preprocess spectrum
+        if baseline_correct:
+            intensities = self.baseline_als(intensities)
+        
+        if smooth and len(intensities) > smoothing_window:
+            window = smoothing_window if smoothing_window % 2 == 1 else smoothing_window + 1
+            intensities = signal.savgol_filter(intensities, window, 3)
+        
+        # Normalize
+        intensities = intensities - np.min(intensities)
+        if np.max(intensities) > 0:
+            intensities = intensities / np.max(intensities)
+        
+        results = {}
+        
+        for ptype, templates in self.plastic_templates.items():
+            best_corr = -1
+            best_match = None
+            best_residual = float('inf')
+            best_coeff = 0
+            
+            for template_wn, template_int, template_name in templates:
+                # Interpolate template to match spectrum wavenumbers
+                # Find overlapping range
+                wn_min = max(wavenumbers.min(), template_wn.min())
+                wn_max = min(wavenumbers.max(), template_wn.max())
+                
+                if wn_max <= wn_min:
+                    continue
+                
+                # Create common wavenumber grid
+                mask = (wavenumbers >= wn_min) & (wavenumbers <= wn_max)
+                common_wn = wavenumbers[mask]
+                
+                if len(common_wn) < 50:
+                    continue
+                
+                # Interpolate both to common grid
+                spec_interp = np.interp(common_wn, wavenumbers, intensities)
+                template_interp = np.interp(common_wn, template_wn, template_int)
+                
+                # Smooth both spectra before correlation to reduce noise sensitivity
+                # Use a simple moving average
+                smooth_window = min(15, len(spec_interp) // 10)
+                if smooth_window > 3:
+                    kernel = np.ones(smooth_window) / smooth_window
+                    spec_smooth = np.convolve(spec_interp, kernel, mode='same')
+                    template_smooth = np.convolve(template_interp, kernel, mode='same')
+                else:
+                    spec_smooth = spec_interp
+                    template_smooth = template_interp
+                
+                # Calculate correlation on smoothed spectra
+                if np.std(spec_smooth) > 1e-10 and np.std(template_smooth) > 1e-10:
+                    raw_corr = np.corrcoef(spec_smooth, template_smooth)[0, 1]
+                else:
+                    raw_corr = 0
+                
+                # Calculate derivative correlation on smoothed data (less noise sensitive)
+                spec_deriv = np.gradient(spec_smooth)
+                template_deriv = np.gradient(template_smooth)
+                
+                if np.std(spec_deriv) > 1e-10 and np.std(template_deriv) > 1e-10:
+                    deriv_corr = np.corrcoef(spec_deriv, template_deriv)[0, 1]
+                else:
+                    deriv_corr = 0
+                
+                # Combined score: weight raw correlation higher since we're smoothing
+                # Raw correlation on smoothed data captures overall shape
+                # Derivative helps with peak alignment
+                corr = 0.7 * max(0, raw_corr) + 0.3 * max(0, deriv_corr)
+                
+                # Calculate residual (how well template fits)
+                if np.sum(template_interp**2) > 0:
+                    coeff = np.sum(spec_interp * template_interp) / np.sum(template_interp**2)
+                    coeff = max(0, coeff)  # Non-negative
+                    fitted = coeff * template_interp
+                    residual = np.sqrt(np.mean((spec_interp - fitted)**2))
+                else:
+                    coeff = 0
+                    residual = float('inf')
+                
+                if corr > best_corr:
+                    best_corr = corr
+                    best_match = template_name
+                    best_residual = residual
+                    best_coeff = coeff
+            
+            if best_match is not None:
+                results[ptype] = {
+                    'best_match': best_match,
+                    'correlation': best_corr,
+                    'residual': best_residual,
+                    'coefficient': best_coeff
+                }
+        
+        return results
+    
+    def scan_map_with_templates(self, wavenumbers: np.ndarray,
+                                intensity_map: np.ndarray,
+                                database: Dict,
+                                plastic_types: Optional[List[str]] = None,
+                                threshold: float = 0.5,
+                                progress_callback: Optional[Callable] = None,
+                                n_jobs: int = -1,
+                                max_templates_per_type: int = 3) -> Dict[str, np.ndarray]:
+        """
+        Scan entire map using template matching against database plastic spectra.
+        
+        This is faster and more accurate than peak-based detection for noisy data.
+        
+        Args:
+            wavenumbers: Wavenumber array
+            intensity_map: 2D array (n_spectra, n_wavenumbers)
+            database: RamanLab database dictionary
+            plastic_types: List of plastic types to detect (None = common types)
+            threshold: Minimum correlation threshold for detection
+            progress_callback: Optional callback function(current, total, message)
+            n_jobs: Number of parallel jobs (-1 = all cores)
+            max_templates_per_type: Max reference spectra per plastic type
+        
+        Returns:
+            Dictionary mapping plastic type to 2D correlation score map
+        """
+        # Load templates if not already loaded
+        if not hasattr(self, 'plastic_templates') or not self.plastic_templates:
+            if progress_callback:
+                progress_callback(0, 100, "Loading plastic templates from database...")
+            self.load_plastic_templates_from_database(database, plastic_types, max_templates_per_type)
+        
+        if not self.plastic_templates:
+            logger.error("No plastic templates available")
+            return {}
+        
+        n_spectra = intensity_map.shape[0]
+        n_cores = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
+        
+        logger.info(f"Template matching {n_spectra:,} spectra against {sum(len(v) for v in self.plastic_templates.values())} templates using {n_cores} cores")
+        
+        if progress_callback:
+            progress_callback(0, 100, f"Template matching {n_spectra:,} spectra...")
+        
+        # Initialize score maps
+        score_maps = {ptype: np.zeros(n_spectra) for ptype in self.plastic_templates.keys()}
+        match_info = {}
+        
+        # Process in batches for parallel execution
+        batch_size = max(100, n_spectra // (n_cores * 4))
+        batches = [list(range(i, min(i + batch_size, n_spectra))) 
+                   for i in range(0, n_spectra, batch_size)]
+        
+        def process_batch(batch_indices):
+            """Process a batch of spectra."""
+            batch_results = []
+            for idx in batch_indices:
+                spectrum = intensity_map[idx]
+                matches = self.template_match_spectrum(wavenumbers, spectrum)
+                batch_results.append((idx, matches))
+            return batch_results
+        
+        # Run parallel processing
+        all_results = Parallel(n_jobs=n_jobs, backend='loky', verbose=0)(
+            delayed(process_batch)(batch) for batch in batches
+        )
+        
+        if progress_callback:
+            progress_callback(80, 100, "Combining results...")
+        
+        # Combine results
+        for batch_results in all_results:
+            for idx, matches in batch_results:
+                for ptype, match_data in matches.items():
+                    corr = match_data['correlation']
+                    score_maps[ptype][idx] = max(0, corr)  # Use correlation as score
+                    
+                    if corr >= threshold:
+                        if idx not in match_info or corr > match_info[idx].get('correlation', 0):
+                            match_info[idx] = {
+                                'plastic_type': ptype,
+                                'best_match': match_data['best_match'],
+                                'correlation': corr,
+                                'residual': match_data['residual']
+                            }
+        
+        # Add match info to results
+        score_maps['_match_info'] = match_info
+        
+        # Calculate detection statistics
+        for ptype in self.plastic_templates.keys():
+            detected = np.sum(score_maps[ptype] >= threshold)
+            pct = 100 * detected / n_spectra
+            logger.info(f"{ptype}: {detected:,} detections ({pct:.2f}%)")
+        
+        if progress_callback:
+            progress_callback(100, 100, "✅ Template matching complete!")
         
         return score_maps

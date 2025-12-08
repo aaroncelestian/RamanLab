@@ -20,12 +20,13 @@ class MicroplasticDetectionWorker(QThread):
     detection_complete = Signal(dict)
     detection_failed = Signal(str)
     
-    def __init__(self, detector, wavenumbers, intensities, params):
+    def __init__(self, detector, wavenumbers, intensities, params, database=None):
         super().__init__()
         self.detector = detector
         self.wavenumbers = wavenumbers
         self.intensities = intensities
         self.params = params
+        self.database = database  # For template matching
         self._is_running = True
     
     def stop(self):
@@ -40,7 +41,49 @@ class MicroplasticDetectionWorker(QThread):
                 if self._is_running:
                     self.progress_updated.emit(current, total, message)
             
-            # Run detection with baseline correction
+            # Check detection method
+            method = self.params.get('method', 'Hybrid (Recommended)')
+            
+            # Template Matching mode - uses database plastic spectra
+            if 'Template Matching' in method and self.database is not None:
+                progress_callback(0, 100, "Using Template Matching mode...")
+                
+                # Map UI plastic type codes to full names for template matching
+                plastic_type_map = {
+                    'PE': 'Polyethylene',
+                    'PP': 'Polypropylene', 
+                    'PS': 'Polystyrene',
+                    'PET': 'Polyethylene Terephthalate',
+                    'PVC': 'PVC',
+                    'PMMA': 'Acrylic',
+                    'PA': 'Polyamide'
+                }
+                
+                # Convert plastic type codes to full names
+                plastic_types = []
+                for code in self.params.get('plastic_types', []):
+                    if code in plastic_type_map:
+                        plastic_types.append(plastic_type_map[code])
+                
+                if not plastic_types:
+                    plastic_types = None  # Use default types
+                
+                results = self.detector.scan_map_with_templates(
+                    wavenumbers=self.wavenumbers,
+                    intensity_map=self.intensities,
+                    database=self.database,
+                    plastic_types=plastic_types,
+                    threshold=self.params['threshold'],
+                    progress_callback=progress_callback,
+                    n_jobs=-1,
+                    max_templates_per_type=5
+                )
+                
+                if self._is_running:
+                    self.detection_complete.emit(results)
+                return
+            
+            # Standard detection modes (Peak-based, Database Correlation, Hybrid)
             baseline_params = self.params.get('baseline', {})
             baseline_method = baseline_params.get('method', 'rolling_ball')
             

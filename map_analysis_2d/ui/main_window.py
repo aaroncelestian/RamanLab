@@ -36,6 +36,28 @@ from ..core.template_management import TemplateSpectraManager
 
 logger = logging.getLogger(__name__)
 
+
+class SimpleMapData:
+    """
+    Minimal map data container for HDF5 import.
+    
+    This class provides a pickle-compatible structure that mimics RamanMapData
+    but doesn't require a data directory for initialization.
+    """
+    def __init__(self):
+        self.spectra = {}
+        self.wavenumbers = None
+        self.target_wavenumbers = None
+        self.x_positions = []
+        self.y_positions = []
+        self.data_dir = None
+        self.cosmic_ray_map = None
+        self.template_manager = None
+        self.template_coefficients = None
+        self.template_residuals = None
+        self.cosmic_ray_manager = None
+
+
 class MapAnalysisMainWindow(QMainWindow):
     """Main window for 2D Raman map analysis."""
     
@@ -479,6 +501,15 @@ class MapAnalysisMainWindow(QMainWindow):
         save_pkl_action.setStatusTip('Save current map data to PKL file (preserves all processing)')
         save_pkl_action.triggered.connect(self.save_map_to_pkl)
         file_menu.addAction(save_pkl_action)
+        
+        file_menu.addSeparator()
+        
+        # HDF5 Import section
+        import_h5_action = QAction('&Import HDF5/MAPX to PKL...', self)
+        import_h5_action.setShortcut('Ctrl+I')
+        import_h5_action.setStatusTip('Import HDF5 or MAPX file and convert to PKL format')
+        import_h5_action.triggered.connect(self.import_h5_to_pkl)
+        file_menu.addAction(import_h5_action)
         
         file_menu.addSeparator()
         
@@ -6536,6 +6567,272 @@ The map is now ready for analysis!"""
         
         if reply == QMessageBox.StandardButton.Yes:
             self.save_map_to_pkl()
+    
+    def import_h5_to_pkl(self):
+        """Import HDF5 or MAPX file and convert to PKL format."""
+        # Get input file path
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import HDF5/MAPX File", "", 
+            "HDF5 files (*.h5 *.hdf5 *.mapx);;All files (*)")
+        
+        if not file_path:
+            return
+        
+        try:
+            # Try to import h5py
+            try:
+                import h5py
+            except ImportError:
+                QMessageBox.critical(
+                    self, "Missing Dependency",
+                    "The h5py library is required to import HDF5 files.\n\n"
+                    "Please install it with:\n"
+                    "pip install h5py\n\n"
+                    "or:\n"
+                    "conda install h5py"
+                )
+                return
+            
+            self.progress_status.show_progress(f"Reading HDF5 file: {file_path}...")
+            
+            # Open and read the HDF5 file
+            with h5py.File(file_path, 'r') as f:
+                # Check for expected structure
+                if 'FileInfo' not in f or 'Regions' not in f:
+                    QMessageBox.critical(
+                        self, "Invalid File Format",
+                        "This HDF5 file does not have the expected structure.\n\n"
+                        "Expected groups: FileInfo, Regions\n"
+                        "Found: " + ", ".join(f.keys())
+                    )
+                    self.progress_status.hide_progress()
+                    return
+                
+                # Get spectral range from FileInfo attributes
+                file_info = f['FileInfo']
+                start_wn = file_info.attrs.get('SpectralRangeStart', 0)
+                end_wn = file_info.attrs.get('SpectralRangeEnd', 2000)
+                
+                # Find the data in Regions
+                regions = f['Regions']
+                region_keys = list(regions.keys())
+                if not region_keys:
+                    QMessageBox.critical(self, "No Data", "No regions found in HDF5 file.")
+                    self.progress_status.hide_progress()
+                    return
+                
+                # Use first region
+                region = regions[region_keys[0]]
+                if 'Dataset' not in region:
+                    QMessageBox.critical(self, "No Data", "No Dataset found in region.")
+                    self.progress_status.hide_progress()
+                    return
+                
+                dataset = region['Dataset']
+                shape = dataset.shape
+                
+                # Determine data layout
+                if len(shape) == 3:
+                    # 3D: (X, Y, Wavenumbers)
+                    n_x, n_y, n_wn = shape
+                    n_spectra = n_x * n_y
+                elif len(shape) == 2:
+                    # 2D: (Spectra, Wavenumbers)
+                    n_spectra, n_wn = shape
+                    n_x = int(np.sqrt(n_spectra))
+                    n_y = n_spectra // n_x
+                else:
+                    QMessageBox.critical(self, "Invalid Shape", f"Unexpected data shape: {shape}")
+                    self.progress_status.hide_progress()
+                    return
+                
+                # Create wavenumber array
+                wavenumbers = np.linspace(start_wn, end_wn, n_wn)
+                
+                # Show info and confirm
+                self.progress_status.hide_progress()
+                
+                reply = QMessageBox.question(
+                    self, "Confirm Import",
+                    f"HDF5 File Information:\n\n"
+                    f"File: {file_path}\n"
+                    f"Map Size: {n_x} × {n_y} = {n_spectra:,} spectra\n"
+                    f"Wavenumber Range: {start_wn:.1f} - {end_wn:.1f} cm⁻¹\n"
+                    f"Points per Spectrum: {n_wn}\n\n"
+                    f"This may take a while for large files.\n"
+                    f"Continue with import?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+                
+                # Get output file path
+                import os
+                default_name = os.path.splitext(os.path.basename(file_path))[0] + '.pkl'
+                default_dir = os.path.dirname(file_path)
+                
+                output_path, _ = QFileDialog.getSaveFileName(
+                    self, "Save PKL File", os.path.join(default_dir, default_name),
+                    "Pickle files (*.pkl);;All files (*)")
+                
+                if not output_path:
+                    return
+                
+                if not output_path.endswith('.pkl'):
+                    output_path += '.pkl'
+                
+                self.progress_status.show_progress(f"Reading {n_spectra:,} spectra from HDF5...")
+                
+                # Import required modules
+                from ..core.spectrum_data import SpectrumData
+                import multiprocessing
+                from joblib import Parallel, delayed
+                
+                # Read all data from HDF5 at once (fast - HDF5 is optimized for this)
+                if len(shape) == 3:
+                    # Read entire 3D array
+                    all_data = dataset[:]  # Shape: (n_x, n_y, n_wn)
+                else:
+                    all_data = dataset[:]  # Shape: (n_spectra, n_wn)
+                
+                self.progress_status.show_progress(f"Creating {n_spectra:,} spectrum objects (parallel)...")
+                
+                # Helper function for parallel processing
+                def create_spectrum(i, wavenumbers, all_data, shape, n_y):
+                    if len(shape) == 3:
+                        x_idx = i // n_y
+                        y_idx = i % n_y
+                        intensities = all_data[x_idx, y_idx, :]
+                        x_pos = float(x_idx)
+                        y_pos = float(y_idx)
+                    else:
+                        intensities = all_data[i, :]
+                        x_pos = float(i // n_y)
+                        y_pos = float(i % n_y)
+                    
+                    spectrum = SpectrumData(
+                        wavenumbers=wavenumbers,
+                        intensities=np.array(intensities, dtype=np.float64),
+                        x_pos=x_pos,
+                        y_pos=y_pos,
+                        filename=f"spectrum_{i:06d}"
+                    )
+                    return ((x_pos, y_pos), spectrum)
+                
+                # Use all available cores for parallel processing
+                n_cores = multiprocessing.cpu_count()
+                logger.info(f"Converting HDF5 to PKL using {n_cores} cores...")
+                
+                # Process in parallel
+                results = Parallel(n_jobs=-1, backend='loky', verbose=0)(
+                    delayed(create_spectrum)(i, wavenumbers, all_data, shape, n_y)
+                    for i in range(n_spectra)
+                )
+                
+                # Convert results to dictionary
+                spectra_dict = dict(results)
+                
+                # Create map data container (SimpleMapData is defined at module level for pickle compatibility)
+                map_data = SimpleMapData()
+                map_data.wavenumbers = wavenumbers
+                map_data.target_wavenumbers = wavenumbers  # Same as wavenumbers for HDF5 import
+                map_data.spectra = spectra_dict
+                map_data.x_positions = sorted(set(int(k[0]) for k in spectra_dict.keys()))
+                map_data.y_positions = sorted(set(int(k[1]) for k in spectra_dict.keys()))
+                map_data.data_dir = file_path  # Store source file path
+                
+                self.progress_status.show_progress("Saving PKL file...")
+                
+                # Save to PKL
+                import pickle
+                save_data = {
+                    'map_data': map_data,
+                    'cosmic_ray_config': CosmicRayConfig(),
+                    'metadata': {
+                        'creation_time': datetime.now().isoformat(),
+                        'total_spectra': n_spectra,
+                        'has_processed_data': False,
+                        'source_file': file_path,
+                        'source_format': 'HDF5',
+                        'version': '2.0.0'
+                    }
+                }
+                
+                with open(output_path, 'wb') as pkl_file:
+                    pickle.dump(save_data, pkl_file, protocol=pickle.HIGHEST_PROTOCOL)
+                
+                self.progress_status.hide_progress()
+                
+                # Ask if user wants to load the new PKL
+                reply = QMessageBox.question(
+                    self, "Import Complete",
+                    f"Successfully converted HDF5 to PKL!\n\n"
+                    f"Output: {output_path}\n"
+                    f"Spectra: {n_spectra:,}\n\n"
+                    f"Would you like to load this PKL file now?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    # Load the PKL file we just created
+                    self._load_pkl_file(output_path)
+                    
+        except Exception as e:
+            self.progress_status.hide_progress()
+            import traceback
+            QMessageBox.critical(
+                self, "Import Error",
+                f"Error importing HDF5 file:\n\n{str(e)}\n\n"
+                f"Details:\n{traceback.format_exc()}"
+            )
+    
+    def _load_pkl_file(self, file_path: str):
+        """Internal method to load a PKL file by path."""
+        try:
+            self.progress_status.show_progress("Loading PKL file...")
+            
+            import pickle
+            
+            # Use the same compatibility unpickler as load_map_from_pkl
+            class ModuleCompatibilityUnpickler(pickle.Unpickler):
+                def find_class(self, module, name):
+                    if module.startswith('map_analysis_2d_qt6'):
+                        new_module = module.replace('map_analysis_2d_qt6', 'map_analysis_2d')
+                        try:
+                            mod = __import__(new_module, fromlist=[name])
+                            return getattr(mod, name)
+                        except (ImportError, AttributeError):
+                            pass
+                    return super().find_class(module, name)
+            
+            with open(file_path, 'rb') as f:
+                unpickler = ModuleCompatibilityUnpickler(f)
+                save_data = unpickler.load()
+            
+            # Extract map data
+            if isinstance(save_data, dict) and 'map_data' in save_data:
+                self.map_data = save_data['map_data']
+                if 'cosmic_ray_config' in save_data:
+                    self.cosmic_ray_config = save_data['cosmic_ray_config']
+            else:
+                self.map_data = save_data
+            
+            self.progress_status.hide_progress()
+            
+            # Update UI
+            self._clear_map_cache()
+            self.update_map()
+            self.update_spectrum_display()
+            
+            spectra_count = len(self.map_data.spectra)
+            self.statusBar().showMessage(f"PKL map loaded: {spectra_count:,} spectra")
+            
+        except Exception as e:
+            self.progress_status.hide_progress()
+            QMessageBox.critical(self, "Load Error", f"Error loading PKL file:\n{str(e)}")
 
     def plot_template_fit_overlay(self, spectrum, wavenumbers, intensities):
         """Plot template fitting overlay on the spectrum."""
@@ -9261,8 +9558,10 @@ The map is now ready for analysis!"""
             self.microplastic_tab.update_progress(30, "Starting detection...")
             
             # Create and configure worker thread
+            # Pass database for template matching mode
+            database = self.database if hasattr(self, 'database') else None
             self.detection_worker = MicroplasticDetectionWorker(
-                detector, wavenumbers, intensities, params
+                detector, wavenumbers, intensities, params, database=database
             )
             
             # Connect signals
