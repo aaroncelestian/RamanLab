@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Documentation - RamanLab</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🔬</span>
+                <span class="brand-name">RamanLab</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="features.html">Features</a></li>
+                <li><a href="documentation.html" class="active">Documentation</a></li>
+                <li><a href="download.html">Download</a></li>
+                <li><a href="contact.html">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>Documentation</h1>
+            <p>Complete guide to installing and using RamanLab</p>
+        </div>
+    </header>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>Quick Start</h2>
+            
+            <h3>Prerequisites</h3>
+            <ul>
+                <li><strong>Python 3.8 or higher</strong></li>
+                <li><strong>Operating System:</strong> Windows, macOS, or Linux</li>
+                <li><strong>RAM:</strong> 8GB minimum (16GB+ recommended for large datasets)</li>
+                <li><strong>Storage:</strong> 500MB for application + 250MB for database</li>
+            </ul>
+
+            <h3>Installation Steps</h3>
+            
+            <h4>1. Clone or Download the Repository</h4>
+            <div class="code-block">git clone https://github.com/aaroncelestian/RamanLab.git
+cd RamanLab</div>
+
+            <h4>2. Create a Virtual Environment (Recommended)</h4>
+            <p>It is strongly recommended to create a dedicated virtual environment:</p>
+            <div class="code-block">python -m venv ramanlab_env</div>
+            
+            <p><strong>Activate the environment:</strong></p>
+            <p>macOS/Linux:</p>
+            <div class="code-block">source ramanlab_env/bin/activate</div>
+            
+            <p>Windows:</p>
+            <div class="code-block">ramanlab_env\Scripts\activate</div>
+            
+            <div class="info-box">
+                You should see <code>(ramanlab_env)</code> in your terminal prompt when the environment is active.
+            </div>
+
+            <h4>3. Install Dependencies</h4>
+            <div class="code-block">pip install -r requirements_qt6.txt</div>
+
+            <h4>4. Verify Installation (Recommended)</h4>
+            <div class="code-block">python check_dependencies.py</div>
+            
+            <p>This will check:</p>
+            <ul>
+                <li>✅ Python version compatibility</li>
+                <li>✅ All required packages and versions</li>
+                <li>✅ PySide6 framework availability</li>
+                <li>✅ System resources (RAM, CPU, disk)</li>
+                <li>✅ Database files presence</li>
+                <li>✅ Component availability</li>
+            </ul>
+
+            <h4>5. Download the Database File (Required)</h4>
+            <p>The main Raman spectra database is not included in the repository due to its size (200MB+).</p>
+            
+            <div class="info-box">
+                <strong>Download link:</strong> <a href="https://zenodo.org/records/15742626" target="_blank">https://zenodo.org/records/15742626</a>
+            </div>
+
+            <p><strong>Installation locations</strong> (choose one):</p>
+            <ul>
+                <li><strong>Option 1 (Recommended):</strong> User Documents folder
+                    <ul>
+                        <li><strong>Windows:</strong> <code>C:\Users\&lt;YourUsername&gt;\Documents\RamanLab_PySide6\RamanLab_Database_20250602.pkl</code></li>
+                        <li><strong>macOS:</strong> <code>~/Documents/RamanLab_PySide6/RamanLab_Database_20250602.pkl</code></li>
+                        <li><strong>Linux:</strong> <code>~/Documents/RamanLab_PySide6/RamanLab_Database_20250602.pkl</code></li>
+                    </ul>
+                </li>
+                <li><strong>Option 2:</strong> Application directory - Place <code>RamanLab_Database_20250602.pkl</code> in the same folder as the Python scripts</li>
+            </ul>
+
+            <h4>6. Launch RamanLab</h4>
+            <div class="code-block">python main_qt6.py</div>
+
+            <h3>Optional: Install Desktop Icon</h3>
+            <p>For convenient access, install a desktop shortcut/application icon:</p>
+            <div class="code-block">python install_desktop_icon.py</div>
+            
+            <p>This will create:</p>
+            <ul>
+                <li><strong>Windows:</strong> Desktop shortcut (.lnk) with icon</li>
+                <li><strong>macOS:</strong> Application bundle in ~/Applications</li>
+                <li><strong>Linux:</strong> Desktop entry in applications menu and desktop</li>
+            </ul>
+
+            <p><strong>To uninstall the icon:</strong></p>
+            <div class="code-block">python install_desktop_icon.py --uninstall</div>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>Basic Usage</h2>
+
+            <h3>Loading a Spectrum</h3>
+            <ol>
+                <li>Click <strong>File → Import Spectrum</strong> or drag-and-drop a file onto the window</li>
+                <li>Select your data file (.txt or .csv format)</li>
+                <li>The spectrum will be displayed in the main plot area</li>
+            </ol>
+
+            <h3>Baseline Correction</h3>
+            <ol>
+                <li>Go to the <strong>Process</strong> tab</li>
+                <li>Select a baseline method (ALS recommended)</li>
+                <li>Adjust parameters using sliders</li>
+                <li>Preview updates in real-time</li>
+                <li>Click <strong>Apply</strong> to apply the correction</li>
+            </ol>
+
+            <h3>Peak Detection</h3>
+            <ol>
+                <li>In the <strong>Process</strong> tab, go to the <strong>Profile</strong> subtab</li>
+                <li>Adjust peak detection parameters (height, distance, prominence)</li>
+                <li>Click <strong>Detect Peaks</strong></li>
+                <li>Detected peaks will be marked on the spectrum</li>
+            </ol>
+
+            <h3>Peak Fitting</h3>
+            <ol>
+                <li>After detecting peaks, click <strong>Fit Peaks</strong></li>
+                <li>Select a peak model (Lorentzian, Gaussian, Voigt, etc.)</li>
+                <li>View fit results in the Analysis Results table</li>
+                <li>Export results to CSV if needed</li>
+            </ol>
+
+            <h3>Database Search</h3>
+            <ol>
+                <li>Load your spectrum</li>
+                <li>Go to the <strong>Search</strong> tab</li>
+                <li>Click <strong>Search Database</strong></li>
+                <li>View top matches with correlation scores</li>
+                <li>Click on a match to overlay it with your data</li>
+            </ol>
+
+            <h3>Saving Results</h3>
+            <ol>
+                <li>Click <strong>File → Save Spectrum</strong> to save processed data</li>
+                <li>Use <strong>Export</strong> options to save peak parameters as CSV</li>
+                <li>Right-click on plots to save images</li>
+            </ol>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>Advanced Modules</h2>
+
+            <h3>Multi-Spectrum Manager</h3>
+            <p>Launch from the main window: <strong>File → Multi-Spectrum Manager</strong></p>
+            <ul>
+                <li>Load multiple spectra at once</li>
+                <li>Compare spectra side-by-side</li>
+                <li>Batch processing capabilities</li>
+                <li>Export combined data</li>
+            </ul>
+
+            <h3>Cluster Analysis</h3>
+            <div class="code-block">python raman_cluster_analysis_qt6.py</div>
+            <ul>
+                <li>Load a folder of spectra or a database</li>
+                <li>Select clustering method (Hierarchical, K-means, UMAP)</li>
+                <li>Adjust parameters and run analysis</li>
+                <li>Visualize results with dendrograms or scatter plots</li>
+                <li>Export cluster assignments</li>
+            </ul>
+
+            <h3>2D Map Analysis</h3>
+            <div class="code-block">python map_analysis_2d_qt6.py</div>
+            <ul>
+                <li>Load spatial Raman mapping data</li>
+                <li>Define peak regions of interest</li>
+                <li>Generate intensity, position, or width maps</li>
+                <li>Apply cosmic ray removal</li>
+                <li>Export maps as images or data files</li>
+            </ul>
+
+            <h3>Database Browser</h3>
+            <div class="code-block">python database_browser_qt6.py</div>
+            <ul>
+                <li>Browse all 6,939+ reference spectra</li>
+                <li>Search by name, chemical family, or metadata</li>
+                <li>View detailed spectrum information</li>
+                <li>Export filtered subsets</li>
+                <li>View database statistics</li>
+            </ul>
+
+            <h3>Polarization Analyzer</h3>
+            <div class="code-block">python raman_polarization_analyzer_qt6.py</div>
+            <ul>
+                <li>Load polarization-dependent measurements</li>
+                <li>Analyze crystal orientation</li>
+                <li>Calculate Raman tensors</li>
+                <li>Visualize angular dependencies</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>File Formats</h2>
+
+            <h3>Supported Import Formats</h3>
+            <ul>
+                <li><strong>Text files (.txt):</strong> Tab or comma-delimited</li>
+                <li><strong>CSV files (.csv):</strong> Comma-separated values</li>
+                <li><strong>Database files (.pkl):</strong> RamanLab pickle format</li>
+            </ul>
+
+            <h3>Expected Data Format</h3>
+            <div class="code-block"># Optional header lines (start with #)
+Wavenumber    Intensity
+100.0         1234.5
+101.0         1245.8
+...</div>
+
+            <h3>Export Formats</h3>
+            <ul>
+                <li><strong>Processed spectra:</strong> .txt with metadata headers</li>
+                <li><strong>Peak parameters:</strong> .csv with detailed fit results</li>
+                <li><strong>Database exports:</strong> .pkl with full metadata</li>
+                <li><strong>Images:</strong> PNG, PDF, SVG for publication</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>Troubleshooting</h2>
+
+            <h3>Dependency Check Failures</h3>
+            <div class="warning-box">
+                <strong>Problem:</strong> <code>check_dependencies.py</code> reports missing or outdated packages
+            </div>
+            
+            <p><strong>Solution:</strong></p>
+            <ol>
+                <li>Ensure virtual environment is activated (if you created one)</li>
+                <li>Install all requirements: <code>pip install -r requirements_qt6.txt</code></li>
+                <li>Upgrade outdated packages: <code>pip install --upgrade &lt;package-name&gt;</code></li>
+                <li>Check Python version: <code>python --version</code> (should be 3.8 or higher)</li>
+            </ol>
+
+            <h3>"Database Not Found" Warning</h3>
+            <div class="warning-box">
+                <strong>Problem:</strong> Application starts with empty database (0 spectra)
+            </div>
+            
+            <p><strong>Solution:</strong></p>
+            <ol>
+                <li>Download <code>RamanLab_Database_20250602.pkl</code> from <a href="https://zenodo.org/records/15742626">Zenodo</a></li>
+                <li>Place in <code>Documents/RamanLab_PySide6/</code> folder</li>
+                <li>Restart RamanLab</li>
+            </ol>
+
+            <h3>Import Errors</h3>
+            <div class="warning-box">
+                <strong>Problem:</strong> Cannot import database files
+            </div>
+            
+            <p><strong>Solution:</strong></p>
+            <ul>
+                <li>Ensure file is .pkl format (not .sqlite)</li>
+                <li>Check file has 'spectra' dictionary key</li>
+                <li>Try re-downloading the database file</li>
+            </ul>
+
+            <h3>Performance Issues</h3>
+            <div class="warning-box">
+                <strong>Problem:</strong> Slow processing on large datasets
+            </div>
+            
+            <p><strong>Solutions:</strong></p>
+            <ul>
+                <li>Enable parallel processing (default)</li>
+                <li>Use data truncation to reduce wavenumber range</li>
+                <li>Apply spectral downsampling for clustering</li>
+                <li>Check <code>performance_fixes_summary.txt</code></li>
+            </ul>
+
+            <h3>Window Too Large for Screen</h3>
+            <div class="warning-box">
+                <strong>Problem:</strong> Application window doesn't fit on laptop screens
+            </div>
+            
+            <p><strong>Solution:</strong></p>
+            <ul>
+                <li>Minimum resolution: 1024x600</li>
+                <li>Scroll areas enabled for small screens</li>
+                <li>Resize window as needed</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>System Requirements</h2>
+
+            <h3>Hardware</h3>
+            <ul>
+                <li><strong>CPU:</strong> Multi-core processor (4+ cores recommended)</li>
+                <li><strong>RAM:</strong> 8GB minimum, 16GB+ for large datasets</li>
+                <li><strong>Storage:</strong> 1GB free space</li>
+                <li><strong>Display:</strong> 1024x600 minimum resolution</li>
+            </ul>
+
+            <h3>Software</h3>
+            <ul>
+                <li><strong>Python:</strong> 3.8, 3.9, 3.10, or 3.11</li>
+                <li><strong>GUI Framework:</strong> PySide6</li>
+                <li><strong>Operating System:</strong> Windows 10+, macOS 10.15+, or Linux</li>
+            </ul>
+
+            <h3>Key Dependencies</h3>
+            <ul>
+                <li>PySide6 (GUI framework)</li>
+                <li>NumPy, SciPy (numerical computing)</li>
+                <li>Matplotlib (plotting)</li>
+                <li>scikit-learn (machine learning)</li>
+                <li>joblib (parallel processing)</li>
+                <li>pandas (data management)</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <h2>Need More Help?</h2>
+            <p>Join our community or watch video tutorials for assistance</p>
+            <div class="cta-buttons">
+                <a href="https://ramanlab.freeforums.net" class="btn btn-primary btn-large" target="_blank">Support Forum</a>
+                <a href="https://www.youtube.com/playlist?list=PLfVMKUXuIqGWFpSKOMbeOTrRAefuNxpcA" class="btn btn-secondary btn-large" target="_blank">YouTube Tutorials</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-section">
+                    <h4>RamanLab</h4>
+                    <p>Advanced Raman Spectroscopy Analysis Suite</p>
+                    <p class="copyright">© 2026 Aaron J. Celestian Ph.D.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="documentation.html">Documentation</a></li>
+                        <li><a href="download.html">Download</a></li>
+                        <li><a href="https://github.com/aaroncelestian/RamanLab">GitHub</a></li>
+                        <li><a href="https://zenodo.org/records/15742626">Database</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://ramanlab.freeforums.net" target="_blank">User Forums</a></li>
+                        <li><a href="https://www.youtube.com/playlist?list=PLfVMKUXuIqGWFpSKOMbeOTrRAefuNxpcA" target="_blank">YouTube Tutorials</a></li>
+                        <li><a href="https://github.com/aaroncelestian/RamanLab/issues">Report Issues</a></li>
+                        <li><a href="contact.html">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Citation</h4>
+                    <ul>
+                        <li><a href="https://doi.org/10.22541/au.175269971.11603902/v1">DOI: 10.22541/au.175269971.11603902/v1</a></li>
+                        <li><a href="https://www.authorea.com/users/19309/articles/1315548">Full Article</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Licensed under MIT License | Built with Python & PySide6</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
