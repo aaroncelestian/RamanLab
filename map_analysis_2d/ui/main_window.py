@@ -56,6 +56,36 @@ class SimpleMapData:
         self.template_coefficients = None
         self.template_residuals = None
         self.cosmic_ray_manager = None
+    
+    def get_processed_data_matrix(self):
+        """Get matrix of all processed spectra (or raw if no processing applied)."""
+        import numpy as np
+        
+        n_spectra = len(self.spectra)
+        if n_spectra == 0:
+            return np.array([])
+        
+        # Get the length from the first spectrum
+        first_spectrum = next(iter(self.spectra.values()))
+        if first_spectrum.processed_intensities is not None:
+            n_points = len(first_spectrum.processed_intensities)
+        else:
+            n_points = len(first_spectrum.intensities)
+        
+        # Create matrix
+        data_matrix = np.zeros((n_spectra, n_points))
+        
+        # Fill matrix with spectra data
+        spectrum_index = 0
+        for spectrum in self.spectra.values():
+            if spectrum.processed_intensities is not None:
+                data_matrix[spectrum_index, :] = spectrum.processed_intensities
+            else:
+                # Use raw intensities if no processed data available
+                data_matrix[spectrum_index, :] = spectrum.intensities
+            spectrum_index += 1
+        
+        return data_matrix
 
 
 class MapAnalysisMainWindow(QMainWindow):
