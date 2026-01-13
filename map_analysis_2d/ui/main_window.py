@@ -9622,8 +9622,11 @@ The map is now ready for analysis!"""
         
         self.microplastic_tab.update_progress(90, "Generating visualizations...")
         
-        # Display results
-        self.microplastic_tab.display_results(results)
+        # Get map dimensions for proper reshaping
+        map_shape = (len(self.map_data.y_positions), len(self.map_data.x_positions))
+        
+        # Display results with map dimensions
+        self.microplastic_tab.display_results(results, map_shape=map_shape)
         
         self.microplastic_tab.update_progress(100, "✅ Detection complete!")
         

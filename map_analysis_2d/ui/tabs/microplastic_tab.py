@@ -517,8 +517,13 @@ class MicroplasticDetectionTab(QWidget):
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         
-    def display_results(self, results: Dict[str, np.ndarray]):
-        """Display detection results in the visualization panel."""
+    def display_results(self, results: Dict[str, np.ndarray], map_shape: tuple = None):
+        """Display detection results in the visualization panel.
+        
+        Args:
+            results: Dictionary of plastic type -> score map arrays
+            map_shape: Tuple of (n_rows, n_cols) for reshaping 1D arrays into 2D maps
+        """
         from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
         
         # Store full results (including metadata like _match_details)
@@ -555,11 +560,19 @@ class MicroplasticDetectionTab(QWidget):
             plastic_name = plastic_info.get('name', plastic_type)
             plastic_color = plastic_info.get('color', '#FF6B6B')
             
-            # Reshape if needed (assuming square map)
+            # Reshape if needed using actual map dimensions
             if score_map.ndim == 1:
-                size = int(np.sqrt(len(score_map)))
-                if size * size == len(score_map):
-                    score_map = score_map.reshape(size, size)
+                if map_shape is not None:
+                    # Use provided map dimensions
+                    score_map = score_map.reshape(map_shape)
+                else:
+                    # Fallback to square assumption
+                    size = int(np.sqrt(len(score_map)))
+                    if size * size == len(score_map):
+                        score_map = score_map.reshape(size, size)
+                    else:
+                        self.log_status(f"⚠️ Warning: Cannot reshape {plastic_type} map (size={len(score_map)})")
+                        continue
             
             # Mask out scores below threshold for clearer visualization
             masked_map = np.copy(score_map)
@@ -1149,8 +1162,14 @@ class MicroplasticDetectionTab(QWidget):
         # Update results
         self.detection_results = refined_results
         
-        # Redisplay
-        self.display_results(refined_results)
+        # Get map shape for proper visualization
+        map_shape = None
+        if hasattr(self.parent_window, 'map_data'):
+            map_data = self.parent_window.map_data
+            map_shape = (len(map_data.y_positions), len(map_data.x_positions))
+        
+        # Redisplay with map dimensions
+        self.display_results(refined_results, map_shape=map_shape)
         
         # Log summary
         removed = total_before - total_after
