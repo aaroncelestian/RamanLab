@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Features - RamanLab</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🔬</span>
+                <span class="brand-name">RamanLab</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="features.html" class="active">Features</a></li>
+                <li><a href="documentation.html">Documentation</a></li>
+                <li><a href="download.html">Download</a></li>
+                <li><a href="contact.html">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>Features</h1>
+            <p>Comprehensive tools for advanced Raman spectroscopy analysis</p>
+        </div>
+    </header>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>Core Analysis Tools</h2>
+            
+            <h3>🔬 Peak Fitting</h3>
+            <p>Advanced multi-peak fitting capabilities with multiple models:</p>
+            <ul>
+                <li><strong>Lorentzian</strong> - Classic peak shape for Raman spectroscopy</li>
+                <li><strong>Gaussian</strong> - Symmetric peak fitting</li>
+                <li><strong>Voigt</strong> - Convolution of Lorentzian and Gaussian</li>
+                <li><strong>Asymmetric Voigt</strong> - 5-parameter model with separate left/right widths</li>
+                <li><strong>Pseudo-Voigt</strong> - Efficient approximation for complex peaks</li>
+            </ul>
+            <div class="info-box">
+                <strong>New in v1.3.0:</strong> Complete asymmetric Voigt implementation with dual FWHM visualization and enhanced CSV export with separate asymmetric parameter columns.
+            </div>
+
+            <h3>📊 Baseline Correction</h3>
+            <p>Multiple baseline subtraction methods for optimal background removal:</p>
+            <ul>
+                <li><strong>ALS (Asymmetric Least Squares)</strong> - Adaptive baseline fitting</li>
+                <li><strong>Polynomial</strong> - Flexible polynomial baseline fitting</li>
+                <li><strong>Rolling Ball</strong> - Morphological baseline estimation</li>
+                <li><strong>Linear</strong> - Simple linear baseline</li>
+                <li><strong>Spline</strong> - Smooth spline-based baseline</li>
+                <li><strong>Manual Adjustment</strong> - Interactive baseline correction</li>
+            </ul>
+            <p>All methods include real-time preview with instant parameter adjustment.</p>
+
+            <h3>🗄️ Database Management</h3>
+            <p>Comprehensive database system with 6,939+ reference spectra:</p>
+            <ul>
+                <li><strong>RRUFF Database</strong> - Mineral Raman spectra</li>
+                <li><strong>WURM Database</strong> - Organic and biological materials</li>
+                <li><strong>SLOPP/E Database</strong> - Microplastic identification</li>
+            </ul>
+            <p>Features include:</p>
+            <ul>
+                <li>Fast search by name, chemical family, or metadata</li>
+                <li>Correlation-based spectrum matching</li>
+                <li>Export filtered subsets</li>
+                <li>Database statistics and visualization</li>
+                <li>Import custom spectra</li>
+            </ul>
+
+            <h3>🔍 Search/Match</h3>
+            <p>Intelligent spectrum identification and matching:</p>
+            <ul>
+                <li><strong>Correlation-based Search</strong> - Fast similarity matching using Pearson correlation</li>
+                <li><strong>DTW (Dynamic Time Warping)</strong> - Advanced alignment for shifted spectra</li>
+                <li><strong>Combined Methods</strong> - Hybrid approach for optimal results</li>
+                <li><strong>6,939+ Reference Library</strong> - Comprehensive database of minerals, organics, and plastics</li>
+                <li><strong>Filtered Search</strong> - Search within specific chemical families or categories</li>
+                <li><strong>Top Match Display</strong> - Ranked results with correlation scores</li>
+                <li><strong>Overlay Comparison</strong> - Visual comparison with reference spectra</li>
+            </ul>
+            <div class="success-box">
+                <strong>Powerful Identification:</strong> Quickly identify unknown materials by matching against curated reference databases from RRUFF, WURM, and SLOPP/E.
+            </div>
+
+            <h3>📦 Batch Processing</h3>
+            <p>Automated workflows for processing multiple files:</p>
+            <ul>
+                <li>Batch baseline correction</li>
+                <li>Automated peak detection and fitting</li>
+                <li>Parallel processing for speed</li>
+                <li>Progress tracking with cancel support</li>
+                <li>Comprehensive CSV export of results</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>Advanced Modules</h2>
+
+            <h3>📈 Cluster Analysis</h3>
+            <p>Discover patterns in large spectral datasets:</p>
+            <ul>
+                <li><strong>Hierarchical Clustering</strong> - Dendrogram-based grouping</li>
+                <li><strong>K-means Clustering</strong> - Efficient partitioning</li>
+                <li><strong>UMAP Visualization</strong> - 2D/3D dimensionality reduction</li>
+                <li><strong>Feature Importance</strong> - Identify discriminating peaks</li>
+                <li><strong>Cluster Statistics</strong> - Comprehensive analysis</li>
+            </ul>
+            <div class="info-box">
+                Handles datasets with 80,000+ spectra using optimized algorithms and caching.
+            </div>
+
+            <h3>🗺️ 2D Raman Mapping</h3>
+            <p>Spatial analysis of Raman data:</p>
+            <ul>
+                <li><strong>Integrated Intensity Maps</strong> - Visualize peak distributions</li>
+                <li><strong>Peak Position Mapping</strong> - Track spectral shifts</li>
+                <li><strong>Peak Width Mapping</strong> - Analyze broadening effects</li>
+                <li><strong>Cosmic Ray Removal</strong> - Automated artifact detection</li>
+                <li><strong>Parallel Processing</strong> - Fast map generation</li>
+                <li><strong>Interactive Visualization</strong> - Click to view spectra</li>
+            </ul>
+
+            <h3>🔬 Polarization Analysis</h3>
+            <p>Crystal orientation and tensor analysis:</p>
+            <ul>
+                <li>Polarization-dependent measurements</li>
+                <li>Raman tensor calculations</li>
+                <li>Crystal orientation determination</li>
+                <li>Automated angle-dependent analysis</li>
+            </ul>
+
+            <h3>🤖 Machine Learning</h3>
+            <p>Automated classification and feature extraction:</p>
+            <ul>
+                <li>Spectral classification</li>
+                <li>Feature extraction</li>
+                <li>Pattern recognition</li>
+                <li>Model training and validation</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>Performance Features</h2>
+
+            <h3>⚡ Parallel Processing</h3>
+            <p>Optimized for multi-core systems:</p>
+            <ul>
+                <li>Automatic CPU core detection</li>
+                <li>Parallel spectrum processing</li>
+                <li>Efficient memory management</li>
+                <li>Progress tracking and cancellation</li>
+            </ul>
+
+            <h3>💾 Large Dataset Support</h3>
+            <p>Handle massive spectral collections:</p>
+            <ul>
+                <li>Efficient caching mechanisms</li>
+                <li>Optimized algorithms for 80,000+ spectra</li>
+                <li>Memory-efficient data structures</li>
+                <li>Incremental processing options</li>
+            </ul>
+
+            <h3>🎯 Real-time Preview</h3>
+            <p>Instant feedback during analysis:</p>
+            <ul>
+                <li>Live parameter adjustment</li>
+                <li>Interactive baseline correction</li>
+                <li>Real-time peak detection</li>
+                <li>Immediate visual feedback</li>
+            </ul>
+
+            <h3>🎨 Drag-and-Drop Interface</h3>
+            <p>Intuitive file loading:</p>
+            <ul>
+                <li>Universal drag-and-drop support across all windows</li>
+                <li>Multi-file drag support</li>
+                <li>Visual feedback during drag operations</li>
+                <li>Automatic file type detection</li>
+            </ul>
+            <div class="success-box">
+                <strong>New in v1.4.0:</strong> Universal drag-and-drop file loading across all major RamanLab windows with enhanced user experience.
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>User Interface</h2>
+
+            <h3>🖥️ Modern PySide6 Interface</h3>
+            <p>Built with the latest PySide6 framework:</p>
+            <ul>
+                <li>Native look and feel on all platforms</li>
+                <li>High-DPI display support</li>
+                <li>Responsive layouts</li>
+                <li>Customizable themes</li>
+            </ul>
+
+            <h3>📱 Cross-Platform Compatibility</h3>
+            <p>Works seamlessly on:</p>
+            <ul>
+                <li><strong>Windows</strong> - Windows 10 and 11</li>
+                <li><strong>macOS</strong> - macOS 10.15 and later</li>
+                <li><strong>Linux</strong> - Ubuntu, Fedora, and other distributions</li>
+            </ul>
+
+            <h3>⌨️ Keyboard Shortcuts</h3>
+            <p>Efficient workflow with keyboard shortcuts:</p>
+            <ul>
+                <li>Quick file operations</li>
+                <li>Fast navigation between modules</li>
+                <li>Rapid parameter adjustment</li>
+                <li>Customizable shortcuts</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>File Format Support</h2>
+
+            <h3>📥 Import Formats</h3>
+            <ul>
+                <li><strong>.txt</strong> - Tab or comma-delimited text files</li>
+                <li><strong>.csv</strong> - Comma-separated values</li>
+                <li><strong>.pkl</strong> - RamanLab pickle format</li>
+                <li>Custom formats with flexible parsers</li>
+            </ul>
+
+            <h3>📤 Export Formats</h3>
+            <ul>
+                <li><strong>Processed Spectra</strong> - .txt with metadata headers</li>
+                <li><strong>Peak Parameters</strong> - .csv with detailed fit results</li>
+                <li><strong>Database Exports</strong> - .pkl with full metadata</li>
+                <li><strong>Images</strong> - PNG, PDF, SVG for publication</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <h2>Experience These Features</h2>
+            <p>Download RamanLab and explore all the powerful analysis tools</p>
+            <div class="cta-buttons">
+                <a href="download.html" class="btn btn-primary btn-large">Download Now</a>
+                <a href="documentation.html" class="btn btn-secondary btn-large">Read Documentation</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-section">
+                    <h4>RamanLab</h4>
+                    <p>Advanced Raman Spectroscopy Analysis Suite</p>
+                    <p class="copyright">© 2026 Aaron J. Celestian Ph.D.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="documentation.html">Documentation</a></li>
+                        <li><a href="download.html">Download</a></li>
+                        <li><a href="https://github.com/aaroncelestian/RamanLab">GitHub</a></li>
+                        <li><a href="https://zenodo.org/records/15742626">Database</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://ramanlab.freeforums.net" target="_blank">User Forums</a></li>
+                        <li><a href="https://www.youtube.com/playlist?list=PLfVMKUXuIqGWFpSKOMbeOTrRAefuNxpcA" target="_blank">YouTube Tutorials</a></li>
+                        <li><a href="https://github.com/aaroncelestian/RamanLab/issues">Report Issues</a></li>
+                        <li><a href="contact.html">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Citation</h4>
+                    <ul>
+                        <li><a href="https://doi.org/10.22541/au.175269971.11603902/v1">DOI: 10.22541/au.175269971.11603902/v1</a></li>
+                        <li><a href="https://www.authorea.com/users/19309/articles/1315548">Full Article</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Licensed under MIT License | Built with Python & PySide6</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

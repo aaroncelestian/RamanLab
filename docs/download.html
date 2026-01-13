@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Download - RamanLab</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <span class="logo">🔬</span>
+                <span class="brand-name">RamanLab</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="index.html">Home</a></li>
+                <li><a href="features.html">Features</a></li>
+                <li><a href="documentation.html">Documentation</a></li>
+                <li><a href="download.html" class="active">Download</a></li>
+                <li><a href="contact.html">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <header class="page-header">
+        <div class="container">
+            <h1>Download RamanLab</h1>
+            <p>Get started with the latest version</p>
+        </div>
+    </header>
+
+    <section class="content-section">
+        <div class="container">
+            <div class="info-box">
+                <h3>Current Version: 1.4.0</h3>
+                <p><strong>Release Name:</strong> Universal Drag-and-Drop & Analysis Enhancements</p>
+                <p><strong>Release Date:</strong> November 11, 2025</p>
+                <p><strong>Status:</strong> Stable</p>
+            </div>
+
+            <h2>Download Options</h2>
+
+            <h3>Option 1: Git Clone (Recommended)</h3>
+            <p>Clone the repository to get the latest version and easy updates:</p>
+            <div class="code-block">git clone https://github.com/aaroncelestian/RamanLab.git
+cd RamanLab</div>
+            
+            <div class="success-box">
+                <strong>Benefits:</strong>
+                <ul>
+                    <li>Easy updates with <code>git pull</code></li>
+                    <li>Access to all development branches</li>
+                    <li>Full version history</li>
+                </ul>
+            </div>
+
+            <h3>Option 2: Direct Download</h3>
+            <p>Download the latest release as a ZIP file:</p>
+            <a href="https://github.com/aaroncelestian/RamanLab/archive/refs/heads/main.zip" class="btn btn-primary">Download ZIP</a>
+            
+            <p style="margin-top: 1rem;">Or visit the GitHub releases page:</p>
+            <a href="https://github.com/aaroncelestian/RamanLab/releases" class="btn btn-secondary">View All Releases</a>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>Database Files</h2>
+            
+            <div class="warning-box">
+                <strong>Important:</strong> The database files are required for full functionality but are not included in the main repository due to their size.
+            </div>
+
+            <h3>Main Raman Database (Required)</h3>
+            <ul>
+                <li><strong>File:</strong> RamanLab_Database_20250602.pkl</li>
+                <li><strong>Size:</strong> ~200MB</li>
+                <li><strong>Contains:</strong> 6,939+ experimental Raman spectra</li>
+                <li><strong>Sources:</strong> RRUFF, WURM, SLOPP/E databases</li>
+            </ul>
+            
+            <a href="https://zenodo.org/records/15742626" class="btn btn-primary" target="_blank">Download from Zenodo</a>
+            
+            <p style="margin-top: 1.5rem;"><strong>Installation Location:</strong></p>
+            <p>Place the database file in one of these locations:</p>
+            <ul>
+                <li><strong>Windows:</strong> <code>C:\Users\&lt;YourUsername&gt;\Documents\RamanLab_PySide6\</code></li>
+                <li><strong>macOS:</strong> <code>~/Documents/RamanLab_PySide6/</code></li>
+                <li><strong>Linux:</strong> <code>~/Documents/RamanLab_PySide6/</code></li>
+                <li><strong>Alternative:</strong> Same folder as the Python scripts</li>
+            </ul>
+
+            <h3>Mineral Modes Database (Optional)</h3>
+            <ul>
+                <li><strong>File:</strong> mineral_modes.pkl</li>
+                <li><strong>Size:</strong> ~50MB</li>
+                <li><strong>Contains:</strong> Mineral vibrational mode data</li>
+            </ul>
+            <p>This database is included in the main repository.</p>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>Installation Guide</h2>
+
+            <h3>Step 1: Install Python</h3>
+            <p>RamanLab requires Python 3.8 or higher. Download from:</p>
+            <a href="https://www.python.org/downloads/" class="btn btn-secondary" target="_blank">Python.org</a>
+
+            <h3>Step 2: Create Virtual Environment (Recommended)</h3>
+            <div class="code-block">python -m venv ramanlab_env</div>
+            
+            <p><strong>Activate the environment:</strong></p>
+            <p>macOS/Linux:</p>
+            <div class="code-block">source ramanlab_env/bin/activate</div>
+            
+            <p>Windows:</p>
+            <div class="code-block">ramanlab_env\Scripts\activate</div>
+
+            <h3>Step 3: Install Dependencies</h3>
+            <div class="code-block">pip install -r requirements_qt6.txt</div>
+
+            <h3>Step 4: Verify Installation</h3>
+            <div class="code-block">python check_dependencies.py</div>
+
+            <h3>Step 5: Download Database</h3>
+            <p>Download the database file from Zenodo and place it in the appropriate location (see above).</p>
+
+            <h3>Step 6: Launch RamanLab</h3>
+            <div class="code-block">python main_qt6.py</div>
+
+            <div class="success-box">
+                <strong>Success!</strong> RamanLab should now be running. See the <a href="documentation.html">Documentation</a> for usage instructions.
+            </div>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>System Requirements</h2>
+
+            <h3>Minimum Requirements</h3>
+            <ul>
+                <li><strong>OS:</strong> Windows 10+, macOS 10.15+, or Linux</li>
+                <li><strong>Python:</strong> 3.8 or higher</li>
+                <li><strong>RAM:</strong> 8GB</li>
+                <li><strong>Storage:</strong> 1GB free space</li>
+                <li><strong>Display:</strong> 1024x600 resolution</li>
+            </ul>
+
+            <h3>Recommended Requirements</h3>
+            <ul>
+                <li><strong>CPU:</strong> Multi-core processor (4+ cores)</li>
+                <li><strong>RAM:</strong> 16GB or more</li>
+                <li><strong>Storage:</strong> 2GB free space</li>
+                <li><strong>Display:</strong> 1920x1080 resolution</li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="content-section">
+        <div class="container">
+            <h2>What's New in Version 1.4.0</h2>
+
+            <h3>Major Features</h3>
+            <ul>
+                <li>🎯 <strong>Universal drag-and-drop support</strong> - Drag files directly onto any RamanLab window</li>
+                <li>📊 <strong>Enhanced cluster analysis</strong> with improved export capabilities</li>
+                <li>🗺️ <strong>Fixed critical 2D map analysis</strong> float/integer position handling bug</li>
+                <li>🔧 <strong>Improved user experience</strong> with faster workflows</li>
+            </ul>
+
+            <h3>Bug Fixes</h3>
+            <ul>
+                <li>Fixed drag-and-drop not working in main RamanLab window</li>
+                <li>Fixed file paths appearing as text in QTextEdit widgets during drag operations</li>
+                <li>Fixed float/integer position handling in 2D map analysis causing crashes</li>
+                <li>Fixed cursor not changing to '+' icon during drag operations</li>
+            </ul>
+
+            <h3>Technical Improvements</h3>
+            <ul>
+                <li>Custom DragDropCentralWidget class for QMainWindow compatibility</li>
+                <li>Disabled QTextEdit drop interception to prevent file paths appearing as text</li>
+                <li>Robust float conversion with error handling for map position data</li>
+                <li>Enhanced drag event handling across all modules</li>
+            </ul>
+
+            <p><a href="https://github.com/aaroncelestian/RamanLab/blob/main/VERSION.txt">View Full Version History</a></p>
+        </div>
+    </section>
+
+    <section class="content-section" style="background-color: var(--light-bg);">
+        <div class="container">
+            <h2>License</h2>
+            
+            <p>RamanLab is released under the MIT License:</p>
+            
+            <div class="code-block">MIT License
+
+Copyright (c) 2025 Aaron J. Celestian Ph.D.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.</div>
+
+            <p><a href="https://github.com/aaroncelestian/RamanLab/blob/main/LICENSE">View Full License</a></p>
+        </div>
+    </section>
+
+    <section class="cta">
+        <div class="container">
+            <h2>Ready to Start?</h2>
+            <p>Download RamanLab now and begin your spectroscopy analysis</p>
+            <div class="cta-buttons">
+                <a href="https://github.com/aaroncelestian/RamanLab" class="btn btn-primary btn-large" target="_blank">View on GitHub</a>
+                <a href="documentation.html" class="btn btn-secondary btn-large">Read Documentation</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-section">
+                    <h4>RamanLab</h4>
+                    <p>Advanced Raman Spectroscopy Analysis Suite</p>
+                    <p class="copyright">© 2026 Aaron J. Celestian Ph.D.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="documentation.html">Documentation</a></li>
+                        <li><a href="download.html">Download</a></li>
+                        <li><a href="https://github.com/aaroncelestian/RamanLab">GitHub</a></li>
+                        <li><a href="https://zenodo.org/records/15742626">Database</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Community</h4>
+                    <ul>
+                        <li><a href="https://ramanlab.freeforums.net" target="_blank">User Forums</a></li>
+                        <li><a href="https://www.youtube.com/playlist?list=PLfVMKUXuIqGWFpSKOMbeOTrRAefuNxpcA" target="_blank">YouTube Tutorials</a></li>
+                        <li><a href="https://github.com/aaroncelestian/RamanLab/issues">Report Issues</a></li>
+                        <li><a href="contact.html">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Citation</h4>
+                    <ul>
+                        <li><a href="https://doi.org/10.22541/au.175269971.11603902/v1">DOI: 10.22541/au.175269971.11603902/v1</a></li>
+                        <li><a href="https://www.authorea.com/users/19309/articles/1315548">Full Article</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>Licensed under MIT License | Built with Python & PySide6</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
