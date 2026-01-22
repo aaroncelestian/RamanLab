@@ -986,7 +986,7 @@ class MicroplasticDetectionTab(QWidget):
         info = QLabel(
             "Spatial filtering removes random noise while keeping real detections.\n"
             "• Clusters: Groups of adjacent pixels (real particles have area)\n"
-            "• Isolated pixels: Kept if score is significantly above neighbors"
+            "• Weak Signal Mode: Uses adaptive thresholds to preserve weak but real signals"
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -1015,21 +1015,41 @@ class MicroplasticDetectionTab(QWidget):
         cluster_row.addWidget(self.min_cluster_spin)
         settings_layout.addLayout(cluster_row)
         
-        # Minimum mean score for cluster
+        # Weak signal preservation mode
+        self.weak_signal_mode = QCheckBox("Weak Signal Mode (Recommended for microplastics)")
+        self.weak_signal_mode.setChecked(True)
+        self.weak_signal_mode.setToolTip(
+            "Uses adaptive thresholds based on local contrast.\n"
+            "Keeps weak signals that stand out from background.\n"
+            "Recommended when detecting weak plastics in noisy data."
+        )
+        settings_layout.addWidget(self.weak_signal_mode)
+        
+        # Minimum relative score (only used when weak signal mode is OFF)
         score_row = QHBoxLayout()
         score_row.addWidget(QLabel("Min cluster mean score:"))
         self.min_score_spin = QDoubleSpinBox()
         self.min_score_spin.setRange(0.0, 1.0)
         self.min_score_spin.setValue(0.55)
         self.min_score_spin.setSingleStep(0.05)
-        self.min_score_spin.setToolTip("Clusters with mean score below this are removed.\nReal plastics should have consistently high scores.")
+        self.min_score_spin.setToolTip("Absolute threshold (only used if Weak Signal Mode is OFF).\nClusters with mean score below this are removed.")
         score_row.addWidget(self.min_score_spin)
         settings_layout.addLayout(score_row)
         
-        # Keep high-confidence detections
-        self.keep_high_conf = QCheckBox("Always keep clusters with max score > 0.75")
-        self.keep_high_conf.setChecked(True)
-        settings_layout.addWidget(self.keep_high_conf)
+        # Minimum local contrast (for weak signal mode)
+        contrast_row = QHBoxLayout()
+        contrast_row.addWidget(QLabel("Min local contrast (σ):"))
+        self.min_contrast_spin = QDoubleSpinBox()
+        self.min_contrast_spin.setRange(1.0, 10.0)
+        self.min_contrast_spin.setValue(2.0)
+        self.min_contrast_spin.setSingleStep(0.5)
+        self.min_contrast_spin.setToolTip(
+            "Minimum standard deviations above local background.\n"
+            "2.0 = keep signals 2σ above neighbors (recommended).\n"
+            "Higher = more conservative (fewer detections)."
+        )
+        contrast_row.addWidget(self.min_contrast_spin)
+        settings_layout.addLayout(contrast_row)
         
         layout.addWidget(settings_group)
         
@@ -1050,9 +1070,11 @@ class MicroplasticDetectionTab(QWidget):
         erosion_iterations = self.erosion_spin.value()
         min_cluster_size = self.min_cluster_spin.value()
         min_mean_score = self.min_score_spin.value()
-        keep_high_conf = self.keep_high_conf.isChecked()
+        weak_signal_mode = self.weak_signal_mode.isChecked()
+        min_contrast_sigma = self.min_contrast_spin.value()
         
-        self.log_status(f"🎯 Applying spatial filter (erosion: {erosion_iterations}, min cluster: {min_cluster_size}, min score: {min_mean_score:.2f})...")
+        mode_str = "Weak Signal (Adaptive)" if weak_signal_mode else f"Absolute (>{min_mean_score:.2f})"
+        self.log_status(f"🎯 Applying spatial filter (mode: {mode_str}, erosion: {erosion_iterations}, min cluster: {min_cluster_size})...")
         
         # Get current threshold
         threshold = self.threshold_slider.value() / 100.0
@@ -1125,21 +1147,77 @@ class MicroplasticDetectionTab(QWidget):
                 # Check if cluster passes filters
                 keep_cluster = False
                 
-                # Always keep high-confidence clusters
-                if keep_high_conf and max_score > 0.75:
-                    keep_cluster = True
-                # Keep if cluster is large enough AND has high enough mean score
-                elif component_size >= min_cluster_size and mean_score >= min_mean_score:
-                    keep_cluster = True
+                if weak_signal_mode:
+                    # ADAPTIVE MODE: Use local contrast analysis
+                    # Calculate local background around this cluster
+                    # Dilate cluster mask to get surrounding region
+                    dilated_region = ndimage.binary_dilation(component_mask, iterations=3)
+                    background_mask = dilated_region & ~component_mask
+                    
+                    if np.sum(background_mask) > 0:
+                        background_scores = score_map_2d[background_mask]
+                        bg_mean = np.mean(background_scores)
+                        bg_std = np.std(background_scores)
+                        
+                        # For isolated detections, background is often all zeros
+                        # In this case, any detection above threshold is significant
+                        if bg_mean < threshold * 0.5 and bg_std < threshold * 0.3:
+                            # Background is essentially noise/zero
+                            # Keep if detection is clearly above threshold
+                            if mean_score > threshold * 1.2:  # 20% above threshold
+                                keep_cluster = True
+                            elif max_score > 0.7:  # Or strong peak
+                                keep_cluster = True
+                        else:
+                            # Normal contrast calculation
+                            if bg_std > 0:
+                                contrast = (mean_score - bg_mean) / bg_std
+                            else:
+                                # No variation but non-zero background
+                                contrast = (mean_score - bg_mean) / (threshold * 0.1)
+                            
+                            # Keep if cluster stands out from local background
+                            if contrast >= min_contrast_sigma:
+                                keep_cluster = True
+                        
+                        # Additional rules regardless of contrast
+                        # Keep if cluster is large enough (real particles have area)
+                        if component_size >= min_cluster_size and mean_score > threshold:
+                            keep_cluster = True
+                        # Always keep very strong signals
+                        if max_score > 0.8:
+                            keep_cluster = True
+                    else:
+                        # No background to compare - isolated at edge
+                        # Keep if above threshold (it's isolated, so likely real)
+                        if mean_score > threshold:
+                            keep_cluster = True
+                        elif max_score > 0.7:
+                            keep_cluster = True
+                else:
+                    # ABSOLUTE MODE: Use fixed thresholds (original behavior)
+                    # Keep if cluster is large enough AND has high enough mean score
+                    if component_size >= min_cluster_size and mean_score >= min_mean_score:
+                        keep_cluster = True
+                    # Always keep very strong signals
+                    elif max_score > 0.8:
+                        keep_cluster = True
                 
                 if keep_cluster:
-                    # Dilate back to recover original extent (undo erosion)
+                    # Recover ALL pixels connected to this cluster in the original detection
+                    # This preserves edge pixels that may have been removed by erosion
                     if erosion_iterations > 0:
-                        # Dilate this component back
-                        dilated = ndimage.binary_dilation(component_mask, iterations=erosion_iterations)
-                        # But only keep pixels that were in original detection
-                        recovered = dilated & detection_mask
-                        refined_mask |= recovered
+                        # Find all pixels in original detection that touch this eroded cluster
+                        # Dilate the eroded cluster to find nearby original detections
+                        search_region = ndimage.binary_dilation(component_mask, iterations=erosion_iterations + 2)
+                        # Get original detections in this region
+                        candidates = detection_mask & search_region
+                        # Label connected components in candidates
+                        candidate_labels, _ = ndimage.label(candidates)
+                        # Keep all candidate components that overlap with our eroded cluster
+                        for candidate_label in np.unique(candidate_labels[component_mask]):
+                            if candidate_label > 0:  # Skip background
+                                refined_mask |= (candidate_labels == candidate_label)
                     else:
                         refined_mask |= component_mask
                     clusters_kept += 1
