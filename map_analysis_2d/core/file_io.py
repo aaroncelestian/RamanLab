@@ -200,6 +200,12 @@ class RamanMapData:
             wavenumbers = data[:, 0]
             intensities = data[:, 1]
             
+            # Check if wavenumbers are in descending order and reverse if needed
+            if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                logger.info(f"Detected descending wavenumbers in {filepath.name} ({wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f}), reversing to ascending order")
+                wavenumbers = wavenumbers[::-1]
+                intensities = intensities[::-1]
+            
             # Apply centralized cosmic ray detection and cleaning at data import
             if self.cosmic_ray_manager.config.apply_during_load:
                 spectrum_id = f"{filepath.name}_{x_pos}_{y_pos}"
@@ -288,6 +294,12 @@ class RamanMapData:
                         
                         wavenumbers = data[:, 0]
                         intensities = data[:, 1]
+                        
+                        # Check if wavenumbers are in descending order and reverse if needed
+                        if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                            wavenumbers = wavenumbers[::-1]
+                            intensities = intensities[::-1]
+                        
                         spectrum_id = f"{filepath.name}_{x_pos}_{y_pos}"
                         
                         raw_spectra_data.append((wavenumbers, intensities, spectrum_id, x_pos, y_pos, filepath))

@@ -952,8 +952,8 @@ class MicroplasticDetectionTab(QWidget):
         ax.grid(True, alpha=0.3)
         ax.tick_params(labelsize=7)
         
-        # Invert x-axis for Raman convention (high to low wavenumber)
-        ax.invert_xaxis()
+        # Note: X-axis is NOT inverted to match data order (low to high wavenumber)
+        # This ensures template matching overlays align correctly with the spectrum
         
         # Force proper layout and canvas update
         self.spectrum_figure.tight_layout(pad=0.5)
@@ -1124,8 +1124,13 @@ class MicroplasticDetectionTab(QWidget):
             # Apply morphological erosion to shrink regions and break weak connections
             if erosion_iterations > 0:
                 eroded_mask = ndimage.binary_erosion(detection_mask, iterations=erosion_iterations)
+                
+                # CRITICAL: Find isolated pixels that were completely removed by erosion
+                # These need special handling since they disappear entirely
+                isolated_pixels = detection_mask & ~ndimage.binary_dilation(eroded_mask, iterations=erosion_iterations + 1)
             else:
                 eroded_mask = detection_mask
+                isolated_pixels = np.zeros_like(detection_mask, dtype=bool)
             
             # Label connected components on eroded mask
             labeled_array, num_features = ndimage.label(eroded_mask)
@@ -1204,25 +1209,55 @@ class MicroplasticDetectionTab(QWidget):
                         keep_cluster = True
                 
                 if keep_cluster:
-                    # Recover ALL pixels connected to this cluster in the original detection
-                    # This preserves edge pixels that may have been removed by erosion
+                    # Recover pixels that were in original detection and connected to this cluster
                     if erosion_iterations > 0:
-                        # Find all pixels in original detection that touch this eroded cluster
-                        # Dilate the eroded cluster to find nearby original detections
-                        search_region = ndimage.binary_dilation(component_mask, iterations=erosion_iterations + 2)
-                        # Get original detections in this region
-                        candidates = detection_mask & search_region
-                        # Label connected components in candidates
-                        candidate_labels, _ = ndimage.label(candidates)
-                        # Keep all candidate components that overlap with our eroded cluster
-                        for candidate_label in np.unique(candidate_labels[component_mask]):
-                            if candidate_label > 0:  # Skip background
-                                refined_mask |= (candidate_labels == candidate_label)
+                        # Dilate back to original extent, but ONLY keep original detections
+                        dilated = ndimage.binary_dilation(component_mask, iterations=erosion_iterations)
+                        # Only recover pixels that were originally detected
+                        recovered = dilated & detection_mask
+                        refined_mask |= recovered
                     else:
                         refined_mask |= component_mask
                     clusters_kept += 1
                 else:
                     clusters_removed += 1
+            
+            # Handle isolated pixels that were completely removed by erosion
+            if erosion_iterations > 0 and np.any(isolated_pixels):
+                # Label isolated pixel groups
+                isolated_labels, n_isolated = ndimage.label(isolated_pixels)
+                
+                for iso_id in range(1, n_isolated + 1):
+                    iso_mask = isolated_labels == iso_id
+                    iso_scores = score_map_2d[iso_mask]
+                    iso_mean = np.mean(iso_scores)
+                    iso_max = np.max(iso_scores)
+                    iso_size = np.sum(iso_mask)
+                    
+                    # Evaluate isolated pixels using same criteria
+                    keep_isolated = False
+                    
+                    if weak_signal_mode:
+                        # For isolated pixels, if they're above threshold, they're likely real
+                        # (Random noise doesn't typically create isolated high-scoring pixels)
+                        if iso_mean > threshold * 1.2:
+                            keep_isolated = True
+                        elif iso_max > 0.7:
+                            keep_isolated = True
+                        elif iso_size >= min_cluster_size and iso_mean > threshold:
+                            keep_isolated = True
+                    else:
+                        # Absolute mode
+                        if iso_size >= min_cluster_size and iso_mean >= min_mean_score:
+                            keep_isolated = True
+                        elif iso_max > 0.8:
+                            keep_isolated = True
+                    
+                    if keep_isolated:
+                        refined_mask |= iso_mask
+                        clusters_kept += 1
+                    else:
+                        clusters_removed += 1
             
             # Apply refined mask to scores (zero out filtered pixels)
             refined_scores = score_map_2d.copy()

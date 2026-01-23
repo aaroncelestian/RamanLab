@@ -1438,14 +1438,22 @@ class MicroplasticDetector:
             
             # Find matching entries in database
             for key, spectrum_data in database.items():
-                key_lower = key.lower()
+                # Skip if we already have enough for this type
+                if len(self.plastic_templates[ptype]) >= max_per_type:
+                    break
                 
-                # Check if this entry matches the plastic type
-                if ptype_lower in key_lower:
-                    # Skip if we already have enough for this type
-                    if len(self.plastic_templates[ptype]) >= max_per_type:
-                        break
-                    
+                # Check metadata first (more reliable than key name)
+                metadata = spectrum_data.get('metadata', {})
+                chemical_family = metadata.get('chemical_family', '').lower()
+                mineral_name = metadata.get('mineral_name', '').lower()
+                
+                # Check if this is a plastic and matches the type
+                is_plastic = chemical_family == 'plastic'
+                matches_type = (ptype_lower in mineral_name or 
+                               ptype_lower in key.lower() or
+                               ptype_lower in chemical_family)
+                
+                if is_plastic and matches_type:
                     # Extract spectrum data
                     wavenumbers = np.array(spectrum_data.get('wavenumbers', []))
                     intensities = np.array(spectrum_data.get('intensities', []))
@@ -1457,7 +1465,7 @@ class MicroplasticDetector:
                             intensities = intensities / np.max(intensities)
                         
                         self.plastic_templates[ptype].append((wavenumbers, intensities, key))
-                        logger.debug(f"Loaded template: {key}")
+                        logger.debug(f"Loaded template: {key} for {ptype}")
             
             logger.info(f"Loaded {len(self.plastic_templates[ptype])} templates for {ptype}")
         
