@@ -1606,7 +1606,7 @@ class MicroplasticDetector:
                 spec_interp = np.interp(common_wn, wavenumbers, intensities)
                 template_interp = np.interp(common_wn, template_wn, template_int)
                 
-                # Use multiple metrics for robust matching
+                # Use multiple metrics for robust matching with STRINGENT requirements
                 
                 # 1. Spectral Angle Mapper (SAM) - measures angle between vectors
                 # More robust than correlation for spectral matching
@@ -1633,20 +1633,50 @@ class MicroplasticDetector:
                 else:
                     ncc = 0
                 
-                # 3. Residual penalty - how well does template fit?
+                # 3. Peak position matching - do the peaks align?
+                # Find peaks in both spectra
+                from scipy.signal import find_peaks
+                spec_peaks, _ = find_peaks(spec_interp, prominence=0.1 * np.max(spec_interp))
+                template_peaks, _ = find_peaks(template_interp, prominence=0.1 * np.max(template_interp))
+                
+                # Calculate peak overlap score
+                if len(spec_peaks) > 0 and len(template_peaks) > 0:
+                    # For each template peak, find closest spectrum peak
+                    peak_distances = []
+                    for tp in template_peaks:
+                        if len(spec_peaks) > 0:
+                            closest_dist = np.min(np.abs(spec_peaks - tp))
+                            # Normalize by wavenumber range
+                            peak_distances.append(closest_dist / len(common_wn))
+                    
+                    # Peak score: 1 if peaks align perfectly, 0 if far apart
+                    avg_peak_dist = np.mean(peak_distances) if peak_distances else 1.0
+                    peak_score = np.exp(-20 * avg_peak_dist)  # Strict penalty for misaligned peaks
+                else:
+                    peak_score = 0.0  # No peaks found
+                
+                # 4. Residual penalty - how well does template fit?
                 if np.sum(template_interp**2) > 0:
                     scale = np.dot(spec_interp, template_interp) / np.sum(template_interp**2)
                     scale = max(0, scale)
                     fitted = scale * template_interp
                     residual_norm = np.sqrt(np.mean((spec_interp - fitted)**2))
                     # Convert to similarity score (0 = bad fit, 1 = perfect fit)
-                    residual_score = np.exp(-5 * residual_norm)  # Exponential penalty
+                    # Increased penalty from -5 to -10 for stricter matching
+                    residual_score = np.exp(-10 * residual_norm)
                 else:
                     residual_score = 0
                 
-                # Combined score: SAM (40%) + NCC (30%) + Residual fit (30%)
-                # This is much more stringent than simple correlation
-                corr = 0.4 * max(0, sam_score) + 0.3 * ncc + 0.3 * residual_score
+                # Combined score with STRICT requirements:
+                # SAM (30%) + NCC (25%) + Peak matching (25%) + Residual fit (20%)
+                # All metrics must be reasonably high for a good match
+                corr = 0.30 * max(0, sam_score) + 0.25 * ncc + 0.25 * peak_score + 0.20 * residual_score
+                
+                # Additional penalty: if any individual metric is too low, reduce overall score
+                # This prevents cases where one high metric compensates for very low others
+                min_metric = min(max(0, sam_score), ncc, peak_score, residual_score)
+                if min_metric < 0.3:  # If any metric is below 0.3, apply penalty
+                    corr *= (min_metric / 0.3)  # Scale down the score
                 
                 # Calculate residual (how well template fits)
                 if np.sum(template_interp**2) > 0:

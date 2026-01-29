@@ -215,6 +215,53 @@ class MicroplasticDetectionTab(QWidget):
         )
         params_layout.addWidget(self.method_combo, 3, 1, 1, 2)
         
+        # Map cropping controls
+        params_layout.addWidget(QLabel("Crop Map (for testing):"), 4, 0)
+        self.crop_enabled_check = QCheckBox("Enable")
+        self.crop_enabled_check.setToolTip("Crop map to a region of interest for faster testing")
+        self.crop_enabled_check.stateChanged.connect(self.on_crop_toggled)
+        params_layout.addWidget(self.crop_enabled_check, 4, 1)
+        
+        # X range
+        params_layout.addWidget(QLabel("  X Range:"), 5, 0)
+        crop_x_layout = QHBoxLayout()
+        self.crop_x_min = QSpinBox()
+        self.crop_x_min.setMinimum(0)
+        self.crop_x_min.setMaximum(9999)
+        self.crop_x_min.setValue(0)
+        self.crop_x_min.setEnabled(False)
+        self.crop_x_min.setPrefix("Min: ")
+        crop_x_layout.addWidget(self.crop_x_min)
+        
+        self.crop_x_max = QSpinBox()
+        self.crop_x_max.setMinimum(0)
+        self.crop_x_max.setMaximum(9999)
+        self.crop_x_max.setValue(100)
+        self.crop_x_max.setEnabled(False)
+        self.crop_x_max.setPrefix("Max: ")
+        crop_x_layout.addWidget(self.crop_x_max)
+        params_layout.addLayout(crop_x_layout, 5, 1, 1, 2)
+        
+        # Y range
+        params_layout.addWidget(QLabel("  Y Range:"), 6, 0)
+        crop_y_layout = QHBoxLayout()
+        self.crop_y_min = QSpinBox()
+        self.crop_y_min.setMinimum(0)
+        self.crop_y_min.setMaximum(9999)
+        self.crop_y_min.setValue(0)
+        self.crop_y_min.setEnabled(False)
+        self.crop_y_min.setPrefix("Min: ")
+        crop_y_layout.addWidget(self.crop_y_min)
+        
+        self.crop_y_max = QSpinBox()
+        self.crop_y_max.setMinimum(0)
+        self.crop_y_max.setMaximum(9999)
+        self.crop_y_max.setValue(100)
+        self.crop_y_max.setEnabled(False)
+        self.crop_y_max.setPrefix("Max: ")
+        crop_y_layout.addWidget(self.crop_y_max)
+        params_layout.addLayout(crop_y_layout, 6, 1, 1, 2)
+        
         layout.addWidget(params_group)
         
         # === Action Buttons ===
@@ -351,6 +398,27 @@ class MicroplasticDetectionTab(QWidget):
         self.create_empty_plots()
         
         return panel
+    
+    def on_crop_toggled(self, state):
+        """Handle crop checkbox toggle."""
+        enabled = state == Qt.CheckState.Checked.value
+        self.crop_x_min.setEnabled(enabled)
+        self.crop_x_max.setEnabled(enabled)
+        self.crop_y_min.setEnabled(enabled)
+        self.crop_y_max.setEnabled(enabled)
+        
+        # Update max values based on current map data
+        if enabled and hasattr(self.parent_window, 'map_data') and self.parent_window.map_data:
+            map_data = self.parent_window.map_data
+            unique_x = sorted(set(s.x_pos for s in map_data.spectra.values()))
+            unique_y = sorted(set(s.y_pos for s in map_data.spectra.values()))
+            
+            self.crop_x_max.setMaximum(len(unique_x))
+            self.crop_y_max.setMaximum(len(unique_y))
+            self.crop_x_max.setValue(min(100, len(unique_x)))
+            self.crop_y_max.setValue(min(100, len(unique_y)))
+            
+            self.log_status(f"ℹ️ Map cropping enabled. Map size: {len(unique_x)} x {len(unique_y)}")
     
     def create_empty_plots(self):
         """Create empty placeholder plots."""

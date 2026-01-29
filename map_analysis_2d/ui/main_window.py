@@ -9703,6 +9703,37 @@ The map is now ready for analysis!"""
             wavenumbers = self.map_data.target_wavenumbers
             intensities = self.map_data.get_processed_data_matrix()  # Shape: (n_spectra, n_wavenumbers)
             
+            # Apply map cropping if enabled
+            if self.microplastic_tab.crop_enabled_check.isChecked():
+                x_min = self.microplastic_tab.crop_x_min.value()
+                x_max = self.microplastic_tab.crop_x_max.value()
+                y_min = self.microplastic_tab.crop_y_min.value()
+                y_max = self.microplastic_tab.crop_y_max.value()
+                
+                # Get all positions and filter
+                all_positions = [(spec.x_pos, spec.y_pos) for spec in self.map_data.spectra.values()]
+                unique_x = sorted(set(pos[0] for pos in all_positions))
+                unique_y = sorted(set(pos[1] for pos in all_positions))
+                
+                # Get actual coordinate ranges
+                x_coords_to_keep = unique_x[x_min:x_max]
+                y_coords_to_keep = unique_y[y_min:y_max]
+                
+                # Filter spectra
+                cropped_indices = []
+                for idx, (x, y) in enumerate(all_positions):
+                    if x in x_coords_to_keep and y in y_coords_to_keep:
+                        cropped_indices.append(idx)
+                
+                if len(cropped_indices) > 0:
+                    intensities = intensities[cropped_indices]
+                    self.microplastic_tab.log_status(
+                        f"✂️ Map cropped: X[{x_min}:{x_max}], Y[{y_min}:{y_max}] → "
+                        f"{len(cropped_indices):,} spectra (from {len(all_positions):,})"
+                    )
+                else:
+                    self.microplastic_tab.log_status("⚠️ Crop region is empty, using full map")
+            
             self.microplastic_tab.log_status(f"📊 Processing {len(intensities):,} spectra...")
             self.microplastic_tab.update_progress(30, "Starting detection...")
             
@@ -9742,7 +9773,15 @@ The map is now ready for analysis!"""
         self.microplastic_tab.update_progress(90, "Generating visualizations...")
         
         # Get map dimensions for proper reshaping
-        map_shape = (len(self.map_data.y_positions), len(self.map_data.x_positions))
+        # If cropping was enabled, use cropped dimensions
+        if self.microplastic_tab.crop_enabled_check.isChecked():
+            x_min = self.microplastic_tab.crop_x_min.value()
+            x_max = self.microplastic_tab.crop_x_max.value()
+            y_min = self.microplastic_tab.crop_y_min.value()
+            y_max = self.microplastic_tab.crop_y_max.value()
+            map_shape = (y_max - y_min, x_max - x_min)
+        else:
+            map_shape = (len(self.map_data.y_positions), len(self.map_data.x_positions))
         
         # Display results with map dimensions
         self.microplastic_tab.display_results(results, map_shape=map_shape)
