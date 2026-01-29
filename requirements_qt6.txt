@@ -36,6 +36,7 @@ pillow>=8.0.0               # Image processing and manipulation
 # DATA PROCESSING & FILE I/O (REQUIRED - Core functionality)
 # ============================================================================
 openpyxl>=3.0.0             # Excel file reading and writing support
+h5py>=3.0.0                 # HDF5 file format support for MAPX file import
 fastdtw>=0.3.4              # Fast Dynamic Time Warping for spectral matching
 tqdm>=4.60.0                # Progress bars for long-running operations
 psutil>=5.8.0               # System and process monitoring utilities
