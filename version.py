@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.4.0"
-__version_info__ = (1, 4, 0)
+__version__ = "1.4.1"
+__version_info__ = (1, 4, 1)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
@@ -12,12 +12,24 @@ __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 
 # Release information
-__release_date__ = "2025-11-11"
-__release_name__ = "Universal Drag-and-Drop & Analysis Enhancements"
+__release_date__ = "2025-01-29"
+__release_name__ = "Microplastic Detection Enhancements"
 __release_status__ = "stable"
 
 # Version history
 __changes__ = {
+    "1.4.1": {
+        "date": "2025-01-29",
+        "name": "Microplastic Detection Enhancements",
+        "description": "Major improvements to microplastic detection accuracy and workflow efficiency",
+        "major_features": [
+            "🎯 Improved template matching with multi-metric scoring (SAM, NCC, peak matching, residual analysis)",
+            "🔬 Interactive baseline correction tester for parameter optimization",
+            "✂️ Map cropping feature for faster testing on regions of interest",
+            "📊 Enhanced false positive reduction with stringent peak alignment requirements",
+            "🗺️ Fixed spatial filtering and result visualization for cropped maps"
+        ],
+    },
     "1.4.0": {
         "date": "2025-11-11",
         "name": "Universal Drag-and-Drop & Analysis Enhancements",
