@@ -1703,9 +1703,10 @@ class MicroplasticDetector:
         n_cores = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
         
         logger.info(f"Template matching {n_spectra:,} spectra against {sum(len(v) for v in self.plastic_templates.values())} templates using {n_cores} cores")
+        logger.info(f"Applying ALS baseline correction to each spectrum before matching")
         
         if progress_callback:
-            progress_callback(0, 100, f"Template matching {n_spectra:,} spectra...")
+            progress_callback(0, 100, f"Template matching {n_spectra:,} spectra (with baseline correction)...")
         
         # Initialize score maps
         score_maps = {ptype: np.zeros(n_spectra) for ptype in self.plastic_templates.keys()}
