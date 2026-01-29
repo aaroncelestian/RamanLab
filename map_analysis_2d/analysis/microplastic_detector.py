@@ -1606,36 +1606,47 @@ class MicroplasticDetector:
                 spec_interp = np.interp(common_wn, wavenumbers, intensities)
                 template_interp = np.interp(common_wn, template_wn, template_int)
                 
-                # Smooth both spectra before correlation to reduce noise sensitivity
-                # Use a simple moving average
-                smooth_window = min(15, len(spec_interp) // 10)
-                if smooth_window > 3:
-                    kernel = np.ones(smooth_window) / smooth_window
-                    spec_smooth = np.convolve(spec_interp, kernel, mode='same')
-                    template_smooth = np.convolve(template_interp, kernel, mode='same')
+                # Use multiple metrics for robust matching
+                
+                # 1. Spectral Angle Mapper (SAM) - measures angle between vectors
+                # More robust than correlation for spectral matching
+                dot_product = np.dot(spec_interp, template_interp)
+                norm_spec = np.linalg.norm(spec_interp)
+                norm_template = np.linalg.norm(template_interp)
+                
+                if norm_spec > 1e-10 and norm_template > 1e-10:
+                    cos_angle = dot_product / (norm_spec * norm_template)
+                    cos_angle = np.clip(cos_angle, -1, 1)  # Numerical stability
+                    sam_score = cos_angle  # 1 = perfect match, 0 = orthogonal, -1 = opposite
                 else:
-                    spec_smooth = spec_interp
-                    template_smooth = template_interp
+                    sam_score = 0
                 
-                # Calculate correlation on smoothed spectra
-                if np.std(spec_smooth) > 1e-10 and np.std(template_smooth) > 1e-10:
-                    raw_corr = np.corrcoef(spec_smooth, template_smooth)[0, 1]
+                # 2. Normalized cross-correlation (more stringent than Pearson)
+                spec_centered = spec_interp - np.mean(spec_interp)
+                template_centered = template_interp - np.mean(template_interp)
+                
+                if np.std(spec_centered) > 1e-10 and np.std(template_centered) > 1e-10:
+                    ncc = np.sum(spec_centered * template_centered) / (
+                        np.sqrt(np.sum(spec_centered**2)) * np.sqrt(np.sum(template_centered**2))
+                    )
+                    ncc = max(0, ncc)  # Only positive correlations
                 else:
-                    raw_corr = 0
+                    ncc = 0
                 
-                # Calculate derivative correlation on smoothed data (less noise sensitive)
-                spec_deriv = np.gradient(spec_smooth)
-                template_deriv = np.gradient(template_smooth)
-                
-                if np.std(spec_deriv) > 1e-10 and np.std(template_deriv) > 1e-10:
-                    deriv_corr = np.corrcoef(spec_deriv, template_deriv)[0, 1]
+                # 3. Residual penalty - how well does template fit?
+                if np.sum(template_interp**2) > 0:
+                    scale = np.dot(spec_interp, template_interp) / np.sum(template_interp**2)
+                    scale = max(0, scale)
+                    fitted = scale * template_interp
+                    residual_norm = np.sqrt(np.mean((spec_interp - fitted)**2))
+                    # Convert to similarity score (0 = bad fit, 1 = perfect fit)
+                    residual_score = np.exp(-5 * residual_norm)  # Exponential penalty
                 else:
-                    deriv_corr = 0
+                    residual_score = 0
                 
-                # Combined score: weight raw correlation higher since we're smoothing
-                # Raw correlation on smoothed data captures overall shape
-                # Derivative helps with peak alignment
-                corr = 0.7 * max(0, raw_corr) + 0.3 * max(0, deriv_corr)
+                # Combined score: SAM (40%) + NCC (30%) + Residual fit (30%)
+                # This is much more stringent than simple correlation
+                corr = 0.4 * max(0, sam_score) + 0.3 * ncc + 0.3 * residual_score
                 
                 # Calculate residual (how well template fits)
                 if np.sum(template_interp**2) > 0:

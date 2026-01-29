@@ -179,7 +179,14 @@ class MicroplasticDetectionTab(QWidget):
             "• ALS (Conservative): λ=1e6, p=0.001, 10 iter - Gentle (~4-8 min)\n"
             "• ALS (Ultra Smooth): λ=1e7, p=0.002, 20 iter - Very smooth (~8-15 min)"
         )
-        params_layout.addWidget(self.baseline_preset_combo, 1, 1, 1, 2)
+        params_layout.addWidget(self.baseline_preset_combo, 1, 1)
+        
+        # Test Baseline button
+        self.test_baseline_btn = QPushButton("🔬 Test")
+        self.test_baseline_btn.setToolTip("Test baseline correction on selected spectrum")
+        self.test_baseline_btn.clicked.connect(self.open_baseline_tester)
+        self.test_baseline_btn.setMaximumWidth(80)
+        params_layout.addWidget(self.test_baseline_btn, 1, 2)
         
         # Peak enhancement
         params_layout.addWidget(QLabel("Peak Enhancement:"), 2, 0)
@@ -1287,3 +1294,98 @@ class MicroplasticDetectionTab(QWidget):
         # Log summary
         removed = total_before - total_after
         self.log_status(f"✅ Refinement complete: {total_before:,} → {total_after:,} detections ({removed:,} removed, {removed/max(1,total_before)*100:.1f}% filtered)")
+    
+    def open_baseline_tester(self):
+        """Open interactive baseline correction tester dialog."""
+        from PySide6.QtWidgets import QMessageBox
+        
+        # Check if we have a selected spectrum
+        if not hasattr(self, 'selected_position') or self.selected_position is None:
+            QMessageBox.information(
+                self, "No Spectrum Selected",
+                "Please click on a spectrum in the map to select it first.\n\n"
+                "Then click 'Test' to try different baseline correction methods."
+            )
+            return
+        
+        # Get the selected spectrum
+        if not hasattr(self.parent_window, 'map_data') or self.parent_window.map_data is None:
+            QMessageBox.warning(self, "No Data", "No map data loaded.")
+            return
+        
+        map_data = self.parent_window.map_data
+        x_pos, y_pos = self.selected_position
+        
+        # Find the spectrum
+        unique_x = sorted(set(s.x_pos for s in map_data.spectra.values()))
+        unique_y = sorted(set(s.y_pos for s in map_data.spectra.values()))
+        
+        if x_pos < len(unique_x) and y_pos < len(unique_y):
+            actual_x = unique_x[x_pos]
+            actual_y = unique_y[y_pos]
+            
+            spectrum = None
+            for spec in map_data.spectra.values():
+                if spec.x_pos == actual_x and spec.y_pos == actual_y:
+                    spectrum = spec
+                    break
+            
+            if spectrum is not None:
+                # Open the baseline tester dialog
+                try:
+                    from map_analysis_2d.ui.dialogs.baseline_tester_dialog import BaselineTesterDialog
+                    
+                    dialog = BaselineTesterDialog(
+                        spectrum.wavenumbers,
+                        spectrum.intensities,
+                        self
+                    )
+                    
+                    if dialog.exec():
+                        # User clicked "Apply to All Spectra"
+                        method, params = dialog.get_selected_method()
+                        
+                        # Update the baseline preset combo to match
+                        method_map = {
+                            ("rolling_ball", 100): "Rolling Ball (Fast) - Recommended",
+                            ("als", (1e5, 0.01, 5)): "ALS (Fast)",
+                            ("als", (1e5, 0.01, 10)): "ALS (Moderate)",
+                            ("als", (1e6, 0.01, 10)): "ALS (Aggressive)",
+                            ("als", (1e6, 0.001, 10)): "ALS (Conservative)",
+                            ("als", (1e7, 0.002, 20)): "ALS (Ultra Smooth)"
+                        }
+                        
+                        # Try to match to a preset
+                        matched = False
+                        if method == "rolling_ball":
+                            key = (method, params.get("window", 100))
+                        else:
+                            key = (method, (params.get("lam", 1e6), params.get("p", 0.001), params.get("niter", 10)))
+                        
+                        if key in method_map:
+                            self.baseline_preset_combo.setCurrentText(method_map[key])
+                            matched = True
+                        
+                        if matched:
+                            self.log_status(f"✓ Baseline method updated to: {self.baseline_preset_combo.currentText()}")
+                        else:
+                            self.log_status(f"✓ Custom baseline parameters set: {method} with {params}")
+                            QMessageBox.information(
+                                self, "Custom Parameters",
+                                f"Custom baseline parameters selected:\n"
+                                f"Method: {method}\n"
+                                f"Parameters: {params}\n\n"
+                                f"Note: These custom parameters will be used for detection."
+                            )
+                
+                except ImportError as e:
+                    QMessageBox.critical(
+                        self, "Import Error",
+                        f"Could not load baseline tester dialog:\n{str(e)}"
+                    )
+                    import traceback
+                    traceback.print_exc()
+            else:
+                QMessageBox.warning(self, "Spectrum Not Found", "Could not find spectrum at selected position.")
+        else:
+            QMessageBox.warning(self, "Invalid Position", "Selected position is out of bounds.")
