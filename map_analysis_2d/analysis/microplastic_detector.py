@@ -104,16 +104,48 @@ class MicroplasticDetector:
             Number of reference spectra loaded
         """
         logger.info(f"Loading plastic references from database (family: {chemical_family})")
+        logger.info(f"Database has {len(database)} total entries")
         
         self.database = database
         self.plastic_references = {}
         
+        # Use flexible keyword matching (matches main_window.py filtering logic)
+        plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                           'polystyrene', 'pet', 'pvc', 'pmma', 'nylon']
+        
+        # Debug: Track what families we see
+        families_seen = set()
+        sample_entries = []
+        
         # Filter database for plastics
         for key, spectrum_data in database.items():
             metadata = spectrum_data.get('metadata', {})
-            family = metadata.get('chemical_family', '')
             
-            if family.lower() == chemical_family.lower():
+            # Check multiple possible keys for chemical family (matches main_window.py)
+            family = ''
+            family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                          'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                          'family', 'Family', 'FAMILY']
+            
+            for family_key in family_keys:
+                if family_key in metadata:
+                    family = metadata[family_key]
+                    if family:
+                        break
+            
+            family = family.lower() if family else ''
+            
+            if family:
+                families_seen.add(family)
+            
+            # Store first few entries for debugging
+            if len(sample_entries) < 3:
+                sample_entries.append(f"{key}: family='{family}'")
+            
+            # Check if family contains any plastic-related keywords
+            is_plastic = any(keyword in family for keyword in plastic_keywords)
+            
+            if is_plastic:
                 # Extract wavenumbers and intensities as numpy arrays
                 wavenumbers = np.array(spectrum_data.get('wavenumbers', []))
                 intensities = np.array(spectrum_data.get('intensities', []))
@@ -123,6 +155,9 @@ class MicroplasticDetector:
                     self.plastic_references[key] = (wavenumbers, intensities)
                     logger.debug(f"Loaded reference: {key} ({len(wavenumbers)} points)")
         
+        # Debug output
+        logger.info(f"Sample database entries: {sample_entries}")
+        logger.info(f"Chemical families found: {sorted(families_seen)}")
         logger.info(f"Loaded {len(self.plastic_references)} plastic reference spectra")
         return len(self.plastic_references)
     
@@ -1430,6 +1465,9 @@ class MicroplasticDetector:
                 'Polyurethane', 'Acrylic', 'PVC'
             ]
         
+        logger.info(f"Loading plastic templates from database with {len(database)} entries")
+        logger.info(f"Looking for plastic types: {plastic_types}")
+        
         self.plastic_templates = {}
         
         for ptype in plastic_types:
@@ -1444,11 +1482,28 @@ class MicroplasticDetector:
                 
                 # Check metadata first (more reliable than key name)
                 metadata = spectrum_data.get('metadata', {})
-                chemical_family = metadata.get('chemical_family', '').lower()
+                
+                # Check multiple possible keys for chemical family (matches main_window.py)
+                chemical_family = ''
+                family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                              'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                              'family', 'Family', 'FAMILY']
+                
+                for family_key in family_keys:
+                    if family_key in metadata:
+                        chemical_family = metadata[family_key]
+                        if chemical_family:
+                            break
+                
+                chemical_family = chemical_family.lower() if chemical_family else ''
                 mineral_name = metadata.get('mineral_name', '').lower()
                 
-                # Check if this is a plastic and matches the type
-                is_plastic = chemical_family == 'plastic'
+                # Check if this is a plastic using flexible keyword matching
+                # (matches the filtering logic in main_window.py)
+                plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                                   'polystyrene', 'pet', 'pvc', 'pmma', 'nylon']
+                is_plastic = any(keyword in chemical_family for keyword in plastic_keywords)
+                
                 matches_type = (ptype_lower in mineral_name or 
                                ptype_lower in key.lower() or
                                ptype_lower in chemical_family)
