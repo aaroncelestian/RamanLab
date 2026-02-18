@@ -21,7 +21,7 @@ except ImportError:
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                               QPushButton, QTextBrowser, QProgressDialog,
                               QMessageBox, QApplication)
-from PySide6.QtCore import Qt, QThread, QObject, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, QObject, Signal, QTimer, QProcess
 from PySide6.QtGui import QFont, QPixmap
 
 from version import __version__
@@ -267,14 +267,34 @@ class UpdateDialog(QDialog):
             progress.close()
             if exit_code == 0 and exit_status == QProcess.NormalExit:
                 output = process.readAllStandardOutput().data().decode('utf-8', errors='replace')
-                QMessageBox.information(
-                    self, 
-                    "Update Successful",
-                    "RamanLab has been updated successfully!\n\n"
-                    "Please restart the application to use the new version.\n\n"
-                    f"Git output:\n{output}"
+                
+                # Ask user if they want to update dependencies
+                reply = QMessageBox.question(
+                    self,
+                    "Update Dependencies?",
+                    "RamanLab code has been updated successfully!\n\n"
+                    "Would you like to update Python dependencies now?\n"
+                    "This will install any new or updated packages from requirements_qt6.txt.\n\n"
+                    "Note: This may take a few minutes.\n\n"
+                    f"Git output:\n{output[:200]}...",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
                 )
-                self.accept()
+                
+                if reply == QMessageBox.Yes:
+                    self._update_dependencies(app_dir)
+                else:
+                    QMessageBox.information(
+                        self,
+                        "Update Complete",
+                        "Code update successful!\n\n"
+                        "You can update dependencies later by running:\n"
+                        "  python update_dependencies.py --all\n\n"
+                        "or:\n"
+                        "  pip install -r requirements_qt6.txt\n\n"
+                        "Please restart the application to use the new version."
+                    )
+                    self.accept()
             else:
                 error_output = process.readAllStandardError().data().decode('utf-8', errors='replace')
                 QMessageBox.warning(
@@ -306,6 +326,98 @@ class UpdateDialog(QDialog):
                 "Please try updating manually using the 'git pull' command in the RamanLab directory:\n"
                 f"{app_dir}"
             )
+    
+    def _update_dependencies(self, app_dir):
+        """Update Python dependencies from requirements_qt6.txt."""
+        requirements_file = os.path.join(app_dir, 'requirements_qt6.txt')
+        
+        # Check if requirements file exists
+        if not os.path.exists(requirements_file):
+            QMessageBox.warning(
+                self,
+                "Requirements File Not Found",
+                f"Could not find requirements_qt6.txt in:\n{app_dir}\n\n"
+                "Please update dependencies manually."
+            )
+            self.accept()
+            return
+        
+        # Create progress dialog for dependency update
+        progress = QProgressDialog(
+            "Updating Python dependencies...\n"
+            "This may take several minutes.\n\n"
+            "Installing packages from requirements_qt6.txt...",
+            "Cancel", 0, 0, self
+        )
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.setMaximum(0)  # Indeterminate progress
+        
+        # Create process for pip install
+        process = QProcess(self)
+        process.setWorkingDirectory(app_dir)
+        
+        def handle_pip_finished(exit_code, exit_status):
+            progress.close()
+            if exit_code == 0 and exit_status == QProcess.NormalExit:
+                output = process.readAllStandardOutput().data().decode('utf-8', errors='replace')
+                QMessageBox.information(
+                    self,
+                    "Dependencies Updated",
+                    "Python dependencies have been updated successfully!\n\n"
+                    "Please restart RamanLab to use the new version with updated packages.\n\n"
+                    "Update complete!"
+                )
+                self.accept()
+            else:
+                error_output = process.readAllStandardError().data().decode('utf-8', errors='replace')
+                QMessageBox.warning(
+                    self,
+                    "Dependency Update Failed",
+                    f"Failed to update some dependencies.\n\n"
+                    f"Error output:\n{error_output[:500]}...\n\n"
+                    "You can try updating manually with:\n"
+                    "  python update_dependencies.py --all\n\n"
+                    "or:\n"
+                    "  pip install -r requirements_qt6.txt"
+                )
+                self.accept()
+        
+        process.finished.connect(handle_pip_finished)
+        
+        # Start pip install process
+        try:
+            # Use sys.executable to ensure we use the same Python interpreter
+            python_exe = sys.executable
+            process.start(python_exe, ['-m', 'pip', 'install', '--upgrade', '-r', 'requirements_qt6.txt'])
+            process.waitForStarted()
+            
+            # Set a longer timeout for pip install (15 minutes)
+            if not process.waitForFinished(900000):  # 15 minutes timeout
+                process.kill()
+                progress.close()
+                QMessageBox.warning(
+                    self,
+                    "Update Timeout",
+                    "Dependency update timed out after 15 minutes.\n\n"
+                    "You can try updating manually with:\n"
+                    "  python update_dependencies.py --all"
+                )
+                self.accept()
+        
+        except Exception as e:
+            progress.close()
+            QMessageBox.warning(
+                self,
+                "Update Error",
+                f"An error occurred during dependency update:\n{str(e)}\n\n"
+                "Please try updating manually with:\n"
+                "  python update_dependencies.py --all\n\n"
+                "or:\n"
+                "  pip install -r requirements_qt6.txt"
+            )
+            self.accept()
     
     def copy_git_command(self):
         """Copy git pull command to clipboard."""

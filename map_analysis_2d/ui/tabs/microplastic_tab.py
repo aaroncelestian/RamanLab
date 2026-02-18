@@ -179,7 +179,14 @@ class MicroplasticDetectionTab(QWidget):
             "• ALS (Conservative): λ=1e6, p=0.001, 10 iter - Gentle (~4-8 min)\n"
             "• ALS (Ultra Smooth): λ=1e7, p=0.002, 20 iter - Very smooth (~8-15 min)"
         )
-        params_layout.addWidget(self.baseline_preset_combo, 1, 1, 1, 2)
+        params_layout.addWidget(self.baseline_preset_combo, 1, 1)
+        
+        # Test Baseline button
+        self.test_baseline_btn = QPushButton("🔬 Test")
+        self.test_baseline_btn.setToolTip("Test baseline correction on selected spectrum")
+        self.test_baseline_btn.clicked.connect(self.open_baseline_tester)
+        self.test_baseline_btn.setMaximumWidth(80)
+        params_layout.addWidget(self.test_baseline_btn, 1, 2)
         
         # Peak enhancement
         params_layout.addWidget(QLabel("Peak Enhancement:"), 2, 0)
@@ -207,6 +214,53 @@ class MicroplasticDetectionTab(QWidget):
             "Template Matching: Uses curated plastic spectra from database (best for noisy data)"
         )
         params_layout.addWidget(self.method_combo, 3, 1, 1, 2)
+        
+        # Map cropping controls
+        params_layout.addWidget(QLabel("Crop Map (for testing):"), 4, 0)
+        self.crop_enabled_check = QCheckBox("Enable")
+        self.crop_enabled_check.setToolTip("Crop map to a region of interest for faster testing")
+        self.crop_enabled_check.stateChanged.connect(self.on_crop_toggled)
+        params_layout.addWidget(self.crop_enabled_check, 4, 1)
+        
+        # X range
+        params_layout.addWidget(QLabel("  X Range:"), 5, 0)
+        crop_x_layout = QHBoxLayout()
+        self.crop_x_min = QSpinBox()
+        self.crop_x_min.setMinimum(0)
+        self.crop_x_min.setMaximum(9999)
+        self.crop_x_min.setValue(0)
+        self.crop_x_min.setEnabled(False)
+        self.crop_x_min.setPrefix("Min: ")
+        crop_x_layout.addWidget(self.crop_x_min)
+        
+        self.crop_x_max = QSpinBox()
+        self.crop_x_max.setMinimum(0)
+        self.crop_x_max.setMaximum(9999)
+        self.crop_x_max.setValue(100)
+        self.crop_x_max.setEnabled(False)
+        self.crop_x_max.setPrefix("Max: ")
+        crop_x_layout.addWidget(self.crop_x_max)
+        params_layout.addLayout(crop_x_layout, 5, 1, 1, 2)
+        
+        # Y range
+        params_layout.addWidget(QLabel("  Y Range:"), 6, 0)
+        crop_y_layout = QHBoxLayout()
+        self.crop_y_min = QSpinBox()
+        self.crop_y_min.setMinimum(0)
+        self.crop_y_min.setMaximum(9999)
+        self.crop_y_min.setValue(0)
+        self.crop_y_min.setEnabled(False)
+        self.crop_y_min.setPrefix("Min: ")
+        crop_y_layout.addWidget(self.crop_y_min)
+        
+        self.crop_y_max = QSpinBox()
+        self.crop_y_max.setMinimum(0)
+        self.crop_y_max.setMaximum(9999)
+        self.crop_y_max.setValue(100)
+        self.crop_y_max.setEnabled(False)
+        self.crop_y_max.setPrefix("Max: ")
+        crop_y_layout.addWidget(self.crop_y_max)
+        params_layout.addLayout(crop_y_layout, 6, 1, 1, 2)
         
         layout.addWidget(params_group)
         
@@ -344,6 +398,27 @@ class MicroplasticDetectionTab(QWidget):
         self.create_empty_plots()
         
         return panel
+    
+    def on_crop_toggled(self, state):
+        """Handle crop checkbox toggle."""
+        enabled = state == Qt.CheckState.Checked.value
+        self.crop_x_min.setEnabled(enabled)
+        self.crop_x_max.setEnabled(enabled)
+        self.crop_y_min.setEnabled(enabled)
+        self.crop_y_max.setEnabled(enabled)
+        
+        # Update max values based on current map data
+        if enabled and hasattr(self.parent_window, 'map_data') and self.parent_window.map_data:
+            map_data = self.parent_window.map_data
+            unique_x = sorted(set(s.x_pos for s in map_data.spectra.values()))
+            unique_y = sorted(set(s.y_pos for s in map_data.spectra.values()))
+            
+            self.crop_x_max.setMaximum(len(unique_x))
+            self.crop_y_max.setMaximum(len(unique_y))
+            self.crop_x_max.setValue(min(100, len(unique_x)))
+            self.crop_y_max.setValue(min(100, len(unique_y)))
+            
+            self.log_status(f"ℹ️ Map cropping enabled. Map size: {len(unique_x)} x {len(unique_y)}")
     
     def create_empty_plots(self):
         """Create empty placeholder plots."""
@@ -517,8 +592,13 @@ class MicroplasticDetectionTab(QWidget):
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         
-    def display_results(self, results: Dict[str, np.ndarray]):
-        """Display detection results in the visualization panel."""
+    def display_results(self, results: Dict[str, np.ndarray], map_shape: tuple = None):
+        """Display detection results in the visualization panel.
+        
+        Args:
+            results: Dictionary of plastic type -> score map arrays
+            map_shape: Tuple of (n_rows, n_cols) for reshaping 1D arrays into 2D maps
+        """
         from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
         
         # Store full results (including metadata like _match_details)
@@ -555,11 +635,19 @@ class MicroplasticDetectionTab(QWidget):
             plastic_name = plastic_info.get('name', plastic_type)
             plastic_color = plastic_info.get('color', '#FF6B6B')
             
-            # Reshape if needed (assuming square map)
+            # Reshape if needed using actual map dimensions
             if score_map.ndim == 1:
-                size = int(np.sqrt(len(score_map)))
-                if size * size == len(score_map):
-                    score_map = score_map.reshape(size, size)
+                if map_shape is not None:
+                    # Use provided map dimensions
+                    score_map = score_map.reshape(map_shape)
+                else:
+                    # Fallback to square assumption
+                    size = int(np.sqrt(len(score_map)))
+                    if size * size == len(score_map):
+                        score_map = score_map.reshape(size, size)
+                    else:
+                        self.log_status(f"⚠️ Warning: Cannot reshape {plastic_type} map (size={len(score_map)})")
+                        continue
             
             # Mask out scores below threshold for clearer visualization
             masked_map = np.copy(score_map)
@@ -939,8 +1027,8 @@ class MicroplasticDetectionTab(QWidget):
         ax.grid(True, alpha=0.3)
         ax.tick_params(labelsize=7)
         
-        # Invert x-axis for Raman convention (high to low wavenumber)
-        ax.invert_xaxis()
+        # Note: X-axis is NOT inverted to match data order (low to high wavenumber)
+        # This ensures template matching overlays align correctly with the spectrum
         
         # Force proper layout and canvas update
         self.spectrum_figure.tight_layout(pad=0.5)
@@ -973,7 +1061,7 @@ class MicroplasticDetectionTab(QWidget):
         info = QLabel(
             "Spatial filtering removes random noise while keeping real detections.\n"
             "• Clusters: Groups of adjacent pixels (real particles have area)\n"
-            "• Isolated pixels: Kept if score is significantly above neighbors"
+            "• Weak Signal Mode: Uses adaptive thresholds to preserve weak but real signals"
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -1002,21 +1090,41 @@ class MicroplasticDetectionTab(QWidget):
         cluster_row.addWidget(self.min_cluster_spin)
         settings_layout.addLayout(cluster_row)
         
-        # Minimum mean score for cluster
+        # Weak signal preservation mode
+        self.weak_signal_mode = QCheckBox("Weak Signal Mode (Recommended for microplastics)")
+        self.weak_signal_mode.setChecked(True)
+        self.weak_signal_mode.setToolTip(
+            "Uses adaptive thresholds based on local contrast.\n"
+            "Keeps weak signals that stand out from background.\n"
+            "Recommended when detecting weak plastics in noisy data."
+        )
+        settings_layout.addWidget(self.weak_signal_mode)
+        
+        # Minimum relative score (only used when weak signal mode is OFF)
         score_row = QHBoxLayout()
         score_row.addWidget(QLabel("Min cluster mean score:"))
         self.min_score_spin = QDoubleSpinBox()
         self.min_score_spin.setRange(0.0, 1.0)
         self.min_score_spin.setValue(0.55)
         self.min_score_spin.setSingleStep(0.05)
-        self.min_score_spin.setToolTip("Clusters with mean score below this are removed.\nReal plastics should have consistently high scores.")
+        self.min_score_spin.setToolTip("Absolute threshold (only used if Weak Signal Mode is OFF).\nClusters with mean score below this are removed.")
         score_row.addWidget(self.min_score_spin)
         settings_layout.addLayout(score_row)
         
-        # Keep high-confidence detections
-        self.keep_high_conf = QCheckBox("Always keep clusters with max score > 0.75")
-        self.keep_high_conf.setChecked(True)
-        settings_layout.addWidget(self.keep_high_conf)
+        # Minimum local contrast (for weak signal mode)
+        contrast_row = QHBoxLayout()
+        contrast_row.addWidget(QLabel("Min local contrast (σ):"))
+        self.min_contrast_spin = QDoubleSpinBox()
+        self.min_contrast_spin.setRange(1.0, 10.0)
+        self.min_contrast_spin.setValue(2.0)
+        self.min_contrast_spin.setSingleStep(0.5)
+        self.min_contrast_spin.setToolTip(
+            "Minimum standard deviations above local background.\n"
+            "2.0 = keep signals 2σ above neighbors (recommended).\n"
+            "Higher = more conservative (fewer detections)."
+        )
+        contrast_row.addWidget(self.min_contrast_spin)
+        settings_layout.addLayout(contrast_row)
         
         layout.addWidget(settings_group)
         
@@ -1037,9 +1145,11 @@ class MicroplasticDetectionTab(QWidget):
         erosion_iterations = self.erosion_spin.value()
         min_cluster_size = self.min_cluster_spin.value()
         min_mean_score = self.min_score_spin.value()
-        keep_high_conf = self.keep_high_conf.isChecked()
+        weak_signal_mode = self.weak_signal_mode.isChecked()
+        min_contrast_sigma = self.min_contrast_spin.value()
         
-        self.log_status(f"🎯 Applying spatial filter (erosion: {erosion_iterations}, min cluster: {min_cluster_size}, min score: {min_mean_score:.2f})...")
+        mode_str = "Weak Signal (Adaptive)" if weak_signal_mode else f"Absolute (>{min_mean_score:.2f})"
+        self.log_status(f"🎯 Applying spatial filter (mode: {mode_str}, erosion: {erosion_iterations}, min cluster: {min_cluster_size})...")
         
         # Get current threshold
         threshold = self.threshold_slider.value() / 100.0
@@ -1089,8 +1199,13 @@ class MicroplasticDetectionTab(QWidget):
             # Apply morphological erosion to shrink regions and break weak connections
             if erosion_iterations > 0:
                 eroded_mask = ndimage.binary_erosion(detection_mask, iterations=erosion_iterations)
+                
+                # CRITICAL: Find isolated pixels that were completely removed by erosion
+                # These need special handling since they disappear entirely
+                isolated_pixels = detection_mask & ~ndimage.binary_dilation(eroded_mask, iterations=erosion_iterations + 1)
             else:
                 eroded_mask = detection_mask
+                isolated_pixels = np.zeros_like(detection_mask, dtype=bool)
             
             # Label connected components on eroded mask
             labeled_array, num_features = ndimage.label(eroded_mask)
@@ -1112,19 +1227,68 @@ class MicroplasticDetectionTab(QWidget):
                 # Check if cluster passes filters
                 keep_cluster = False
                 
-                # Always keep high-confidence clusters
-                if keep_high_conf and max_score > 0.75:
-                    keep_cluster = True
-                # Keep if cluster is large enough AND has high enough mean score
-                elif component_size >= min_cluster_size and mean_score >= min_mean_score:
-                    keep_cluster = True
+                if weak_signal_mode:
+                    # ADAPTIVE MODE: Use local contrast analysis
+                    # Calculate local background around this cluster
+                    # Dilate cluster mask to get surrounding region
+                    dilated_region = ndimage.binary_dilation(component_mask, iterations=3)
+                    background_mask = dilated_region & ~component_mask
+                    
+                    if np.sum(background_mask) > 0:
+                        background_scores = score_map_2d[background_mask]
+                        bg_mean = np.mean(background_scores)
+                        bg_std = np.std(background_scores)
+                        
+                        # For isolated detections, background is often all zeros
+                        # In this case, any detection above threshold is significant
+                        if bg_mean < threshold * 0.5 and bg_std < threshold * 0.3:
+                            # Background is essentially noise/zero
+                            # Keep if detection is clearly above threshold
+                            if mean_score > threshold * 1.2:  # 20% above threshold
+                                keep_cluster = True
+                            elif max_score > 0.7:  # Or strong peak
+                                keep_cluster = True
+                        else:
+                            # Normal contrast calculation
+                            if bg_std > 0:
+                                contrast = (mean_score - bg_mean) / bg_std
+                            else:
+                                # No variation but non-zero background
+                                contrast = (mean_score - bg_mean) / (threshold * 0.1)
+                            
+                            # Keep if cluster stands out from local background
+                            if contrast >= min_contrast_sigma:
+                                keep_cluster = True
+                        
+                        # Additional rules regardless of contrast
+                        # Keep if cluster is large enough (real particles have area)
+                        if component_size >= min_cluster_size and mean_score > threshold:
+                            keep_cluster = True
+                        # Always keep very strong signals
+                        if max_score > 0.8:
+                            keep_cluster = True
+                    else:
+                        # No background to compare - isolated at edge
+                        # Keep if above threshold (it's isolated, so likely real)
+                        if mean_score > threshold:
+                            keep_cluster = True
+                        elif max_score > 0.7:
+                            keep_cluster = True
+                else:
+                    # ABSOLUTE MODE: Use fixed thresholds (original behavior)
+                    # Keep if cluster is large enough AND has high enough mean score
+                    if component_size >= min_cluster_size and mean_score >= min_mean_score:
+                        keep_cluster = True
+                    # Always keep very strong signals
+                    elif max_score > 0.8:
+                        keep_cluster = True
                 
                 if keep_cluster:
-                    # Dilate back to recover original extent (undo erosion)
+                    # Recover pixels that were in original detection and connected to this cluster
                     if erosion_iterations > 0:
-                        # Dilate this component back
+                        # Dilate back to original extent, but ONLY keep original detections
                         dilated = ndimage.binary_dilation(component_mask, iterations=erosion_iterations)
-                        # But only keep pixels that were in original detection
+                        # Only recover pixels that were originally detected
                         recovered = dilated & detection_mask
                         refined_mask |= recovered
                     else:
@@ -1132,6 +1296,43 @@ class MicroplasticDetectionTab(QWidget):
                     clusters_kept += 1
                 else:
                     clusters_removed += 1
+            
+            # Handle isolated pixels that were completely removed by erosion
+            if erosion_iterations > 0 and np.any(isolated_pixels):
+                # Label isolated pixel groups
+                isolated_labels, n_isolated = ndimage.label(isolated_pixels)
+                
+                for iso_id in range(1, n_isolated + 1):
+                    iso_mask = isolated_labels == iso_id
+                    iso_scores = score_map_2d[iso_mask]
+                    iso_mean = np.mean(iso_scores)
+                    iso_max = np.max(iso_scores)
+                    iso_size = np.sum(iso_mask)
+                    
+                    # Evaluate isolated pixels using same criteria
+                    keep_isolated = False
+                    
+                    if weak_signal_mode:
+                        # For isolated pixels, if they're above threshold, they're likely real
+                        # (Random noise doesn't typically create isolated high-scoring pixels)
+                        if iso_mean > threshold * 1.2:
+                            keep_isolated = True
+                        elif iso_max > 0.7:
+                            keep_isolated = True
+                        elif iso_size >= min_cluster_size and iso_mean > threshold:
+                            keep_isolated = True
+                    else:
+                        # Absolute mode
+                        if iso_size >= min_cluster_size and iso_mean >= min_mean_score:
+                            keep_isolated = True
+                        elif iso_max > 0.8:
+                            keep_isolated = True
+                    
+                    if keep_isolated:
+                        refined_mask |= iso_mask
+                        clusters_kept += 1
+                    else:
+                        clusters_removed += 1
             
             # Apply refined mask to scores (zero out filtered pixels)
             refined_scores = score_map_2d.copy()
@@ -1149,9 +1350,110 @@ class MicroplasticDetectionTab(QWidget):
         # Update results
         self.detection_results = refined_results
         
-        # Redisplay
-        self.display_results(refined_results)
+        # Get map shape for proper visualization
+        map_shape = None
+        if hasattr(self.parent_window, 'map_data'):
+            map_data = self.parent_window.map_data
+            map_shape = (len(map_data.y_positions), len(map_data.x_positions))
+        
+        # Redisplay with map dimensions
+        self.display_results(refined_results, map_shape=map_shape)
         
         # Log summary
         removed = total_before - total_after
         self.log_status(f"✅ Refinement complete: {total_before:,} → {total_after:,} detections ({removed:,} removed, {removed/max(1,total_before)*100:.1f}% filtered)")
+    
+    def open_baseline_tester(self):
+        """Open interactive baseline correction tester dialog."""
+        from PySide6.QtWidgets import QMessageBox
+        
+        # Check if we have a selected spectrum
+        if not hasattr(self, 'selected_position') or self.selected_position is None:
+            QMessageBox.information(
+                self, "No Spectrum Selected",
+                "Please click on a spectrum in the map to select it first.\n\n"
+                "Then click 'Test' to try different baseline correction methods."
+            )
+            return
+        
+        # Get the selected spectrum
+        if not hasattr(self.parent_window, 'map_data') or self.parent_window.map_data is None:
+            QMessageBox.warning(self, "No Data", "No map data loaded.")
+            return
+        
+        map_data = self.parent_window.map_data
+        x_pos, y_pos = self.selected_position
+        
+        # Find the spectrum
+        unique_x = sorted(set(s.x_pos for s in map_data.spectra.values()))
+        unique_y = sorted(set(s.y_pos for s in map_data.spectra.values()))
+        
+        if x_pos < len(unique_x) and y_pos < len(unique_y):
+            actual_x = unique_x[x_pos]
+            actual_y = unique_y[y_pos]
+            
+            spectrum = None
+            for spec in map_data.spectra.values():
+                if spec.x_pos == actual_x and spec.y_pos == actual_y:
+                    spectrum = spec
+                    break
+            
+            if spectrum is not None:
+                # Open the baseline tester dialog
+                try:
+                    from map_analysis_2d.ui.dialogs.baseline_tester_dialog import BaselineTesterDialog
+                    
+                    dialog = BaselineTesterDialog(
+                        spectrum.wavenumbers,
+                        spectrum.intensities,
+                        self
+                    )
+                    
+                    if dialog.exec():
+                        # User clicked "Apply to All Spectra"
+                        method, params = dialog.get_selected_method()
+                        
+                        # Update the baseline preset combo to match
+                        method_map = {
+                            ("rolling_ball", 100): "Rolling Ball (Fast) - Recommended",
+                            ("als", (1e5, 0.01, 5)): "ALS (Fast)",
+                            ("als", (1e5, 0.01, 10)): "ALS (Moderate)",
+                            ("als", (1e6, 0.01, 10)): "ALS (Aggressive)",
+                            ("als", (1e6, 0.001, 10)): "ALS (Conservative)",
+                            ("als", (1e7, 0.002, 20)): "ALS (Ultra Smooth)"
+                        }
+                        
+                        # Try to match to a preset
+                        matched = False
+                        if method == "rolling_ball":
+                            key = (method, params.get("window", 100))
+                        else:
+                            key = (method, (params.get("lam", 1e6), params.get("p", 0.001), params.get("niter", 10)))
+                        
+                        if key in method_map:
+                            self.baseline_preset_combo.setCurrentText(method_map[key])
+                            matched = True
+                        
+                        if matched:
+                            self.log_status(f"✓ Baseline method updated to: {self.baseline_preset_combo.currentText()}")
+                        else:
+                            self.log_status(f"✓ Custom baseline parameters set: {method} with {params}")
+                            QMessageBox.information(
+                                self, "Custom Parameters",
+                                f"Custom baseline parameters selected:\n"
+                                f"Method: {method}\n"
+                                f"Parameters: {params}\n\n"
+                                f"Note: These custom parameters will be used for detection."
+                            )
+                
+                except ImportError as e:
+                    QMessageBox.critical(
+                        self, "Import Error",
+                        f"Could not load baseline tester dialog:\n{str(e)}"
+                    )
+                    import traceback
+                    traceback.print_exc()
+            else:
+                QMessageBox.warning(self, "Spectrum Not Found", "Could not find spectrum at selected position.")
+        else:
+            QMessageBox.warning(self, "Invalid Position", "Selected position is out of bounds.")

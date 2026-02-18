@@ -200,6 +200,12 @@ class RamanMapData:
             wavenumbers = data[:, 0]
             intensities = data[:, 1]
             
+            # Check if wavenumbers are in descending order and reverse if needed
+            if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                logger.info(f"Detected descending wavenumbers in {filepath.name} ({wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f}), reversing to ascending order")
+                wavenumbers = wavenumbers[::-1]
+                intensities = intensities[::-1]
+            
             # Apply centralized cosmic ray detection and cleaning at data import
             if self.cosmic_ray_manager.config.apply_during_load:
                 spectrum_id = f"{filepath.name}_{x_pos}_{y_pos}"
@@ -288,6 +294,12 @@ class RamanMapData:
                         
                         wavenumbers = data[:, 0]
                         intensities = data[:, 1]
+                        
+                        # Check if wavenumbers are in descending order and reverse if needed
+                        if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                            wavenumbers = wavenumbers[::-1]
+                            intensities = intensities[::-1]
+                        
                         spectrum_id = f"{filepath.name}_{x_pos}_{y_pos}"
                         
                         raw_spectra_data.append((wavenumbers, intensities, spectrum_id, x_pos, y_pos, filepath))
@@ -367,7 +379,11 @@ class RamanMapData:
         return len(self.y_positions)
     
     def get_processed_data_matrix(self) -> np.ndarray:
-        """Get matrix of all processed spectra."""
+        """Get matrix of all processed spectra in row-major grid order.
+        
+        Returns spectra ordered by (y, x) position so that reshaping to 
+        (n_y, n_x, n_wavenumbers) preserves spatial relationships.
+        """
         n_spectra = len(self.spectra)
         if n_spectra == 0:
             return np.array([])
@@ -382,15 +398,20 @@ class RamanMapData:
         # Create matrix
         data_matrix = np.zeros((n_spectra, n_points))
         
+        # CRITICAL: Iterate in consistent row-major order (y, then x)
+        # This ensures reshaping to (n_y, n_x) preserves spatial layout
         spectrum_index = 0
-        for spectrum in self.spectra.values():
-            if spectrum.processed_intensities is not None:
-                data_matrix[spectrum_index, :] = spectrum.processed_intensities
-            else:
-                # Fallback to preprocessing on the fly
-                processed = self._preprocess_spectrum(spectrum.wavenumbers, spectrum.intensities)
-                data_matrix[spectrum_index, :] = processed
-            spectrum_index += 1
+        for y in sorted(self.y_positions):
+            for x in sorted(self.x_positions):
+                if (x, y) in self.spectra:
+                    spectrum = self.spectra[(x, y)]
+                    if spectrum.processed_intensities is not None:
+                        data_matrix[spectrum_index, :] = spectrum.processed_intensities
+                    else:
+                        # Fallback to preprocessing on the fly
+                        processed = self._preprocess_spectrum(spectrum.wavenumbers, spectrum.intensities)
+                        data_matrix[spectrum_index, :] = processed
+                    spectrum_index += 1
         
         return data_matrix
     

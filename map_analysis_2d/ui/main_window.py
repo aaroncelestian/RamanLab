@@ -56,6 +56,36 @@ class SimpleMapData:
         self.template_coefficients = None
         self.template_residuals = None
         self.cosmic_ray_manager = None
+    
+    def get_processed_data_matrix(self):
+        """Get matrix of all processed spectra (or raw if no processing applied)."""
+        import numpy as np
+        
+        n_spectra = len(self.spectra)
+        if n_spectra == 0:
+            return np.array([])
+        
+        # Get the length from the first spectrum
+        first_spectrum = next(iter(self.spectra.values()))
+        if first_spectrum.processed_intensities is not None:
+            n_points = len(first_spectrum.processed_intensities)
+        else:
+            n_points = len(first_spectrum.intensities)
+        
+        # Create matrix
+        data_matrix = np.zeros((n_spectra, n_points))
+        
+        # Fill matrix with spectra data
+        spectrum_index = 0
+        for spectrum in self.spectra.values():
+            if spectrum.processed_intensities is not None:
+                data_matrix[spectrum_index, :] = spectrum.processed_intensities
+            else:
+                # Use raw intensities if no processed data available
+                data_matrix[spectrum_index, :] = spectrum.intensities
+            spectrum_index += 1
+        
+        return data_matrix
 
 
 class MapAnalysisMainWindow(QMainWindow):
@@ -6462,6 +6492,53 @@ All spectra have been processed and cleaned data is now available for analysis."
                 version = 'Legacy'
                 metadata = {}
             
+            # Check if wavenumbers are in descending order and fix if needed
+            reversed_count = 0
+            
+            # Check and reverse target_wavenumbers
+            if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                wn = self.map_data.target_wavenumbers
+                print(f"[PKL LOAD] target_wavenumbers: {wn[0]:.1f} → {wn[-1]:.1f}")
+                if len(wn) > 1 and wn[0] > wn[-1]:
+                    print(f"[PKL LOAD]   Reversing target_wavenumbers to ascending order")
+                    self.map_data.target_wavenumbers = wn[::-1]
+                    reversed_count += 1
+            
+            # Check and reverse wavenumbers attribute (for SimpleMapData from H5 import)
+            if hasattr(self.map_data, 'wavenumbers') and self.map_data.wavenumbers is not None:
+                wn = self.map_data.wavenumbers
+                print(f"[PKL LOAD] wavenumbers attribute: {wn[0]:.1f} → {wn[-1]:.1f}")
+                if len(wn) > 1 and wn[0] > wn[-1]:
+                    print(f"[PKL LOAD]   Reversing wavenumbers attribute to ascending order")
+                    self.map_data.wavenumbers = wn[::-1]
+                    reversed_count += 1
+            
+            # Reverse wavenumbers in all individual spectra
+            if hasattr(self.map_data, 'spectra') and self.map_data.spectra:
+                spectra_reversed = 0
+                first_spectrum = next(iter(self.map_data.spectra.values()))
+                if hasattr(first_spectrum, 'wavenumbers') and first_spectrum.wavenumbers is not None:
+                    print(f"[PKL LOAD] first spectrum wavenumbers: {first_spectrum.wavenumbers[0]:.1f} → {first_spectrum.wavenumbers[-1]:.1f}")
+                
+                for spectrum in self.map_data.spectra.values():
+                    if hasattr(spectrum, 'wavenumbers') and spectrum.wavenumbers is not None:
+                        if len(spectrum.wavenumbers) > 1 and spectrum.wavenumbers[0] > spectrum.wavenumbers[-1]:
+                            spectrum.wavenumbers = spectrum.wavenumbers[::-1]
+                            if hasattr(spectrum, 'intensities') and spectrum.intensities is not None:
+                                spectrum.intensities = spectrum.intensities[::-1]
+                            if hasattr(spectrum, 'processed_intensities') and spectrum.processed_intensities is not None:
+                                spectrum.processed_intensities = spectrum.processed_intensities[::-1]
+                            spectra_reversed += 1
+                
+                if spectra_reversed > 0:
+                    print(f"[PKL LOAD]   Reversed wavenumbers in {spectra_reversed} individual spectra")
+                    reversed_count += 1
+            
+            if reversed_count > 0:
+                print(f"[PKL LOAD] ✓ Wavenumber reversal complete: {reversed_count} array type(s) corrected")
+            else:
+                print(f"[PKL LOAD] ✓ Wavenumbers already in correct order")
+            
             self.progress_status.hide_progress()
             
             # Initialize integration slider with spectrum midpoint
@@ -6613,6 +6690,8 @@ The map is now ready for analysis!"""
                 start_wn = file_info.attrs.get('SpectralRangeStart', 0)
                 end_wn = file_info.attrs.get('SpectralRangeEnd', 2000)
                 
+                logger.info(f"H5 file attributes: SpectralRangeStart={start_wn}, SpectralRangeEnd={end_wn}")
+                
                 # Find the data in Regions
                 regions = f['Regions']
                 region_keys = list(regions.keys())
@@ -6648,6 +6727,17 @@ The map is now ready for analysis!"""
                 
                 # Create wavenumber array
                 wavenumbers = np.linspace(start_wn, end_wn, n_wn)
+                logger.info(f"Created wavenumber array: {wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f} ({len(wavenumbers)} points)")
+                
+                # Check if wavenumbers are in descending order and reverse if needed
+                if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                    logger.info(f"Detected descending wavenumbers ({wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f}), reversing to ascending order")
+                    wavenumbers = wavenumbers[::-1]
+                    reverse_spectra = True
+                    logger.info(f"After reversal: {wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f}")
+                else:
+                    reverse_spectra = False
+                    logger.info(f"Wavenumbers already in ascending order")
                 
                 # Show info and confirm
                 self.progress_status.hide_progress()
@@ -6700,7 +6790,7 @@ The map is now ready for analysis!"""
                 self.progress_status.show_progress(f"Creating {n_spectra:,} spectrum objects (parallel)...")
                 
                 # Helper function for parallel processing
-                def create_spectrum(i, wavenumbers, all_data, shape, n_y):
+                def create_spectrum(i, wavenumbers, all_data, shape, n_y, reverse_spectra):
                     if len(shape) == 3:
                         x_idx = i // n_y
                         y_idx = i % n_y
@@ -6711,6 +6801,10 @@ The map is now ready for analysis!"""
                         intensities = all_data[i, :]
                         x_pos = float(i // n_y)
                         y_pos = float(i % n_y)
+                    
+                    # Reverse intensities if wavenumbers were reversed
+                    if reverse_spectra:
+                        intensities = intensities[::-1]
                     
                     spectrum = SpectrumData(
                         wavenumbers=wavenumbers,
@@ -6727,7 +6821,7 @@ The map is now ready for analysis!"""
                 
                 # Process in parallel
                 results = Parallel(n_jobs=-1, backend='loky', verbose=0)(
-                    delayed(create_spectrum)(i, wavenumbers, all_data, shape, n_y)
+                    delayed(create_spectrum)(i, wavenumbers, all_data, shape, n_y, reverse_spectra)
                     for i in range(n_spectra)
                 )
                 
@@ -6819,6 +6913,61 @@ The map is now ready for analysis!"""
                     self.cosmic_ray_config = save_data['cosmic_ray_config']
             else:
                 self.map_data = save_data
+            
+            # Check if wavenumbers are in descending order and fix if needed
+            reversed_count = 0
+            
+            # Check and reverse target_wavenumbers
+            if hasattr(self.map_data, 'target_wavenumbers') and self.map_data.target_wavenumbers is not None:
+                wn = self.map_data.target_wavenumbers
+                print(f"[PKL LOAD] target_wavenumbers: {wn[0]:.1f} → {wn[-1]:.1f}")
+                logger.info(f"PKL target_wavenumbers: {wn[0]:.1f} → {wn[-1]:.1f}")
+                if len(wn) > 1 and wn[0] > wn[-1]:
+                    print(f"[PKL LOAD]   Reversing target_wavenumbers to ascending order")
+                    logger.info(f"  Reversing target_wavenumbers to ascending order")
+                    self.map_data.target_wavenumbers = wn[::-1]
+                    reversed_count += 1
+            
+            # Check and reverse wavenumbers attribute (for SimpleMapData from H5 import)
+            if hasattr(self.map_data, 'wavenumbers') and self.map_data.wavenumbers is not None:
+                wn = self.map_data.wavenumbers
+                print(f"[PKL LOAD] wavenumbers attribute: {wn[0]:.1f} → {wn[-1]:.1f}")
+                logger.info(f"PKL wavenumbers attribute: {wn[0]:.1f} → {wn[-1]:.1f}")
+                if len(wn) > 1 and wn[0] > wn[-1]:
+                    print(f"[PKL LOAD]   Reversing wavenumbers attribute to ascending order")
+                    logger.info(f"  Reversing wavenumbers attribute to ascending order")
+                    self.map_data.wavenumbers = wn[::-1]
+                    reversed_count += 1
+            
+            # Reverse wavenumbers in all individual spectra
+            if hasattr(self.map_data, 'spectra') and self.map_data.spectra:
+                spectra_reversed = 0
+                first_spectrum = next(iter(self.map_data.spectra.values()))
+                if hasattr(first_spectrum, 'wavenumbers') and first_spectrum.wavenumbers is not None:
+                    print(f"[PKL LOAD] first spectrum wavenumbers: {first_spectrum.wavenumbers[0]:.1f} → {first_spectrum.wavenumbers[-1]:.1f}")
+                    logger.info(f"PKL first spectrum wavenumbers: {first_spectrum.wavenumbers[0]:.1f} → {first_spectrum.wavenumbers[-1]:.1f}")
+                
+                for spectrum in self.map_data.spectra.values():
+                    if hasattr(spectrum, 'wavenumbers') and spectrum.wavenumbers is not None:
+                        if len(spectrum.wavenumbers) > 1 and spectrum.wavenumbers[0] > spectrum.wavenumbers[-1]:
+                            spectrum.wavenumbers = spectrum.wavenumbers[::-1]
+                            if hasattr(spectrum, 'intensities') and spectrum.intensities is not None:
+                                spectrum.intensities = spectrum.intensities[::-1]
+                            if hasattr(spectrum, 'processed_intensities') and spectrum.processed_intensities is not None:
+                                spectrum.processed_intensities = spectrum.processed_intensities[::-1]
+                            spectra_reversed += 1
+                
+                if spectra_reversed > 0:
+                    print(f"[PKL LOAD]   Reversed wavenumbers in {spectra_reversed} individual spectra")
+                    logger.info(f"  Reversed wavenumbers in {spectra_reversed} individual spectra")
+                    reversed_count += 1
+            
+            if reversed_count > 0:
+                print(f"[PKL LOAD] ✓ Wavenumber reversal complete: {reversed_count} array type(s) corrected")
+                logger.info(f"✓ PKL wavenumber reversal complete: {reversed_count} array type(s) corrected")
+            else:
+                print(f"[PKL LOAD] ✓ Wavenumbers already in correct order")
+                logger.info(f"✓ PKL wavenumbers already in correct order")
             
             self.progress_status.hide_progress()
             
@@ -9554,6 +9703,37 @@ The map is now ready for analysis!"""
             wavenumbers = self.map_data.target_wavenumbers
             intensities = self.map_data.get_processed_data_matrix()  # Shape: (n_spectra, n_wavenumbers)
             
+            # Apply map cropping if enabled
+            if self.microplastic_tab.crop_enabled_check.isChecked():
+                x_min = self.microplastic_tab.crop_x_min.value()
+                x_max = self.microplastic_tab.crop_x_max.value()
+                y_min = self.microplastic_tab.crop_y_min.value()
+                y_max = self.microplastic_tab.crop_y_max.value()
+                
+                # Get all positions and filter
+                all_positions = [(spec.x_pos, spec.y_pos) for spec in self.map_data.spectra.values()]
+                unique_x = sorted(set(pos[0] for pos in all_positions))
+                unique_y = sorted(set(pos[1] for pos in all_positions))
+                
+                # Get actual coordinate ranges
+                x_coords_to_keep = unique_x[x_min:x_max]
+                y_coords_to_keep = unique_y[y_min:y_max]
+                
+                # Filter spectra
+                cropped_indices = []
+                for idx, (x, y) in enumerate(all_positions):
+                    if x in x_coords_to_keep and y in y_coords_to_keep:
+                        cropped_indices.append(idx)
+                
+                if len(cropped_indices) > 0:
+                    intensities = intensities[cropped_indices]
+                    self.microplastic_tab.log_status(
+                        f"✂️ Map cropped: X[{x_min}:{x_max}], Y[{y_min}:{y_max}] → "
+                        f"{len(cropped_indices):,} spectra (from {len(all_positions):,})"
+                    )
+                else:
+                    self.microplastic_tab.log_status("⚠️ Crop region is empty, using full map")
+            
             self.microplastic_tab.log_status(f"📊 Processing {len(intensities):,} spectra...")
             self.microplastic_tab.update_progress(30, "Starting detection...")
             
@@ -9592,8 +9772,19 @@ The map is now ready for analysis!"""
         
         self.microplastic_tab.update_progress(90, "Generating visualizations...")
         
-        # Display results
-        self.microplastic_tab.display_results(results)
+        # Get map dimensions for proper reshaping
+        # If cropping was enabled, use cropped dimensions
+        if self.microplastic_tab.crop_enabled_check.isChecked():
+            x_min = self.microplastic_tab.crop_x_min.value()
+            x_max = self.microplastic_tab.crop_x_max.value()
+            y_min = self.microplastic_tab.crop_y_min.value()
+            y_max = self.microplastic_tab.crop_y_max.value()
+            map_shape = (y_max - y_min, x_max - x_min)
+        else:
+            map_shape = (len(self.map_data.y_positions), len(self.map_data.x_positions))
+        
+        # Display results with map dimensions
+        self.microplastic_tab.display_results(results, map_shape=map_shape)
         
         self.microplastic_tab.update_progress(100, "✅ Detection complete!")
         

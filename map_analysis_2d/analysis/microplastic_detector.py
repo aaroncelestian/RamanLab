@@ -104,16 +104,48 @@ class MicroplasticDetector:
             Number of reference spectra loaded
         """
         logger.info(f"Loading plastic references from database (family: {chemical_family})")
+        logger.info(f"Database has {len(database)} total entries")
         
         self.database = database
         self.plastic_references = {}
         
+        # Use flexible keyword matching (matches main_window.py filtering logic)
+        plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                           'polystyrene', 'pet', 'pvc', 'pmma', 'nylon']
+        
+        # Debug: Track what families we see
+        families_seen = set()
+        sample_entries = []
+        
         # Filter database for plastics
         for key, spectrum_data in database.items():
             metadata = spectrum_data.get('metadata', {})
-            family = metadata.get('chemical_family', '')
             
-            if family.lower() == chemical_family.lower():
+            # Check multiple possible keys for chemical family (matches main_window.py)
+            family = ''
+            family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                          'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                          'family', 'Family', 'FAMILY']
+            
+            for family_key in family_keys:
+                if family_key in metadata:
+                    family = metadata[family_key]
+                    if family:
+                        break
+            
+            family = family.lower() if family else ''
+            
+            if family:
+                families_seen.add(family)
+            
+            # Store first few entries for debugging
+            if len(sample_entries) < 3:
+                sample_entries.append(f"{key}: family='{family}'")
+            
+            # Check if family contains any plastic-related keywords
+            is_plastic = any(keyword in family for keyword in plastic_keywords)
+            
+            if is_plastic:
                 # Extract wavenumbers and intensities as numpy arrays
                 wavenumbers = np.array(spectrum_data.get('wavenumbers', []))
                 intensities = np.array(spectrum_data.get('intensities', []))
@@ -123,6 +155,9 @@ class MicroplasticDetector:
                     self.plastic_references[key] = (wavenumbers, intensities)
                     logger.debug(f"Loaded reference: {key} ({len(wavenumbers)} points)")
         
+        # Debug output
+        logger.info(f"Sample database entries: {sample_entries}")
+        logger.info(f"Chemical families found: {sorted(families_seen)}")
         logger.info(f"Loaded {len(self.plastic_references)} plastic reference spectra")
         return len(self.plastic_references)
     
@@ -1430,6 +1465,9 @@ class MicroplasticDetector:
                 'Polyurethane', 'Acrylic', 'PVC'
             ]
         
+        logger.info(f"Loading plastic templates from database with {len(database)} entries")
+        logger.info(f"Looking for plastic types: {plastic_types}")
+        
         self.plastic_templates = {}
         
         for ptype in plastic_types:
@@ -1438,14 +1476,39 @@ class MicroplasticDetector:
             
             # Find matching entries in database
             for key, spectrum_data in database.items():
-                key_lower = key.lower()
+                # Skip if we already have enough for this type
+                if len(self.plastic_templates[ptype]) >= max_per_type:
+                    break
                 
-                # Check if this entry matches the plastic type
-                if ptype_lower in key_lower:
-                    # Skip if we already have enough for this type
-                    if len(self.plastic_templates[ptype]) >= max_per_type:
-                        break
-                    
+                # Check metadata first (more reliable than key name)
+                metadata = spectrum_data.get('metadata', {})
+                
+                # Check multiple possible keys for chemical family (matches main_window.py)
+                chemical_family = ''
+                family_keys = ['chemical_family', 'Chemical_Family', 'CHEMICAL_FAMILY',
+                              'Chemical Family', 'CHEMICAL FAMILY', 'chemical family',
+                              'family', 'Family', 'FAMILY']
+                
+                for family_key in family_keys:
+                    if family_key in metadata:
+                        chemical_family = metadata[family_key]
+                        if chemical_family:
+                            break
+                
+                chemical_family = chemical_family.lower() if chemical_family else ''
+                mineral_name = metadata.get('mineral_name', '').lower()
+                
+                # Check if this is a plastic using flexible keyword matching
+                # (matches the filtering logic in main_window.py)
+                plastic_keywords = ['plastic', 'polymer', 'polyethylene', 'polypropylene', 
+                                   'polystyrene', 'pet', 'pvc', 'pmma', 'nylon']
+                is_plastic = any(keyword in chemical_family for keyword in plastic_keywords)
+                
+                matches_type = (ptype_lower in mineral_name or 
+                               ptype_lower in key.lower() or
+                               ptype_lower in chemical_family)
+                
+                if is_plastic and matches_type:
                     # Extract spectrum data
                     wavenumbers = np.array(spectrum_data.get('wavenumbers', []))
                     intensities = np.array(spectrum_data.get('intensities', []))
@@ -1457,7 +1520,7 @@ class MicroplasticDetector:
                             intensities = intensities / np.max(intensities)
                         
                         self.plastic_templates[ptype].append((wavenumbers, intensities, key))
-                        logger.debug(f"Loaded template: {key}")
+                        logger.debug(f"Loaded template: {key} for {ptype}")
             
             logger.info(f"Loaded {len(self.plastic_templates[ptype])} templates for {ptype}")
         
@@ -1543,36 +1606,77 @@ class MicroplasticDetector:
                 spec_interp = np.interp(common_wn, wavenumbers, intensities)
                 template_interp = np.interp(common_wn, template_wn, template_int)
                 
-                # Smooth both spectra before correlation to reduce noise sensitivity
-                # Use a simple moving average
-                smooth_window = min(15, len(spec_interp) // 10)
-                if smooth_window > 3:
-                    kernel = np.ones(smooth_window) / smooth_window
-                    spec_smooth = np.convolve(spec_interp, kernel, mode='same')
-                    template_smooth = np.convolve(template_interp, kernel, mode='same')
+                # Use multiple metrics for robust matching with STRINGENT requirements
+                
+                # 1. Spectral Angle Mapper (SAM) - measures angle between vectors
+                # More robust than correlation for spectral matching
+                dot_product = np.dot(spec_interp, template_interp)
+                norm_spec = np.linalg.norm(spec_interp)
+                norm_template = np.linalg.norm(template_interp)
+                
+                if norm_spec > 1e-10 and norm_template > 1e-10:
+                    cos_angle = dot_product / (norm_spec * norm_template)
+                    cos_angle = np.clip(cos_angle, -1, 1)  # Numerical stability
+                    sam_score = cos_angle  # 1 = perfect match, 0 = orthogonal, -1 = opposite
                 else:
-                    spec_smooth = spec_interp
-                    template_smooth = template_interp
+                    sam_score = 0
                 
-                # Calculate correlation on smoothed spectra
-                if np.std(spec_smooth) > 1e-10 and np.std(template_smooth) > 1e-10:
-                    raw_corr = np.corrcoef(spec_smooth, template_smooth)[0, 1]
+                # 2. Normalized cross-correlation (more stringent than Pearson)
+                spec_centered = spec_interp - np.mean(spec_interp)
+                template_centered = template_interp - np.mean(template_interp)
+                
+                if np.std(spec_centered) > 1e-10 and np.std(template_centered) > 1e-10:
+                    ncc = np.sum(spec_centered * template_centered) / (
+                        np.sqrt(np.sum(spec_centered**2)) * np.sqrt(np.sum(template_centered**2))
+                    )
+                    ncc = max(0, ncc)  # Only positive correlations
                 else:
-                    raw_corr = 0
+                    ncc = 0
                 
-                # Calculate derivative correlation on smoothed data (less noise sensitive)
-                spec_deriv = np.gradient(spec_smooth)
-                template_deriv = np.gradient(template_smooth)
+                # 3. Peak position matching - do the peaks align?
+                # Find peaks in both spectra
+                from scipy.signal import find_peaks
+                spec_peaks, _ = find_peaks(spec_interp, prominence=0.1 * np.max(spec_interp))
+                template_peaks, _ = find_peaks(template_interp, prominence=0.1 * np.max(template_interp))
                 
-                if np.std(spec_deriv) > 1e-10 and np.std(template_deriv) > 1e-10:
-                    deriv_corr = np.corrcoef(spec_deriv, template_deriv)[0, 1]
+                # Calculate peak overlap score
+                if len(spec_peaks) > 0 and len(template_peaks) > 0:
+                    # For each template peak, find closest spectrum peak
+                    peak_distances = []
+                    for tp in template_peaks:
+                        if len(spec_peaks) > 0:
+                            closest_dist = np.min(np.abs(spec_peaks - tp))
+                            # Normalize by wavenumber range
+                            peak_distances.append(closest_dist / len(common_wn))
+                    
+                    # Peak score: 1 if peaks align perfectly, 0 if far apart
+                    avg_peak_dist = np.mean(peak_distances) if peak_distances else 1.0
+                    peak_score = np.exp(-20 * avg_peak_dist)  # Strict penalty for misaligned peaks
                 else:
-                    deriv_corr = 0
+                    peak_score = 0.0  # No peaks found
                 
-                # Combined score: weight raw correlation higher since we're smoothing
-                # Raw correlation on smoothed data captures overall shape
-                # Derivative helps with peak alignment
-                corr = 0.7 * max(0, raw_corr) + 0.3 * max(0, deriv_corr)
+                # 4. Residual penalty - how well does template fit?
+                if np.sum(template_interp**2) > 0:
+                    scale = np.dot(spec_interp, template_interp) / np.sum(template_interp**2)
+                    scale = max(0, scale)
+                    fitted = scale * template_interp
+                    residual_norm = np.sqrt(np.mean((spec_interp - fitted)**2))
+                    # Convert to similarity score (0 = bad fit, 1 = perfect fit)
+                    # Increased penalty from -5 to -10 for stricter matching
+                    residual_score = np.exp(-10 * residual_norm)
+                else:
+                    residual_score = 0
+                
+                # Combined score with STRICT requirements:
+                # SAM (30%) + NCC (25%) + Peak matching (25%) + Residual fit (20%)
+                # All metrics must be reasonably high for a good match
+                corr = 0.30 * max(0, sam_score) + 0.25 * ncc + 0.25 * peak_score + 0.20 * residual_score
+                
+                # Additional penalty: if any individual metric is too low, reduce overall score
+                # This prevents cases where one high metric compensates for very low others
+                min_metric = min(max(0, sam_score), ncc, peak_score, residual_score)
+                if min_metric < 0.3:  # If any metric is below 0.3, apply penalty
+                    corr *= (min_metric / 0.3)  # Scale down the score
                 
                 # Calculate residual (how well template fits)
                 if np.sum(template_interp**2) > 0:
@@ -1640,9 +1744,10 @@ class MicroplasticDetector:
         n_cores = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
         
         logger.info(f"Template matching {n_spectra:,} spectra against {sum(len(v) for v in self.plastic_templates.values())} templates using {n_cores} cores")
+        logger.info(f"Applying ALS baseline correction to each spectrum before matching")
         
         if progress_callback:
-            progress_callback(0, 100, f"Template matching {n_spectra:,} spectra...")
+            progress_callback(0, 100, f"Template matching {n_spectra:,} spectra (with baseline correction)...")
         
         # Initialize score maps
         score_maps = {ptype: np.zeros(n_spectra) for ptype in self.plastic_templates.keys()}
