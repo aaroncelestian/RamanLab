@@ -1,4 +1,15 @@
 """
+RamanLab Cluster Analysis - Main Application (Refactored)
+
+This is the main entry point for the cluster analysis module with improved
+architecture using separated UI components.
+"""
+
+print("="*60)
+print("DEBUG: cluster_analysis/main.py is being loaded!")
+print("="*60)
+
+"""
 Main Cluster Analysis Module for RamanLab
 
 This module contains the main cluster analysis class that orchestrates
@@ -163,16 +174,28 @@ class RamanClusterAnalysisQt6(QMainWindow):
     
     def select_import_folder(self):
         """Select folder for data import and automatically start loading."""
+        print("\n" + "="*60)
+        print("DEBUG: select_import_folder() called")
+        print("DEBUG: About to open QFileDialog...")
         folder = QFileDialog.getExistingDirectory(self, "Select Folder with Spectra")
+        print(f"DEBUG: Dialog closed. Selected folder: '{folder}'")
+        print(f"DEBUG: folder is empty: {not folder}")
         if folder:
             self.selected_folder = folder
+            print(f"DEBUG: self.selected_folder set to: {self.selected_folder}")
             # Update the folder path label in the import tab
             if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_folder_path_label'):
                 folder_label = self.import_tab.get_folder_path_label()
                 folder_label.setText(folder)
+                print("DEBUG: Updated folder path label")
             
             # Automatically start import (consistent with other import methods)
+            print("DEBUG: Calling start_batch_import()...")
             self.start_batch_import()
+            print("DEBUG: start_batch_import() completed")
+        else:
+            print("DEBUG: No folder selected (user cancelled)")
+        print("="*60 + "\n")
     
     def import_single_file_map(self):
         """Import a single file containing all spectra with X,Y positions (2D map format)."""
@@ -471,16 +494,6 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import spectra:\n{str(e)}")
-    
-    def select_import_folder(self):
-        """Select folder for importing spectra."""
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder with Spectra")
-        if folder:
-            self.selected_folder = folder
-            # Update the folder path label in the import tab
-            if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_folder_path_label'):
-                folder_label = self.import_tab.get_folder_path_label()
-                folder_label.setText(folder)
     
     def load_folder_spectra(self):
         """Load spectra from selected folder."""
@@ -1054,7 +1067,12 @@ class RamanClusterAnalysisQt6(QMainWindow):
     
     def start_batch_import(self):
         """Start batch import of spectra from selected folder using intelligent parsing."""
+        print("\n" + "="*60)
+        print("DEBUG: start_batch_import() called")
+        print(f"DEBUG: self.selected_folder = {self.selected_folder}")
+        
         if not self.selected_folder:
+            print("DEBUG: ERROR - No folder selected!")
             QMessageBox.warning(self, "No Folder", "Please select a folder first.")
             return
             
@@ -1065,10 +1083,18 @@ class RamanClusterAnalysisQt6(QMainWindow):
             # Get file patterns to search for
             patterns = ['*.txt', '*.csv', '*.dat', '*.asc']
             files = []
+            print(f"DEBUG: Searching for files with patterns: {patterns}")
             for pattern in patterns:
-                files.extend(glob.glob(os.path.join(self.selected_folder, pattern)))
+                pattern_files = glob.glob(os.path.join(self.selected_folder, pattern))
+                print(f"DEBUG: Pattern '{pattern}' found {len(pattern_files)} files")
+                files.extend(pattern_files)
+            
+            print(f"DEBUG: Total files found: {len(files)}")
+            if files:
+                print(f"DEBUG: First few files: {files[:3]}")
             
             if not files:
+                print("DEBUG: ERROR - No files found!")
                 QMessageBox.warning(self, "No Files", "No spectrum files found in selected folder.")
                 return
             
@@ -1089,6 +1115,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             spectra_data = []
             wavenumbers = None
             
+            print(f"DEBUG: Starting to load {len(files)} files...")
             for i, file_path in enumerate(files):
                 try:
                     # Update progress
@@ -1105,36 +1132,88 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     QApplication.processEvents()
                     
                     # Read spectrum file (intelligent parsing)
+                    if i < 3:  # Only print details for first 3 files
+                        print(f"DEBUG: Reading file {i+1}: {os.path.basename(file_path)}")
                     spectrum = self._read_spectrum_file(file_path)
                     if spectrum is not None:
                         if wavenumbers is None:
                             wavenumbers = spectrum['wavenumbers']
+                            print(f"DEBUG: Set wavenumbers from first file, length: {len(wavenumbers)}")
                         spectra_data.append(spectrum['intensities'])
+                        if i < 3:
+                            print(f"DEBUG: Successfully loaded spectrum {i+1}, intensities length: {len(spectrum['intensities'])}")
+                    else:
+                        if i < 3:
+                            print(f"DEBUG: WARNING - spectrum is None for file {i+1}")
                     
                 except Exception as e:
-                    print(f"Error importing file {file_path}: {str(e)}")
+                    print(f"DEBUG: ERROR importing file {file_path}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
                     continue
             
+            print(f"DEBUG: Finished loading files. Total spectra loaded: {len(spectra_data)}")
             if not spectra_data:
+                print("DEBUG: ERROR - No valid spectra loaded!")
                 QMessageBox.warning(self, "Import Failed", "No valid spectra could be imported.")
                 return
             
             # Store in cluster data
+            print("DEBUG: Storing data in cluster_data...")
             self.cluster_data['intensities'] = np.array(spectra_data)
             self.cluster_data['wavenumbers'] = wavenumbers
+            print(f"DEBUG: cluster_data['intensities'].shape = {self.cluster_data['intensities'].shape}")
+            print(f"DEBUG: cluster_data['wavenumbers'].shape = {self.cluster_data['wavenumbers'].shape}")
+            print(f"DEBUG: cluster_data keys: {list(self.cluster_data.keys())}")
+            
+            # Extract features (required for clustering)
+            print("DEBUG: Extracting features...")
+            if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_import_status'):
+                status_label = self.import_tab.get_import_status()
+                status_label.setText("Extracting features...")
+            QApplication.processEvents()
+            
+            features = self.data_processor.extract_vibrational_features(
+                self.cluster_data['intensities'], 
+                wavenumbers
+            )
+            self.cluster_data['features'] = features
+            print(f"DEBUG: Features extracted, shape: {features.shape}")
+            
+            # Scale features (required for clustering)
+            print("DEBUG: Scaling features...")
+            if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_import_status'):
+                status_label = self.import_tab.get_import_status()
+                status_label.setText("Scaling features...")
+            QApplication.processEvents()
+            
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            self.cluster_data['features_scaled'] = scaler.fit_transform(features)
+            print(f"DEBUG: Features scaled, shape: {self.cluster_data['features_scaled'].shape}")
+            print(f"DEBUG: Final cluster_data keys: {list(self.cluster_data.keys())}")
             
             # Update status
             if hasattr(self, 'import_tab') and hasattr(self.import_tab, 'get_import_status'):
                 status_label = self.import_tab.get_import_status()
                 status_label.setText(f"Successfully imported {len(spectra_data)} spectra from {len(files)} files\n" +
-                                    f"Wavenumber range: {np.min(wavenumbers):.1f} - {np.max(wavenumbers):.1f} cm⁻¹")
+                                    f"Wavenumber range: {np.min(wavenumbers):.1f} - {np.max(wavenumbers):.1f} cm⁻¹\n" +
+                                    f"Features extracted and scaled. Ready for clustering.")
             
-            self.statusBar().showMessage(f"Imported {len(spectra_data)} spectra")
+            self.statusBar().showMessage(f"Imported {len(spectra_data)} spectra - Ready for clustering")
+            
+            print("DEBUG: Import process completed successfully!")
+            print("="*60 + "\n")
             
             QMessageBox.information(self, "Import Complete", 
-                                  f"Successfully imported {len(spectra_data)} spectra from {len(files)} files.")
+                                  f"Successfully imported {len(spectra_data)} spectra from {len(files)} files.\n\n"
+                                  f"Features extracted and scaled.\nReady for clustering!")
             
         except Exception as e:
+            print(f"DEBUG: EXCEPTION in start_batch_import: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            print("="*60 + "\n")
             QMessageBox.critical(self, "Import Error", f"Failed to import spectra:\n{str(e)}")
     
     def _read_spectrum_file(self, file_path):

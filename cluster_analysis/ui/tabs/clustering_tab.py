@@ -193,20 +193,20 @@ class ClusteringTab(QWidget):
     
     def on_algorithm_changed(self, algorithm):
         """Handle algorithm selection changes."""
-        # Hide all algorithm-specific controls first
-        self.linkage_method_combo.setVisible(False)
-        self.distance_metric_combo.setVisible(False)
-        self.dbscan_eps.setVisible(False)
-        self.dbscan_min_samples.setVisible(False)
+        # Disable all algorithm-specific controls first (keep them visible)
+        self.linkage_method_combo.setEnabled(False)
+        self.distance_metric_combo.setEnabled(False)
+        self.dbscan_eps.setEnabled(False)
+        self.dbscan_min_samples.setEnabled(False)
         
-        # Show relevant controls based on algorithm
+        # Enable relevant controls based on algorithm
         if algorithm == 'Hierarchical':
-            self.linkage_method_combo.setVisible(True)
-            self.distance_metric_combo.setVisible(True)
+            self.linkage_method_combo.setEnabled(True)
+            self.distance_metric_combo.setEnabled(True)
             self.n_clusters_spinbox.setEnabled(True)
         elif algorithm == 'DBSCAN':
-            self.dbscan_eps.setVisible(True)
-            self.dbscan_min_samples.setVisible(True)
+            self.dbscan_eps.setEnabled(True)
+            self.dbscan_min_samples.setEnabled(True)
             self.n_clusters_spinbox.setEnabled(False)  # DBSCAN finds clusters automatically
         else:  # K-Means, MiniBatchKMeans, GMM
             self.n_clusters_spinbox.setEnabled(True)

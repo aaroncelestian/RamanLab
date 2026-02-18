@@ -34,7 +34,21 @@ class ImportTab(QWidget):
         
         # Add select folder button
         select_folder_btn = QPushButton("Select Folder")
-        select_folder_btn.clicked.connect(self.parent_window.select_import_folder)
+        
+        def debug_select_folder():
+            print("\n" + "="*60)
+            print("DEBUG: Select Folder button clicked!")
+            print("="*60)
+            try:
+                print(f"DEBUG: parent_window type: {type(self.parent_window)}")
+                print(f"DEBUG: hasattr select_import_folder: {hasattr(self.parent_window, 'select_import_folder')}")
+                self.parent_window.select_import_folder()
+            except Exception as e:
+                print(f"DEBUG: ERROR calling select_import_folder: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        select_folder_btn.clicked.connect(debug_select_folder)
         folder_layout.addWidget(select_folder_btn)
         
         # Add import single file button (for single-file 2D maps)
