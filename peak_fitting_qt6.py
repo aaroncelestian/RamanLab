@@ -9480,7 +9480,11 @@ class SpectralDeconvolutionQt6(QDialog):
             
             # Pass selected data file if available
             data_file = getattr(self, 'selected_data_file', None)
-            launch_density_analysis(data_file)
+            
+            # Pass batch results if available (for automatic loading)
+            batch_results = getattr(self, 'batch_results', None)
+            
+            launch_density_analysis(data_file, batch_results)
             
         except ImportError:
             QMessageBox.warning(self, "Module Not Available", 
