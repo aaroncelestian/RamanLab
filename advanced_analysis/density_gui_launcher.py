@@ -960,6 +960,7 @@ class DensityAnalysisGUI(QMainWindow):
             "Peak Position vs CDI",
             "Peak Height vs Peak Width",
             "Density vs Peak Width",
+            "Peak Width vs Sequence Position",
             "Multi-parameter Matrix"
         ])
         plot_selection_layout.addWidget(self.diagnostic_plot_combo)
@@ -2535,6 +2536,41 @@ Material-Specific Density Ranges:
                 from scipy import stats
                 corr, p_val = stats.pearsonr(densities, peak_widths)
                 ax.text(0.02, 0.98, f'Correlation: {corr:.3f}\nP-value: {p_val:.4f}',
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Width vs Sequence Position":
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                # Plot with CDI as color to show crystallinity variation
+                scatter = ax.scatter(sequence_indices, peak_widths, c=cdis, 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('Sequence Position (Line Scan)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Peak Width Along Line Scan - Colored by CDI')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('CDI (Crystallinity)', rotation=270, labelpad=15)
+                
+                # Add horizontal line at CDI threshold to show which points are filtered
+                # Calculate mean width for high vs low CDI regions
+                high_cdi_mask = cdis >= 0.2
+                if np.sum(high_cdi_mask) > 0:
+                    mean_width_high = np.mean(peak_widths[high_cdi_mask])
+                    ax.axhline(mean_width_high, color='red', linestyle='--', linewidth=1.5, 
+                             alpha=0.5, label=f'Mean width (CDI≥0.2): {mean_width_high:.1f} cm⁻¹')
+                
+                low_cdi_mask = cdis < 0.2
+                if np.sum(low_cdi_mask) > 0:
+                    mean_width_low = np.mean(peak_widths[low_cdi_mask])
+                    ax.axhline(mean_width_low, color='orange', linestyle='--', linewidth=1.5, 
+                             alpha=0.5, label=f'Mean width (CDI<0.2): {mean_width_low:.1f} cm⁻¹')
+                
+                ax.legend(loc='best')
+                
+                # Add info about spatial zones
+                info_text = f'Total spectra: {len(sequence_indices)}\nCrystalline (CDI≥0.2): {np.sum(high_cdi_mask)}\nBacteria-rich (CDI<0.2): {np.sum(low_cdi_mask)}'
+                ax.text(0.02, 0.98, info_text,
                        transform=ax.transAxes, verticalalignment='top',
                        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
                 
