@@ -961,6 +961,9 @@ class DensityAnalysisGUI(QMainWindow):
             "Peak Height vs Peak Width",
             "Density vs Peak Width",
             "Peak Width vs Sequence Position",
+            "Peak Width Trends (Smoothed)",
+            "Dual-Axis: Peak Width + CDI vs Position",
+            "Normalized Peak Width (Stress Indicator)",
             "Multi-parameter Matrix"
         ])
         plot_selection_layout.addWidget(self.diagnostic_plot_combo)
@@ -2573,6 +2576,154 @@ Material-Specific Density Ranges:
                 ax.text(0.02, 0.98, info_text,
                        transform=ax.transAxes, verticalalignment='top',
                        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Width Trends (Smoothed)":
+                from scipy import signal
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                # Apply smoothing to peak width data
+                window_size = min(11, len(peak_widths) // 3)
+                if window_size % 2 == 0:
+                    window_size += 1
+                if window_size >= 3:
+                    smoothed_width = signal.savgol_filter(peak_widths, window_size, 2)
+                else:
+                    smoothed_width = peak_widths
+                
+                # Plot raw data as light scatter
+                ax.scatter(sequence_indices, peak_widths, c='lightgray', s=20, alpha=0.3, label='Raw data')
+                
+                # Plot smoothed trend colored by CDI
+                scatter = ax.scatter(sequence_indices, smoothed_width, c=cdis, 
+                                   cmap='viridis', s=60, alpha=0.8, edgecolors='black', linewidth=0.5)
+                ax.plot(sequence_indices, smoothed_width, 'k-', linewidth=2, alpha=0.5, label='Smoothed trend')
+                
+                ax.set_xlabel('Sequence Position (Line Scan)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Smoothed Peak Width Trends - Emphasizing Spatial Patterns')
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc='upper right')
+                
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('CDI (Crystallinity)', rotation=270, labelpad=15)
+                
+                # Identify zones with elevated peak width
+                mean_width = np.mean(smoothed_width)
+                std_width = np.std(smoothed_width)
+                high_width_zones = smoothed_width > (mean_width + 0.5 * std_width)
+                
+                # Highlight high-width zones
+                if np.any(high_width_zones):
+                    ax.fill_between(sequence_indices, 0, ax.get_ylim()[1], 
+                                   where=high_width_zones, alpha=0.1, color='red',
+                                   label='Elevated width zones')
+                    ax.legend(loc='upper right')
+                
+            elif plot_type == "Dual-Axis: Peak Width + CDI vs Position":
+                fig = self.figure
+                ax1 = fig.add_subplot(1, 1, 1)
+                
+                # Smooth both datasets
+                from scipy import signal
+                window_size = min(11, len(peak_widths) // 3)
+                if window_size % 2 == 0:
+                    window_size += 1
+                if window_size >= 3:
+                    smoothed_width = signal.savgol_filter(peak_widths, window_size, 2)
+                    smoothed_cdi = signal.savgol_filter(cdis, window_size, 2)
+                else:
+                    smoothed_width = peak_widths
+                    smoothed_cdi = cdis
+                
+                # Plot peak width on left axis
+                color_width = 'tab:red'
+                ax1.set_xlabel('Sequence Position (Line Scan)')
+                ax1.set_ylabel('Peak Width (cm⁻¹)', color=color_width)
+                line1 = ax1.plot(sequence_indices, smoothed_width, color=color_width, 
+                               linewidth=3, alpha=0.8, label='Peak Width (smoothed)')
+                ax1.scatter(sequence_indices, peak_widths, color=color_width, s=20, alpha=0.2)
+                ax1.tick_params(axis='y', labelcolor=color_width)
+                ax1.grid(True, alpha=0.3)
+                
+                # Create second y-axis for CDI
+                ax2 = ax1.twinx()
+                color_cdi = 'tab:blue'
+                ax2.set_ylabel('CDI (Crystallinity)', color=color_cdi)
+                line2 = ax2.plot(sequence_indices, smoothed_cdi, color=color_cdi, 
+                               linewidth=3, alpha=0.8, linestyle='--', label='CDI (smoothed)')
+                ax2.scatter(sequence_indices, cdis, color=color_cdi, s=20, alpha=0.2)
+                ax2.tick_params(axis='y', labelcolor=color_cdi)
+                
+                # Add CDI threshold line
+                ax2.axhline(0.2, color='orange', linestyle=':', linewidth=2, alpha=0.7, label='CDI=0.2 threshold')
+                
+                ax1.set_title('Peak Width vs CDI Decoupling Analysis')
+                
+                # Combine legends
+                lines = line1 + line2
+                labels = [l.get_label() for l in lines]
+                ax1.legend(lines, labels, loc='upper left')
+                
+                # Add interpretation text
+                info_text = 'If peak width is high where CDI is moderate/high,\nthis indicates stress/strain effects'
+                ax1.text(0.98, 0.02, info_text, transform=ax1.transAxes,
+                        ha='right', va='bottom', fontsize=9,
+                        bbox=dict(boxstyle="round,pad=0.5", facecolor='yellow', alpha=0.3))
+                
+            elif plot_type == "Normalized Peak Width (Stress Indicator)":
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                # Calculate expected peak width based on CDI
+                # Fit a polynomial to the CDI vs peak width relationship for crystalline regions
+                mask = cdis >= 0.2
+                if np.sum(mask) > 10:
+                    from scipy import stats
+                    # Fit linear relationship for expected width vs CDI
+                    slope, intercept, _, _, _ = stats.linregress(cdis[mask], peak_widths[mask])
+                    expected_width = slope * cdis + intercept
+                    
+                    # Calculate residuals (actual - expected)
+                    width_residuals = peak_widths - expected_width
+                    
+                    # Normalize by standard deviation
+                    std_residual = np.std(width_residuals[mask])
+                    normalized_residuals = width_residuals / std_residual if std_residual > 0 else width_residuals
+                    
+                    # Plot normalized residuals
+                    scatter = ax.scatter(sequence_indices, normalized_residuals, c=cdis,
+                                       cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                    
+                    # Add zero line
+                    ax.axhline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.5, label='Expected width')
+                    
+                    # Add +/- 1 sigma lines
+                    ax.axhline(1, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label='+1σ (broader than expected)')
+                    ax.axhline(-1, color='blue', linestyle='--', linewidth=1.5, alpha=0.5, label='-1σ (narrower than expected)')
+                    
+                    # Highlight stress zones (>1 sigma broader)
+                    stress_zones = normalized_residuals > 1
+                    if np.any(stress_zones):
+                        ax.fill_between(sequence_indices, -3, 3, where=stress_zones,
+                                       alpha=0.15, color='red', label='Potential stress zones')
+                    
+                    ax.set_xlabel('Sequence Position (Line Scan)')
+                    ax.set_ylabel('Normalized Peak Width Residual (σ)')
+                    ax.set_title('Stress/Strain Indicator - Peak Width Deviations from Expected')
+                    ax.grid(True, alpha=0.3)
+                    ax.legend(loc='best')
+                    ax.set_ylim(-3, 3)
+                    
+                    cbar = plt.colorbar(scatter, ax=ax)
+                    cbar.set_label('CDI (Crystallinity)', rotation=270, labelpad=15)
+                    
+                    # Add interpretation
+                    info_text = f'Positive values = broader than expected for CDI\nNegative values = narrower than expected\nStress zones: {np.sum(stress_zones)} spectra'
+                    ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
+                           verticalalignment='top',
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                else:
+                    ax.text(0.5, 0.5, 'Insufficient crystalline data (CDI≥0.2) for normalization',
+                           transform=ax.transAxes, ha='center', va='center')
                 
             elif plot_type == "Multi-parameter Matrix":
                 # Create 3x3 correlation matrix
