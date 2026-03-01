@@ -707,6 +707,24 @@ class DensityAnalysisGUI(QMainWindow):
         file_group = QGroupBox("Data Input")
         file_layout = QVBoxLayout(file_group)
         
+        # Load pickle file button (for batch results)
+        load_pickle_btn = QPushButton("📦 Load Pickle File (Batch Results)")
+        load_pickle_btn.clicked.connect(self.load_pickle_file)
+        load_pickle_btn.setToolTip("Load a pickle file containing batch peak fitting results")
+        load_pickle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 8px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        file_layout.addWidget(load_pickle_btn)
+        
         load_btn = QPushButton("Load Spectrum File")
         load_btn.clicked.connect(self.load_spectrum_file)
         file_layout.addWidget(load_btn)
@@ -921,6 +939,60 @@ class DensityAnalysisGUI(QMainWindow):
         
         layout.addWidget(trend_controls_group)
         
+        # Diagnostic Analysis Section
+        diagnostic_group = QGroupBox("Diagnostic Correlation Analysis")
+        diagnostic_layout = QVBoxLayout(diagnostic_group)
+        
+        diagnostic_info = QLabel("Investigate stress/strain effects and peak relationships:")
+        diagnostic_info.setWordWrap(True)
+        diagnostic_info.setStyleSheet("color: #666; font-style: italic;")
+        diagnostic_layout.addWidget(diagnostic_info)
+        
+        # Combo box for plot type selection
+        plot_selection_layout = QHBoxLayout()
+        plot_selection_layout.addWidget(QLabel("Plot Type:"))
+        
+        self.diagnostic_plot_combo = QComboBox()
+        self.diagnostic_plot_combo.addItems([
+            "CDI vs Peak Width (all spectra)",
+            "CDI vs Peak Width (CDI≥0.2 only)",
+            "Peak Position vs Peak Width",
+            "Peak Position vs CDI",
+            "Peak Height vs Peak Width",
+            "Density vs Peak Width",
+            "Peak Width vs Sequence Position",
+            "Peak Width Trends (Smoothed)",
+            "Dual-Axis: Peak Width + CDI vs Position",
+            "Normalized Peak Width (Stress Indicator)",
+            "Multi-parameter Matrix"
+        ])
+        plot_selection_layout.addWidget(self.diagnostic_plot_combo)
+        diagnostic_layout.addLayout(plot_selection_layout)
+        
+        # Plot button
+        self.create_diagnostic_plot_btn = QPushButton("Create Diagnostic Plot")
+        self.create_diagnostic_plot_btn.clicked.connect(self.create_diagnostic_plot)
+        self.create_diagnostic_plot_btn.setEnabled(False)
+        self.create_diagnostic_plot_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
+        diagnostic_layout.addWidget(self.create_diagnostic_plot_btn)
+        
+        layout.addWidget(diagnostic_group)
+        
         # Trend results display
         trend_results_group = QGroupBox("Trend Analysis Results")
         trend_results_layout = QVBoxLayout(trend_results_group)
@@ -1078,6 +1150,88 @@ class DensityAnalysisGUI(QMainWindow):
         
         return panel
         
+    def load_pickle_file(self):
+        """Load a pickle file containing batch peak fitting results."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Load Pickle File", "",
+            "Pickle files (*.pkl *.pickle);;All files (*.*)"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            import pickle
+            
+            # Load the pickle file
+            with open(file_path, 'rb') as f:
+                batch_data = pickle.load(f)
+            
+            # Convert to the format expected by set_batch_fitting_results
+            batch_results = []
+            
+            # Handle pandas DataFrame format (new format from batch export)
+            if isinstance(batch_data, dict) and 'spectra_dict' in batch_data:
+                spectra_dict = batch_data['spectra_dict']
+                
+                # Convert spectra_dict to list format
+                for spectrum_key, spectrum_data in spectra_dict.items():
+                    result_entry = {
+                        'file': spectrum_data.get('filename', spectrum_key),
+                        'filename': spectrum_data.get('filename', spectrum_key),
+                        'wavenumbers': spectrum_data.get('wavenumbers', np.array([])),
+                        'intensities': spectrum_data.get('intensities', np.array([])),
+                        'original_intensities': spectrum_data.get('original_intensities'),
+                        'background': spectrum_data.get('background'),
+                        'fitted_peaks': spectrum_data.get('fitted_peaks'),
+                        'residuals': spectrum_data.get('residuals'),
+                        'region_start': spectrum_data.get('region_start'),
+                        'region_end': spectrum_data.get('region_end')
+                    }
+                    batch_results.append(result_entry)
+                
+                # Load the batch results into the GUI
+                self.set_batch_fitting_results(batch_results)
+                
+                QMessageBox.information(
+                    self, 
+                    "Pickle File Loaded",
+                    f"Successfully loaded batch results from:\n{Path(file_path).name}\n\n"
+                    f"Number of spectra: {len(batch_results)}\n\n"
+                    f"You can now:\n"
+                    f"• Select individual spectra to analyze\n"
+                    f"• Click 'Analyze All' to process all spectra for density"
+                )
+                
+            # Handle old list format
+            elif isinstance(batch_data, list):
+                self.set_batch_fitting_results(batch_data)
+                
+                QMessageBox.information(
+                    self, 
+                    "Pickle File Loaded",
+                    f"Successfully loaded batch results from:\n{Path(file_path).name}\n\n"
+                    f"Number of spectra: {len(batch_data)}\n\n"
+                    f"You can now:\n"
+                    f"• Select individual spectra to analyze\n"
+                    f"• Click 'Analyze All' to process all spectra for density"
+                )
+            else:
+                QMessageBox.warning(
+                    self, 
+                    "Invalid Format",
+                    f"The pickle file does not contain valid batch results.\n"
+                    f"Expected a dict with 'spectra_dict' or a list, got: {type(batch_data).__name__}\n\n"
+                    f"Available keys: {list(batch_data.keys()) if isinstance(batch_data, dict) else 'N/A'}"
+                )
+                
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            QMessageBox.critical(self, "Load Error", 
+                               f"Failed to load pickle file:\n{str(e)}\n\n"
+                               f"Details:\n{error_details[:500]}")
+    
     def load_spectrum_file(self):
         """Load a spectrum file."""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -1553,7 +1707,7 @@ Material-Specific Density Ranges:
             ax1 = self.figure.add_subplot(gs[0, 0])
             
             # Create histogram of CDI values
-            ax1.hist(cdis, bins=min(10, len(cdis)), alpha=0.7, color='blue', edgecolor='black')
+            ax1.hist(cdis, bins=min(20, len(cdis)//5 + 1), alpha=0.7, color='blue', edgecolor='black')
             ax1.axvline(np.mean(cdis), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(cdis):.4f}')
             ax1.set_xlabel('Crystalline Density Index (CDI)')
             ax1.set_ylabel('Frequency')
@@ -1561,67 +1715,109 @@ Material-Specific Density Ranges:
             ax1.legend()
             ax1.grid(True, alpha=0.3)
             
-            # 2. Density Comparison (top-right)
+            # 2. Density & CDI Dual-Axis with Viridis Color Coding (top-right)
             ax2 = self.figure.add_subplot(gs[0, 1])
             
-            # Scatter plot comparing apparent vs specialized density
-            scatter = ax2.scatter(apparent_densities, specialized_densities, 
-                                c=cdis, cmap='viridis', alpha=0.7, s=60, edgecolors='black')
+            # Create spectrum indices (1 to N)
+            spectrum_indices = np.arange(1, len(batch_results) + 1)
             
-            # Add diagonal line for reference
-            min_density = min(min(apparent_densities), min(specialized_densities))
-            max_density = max(max(apparent_densities), max(specialized_densities))
-            ax2.plot([min_density, max_density], [min_density, max_density], 
-                    'r--', alpha=0.5, label='Equal densities')
+            # Normalize CDI values for viridis colormap (0 to 1)
+            cdi_normalized = (np.array(cdis) - min(cdis)) / (max(cdis) - min(cdis)) if max(cdis) > min(cdis) else np.zeros_like(cdis)
             
-            ax2.set_xlabel('Apparent Density (g/cm³)')
-            ax2.set_ylabel('Specialized Density (g/cm³)')
-            ax2.set_title('Density Correlation')
-            ax2.legend()
+            # Use viridis colormap (colorblind-friendly)
+            import matplotlib.cm as cm
+            colors = cm.viridis(cdi_normalized)
+            
+            # Plot density on left y-axis with color-coded points
+            ax2.set_xlabel('Spectrum Number (Line Scan Position)')
+            ax2.set_ylabel('Density (g/cm³)', color='black')
+            
+            # Plot density line
+            ax2.plot(spectrum_indices, specialized_densities, 'k-', linewidth=1.5, alpha=0.3)
+            
+            # Plot colored scatter points for density
+            scatter1 = ax2.scatter(spectrum_indices, specialized_densities, c=cdis, 
+                                  cmap='viridis', s=50, alpha=0.8, edgecolors='black', linewidth=0.5,
+                                  zorder=5)
+            
+            # Add mean density line
+            mean_density = np.mean(specialized_densities)
+            ax2.axhline(mean_density, color='blue', linestyle=':', linewidth=1.5, alpha=0.5)
+            
+            # Create second y-axis for CDI
+            ax2_twin = ax2.twinx()
+            ax2_twin.set_ylabel('CDI (Crystallinity)', color='purple')
+            
+            # Plot CDI line
+            ax2_twin.plot(spectrum_indices, cdis, color='purple', linewidth=2, 
+                         marker='s', markersize=3, alpha=0.6, linestyle='--')
+            ax2_twin.tick_params(axis='y', labelcolor='purple')
+            
+            # Add mean CDI line
+            mean_cdi = np.mean(cdis)
+            ax2_twin.axhline(mean_cdi, color='purple', linestyle=':', linewidth=1.5, alpha=0.5)
+            
+            # Add classification threshold if available
+            if hasattr(self.analyzer, 'classification_thresholds'):
+                thresholds = self.analyzer.classification_thresholds
+                if 'medium' in thresholds:
+                    ax2_twin.axhline(thresholds['medium'], color='orange', linestyle='--', 
+                                   linewidth=1.5, alpha=0.7, label='Mixed threshold')
+            
+            ax2.set_title('Density & Crystallinity Across Line Scan')
             ax2.grid(True, alpha=0.3)
             
-            # Add colorbar for CDI
-            cbar = self.figure.colorbar(scatter, ax=ax2)
-            cbar.set_label('CDI', rotation=270, labelpad=15)
+            # Set x-axis to show reasonable tick marks
+            if len(batch_results) > 20:
+                # Show every Nth tick for large datasets
+                tick_step = max(1, len(batch_results) // 20)
+                ax2.set_xticks(spectrum_indices[::tick_step])
             
-            # 3. Spectrum Quality vs Density (bottom-left)
+            # 3. CDI by Spectrum - LINE PLOT (bottom-left)
             ax3 = self.figure.add_subplot(gs[1, 0])
             
-            # Plot R² vs specialized density
-            ax3.scatter(specialized_densities, original_r2s, 
-                       c=cdis, cmap='plasma', alpha=0.7, s=60, edgecolors='black')
-            ax3.set_xlabel('Specialized Density (g/cm³)')
-            ax3.set_ylabel('Original Fit R²')
-            ax3.set_title('Fit Quality vs Density')
+            # Plot CDI as a line with markers
+            ax3.plot(spectrum_indices, cdis, 'purple', linewidth=2, marker='o', 
+                    markersize=4, alpha=0.7)
+            
+            # Add mean line
+            mean_cdi = np.mean(cdis)
+            ax3.axhline(mean_cdi, color='red', linestyle=':', linewidth=2, 
+                       label=f'Mean: {mean_cdi:.4f}')
+            
+            # Add classification thresholds if available
+            if hasattr(self.analyzer, 'classification_thresholds'):
+                thresholds = self.analyzer.classification_thresholds
+                if 'medium' in thresholds:
+                    ax3.axhline(thresholds['medium'], color='orange', linestyle='--', 
+                               linewidth=1, alpha=0.7, label='Mixed threshold')
+            
+            ax3.set_xlabel('Spectrum Number (Line Scan Position)')
+            ax3.set_ylabel('Crystalline Density Index (CDI)')
+            ax3.set_title('CDI Across Line Scan')
+            ax3.legend(loc='best')
             ax3.grid(True, alpha=0.3)
             
-            # 4. Batch Overview Bar Chart (bottom-right)
+            # Set x-axis to show reasonable tick marks
+            if len(batch_results) > 20:
+                ax3.set_xticks(spectrum_indices[::tick_step])
+            
+            # 4. Density vs CDI Correlation (bottom-right)
             ax4 = self.figure.add_subplot(gs[1, 1])
             
-            # Show density values for each spectrum (limited to first 10 for readability)
-            display_count = min(10, len(batch_results))
-            x_indices = range(display_count)
+            # Scatter plot with color gradient based on spectrum position
+            scatter = ax4.scatter(cdis, specialized_densities, 
+                                c=spectrum_indices, cmap='viridis', 
+                                alpha=0.7, s=60, edgecolors='black')
             
-            # Truncate filenames for display
-            display_names = [name[:8] + '...' if len(name) > 8 else name 
-                           for name in filenames[:display_count]]
-            
-            bars = ax4.bar(x_indices, specialized_densities[:display_count], 
-                          color=plt.cm.viridis(np.array(cdis[:display_count])/max(cdis)), 
-                          alpha=0.7, edgecolor='black')
-            
-            ax4.set_xlabel('Spectrum')
+            ax4.set_xlabel('Crystalline Density Index (CDI)')
             ax4.set_ylabel('Specialized Density (g/cm³)')
-            ax4.set_title(f'Density by Spectrum (first {display_count})')
-            ax4.set_xticks(x_indices)
-            ax4.set_xticklabels(display_names, rotation=45, ha='right')
+            ax4.set_title('Density vs CDI Correlation')
             ax4.grid(True, alpha=0.3)
             
-            # Add value labels on bars
-            for bar, density, cdi in zip(bars, specialized_densities[:display_count], cdis[:display_count]):
-                height = bar.get_height()
-                ax4.text(bar.get_x() + bar.get_width()/2., height + max(specialized_densities)*0.01,
-                        f'{density:.3f}\n({cdi:.3f})', ha='center', va='bottom', fontsize=8)
+            # Add colorbar to show position along line scan
+            cbar = self.figure.colorbar(scatter, ax=ax4)
+            cbar.set_label('Spectrum Position', rotation=270, labelpad=15)
             
             # Add summary statistics
             summary_text = f"""Batch Statistics:
@@ -1636,9 +1832,6 @@ Material-Specific Density Ranges:
             self.figure.text(0.02, 0.02, summary_text, fontsize=9, 
                            bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgray', alpha=0.8),
                            verticalalignment='bottom')
-            
-            self.figure.suptitle(f'Batch Density Analysis Results - {len(batch_results)} Spectra', 
-                               fontsize=14, fontweight='bold')
             
             self.figure.tight_layout()
             self.canvas.draw()
@@ -1754,7 +1947,14 @@ Material-Specific Density Ranges:
             if self.analyze_peak_height_checkbox.isChecked():
                 data_arrays['Peak Height'] = np.array([r['metrics']['main_peak_height'] for r in results])
             if self.analyze_peak_width_checkbox.isChecked():
-                data_arrays['Peak Width'] = np.array([r['metrics']['peak_width'] for r in results])
+                # Filter peak width data: only include spectra with CDI >= 0.2
+                # This excludes bacteria-dominated spectra where we're measuring background width
+                cdis = np.array([r['cdi'] for r in results])
+                peak_widths = np.array([r['metrics']['peak_width'] for r in results])
+                
+                # Create masked array where CDI < 0.2 are set to NaN
+                filtered_widths = np.where(cdis >= 0.2, peak_widths, np.nan)
+                data_arrays['COM Peak Width (CDI≥0.2)'] = filtered_widths
             
             if not data_arrays:
                 QMessageBox.warning(self, "No Parameters", "Please select at least one parameter to analyze.")
@@ -1794,6 +1994,9 @@ Material-Specific Density Ranges:
             # Enable export buttons
             self.export_trends_btn.setEnabled(True)
             self.save_trend_plots_btn.setEnabled(True)
+            
+            # Enable diagnostic plot button
+            self.create_diagnostic_plot_btn.setEnabled(True)
             
         except Exception as e:
             QMessageBox.critical(self, "Analysis Error", f"Failed to analyze trends:\n{str(e)}")
@@ -1840,8 +2043,12 @@ Material-Specific Density Ranges:
         import scipy.stats as stats
         from scipy import signal
         
-        n = len(y)
-        if n < 3:
+        # Store original data (may contain NaN for filtered data)
+        raw_data = y.copy()
+        
+        # Filter out NaN values for statistical calculations
+        valid_mask = ~np.isnan(y)
+        if np.sum(valid_mask) < 3:
             return {
                 'trend': 'insufficient_data',
                 'slope': 0,
@@ -1849,11 +2056,19 @@ Material-Specific Density Ranges:
                 'p_value': 1.0,
                 'confidence_interval': (0, 0),
                 'smoothed_data': y,
-                'residuals': np.zeros_like(y)
+                'raw_data': raw_data,
+                'residuals': np.zeros_like(y),
+                'fitted_line': y,
+                'prediction_intervals': {'lower': y, 'upper': y}
             }
         
-        # Calculate linear regression
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+        # Use only valid (non-NaN) data for calculations
+        x_valid = x[valid_mask]
+        y_valid = y[valid_mask]
+        n = len(y_valid)
+        
+        # Calculate linear regression on valid data
+        slope, intercept, r_value, p_value, std_err = stats.linregress(x_valid, y_valid)
         r_squared = r_value ** 2
         
         # Calculate confidence interval for the slope
@@ -1861,14 +2076,19 @@ Material-Specific Density Ranges:
         t_critical = stats.t.ppf(1 - alpha/2, n - 2)
         slope_ci = (slope - t_critical * std_err, slope + t_critical * std_err)
         
-        # Calculate smoothed data using moving average
+        # Calculate smoothed data using moving average (only on valid data)
         if window_size > 1 and n >= window_size:
-            smoothed = signal.savgol_filter(y, min(window_size, n), min(2, window_size-1))
+            smoothed_valid = signal.savgol_filter(y_valid, min(window_size, n), min(2, window_size-1))
         else:
-            smoothed = y.copy()
+            smoothed_valid = y_valid.copy()
         
-        # Calculate residuals
-        fitted_line = slope * x + intercept
+        # Reconstruct full smoothed array with NaN where data was filtered
+        smoothed = np.full_like(y, np.nan)
+        smoothed[valid_mask] = smoothed_valid
+        
+        # Calculate residuals and fitted line
+        fitted_line = np.full_like(y, np.nan)
+        fitted_line[valid_mask] = slope * x_valid + intercept
         residuals = y - fitted_line
         
         # Determine trend significance
@@ -1881,8 +2101,14 @@ Material-Specific Density Ranges:
         else:
             trend = 'uncertain'
         
-        # Calculate prediction intervals
-        pred_intervals = self.calculate_prediction_intervals(x, y, confidence_level)
+        # Calculate prediction intervals (only for valid data)
+        pred_intervals = self.calculate_prediction_intervals(x_valid, y_valid, confidence_level)
+        
+        # Reconstruct full prediction interval arrays with NaN
+        pred_lower = np.full_like(y, np.nan)
+        pred_upper = np.full_like(y, np.nan)
+        pred_lower[valid_mask] = pred_intervals['lower']
+        pred_upper[valid_mask] = pred_intervals['upper']
         
         return {
             'trend': trend,
@@ -1893,9 +2119,10 @@ Material-Specific Density Ranges:
             'std_err': std_err,
             'confidence_interval': slope_ci,
             'smoothed_data': smoothed,
+            'raw_data': raw_data,
             'residuals': residuals,
             'fitted_line': fitted_line,
-            'prediction_intervals': pred_intervals
+            'prediction_intervals': {'lower': pred_lower, 'upper': pred_upper}
         }
     
     def calculate_prediction_intervals(self, x, y, confidence_level):
@@ -1988,7 +2215,16 @@ Material-Specific Density Ranges:
             gs = self.figure.add_gridspec(rows, cols, hspace=0.4, wspace=0.3)
             
             plot_idx = 0
-            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+            # Use viridis colormap for colorblind-friendly colors
+            # Use range 0.2 to 0.9 to avoid very light yellow and very dark purple
+            import matplotlib.cm as cm
+            viridis = cm.get_cmap('viridis')
+            n_params = len(trend_results)
+            if n_params == 1:
+                colors = [viridis(0.5)]  # Use middle color for single plot
+            else:
+                # Map to darker, more visible range of viridis (0.15 to 0.85)
+                colors = [viridis(0.15 + (0.7 * i / (n_params - 1))) for i in range(n_params)]
             
             for param_name, result in trend_results.items():
                 if plot_idx >= rows * cols:
@@ -2000,60 +2236,31 @@ Material-Specific Density Ranges:
                 
                 color = colors[plot_idx % len(colors)]
                 
-                # Plot raw data points
-                ax.scatter(sequence_indices, result['smoothed_data'], 
-                          color=color, alpha=0.6, s=40, label='Data points', zorder=3)
+                # Plot raw data points with viridis colors
+                ax.scatter(sequence_indices, result['raw_data'], 
+                          color=color, alpha=0.5, s=30, label='Data points', zorder=3)
                 
-                # Plot fitted line
-                ax.plot(sequence_indices, result['fitted_line'], 
-                       color='red', linewidth=2, label='Linear fit', zorder=4)
-                
-                # Plot confidence intervals (prediction intervals)
-                pred_intervals = result['prediction_intervals']
-                ax.fill_between(sequence_indices, pred_intervals['lower'], pred_intervals['upper'],
-                               color='gray', alpha=0.2, label=f'{self.confidence_level.value()*100:.0f}% Prediction Interval')
-                
-                # Plot smoothed trend line
+                # Plot smoothed trend line (main feature)
                 if len(result['smoothed_data']) > 1:
                     ax.plot(sequence_indices, result['smoothed_data'], 
-                           color=color, linewidth=1.5, alpha=0.8, linestyle='--', 
-                           label='Smoothed trend', zorder=2)
+                           color=color, linewidth=2.5, alpha=0.9, 
+                           label='Smoothed trend', zorder=4)
                 
                 # Formatting
                 ax.set_xlabel('Sequence Index')
                 ax.set_ylabel(param_name)
-                ax.set_title(f"{param_name} - {result['trend'].title()} Trend")
+                ax.set_title(f"{param_name} Trend")
                 ax.grid(True, alpha=0.3)
-                ax.legend(fontsize=8)
                 
-                # Add trend information as text
-                trend_info = f"Slope: {result['slope']:.4f}\nR²: {result['r_squared']:.3f}\nP: {result['p_value']:.3f}"
+                # Add trend information as text (without linear fit stats)
+                trend_info = f"Trend: {result['trend'].title()}\nP: {result['p_value']:.3f}"
                 ax.text(0.02, 0.98, trend_info, transform=ax.transAxes, 
                        verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", 
                        facecolor='white', alpha=0.8), fontsize=8)
                 
-                # Color-code the title based on trend significance
-                if result['trend'] == 'increasing':
-                    title_color = 'green'
-                elif result['trend'] == 'decreasing':
-                    title_color = 'red'
-                elif result['trend'] == 'stable':
-                    title_color = 'blue'
-                else:
-                    title_color = 'orange'
-                
-                ax.set_title(f"{param_name} - {result['trend'].title()} Trend", color=title_color, fontweight='bold')
-                
                 plot_idx += 1
             
-            # Add overall title with analysis summary
-            n_spectra = len(sequence_indices)
-            sequence_order = self.sequence_order_combo.currentText()
-            
-            summary_title = f"Trend Analysis: {n_spectra} Spectra - {sequence_order}"
-            self.figure.suptitle(summary_title, fontsize=14, fontweight='bold')
-            
-            # Add analysis parameters as figure text
+            # Add analysis parameters as figure text (no main title)
             params_text = (f"Confidence: {self.confidence_level.value()*100:.0f}%, "
                           f"Window: {self.moving_avg_window.value()}, "
                           f"Sensitivity: {self.trend_sensitivity.value():.3f}")
@@ -2194,6 +2401,378 @@ Material-Specific Density Ranges:
             
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save trend plots:\n{str(e)}")
+    
+    def create_diagnostic_plot(self):
+        """Create diagnostic correlation plots to investigate stress/strain effects."""
+        if not hasattr(self, 'batch_density_results') or not self.batch_density_results:
+            QMessageBox.warning(self, "No Data", "No batch density results available.\n\nPlease run batch analysis first.")
+            return
+        
+        try:
+            # Get the batch results
+            results = self.batch_density_results.copy()
+            
+            # Sort results according to sequence order
+            results = self.sort_sequence(results)
+            
+            # Extract all data
+            sequence_indices = np.arange(len(results))
+            cdis = np.array([r['cdi'] for r in results])
+            densities = np.array([r['specialized_density'] for r in results])
+            peak_widths = np.array([r['metrics']['peak_width'] for r in results])
+            peak_positions = np.array([r['metrics']['main_peak_position'] for r in results])
+            peak_heights = np.array([r['metrics']['main_peak_height'] for r in results])
+            
+            # Get selected plot type
+            plot_type = self.diagnostic_plot_combo.currentText()
+            
+            # Clear the figure
+            self.figure.clear()
+            
+            # Use viridis colormap for sequence position
+            import matplotlib.cm as cm
+            viridis = cm.get_cmap('viridis')
+            colors = viridis(sequence_indices / max(1, len(sequence_indices) - 1))
+            
+            if plot_type == "CDI vs Peak Width (all spectra)":
+                ax = self.figure.add_subplot(1, 1, 1)
+                scatter = ax.scatter(cdis, peak_widths, c=sequence_indices, cmap='viridis', 
+                                   s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('CDI (Crystallinity)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('CDI vs Peak Width - All Spectra')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('Sequence Position', rotation=270, labelpad=15)
+                
+                # Add threshold line
+                ax.axvline(0.2, color='red', linestyle='--', linewidth=2, alpha=0.7, label='CDI=0.2 threshold')
+                ax.legend()
+                
+            elif plot_type == "CDI vs Peak Width (CDI≥0.2 only)":
+                # Filter for CDI >= 0.2
+                mask = cdis >= 0.2
+                ax = self.figure.add_subplot(1, 1, 1)
+                scatter = ax.scatter(cdis[mask], peak_widths[mask], c=sequence_indices[mask], 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('CDI (Crystallinity)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('CDI vs Peak Width - Crystalline Regions Only (CDI≥0.2)')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('Sequence Position', rotation=270, labelpad=15)
+                
+                # Add correlation info
+                if np.sum(mask) > 2:
+                    from scipy import stats
+                    corr, p_val = stats.pearsonr(cdis[mask], peak_widths[mask])
+                    ax.text(0.02, 0.98, f'Correlation: {corr:.3f}\nP-value: {p_val:.4f}',
+                           transform=ax.transAxes, verticalalignment='top',
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Position vs Peak Width":
+                ax = self.figure.add_subplot(1, 1, 1)
+                scatter = ax.scatter(peak_positions, peak_widths, c=sequence_indices, 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('Peak Position (cm⁻¹)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Peak Position vs Peak Width - Stress/Strain Analysis')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('Sequence Position', rotation=270, labelpad=15)
+                
+                # Add correlation info
+                from scipy import stats
+                corr, p_val = stats.pearsonr(peak_positions, peak_widths)
+                ax.text(0.02, 0.98, f'Correlation: {corr:.3f}\nP-value: {p_val:.4f}\n\nShift + Broadening = Stress/Strain',
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Position vs CDI":
+                ax = self.figure.add_subplot(1, 1, 1)
+                scatter = ax.scatter(cdis, peak_positions, c=sequence_indices, 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('CDI (Crystallinity)')
+                ax.set_ylabel('Peak Position (cm⁻¹)')
+                ax.set_title('CDI vs Peak Position')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('Sequence Position', rotation=270, labelpad=15)
+                
+                # Add correlation info
+                from scipy import stats
+                corr, p_val = stats.pearsonr(cdis, peak_positions)
+                ax.text(0.02, 0.98, f'Correlation: {corr:.3f}\nP-value: {p_val:.4f}',
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Height vs Peak Width":
+                ax = self.figure.add_subplot(1, 1, 1)
+                scatter = ax.scatter(peak_heights, peak_widths, c=sequence_indices, 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('Peak Height (a.u.)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Peak Height vs Peak Width')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('Sequence Position', rotation=270, labelpad=15)
+                
+                # Add correlation info
+                from scipy import stats
+                corr, p_val = stats.pearsonr(peak_heights, peak_widths)
+                ax.text(0.02, 0.98, f'Correlation: {corr:.3f}\nP-value: {p_val:.4f}',
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Density vs Peak Width":
+                ax = self.figure.add_subplot(1, 1, 1)
+                scatter = ax.scatter(densities, peak_widths, c=sequence_indices, 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('Specialized Density (g/cm³)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Density vs Peak Width')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('Sequence Position', rotation=270, labelpad=15)
+                
+                # Add correlation info
+                from scipy import stats
+                corr, p_val = stats.pearsonr(densities, peak_widths)
+                ax.text(0.02, 0.98, f'Correlation: {corr:.3f}\nP-value: {p_val:.4f}',
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Width vs Sequence Position":
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                # Plot with CDI as color to show crystallinity variation
+                scatter = ax.scatter(sequence_indices, peak_widths, c=cdis, 
+                                   cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                ax.set_xlabel('Sequence Position (Line Scan)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Peak Width Along Line Scan - Colored by CDI')
+                ax.grid(True, alpha=0.3)
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('CDI (Crystallinity)', rotation=270, labelpad=15)
+                
+                # Add horizontal line at CDI threshold to show which points are filtered
+                # Calculate mean width for high vs low CDI regions
+                high_cdi_mask = cdis >= 0.2
+                if np.sum(high_cdi_mask) > 0:
+                    mean_width_high = np.mean(peak_widths[high_cdi_mask])
+                    ax.axhline(mean_width_high, color='red', linestyle='--', linewidth=1.5, 
+                             alpha=0.5, label=f'Mean width (CDI≥0.2): {mean_width_high:.1f} cm⁻¹')
+                
+                low_cdi_mask = cdis < 0.2
+                if np.sum(low_cdi_mask) > 0:
+                    mean_width_low = np.mean(peak_widths[low_cdi_mask])
+                    ax.axhline(mean_width_low, color='orange', linestyle='--', linewidth=1.5, 
+                             alpha=0.5, label=f'Mean width (CDI<0.2): {mean_width_low:.1f} cm⁻¹')
+                
+                ax.legend(loc='best')
+                
+                # Add info about spatial zones
+                info_text = f'Total spectra: {len(sequence_indices)}\nCrystalline (CDI≥0.2): {np.sum(high_cdi_mask)}\nBacteria-rich (CDI<0.2): {np.sum(low_cdi_mask)}'
+                ax.text(0.02, 0.98, info_text,
+                       transform=ax.transAxes, verticalalignment='top',
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                
+            elif plot_type == "Peak Width Trends (Smoothed)":
+                from scipy import signal
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                # Apply smoothing to peak width data
+                window_size = min(11, len(peak_widths) // 3)
+                if window_size % 2 == 0:
+                    window_size += 1
+                if window_size >= 3:
+                    smoothed_width = signal.savgol_filter(peak_widths, window_size, 2)
+                else:
+                    smoothed_width = peak_widths
+                
+                # Plot raw data as light scatter
+                ax.scatter(sequence_indices, peak_widths, c='lightgray', s=20, alpha=0.3, label='Raw data')
+                
+                # Plot smoothed trend colored by CDI
+                scatter = ax.scatter(sequence_indices, smoothed_width, c=cdis, 
+                                   cmap='viridis', s=60, alpha=0.8, edgecolors='black', linewidth=0.5)
+                ax.plot(sequence_indices, smoothed_width, 'k-', linewidth=2, alpha=0.5, label='Smoothed trend')
+                
+                ax.set_xlabel('Sequence Position (Line Scan)')
+                ax.set_ylabel('Peak Width (cm⁻¹)')
+                ax.set_title('Smoothed Peak Width Trends - Emphasizing Spatial Patterns')
+                ax.grid(True, alpha=0.3)
+                ax.legend(loc='upper right')
+                
+                cbar = plt.colorbar(scatter, ax=ax)
+                cbar.set_label('CDI (Crystallinity)', rotation=270, labelpad=15)
+                
+                # Identify zones with elevated peak width
+                mean_width = np.mean(smoothed_width)
+                std_width = np.std(smoothed_width)
+                high_width_zones = smoothed_width > (mean_width + 0.5 * std_width)
+                
+                # Highlight high-width zones
+                if np.any(high_width_zones):
+                    ax.fill_between(sequence_indices, 0, ax.get_ylim()[1], 
+                                   where=high_width_zones, alpha=0.1, color='red',
+                                   label='Elevated width zones')
+                    ax.legend(loc='upper right')
+                
+            elif plot_type == "Dual-Axis: Peak Width + CDI vs Position":
+                fig = self.figure
+                ax1 = fig.add_subplot(1, 1, 1)
+                
+                # Smooth both datasets
+                from scipy import signal
+                window_size = min(11, len(peak_widths) // 3)
+                if window_size % 2 == 0:
+                    window_size += 1
+                if window_size >= 3:
+                    smoothed_width = signal.savgol_filter(peak_widths, window_size, 2)
+                    smoothed_cdi = signal.savgol_filter(cdis, window_size, 2)
+                else:
+                    smoothed_width = peak_widths
+                    smoothed_cdi = cdis
+                
+                # Plot peak width on left axis
+                color_width = 'tab:red'
+                ax1.set_xlabel('Sequence Position (Line Scan)')
+                ax1.set_ylabel('Peak Width (cm⁻¹)', color=color_width)
+                line1 = ax1.plot(sequence_indices, smoothed_width, color=color_width, 
+                               linewidth=3, alpha=0.8, label='Peak Width (smoothed)')
+                ax1.scatter(sequence_indices, peak_widths, color=color_width, s=20, alpha=0.2)
+                ax1.tick_params(axis='y', labelcolor=color_width)
+                ax1.grid(True, alpha=0.3)
+                
+                # Create second y-axis for CDI
+                ax2 = ax1.twinx()
+                color_cdi = 'tab:blue'
+                ax2.set_ylabel('CDI (Crystallinity)', color=color_cdi)
+                line2 = ax2.plot(sequence_indices, smoothed_cdi, color=color_cdi, 
+                               linewidth=3, alpha=0.8, linestyle='--', label='CDI (smoothed)')
+                ax2.scatter(sequence_indices, cdis, color=color_cdi, s=20, alpha=0.2)
+                ax2.tick_params(axis='y', labelcolor=color_cdi)
+                
+                # Add CDI threshold line
+                ax2.axhline(0.2, color='orange', linestyle=':', linewidth=2, alpha=0.7, label='CDI=0.2 threshold')
+                
+                ax1.set_title('Peak Width vs CDI Decoupling Analysis')
+                
+                # Combine legends
+                lines = line1 + line2
+                labels = [l.get_label() for l in lines]
+                ax1.legend(lines, labels, loc='upper left')
+                
+                # Add interpretation text
+                info_text = 'If peak width is high where CDI is moderate/high,\nthis indicates stress/strain effects'
+                ax1.text(0.98, 0.02, info_text, transform=ax1.transAxes,
+                        ha='right', va='bottom', fontsize=9,
+                        bbox=dict(boxstyle="round,pad=0.5", facecolor='yellow', alpha=0.3))
+                
+            elif plot_type == "Normalized Peak Width (Stress Indicator)":
+                ax = self.figure.add_subplot(1, 1, 1)
+                
+                # Calculate expected peak width based on CDI
+                # Fit a polynomial to the CDI vs peak width relationship for crystalline regions
+                mask = cdis >= 0.2
+                if np.sum(mask) > 10:
+                    from scipy import stats
+                    # Fit linear relationship for expected width vs CDI
+                    slope, intercept, _, _, _ = stats.linregress(cdis[mask], peak_widths[mask])
+                    expected_width = slope * cdis + intercept
+                    
+                    # Calculate residuals (actual - expected)
+                    width_residuals = peak_widths - expected_width
+                    
+                    # Normalize by standard deviation
+                    std_residual = np.std(width_residuals[mask])
+                    normalized_residuals = width_residuals / std_residual if std_residual > 0 else width_residuals
+                    
+                    # Plot normalized residuals
+                    scatter = ax.scatter(sequence_indices, normalized_residuals, c=cdis,
+                                       cmap='viridis', s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+                    
+                    # Add zero line
+                    ax.axhline(0, color='black', linestyle='-', linewidth=1.5, alpha=0.5, label='Expected width')
+                    
+                    # Add +/- 1 sigma lines
+                    ax.axhline(1, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label='+1σ (broader than expected)')
+                    ax.axhline(-1, color='blue', linestyle='--', linewidth=1.5, alpha=0.5, label='-1σ (narrower than expected)')
+                    
+                    # Highlight stress zones (>1 sigma broader)
+                    stress_zones = normalized_residuals > 1
+                    if np.any(stress_zones):
+                        ax.fill_between(sequence_indices, -3, 3, where=stress_zones,
+                                       alpha=0.15, color='red', label='Potential stress zones')
+                    
+                    ax.set_xlabel('Sequence Position (Line Scan)')
+                    ax.set_ylabel('Normalized Peak Width Residual (σ)')
+                    ax.set_title('Stress/Strain Indicator - Peak Width Deviations from Expected')
+                    ax.grid(True, alpha=0.3)
+                    ax.legend(loc='best')
+                    ax.set_ylim(-3, 3)
+                    
+                    cbar = plt.colorbar(scatter, ax=ax)
+                    cbar.set_label('CDI (Crystallinity)', rotation=270, labelpad=15)
+                    
+                    # Add interpretation
+                    info_text = f'Positive values = broader than expected for CDI\nNegative values = narrower than expected\nStress zones: {np.sum(stress_zones)} spectra'
+                    ax.text(0.02, 0.98, info_text, transform=ax.transAxes,
+                           verticalalignment='top',
+                           bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                else:
+                    ax.text(0.5, 0.5, 'Insufficient crystalline data (CDI≥0.2) for normalization',
+                           transform=ax.transAxes, ha='center', va='center')
+                
+            elif plot_type == "Multi-parameter Matrix":
+                # Create 3x3 correlation matrix
+                fig = self.figure
+                gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+                
+                params = [
+                    ('CDI', cdis),
+                    ('Density\n(g/cm³)', densities),
+                    ('Peak Width\n(cm⁻¹)', peak_widths),
+                    ('Peak Position\n(cm⁻¹)', peak_positions),
+                    ('Peak Height\n(a.u.)', peak_heights)
+                ]
+                
+                # Create scatter plots for key combinations
+                plot_positions = [
+                    (0, 0, 0, 1),  # CDI vs Density
+                    (0, 1, 0, 2),  # CDI vs Peak Width
+                    (0, 2, 0, 3),  # CDI vs Peak Position
+                    (1, 0, 1, 2),  # Density vs Peak Width
+                    (1, 1, 1, 3),  # Density vs Peak Position
+                    (2, 0, 2, 3),  # Peak Width vs Peak Position
+                ]
+                
+                for row, col, x_idx, y_idx in plot_positions:
+                    ax = fig.add_subplot(gs[row, col])
+                    ax.scatter(params[x_idx][1], params[y_idx][1], c=sequence_indices,
+                             cmap='viridis', s=20, alpha=0.6, edgecolors='black', linewidth=0.3)
+                    ax.set_xlabel(params[x_idx][0], fontsize=8)
+                    ax.set_ylabel(params[y_idx][0], fontsize=8)
+                    ax.tick_params(labelsize=7)
+                    ax.grid(True, alpha=0.3)
+                    
+                    # Add correlation coefficient
+                    from scipy import stats
+                    corr, _ = stats.pearsonr(params[x_idx][1], params[y_idx][1])
+                    ax.text(0.95, 0.05, f'r={corr:.2f}', transform=ax.transAxes,
+                           ha='right', va='bottom', fontsize=7,
+                           bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.7))
+                
+                fig.suptitle('Multi-Parameter Correlation Matrix', fontsize=12, fontweight='bold')
+            
+            self.figure.tight_layout()
+            self.canvas.draw()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Plot Error", f"Failed to create diagnostic plot:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def set_batch_fitting_results(self, results):
         """Set batch fitting results and enable trend analysis."""

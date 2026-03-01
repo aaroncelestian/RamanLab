@@ -542,4 +542,81 @@ Mean Density: {stats['mean_density']:.3f} ± {stats['std_density']:.3f} g/cm³
                                       f"Density analysis plots exported to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self.main_window, "Export Error", 
-                                   f"Failed to export plots:\n{str(e)}") 
+                                   f"Failed to export plots:\n{str(e)}")
+
+
+# Standalone function for launching density analysis from other modules
+def launch_density_analysis(data_file=None, batch_results=None):
+    """
+    Launch the density analysis GUI as a standalone application.
+    
+    Args:
+        data_file: Optional path to a pickle file with batch fitting results
+        batch_results: Optional batch fitting results data (list or dict) to load directly
+    """
+    try:
+        # Try to import the density GUI launcher
+        script_path = Path(__file__).parent.parent / "advanced_analysis" / "density_gui_launcher.py"
+        
+        if not script_path.exists():
+            # Fallback to looking in Density folder
+            script_path = Path(__file__).parent.parent / "Density" / "density_gui_launcher.py"
+            
+        if not script_path.exists():
+            # Try one more fallback
+            script_path = Path(__file__).parent.parent / "Density" / "raman_density_analysis.py"
+            
+        if script_path.exists():
+            # Launch as separate Python process
+            import subprocess
+            if data_file:
+                subprocess.Popen([sys.executable, str(script_path), str(data_file)], 
+                               cwd=script_path.parent)
+            else:
+                subprocess.Popen([sys.executable, str(script_path)], 
+                               cwd=script_path.parent)
+            return True
+        else:
+            # Try to import and launch directly
+            try:
+                from advanced_analysis.density_gui_launcher import DensityAnalysisGUI
+                
+                # Create QApplication if it doesn't exist
+                app = QApplication.instance()
+                if app is None:
+                    app = QApplication(sys.argv)
+                
+                # Create and show the density analysis GUI
+                density_gui = DensityAnalysisGUI()
+                density_gui.show()
+                
+                # If we have batch_results passed directly, use them
+                if batch_results is not None:
+                    try:
+                        density_gui.set_batch_fitting_results(batch_results)
+                        print(f"Loaded {len(batch_results) if isinstance(batch_results, list) else 'batch'} results into density GUI")
+                    except Exception as e:
+                        print(f"Warning: Could not load batch results: {e}")
+                # Otherwise, if we have a data file, try to load it
+                elif data_file and os.path.exists(data_file):
+                    try:
+                        import pickle
+                        with open(data_file, 'rb') as f:
+                            loaded_results = pickle.load(f)
+                        density_gui.set_batch_fitting_results(loaded_results)
+                    except Exception as e:
+                        print(f"Warning: Could not load batch results from {data_file}: {e}")
+                
+                return True
+                
+            except ImportError as e:
+                QMessageBox.warning(None, "Module Not Available", 
+                                  f"Density analysis module is not available.\n"
+                                  f"Error: {str(e)}\n\n"
+                                  f"Please ensure the Density or advanced_analysis folder contains the required files.")
+                return False
+                
+    except Exception as e:
+        QMessageBox.critical(None, "Launch Error", 
+                           f"Failed to launch density analysis:\n{str(e)}")
+        return False 
