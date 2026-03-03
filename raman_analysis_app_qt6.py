@@ -7528,7 +7528,7 @@ class AdvancedBaselineWindow(QMainWindow):
                 f.write(f"# Original file: {original_path}\n")
                 f.write(f"# Method: {self.method_combo.currentText()}\n")
                 if self.enable_truncation.isChecked():
-                    f.write(f"# Truncated: {self.min_wn.value()}-{self.max_wn.value()} cm⁻¹\n")
+                    f.write(f"# Truncated: {self.min_wn.value()}-{self.max_wn.value()} cm^-1\n")
                 f.write("# Wavenumber\tIntensity\n")
                 
                 for wn, intensity in zip(wavenumbers, intensities):
