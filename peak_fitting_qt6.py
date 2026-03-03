@@ -4172,13 +4172,23 @@ class SpectralDeconvolutionQt6(QDialog):
         """Update the heatmap plot with spectral data."""
         import numpy as np
         import matplotlib.pyplot as plt
+        from core.matplotlib_config import add_colorbar_no_shrink
         
         spectra_data = self.extract_spectral_data()
         if spectra_data is None:
             self.setup_empty_heatmap_plot()
             return
         
+        # Clear the axis and remove old colorbar if it exists
         self.heatmap_ax.clear()
+        
+        # Remove old colorbar if it exists
+        if hasattr(self, 'heatmap_colorbar') and self.heatmap_colorbar is not None:
+            try:
+                self.heatmap_colorbar.remove()
+            except:
+                pass
+            self.heatmap_colorbar = None
         
         # Get control values from persistent settings or controls
         colormap_name = (self.heatmap_colormap_combo.currentText() if hasattr(self, 'heatmap_colormap_combo') 
@@ -4221,8 +4231,8 @@ class SpectralDeconvolutionQt6(QDialog):
                                    aspect=aspect,
                                    extent=[min_wn, max_wn, len(spectra_data), 0])
         
-        # Add colorbar using the no-shrink function from matplotlib config
-        add_colorbar_no_shrink(self.heatmap_figure, im, self.heatmap_ax, label='Intensity')
+        # Add colorbar using the no-shrink function from matplotlib config and store reference
+        self.heatmap_colorbar = add_colorbar_no_shrink(self.heatmap_figure, im, self.heatmap_ax, label='Intensity')
         
         # Customize plot
         self.heatmap_ax.set_title('Heatmap - Spectral Intensity Map', fontweight='bold')

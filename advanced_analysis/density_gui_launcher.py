@@ -1694,7 +1694,8 @@ Material-Specific Density Ranges:
             self.figure.clear()
             
             # Create a 2x2 subplot layout for batch visualization
-            gs = self.figure.add_gridspec(2, 2, hspace=0.4, wspace=0.3)
+            # Increased wspace to 0.45 to accommodate twin axis label on top-right plot
+            gs = self.figure.add_gridspec(2, 2, hspace=0.4, wspace=0.45)
             
             # Extract data for plotting
             filenames = [res['filename'] for res in batch_results]
@@ -1767,11 +1768,13 @@ Material-Specific Density Ranges:
             ax2.set_title('Density & Crystallinity Across Line Scan')
             ax2.grid(True, alpha=0.3)
             
-            # Set x-axis to show reasonable tick marks
-            if len(batch_results) > 20:
-                # Show every Nth tick for large datasets
-                tick_step = max(1, len(batch_results) // 20)
-                ax2.set_xticks(spectrum_indices[::tick_step])
+            # Adjust layout to prevent y-axis label cutoff on twin axis
+            ax2_twin.yaxis.set_label_coords(1.12, 0.5)
+            
+            # Set x-axis major ticks at intervals of 10
+            import matplotlib.ticker as ticker
+            ax2.xaxis.set_major_locator(ticker.MultipleLocator(10))
+            ax2.xaxis.set_minor_locator(ticker.MultipleLocator(5))
             
             # 3. CDI by Spectrum - LINE PLOT (bottom-left)
             ax3 = self.figure.add_subplot(gs[1, 0])
@@ -1798,9 +1801,9 @@ Material-Specific Density Ranges:
             ax3.legend(loc='best')
             ax3.grid(True, alpha=0.3)
             
-            # Set x-axis to show reasonable tick marks
-            if len(batch_results) > 20:
-                ax3.set_xticks(spectrum_indices[::tick_step])
+            # Set x-axis major ticks at intervals of 10
+            ax3.xaxis.set_major_locator(ticker.MultipleLocator(10))
+            ax3.xaxis.set_minor_locator(ticker.MultipleLocator(5))
             
             # 4. Density vs CDI Correlation (bottom-right)
             ax4 = self.figure.add_subplot(gs[1, 1])
@@ -1833,7 +1836,9 @@ Material-Specific Density Ranges:
                            bbox=dict(boxstyle="round,pad=0.5", facecolor='lightgray', alpha=0.8),
                            verticalalignment='bottom')
             
-            self.figure.tight_layout()
+            # Use subplots_adjust instead of tight_layout to ensure twin axis label is visible
+            # right=0.92 leaves 8% margin on the right for the twin axis label
+            self.figure.subplots_adjust(left=0.08, right=0.92, top=0.95, bottom=0.12, hspace=0.4, wspace=0.45)
             self.canvas.draw()
             
         except Exception as e:
@@ -2252,11 +2257,8 @@ Material-Specific Density Ranges:
                 ax.set_title(f"{param_name} Trend")
                 ax.grid(True, alpha=0.3)
                 
-                # Add trend information as text (without linear fit stats)
-                trend_info = f"Trend: {result['trend'].title()}\nP: {result['p_value']:.3f}"
-                ax.text(0.02, 0.98, trend_info, transform=ax.transAxes, 
-                       verticalalignment='top', bbox=dict(boxstyle="round,pad=0.3", 
-                       facecolor='white', alpha=0.8), fontsize=8)
+                # Trend information removed from plot for cleaner visualization
+                # (Trend statistics are available in the text results panel)
                 
                 plot_idx += 1
             
