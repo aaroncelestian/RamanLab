@@ -3,8 +3,8 @@
 Version information for RamanLab Qt6
 """
 
-__version__ = "1.4.1"
-__version_info__ = (1, 4, 1)
+__version__ = "1.4.2"
+__version_info__ = (1, 4, 2)
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
