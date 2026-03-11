@@ -165,6 +165,7 @@ def check_core_scientific_stack():
         ("seaborn", "0.11.0", "Statistical visualization"),
         ("pillow", "8.0.0", "Image processing", "PIL"),  # PIL is the import name
         ("openpyxl", "3.0.0", "Excel file support"),
+        ("h5py", "3.0.0", "HDF5 file format support"),
         ("fastdtw", "0.3.4", "Dynamic time warping"),
         ("tqdm", "4.60.0", "Progress indicators"),
         ("psutil", "5.8.0", "System utilities"),

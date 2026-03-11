@@ -80,9 +80,22 @@ RamanLab is a comprehensive Python-based application for Raman spectroscopy data
      - Place `RamanLab_Database_20250602.pkl` in the same folder as the Python scripts
 
 6. **Launch RamanLab:**
+   
+   **macOS/Linux:**
    ```bash
    python main_qt6.py
    ```
+   
+   **Windows:**
+   ```cmd
+   run_ramanlab.bat
+   ```
+   Or:
+   ```cmd
+   python main_qt6.py
+   ```
+   
+   > **Windows Users:** If you encounter h5py import errors, see [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for detailed troubleshooting.
 
 ### Optional: Install Desktop Icon
 
