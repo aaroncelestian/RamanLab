@@ -129,13 +129,13 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # ============================================================================
 #
 # CORE REQUIRED DEPENDENCIES (Essential - RamanLab won't work without these):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl h5py fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet
 #
 # FULL INSTALL (All Required + Recommended Optional):
-# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet umap-learn pymatgen reportlab pyinstaller qtconsole jupyter-client ipykernel
+# pip install PySide6 numpy scipy matplotlib pandas seaborn pillow openpyxl h5py fastdtw tqdm psutil requests packaging pyperclip scikit-learn joblib dask chardet umap-learn pymatgen reportlab pyinstaller qtconsole jupyter-client ipykernel
 #
 # MINIMAL INSTALL (If some packages fail):
-# 1. First try: pip install PySide6 numpy scipy matplotlib pandas scikit-learn joblib chardet
+# 1. First try: pip install PySide6 numpy scipy matplotlib pandas scikit-learn joblib chardet h5py
 # 2. Then add: pip install seaborn pillow openpyxl fastdtw tqdm psutil requests packaging pyperclip dask
 # 3. Optional extras: pip install umap-learn pymatgen reportlab pyinstaller
 #
@@ -165,6 +165,15 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # - For Windows users: Install Microsoft Visual C++ Build Tools if needed
 # - For macOS users: Install Xcode Command Line Tools if needed
 # - For Linux users: Install system packages for Qt6 development
+# - If HDF5 import reports missing h5py, verify interpreter alignment:
+#   python -c "import sys; print(sys.executable)"
+#   python -m pip show h5py
+#   python -c "import h5py; print(h5py.__version__, h5py.__file__)"
+# - If h5py import fails on Windows with DLL errors, reinstall in the same env:
+#   python -m pip install --upgrade pip setuptools wheel
+#   python -m pip uninstall -y h5py
+#   python -m pip install --no-cache-dir h5py
+# - Conda alternative for h5py: conda install -c conda-forge h5py
 # - If optional packages fail, skip them - basic functionality will still work
 # - If batch peak fitting fails with "No module named 'chardet'": pip install chardet
 #

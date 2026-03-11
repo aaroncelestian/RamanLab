@@ -6659,14 +6659,20 @@ The map is now ready for analysis!"""
             # Try to import h5py
             try:
                 import h5py
-            except ImportError:
+            except Exception as import_err:
+                import sys
+                error_details = str(import_err).strip() or repr(import_err)
+                logger.exception("Failed to import h5py during HDF5/MAPX import")
                 QMessageBox.critical(
                     self, "Missing Dependency",
-                    "The h5py library is required to import HDF5 files.\n\n"
-                    "Please install it with:\n"
-                    "pip install h5py\n\n"
-                    "or:\n"
-                    "conda install h5py"
+                    "The h5py library is required to import HDF5 files, but it could not be imported.\n\n"
+                    f"Python executable:\n{sys.executable}\n\n"
+                    f"Import error details:\n{error_details}\n\n"
+                    "Install h5py into this same interpreter with:\n"
+                    "python -m pip install --upgrade pip\n"
+                    "python -m pip install --no-cache-dir h5py\n\n"
+                    "Conda alternative:\n"
+                    "conda install -c conda-forge h5py"
                 )
                 return
             
