@@ -30,6 +30,7 @@ from .control_panels import (
     NMFControlPanel, MLControlPanel, ResultsControlPanel,
     DimensionalityReductionControlPanel
 )
+from .dialogs.h5py_install_dialog import H5pyInstallDialog
 
 # Import additional modules
 from ..core.template_management import TemplateSpectraManager
@@ -6663,17 +6664,9 @@ The map is now ready for analysis!"""
                 import sys
                 error_details = str(import_err).strip() or repr(import_err)
                 logger.exception("Failed to import h5py during HDF5/MAPX import")
-                QMessageBox.critical(
-                    self, "Missing Dependency",
-                    "The h5py library is required to import HDF5 files, but it could not be imported.\n\n"
-                    f"Python executable:\n{sys.executable}\n\n"
-                    f"Import error details:\n{error_details}\n\n"
-                    "Install h5py into this same interpreter with:\n"
-                    "python -m pip install --upgrade pip\n"
-                    "python -m pip install --no-cache-dir h5py\n\n"
-                    "Conda alternative:\n"
-                    "conda install -c conda-forge h5py"
-                )
+                
+                # Show custom dialog with diagnostic and install options
+                self._show_h5py_missing_dialog(sys.executable, error_details)
                 return
             
             self.progress_status.show_progress(f"Reading HDF5 file: {file_path}...")
@@ -6988,6 +6981,11 @@ The map is now ready for analysis!"""
         except Exception as e:
             self.progress_status.hide_progress()
             QMessageBox.critical(self, "Load Error", f"Error loading PKL file:\n{str(e)}")
+    
+    def _show_h5py_missing_dialog(self, python_executable, error_details):
+        """Show custom dialog for h5py installation with diagnostic and auto-install options."""
+        dialog = H5pyInstallDialog(python_executable, error_details, parent=self)
+        dialog.exec()
 
     def plot_template_fit_overlay(self, spectrum, wavenumbers, intensities):
         """Plot template fitting overlay on the spectrum."""
