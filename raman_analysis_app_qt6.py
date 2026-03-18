@@ -1358,7 +1358,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             self,
             "Import Raman Spectrum",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
-            "Spectrum files (*.txt *.csv *.dat *.spc *.xy *.asc);;Text files (*.txt);;CSV files (*.csv);;Data files (*.dat);;All files (*.*)"
+            "Spectrum files (*.txt *.csv *.dat *.spc *.xy *.asc *.l6s);;LabSpec6 Binary (*.l6s);;Text files (*.txt);;CSV files (*.csv);;Data files (*.dat);;All files (*.*)"
         )
         
         if file_path:
@@ -1415,11 +1415,23 @@ class RamanAnalysisAppQt6(QMainWindow):
         import re
         from pathlib import Path
         
+        file_extension = Path(file_path).suffix.lower()
+        
+        # Handle LabSpec6 binary files
+        if file_extension == '.l6s':
+            try:
+                from utils.labspec6_parser import load_labspec6_spectrum
+                wavenumbers, intensities, metadata = load_labspec6_spectrum(file_path)
+                if wavenumbers is None:
+                    raise ValueError(metadata.get('error', 'Failed to parse LabSpec6 file'))
+                return wavenumbers, intensities, metadata
+            except ImportError:
+                raise ValueError("LabSpec6 parser not available. Please check installation.")
+        
+        # Handle text files
         wavenumbers = []
         intensities = []
         metadata = {}
-        
-        file_extension = Path(file_path).suffix.lower()
         
         try:
             with open(file_path, 'r', encoding='utf-8') as file:

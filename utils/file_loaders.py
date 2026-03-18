@@ -9,6 +9,12 @@ from typing import Tuple, Optional, Dict, Any
 import os
 from pathlib import Path
 
+try:
+    from .labspec6_parser import LabSpec6Parser
+    LABSPEC6_AVAILABLE = True
+except ImportError:
+    LABSPEC6_AVAILABLE = False
+
 
 class SpectrumLoader:
     """
@@ -23,6 +29,11 @@ class SpectrumLoader:
     def __init__(self):
         """Initialize the spectrum loader."""
         self.supported_extensions = ['.txt', '.dat', '.csv', '.asc', '.spc']
+        if LABSPEC6_AVAILABLE:
+            self.supported_extensions.append('.l6s')
+            self.labspec6_parser = LabSpec6Parser()
+        else:
+            self.labspec6_parser = None
     
     def load_spectrum(self, file_path: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Dict[str, Any]]:
         """
@@ -41,7 +52,14 @@ class SpectrumLoader:
             if not file_path.exists():
                 return None, None, {"error": f"File not found: {file_path}"}
             
-            # Try to parse the file
+            # Check if this is a LabSpec6 binary file
+            if file_path.suffix.lower() == '.l6s':
+                if self.labspec6_parser is not None:
+                    return self.labspec6_parser.load_spectrum(str(file_path))
+                else:
+                    return None, None, {"error": "LabSpec6 parser not available"}
+            
+            # Try to parse as text file
             wavenumbers, intensities, metadata = self._parse_text_file(str(file_path))
             
             if wavenumbers is not None and intensities is not None:
