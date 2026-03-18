@@ -30,7 +30,13 @@ from .control_panels import (
     NMFControlPanel, MLControlPanel, ResultsControlPanel,
     DimensionalityReductionControlPanel
 )
-from .dialogs.h5py_install_dialog import H5pyInstallDialog
+
+# Import h5py install dialog (optional - fallback to simple error if not available)
+try:
+    from .dialogs.h5py_install_dialog import H5pyInstallDialog
+    H5PY_INSTALL_DIALOG_AVAILABLE = True
+except ImportError:
+    H5PY_INSTALL_DIALOG_AVAILABLE = False
 
 # Import additional modules
 from ..core.template_management import TemplateSpectraManager
@@ -6984,8 +6990,23 @@ The map is now ready for analysis!"""
     
     def _show_h5py_missing_dialog(self, python_executable, error_details):
         """Show custom dialog for h5py installation with diagnostic and auto-install options."""
-        dialog = H5pyInstallDialog(python_executable, error_details, parent=self)
-        dialog.exec()
+        if H5PY_INSTALL_DIALOG_AVAILABLE:
+            # Use the enhanced dialog with diagnostic and install buttons
+            dialog = H5pyInstallDialog(python_executable, error_details, parent=self)
+            dialog.exec()
+        else:
+            # Fallback to simple error message if dialog is not available
+            QMessageBox.critical(
+                self, "Missing Dependency",
+                "The h5py library is required to import HDF5 files, but it could not be imported.\n\n"
+                f"Python executable:\n{python_executable}\n\n"
+                f"Import error details:\n{error_details}\n\n"
+                "Install h5py into this same interpreter with:\n"
+                "python -m pip install --upgrade pip\n"
+                "python -m pip install --no-cache-dir h5py\n\n"
+                "Conda alternative:\n"
+                "conda install -c conda-forge h5py"
+            )
 
     def plot_template_fit_overlay(self, spectrum, wavenumbers, intensities):
         """Plot template fitting overlay on the spectrum."""

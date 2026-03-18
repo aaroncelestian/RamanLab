@@ -46,13 +46,16 @@ echo.
 echo Starting RamanLab...
 echo.
 
-REM Launch RamanLab
-python main_qt6.py
+REM Launch RamanLab with debug launcher for better error capture
+python launch_ramanlab_debug.py
 
 REM Check exit code
 if errorlevel 1 (
     echo.
     echo RamanLab exited with an error.
     echo.
+    echo See error details above.
+    echo.
     pause
+    exit /b 1
 )
