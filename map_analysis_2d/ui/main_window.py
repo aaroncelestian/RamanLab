@@ -541,12 +541,18 @@ class MapAnalysisMainWindow(QMainWindow):
         
         file_menu.addSeparator()
         
-        # HDF5 Import section
+        # Import section
         import_h5_action = QAction('&Import HDF5/MAPX to PKL...', self)
         import_h5_action.setShortcut('Ctrl+I')
         import_h5_action.setStatusTip('Import HDF5 or MAPX file and convert to PKL format')
         import_h5_action.triggered.connect(self.import_h5_to_pkl)
         file_menu.addAction(import_h5_action)
+        
+        import_l6m_action = QAction('Import LabSpec6 &Map (.l6m) to PKL...', self)
+        import_l6m_action.setShortcut('Ctrl+M')
+        import_l6m_action.setStatusTip('Import LabSpec6 binary map file and convert to PKL format')
+        import_l6m_action.triggered.connect(self.import_l6m_file)
+        file_menu.addAction(import_l6m_action)
         
         file_menu.addSeparator()
         
@@ -6663,7 +6669,7 @@ The map is now ready for analysis!"""
             return
         
         try:
-            # Try to import h5py
+            # Try to import h5py for HDF5/MAPX files
             try:
                 import h5py
             except Exception as import_err:
@@ -6987,6 +6993,147 @@ The map is now ready for analysis!"""
         except Exception as e:
             self.progress_status.hide_progress()
             QMessageBox.critical(self, "Load Error", f"Error loading PKL file:\n{str(e)}")
+    
+    def import_l6m_file(self):
+        """Import LabSpec6 .l6m map file (menu entry point)."""
+        # Get input file path
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import LabSpec6 Map File", "", 
+            "LabSpec6 Map files (*.l6m);;All files (*)")
+        
+        if not file_path:
+            return
+        
+        self._import_l6m_to_pkl(file_path)
+    
+    def _import_l6m_to_pkl(self, file_path):
+        """Import LabSpec6 .l6m map file and convert to PKL format."""
+        try:
+            from utils.labspec6_map_parser import load_labspec6_map
+        except ImportError:
+            QMessageBox.critical(
+                self, "Import Error",
+                "LabSpec6 map parser not available.\n\n"
+                "Please ensure the labspec6_map_parser module is installed."
+            )
+            return
+        
+        try:
+            self.progress_status.show_progress(f"Reading LabSpec6 map file: {file_path}...")
+            
+            # Load the .l6m file
+            wavenumbers, x_coords, y_coords, cube, metadata = load_labspec6_map(file_path)
+            
+            if wavenumbers is None:
+                QMessageBox.critical(
+                    self, "Import Error",
+                    f"Failed to load LabSpec6 map file:\n\n{metadata.get('error', 'Unknown error')}"
+                )
+                self.progress_status.hide_progress()
+                return
+            
+            # Extract dimensions
+            n_y, n_x, n_pts = cube.shape
+            n_spectra = n_x * n_y
+            
+            # Show info and confirm
+            self.progress_status.hide_progress()
+            
+            reply = QMessageBox.question(
+                self, "Confirm Import",
+                f"LabSpec6 Map File Information:\n\n"
+                f"File: {file_path}\n"
+                f"Sample: {metadata.get('sample_name', 'N/A')}\n"
+                f"Map Size: {n_x} × {n_y} = {n_spectra:,} spectra\n"
+                f"Wavenumber Range: {wavenumbers[0]:.1f} - {wavenumbers[-1]:.1f} cm⁻¹ ({n_pts} points)\n"
+                f"X Range: {x_coords[0]:.3f} - {x_coords[-1]:.3f} µm\n"
+                f"Y Range: {y_coords[0]:.3f} - {y_coords[-1]:.3f} µm\n\n"
+                f"Proceed with conversion to PKL format?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            
+            # Get output file path
+            from pathlib import Path
+            default_name = Path(file_path).stem + "_converted.pkl"
+            output_path, _ = QFileDialog.getSaveFileName(
+                self, "Save PKL File", default_name, "PKL files (*.pkl);;All files (*)"
+            )
+            
+            if not output_path:
+                return
+            
+            self.progress_status.show_progress(f"Converting {n_spectra:,} spectra to PKL format...")
+            
+            # Import required modules
+            from ..core.spectrum_data import SpectrumData, SimpleMapData
+            import multiprocessing
+            from joblib import Parallel, delayed
+            
+            # Create SpectrumData objects for each pixel
+            def create_spectrum(i_y, i_x, spectrum_data, wn, x_pos, y_pos, filename):
+                """Create a SpectrumData object for a single pixel."""
+                return SpectrumData(
+                    x_pos=i_x,
+                    y_pos=i_y,
+                    wavenumbers=wn.copy(),
+                    intensities=spectrum_data.copy(),
+                    filename=filename
+                )
+            
+            # Process in parallel
+            n_jobs = min(multiprocessing.cpu_count(), 8)
+            
+            sample_name = metadata.get('sample_name', Path(file_path).stem)
+            
+            tasks = []
+            for i_y in range(n_y):
+                for i_x in range(n_x):
+                    pixel_name = f"{sample_name}_y{i_y}_x{i_x}"
+                    tasks.append((i_y, i_x, cube[i_y, i_x, :], wavenumbers, x_coords[i_x], y_coords[i_y], pixel_name))
+            
+            spectra_list = Parallel(n_jobs=n_jobs)(
+                delayed(create_spectrum)(i_y, i_x, spec, wn, x, y, fname) 
+                for i_y, i_x, spec, wn, x, y, fname in tasks
+            )
+            
+            # Convert list to dictionary with (x, y) keys
+            spectra_dict = {}
+            for spec in spectra_list:
+                spectra_dict[(spec.x_pos, spec.y_pos)] = spec
+            
+            # Create the map data object using the module-level class
+            map_data = SimpleMapData(spectra_dict, wavenumbers)
+            
+            # Save to PKL
+            import pickle
+            with open(output_path, 'wb') as f:
+                pickle.dump(map_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            self.progress_status.hide_progress()
+            
+            QMessageBox.information(
+                self, "Success",
+                f"Successfully converted LabSpec6 map to PKL format!\n\n"
+                f"Output file: {output_path}\n"
+                f"Spectra saved: {len(spectra_list):,}\n\n"
+                f"You can now load this PKL file in the Map Analysis tool."
+            )
+            
+            logger.info(f"Successfully converted {file_path} to {output_path}")
+            
+        except Exception as e:
+            self.progress_status.hide_progress()
+            import traceback
+            QMessageBox.critical(
+                self, "Import Error",
+                f"Error importing LabSpec6 map file:\n\n{str(e)}\n\n"
+                f"Details:\n{traceback.format_exc()}"
+            )
+            logger.exception("Error importing LabSpec6 map file")
     
     def _show_h5py_missing_dialog(self, python_executable, error_details):
         """Show custom dialog for h5py installation with diagnostic and auto-install options."""
