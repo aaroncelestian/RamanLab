@@ -3470,17 +3470,24 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 return
             
             # Find common wavenumber range
-            min_len = min(len(wn) for wn in all_wavenumbers)
+            try:
+                min_len = min(len(wn) for wn in all_wavenumbers)
+            except Exception as e:
+                raise Exception(f"Error finding min length: {e}")
+            
             common_wavenumbers = all_wavenumbers[0][:min_len]
             
             # Interpolate all spectra to common wavenumber grid
             processed_intensities = []
-            for wavenumbers, intensities in zip(all_wavenumbers, all_intensities):
-                # Simple interpolation - in practice you might want more sophisticated alignment
-                if len(intensities) != len(common_wavenumbers):
-                    processed_intensities.append(intensities[:min_len])
-                else:
-                    processed_intensities.append(intensities)
+            try:
+                for wavenumbers, intensities in zip(all_wavenumbers, all_intensities):
+                    # Simple interpolation - in practice you might want more sophisticated alignment
+                    if len(intensities) != len(common_wavenumbers):
+                        processed_intensities.append(intensities[:min_len])
+                    else:
+                        processed_intensities.append(intensities)
+            except Exception as e:
+                raise Exception(f"Error processing intensities: {e}")
             
             # Store data
             self.cluster_data['wavenumbers'] = common_wavenumbers
@@ -3488,7 +3495,10 @@ class RamanClusterAnalysisQt6(QMainWindow):
             self.cluster_data['spectrum_metadata'] = all_metadata  # Store metadata
             
             # Apply performance optimizations
-            self.cluster_data = self.apply_performance_optimizations(self.cluster_data)
+            try:
+                self.cluster_data = self.apply_performance_optimizations(self.cluster_data)
+            except Exception as e:
+                raise Exception(f"Error in performance optimizations: {e}")
             
             # Extract features
             features = self.extract_vibrational_features(self.cluster_data['intensities'], self.cluster_data['wavenumbers'])
@@ -3514,7 +3524,10 @@ class RamanClusterAnalysisQt6(QMainWindow):
             QMessageBox.information(self, "Import Complete", summary_msg)
             
         except Exception as e:
-            QMessageBox.critical(self, "Import Error", f"Failed to import spectra:\n{str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"Import error traceback:\n{error_details}")
+            QMessageBox.critical(self, "Import Error", f"Failed to import spectra:\n{str(e)}\n\nSee console for full traceback.")
 
     def parse_spectrum_file(self, file_path):
         """Enhanced spectrum file parser that handles headers, metadata, and various formats.
@@ -3618,7 +3631,18 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 if len(parts) == 2:
                     key = parts[0].strip()
                     value = parts[1].strip()
-                    metadata[key] = value
+                    
+                    # Try to convert numeric values to appropriate types
+                    try:
+                        # Try integer first
+                        if '.' not in value:
+                            metadata[key] = int(value)
+                        else:
+                            # Try float
+                            metadata[key] = float(value)
+                    except ValueError:
+                        # Keep as string if not numeric
+                        metadata[key] = value
                     return
         
         # If no separator found, store as a general comment
@@ -3649,10 +3673,11 @@ class RamanClusterAnalysisQt6(QMainWindow):
             if ',' in line:
                 return ','
         
-        # Count occurrences of different delimiters
-        comma_count = line.count(',')
-        tab_count = line.count('\t')
-        space_count = len([x for x in line.split(' ') if x.strip()]) - 1
+        # Count occurrences of different delimiters - ensure all are integers
+        comma_count = int(line.count(','))
+        tab_count = int(line.count('\t'))
+        space_parts = [x for x in line.split(' ') if x.strip()]
+        space_count = max(0, len(space_parts) - 1)  # Ensure non-negative
         
         # Choose delimiter with highest count
         if comma_count > 0 and comma_count >= tab_count and comma_count >= space_count:

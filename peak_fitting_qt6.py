@@ -1443,6 +1443,14 @@ class SpectralDeconvolutionQt6(QDialog):
         # Analysis menu
         analysis_menu = self.menu_bar.addMenu("Analysis")
         
+        # Peak Discriminant Analysis
+        discriminant_action = QAction("📊 Peak Parameter Discriminant Analysis...", self)
+        discriminant_action.setStatusTip("Classify spectra based on peak parameters from batch results")
+        discriminant_action.triggered.connect(self.launch_discriminant_analysis)
+        analysis_menu.addAction(discriminant_action)
+        
+        analysis_menu.addSeparator()
+        
         # Quick actions
         reset_action = QAction("Reset Analysis", self)
         reset_action.triggered.connect(self.reset_spectrum)
@@ -5538,6 +5546,25 @@ class SpectralDeconvolutionQt6(QDialog):
             self._update_background_calculation()
             if self.background is not None:
                 self.apply_background()
+    
+    def launch_discriminant_analysis(self):
+        """Launch the Peak Parameter Discriminant Analysis tool."""
+        try:
+            from peak_discriminant_analysis import launch_peak_discriminant_analysis
+            launch_peak_discriminant_analysis(self)
+        except ImportError as e:
+            QMessageBox.warning(
+                self,
+                "Module Not Available",
+                f"Peak Discriminant Analysis module could not be loaded:\n{str(e)}\n\n"
+                "Please ensure peak_discriminant_analysis.py is in the RamanLab directory."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Launch Error",
+                f"Failed to launch Peak Discriminant Analysis:\n{str(e)}"
+            )
     
     def reset_spectrum(self):
         """Reset to original spectrum."""

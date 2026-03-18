@@ -1227,42 +1227,78 @@ class MultiSpectrumManagerQt6(QMainWindow):
             Set to False for batch loading to improve performance
         """
         try:
-            # Load the file data
-            data = np.loadtxt(file_path)
-            if data.ndim == 2 and data.shape[1] >= 2:
-                wavenumbers = data[:, 0]
-                intensities = data[:, 1]
-                
-                # Validate data
-                if len(wavenumbers) == 0 or len(intensities) == 0:
-                    raise ValueError("File contains no data points")
-                
-                if np.any(np.isnan(wavenumbers)) or np.any(np.isnan(intensities)):
-                    raise ValueError("File contains invalid (NaN) values")
-                
-                # Generate unique name
-                filename = Path(file_path).stem
-                display_name = filename
-                counter = 1
-                while display_name in self.loaded_spectra:
-                    display_name = f"{filename}_{counter}"
-                    counter += 1
-                
-                # Store spectrum
-                self.loaded_spectra[display_name] = (wavenumbers, intensities)
-                
-                # Add to list (without triggering selection events during batch load)
-                self.multi_spectrum_list.addItem(display_name)
-                
-                # Only update plot if requested (skip during batch loading)
-                if update_plot:
-                    self.update_multi_plot()
-                    self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
-                
-                return True
-                
-            elif data.ndim == 1 or data.shape[1] < 2:
-                raise ValueError(f"File must contain at least two columns (wavenumber, intensity). Found {data.shape[1] if data.ndim == 2 else 1} column(s)")
+            import pandas as pd
+            
+            wavenumbers = None
+            intensities = None
+            
+            # Try different delimiters with pandas (handles headers automatically)
+            delimiters = ['\t', ',', ';', ' ', '|']
+            
+            for delimiter in delimiters:
+                try:
+                    # Read with pandas, skip comments and handle headers
+                    df = pd.read_csv(file_path, delimiter=delimiter, comment='#', 
+                                   skipinitialspace=True, on_bad_lines='skip')
+                    
+                    if df.shape[1] >= 2:
+                        # Convert to numeric, coercing errors (headers become NaN)
+                        wn = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
+                        inten = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
+                        
+                        # Remove NaN values (from header rows)
+                        valid_mask = ~(np.isnan(wn) | np.isnan(inten))
+                        wn = wn[valid_mask]
+                        inten = inten[valid_mask]
+                        
+                        # Check if we got valid data
+                        if len(wn) > 10 and len(inten) > 10:
+                            wavenumbers = wn.astype(np.float64)
+                            intensities = inten.astype(np.float64)
+                            break
+                except:
+                    continue
+            
+            # Fallback to numpy loadtxt if pandas fails
+            if wavenumbers is None:
+                try:
+                    data = np.loadtxt(file_path)
+                    if data.ndim == 2 and data.shape[1] >= 2:
+                        wavenumbers = data[:, 0].astype(np.float64)
+                        intensities = data[:, 1].astype(np.float64)
+                except:
+                    pass
+            
+            # Validate we got data
+            if wavenumbers is None or intensities is None:
+                raise ValueError("Could not parse file - no valid numeric data found")
+            
+            if len(wavenumbers) == 0 or len(intensities) == 0:
+                raise ValueError("File contains no data points")
+            
+            if np.any(np.isnan(wavenumbers)) or np.any(np.isnan(intensities)):
+                raise ValueError("File contains invalid (NaN) values")
+            
+            # Generate unique name
+            filename = Path(file_path).stem
+            display_name = filename
+            counter = 1
+            while display_name in self.loaded_spectra:
+                display_name = f"{filename}_{counter}"
+                counter += 1
+            
+            # Store spectrum
+            self.loaded_spectra[display_name] = (wavenumbers, intensities)
+            
+            # Add to list (without triggering selection events during batch load)
+            self.multi_spectrum_list.addItem(display_name)
+            
+            # Only update plot if requested (skip during batch loading)
+            if update_plot:
+                self.update_multi_plot()
+                self.setWindowTitle(f"Multi-Spectrum Manager - {len(self.loaded_spectra)} spectra loaded")
+            
+            return True
             
         except Exception as e:
             # Re-raise the exception to be handled by the calling method

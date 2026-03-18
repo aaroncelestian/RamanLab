@@ -1113,6 +1113,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             # Load spectra from files
             spectra_data = []
+            filenames = []  # Track filenames
             wavenumbers = None
             
             print(f"DEBUG: Starting to load {len(files)} files...")
@@ -1140,6 +1141,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
                             wavenumbers = spectrum['wavenumbers']
                             print(f"DEBUG: Set wavenumbers from first file, length: {len(wavenumbers)}")
                         spectra_data.append(spectrum['intensities'])
+                        filenames.append(os.path.basename(file_path))  # Store filename
                         if i < 3:
                             print(f"DEBUG: Successfully loaded spectrum {i+1}, intensities length: {len(spectrum['intensities'])}")
                     else:
@@ -1158,10 +1160,26 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 QMessageBox.warning(self, "Import Failed", "No valid spectra could be imported.")
                 return
             
+            # Check if all spectra have the same length
+            spectrum_lengths = [len(spec) for spec in spectra_data]
+            print(f"DEBUG: Spectrum lengths - min: {min(spectrum_lengths)}, max: {max(spectrum_lengths)}")
+            
+            if len(set(spectrum_lengths)) > 1:
+                # Spectra have different lengths - need to align them
+                print(f"DEBUG: Spectra have different lengths. Aligning to common length...")
+                min_length = min(spectrum_lengths)
+                
+                # Truncate all spectra to the minimum length
+                spectra_data = [spec[:min_length] for spec in spectra_data]
+                wavenumbers = wavenumbers[:min_length]
+                
+                print(f"DEBUG: Aligned all spectra to length: {min_length}")
+            
             # Store in cluster data
             print("DEBUG: Storing data in cluster_data...")
             self.cluster_data['intensities'] = np.array(spectra_data)
             self.cluster_data['wavenumbers'] = wavenumbers
+            self.cluster_data['filenames'] = filenames  # Store filenames
             print(f"DEBUG: cluster_data['intensities'].shape = {self.cluster_data['intensities'].shape}")
             print(f"DEBUG: cluster_data['wavenumbers'].shape = {self.cluster_data['wavenumbers'].shape}")
             print(f"DEBUG: cluster_data keys: {list(self.cluster_data.keys())}")
@@ -1226,30 +1244,40 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             for delimiter in delimiters:
                 try:
-                    # Read file
-                    df = pd.read_csv(file_path, delimiter=delimiter, header=None, comment='#')
+                    # First, try reading with header detection
+                    df = pd.read_csv(file_path, delimiter=delimiter, comment='#', 
+                                   skipinitialspace=True, on_bad_lines='skip')
                     
+                    # If first row looks like a header, skip it
                     if df.shape[1] >= 2:
-                        # Assume first column is wavenumbers, second is intensities
-                        wavenumbers = df.iloc[:, 0].values
-                        intensities = df.iloc[:, 1].values
-                        
-                        # Basic validation
-                        if len(wavenumbers) > 10 and len(intensities) > 10:
-                            return {
-                                'wavenumbers': wavenumbers,
-                                'intensities': intensities
-                            }
+                        # Try to convert to numeric - this will fail if headers are present
+                        try:
+                            wavenumbers = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
+                            intensities = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
+                            
+                            # Remove any NaN values (from non-numeric rows like headers)
+                            valid_mask = ~(np.isnan(wavenumbers) | np.isnan(intensities))
+                            wavenumbers = wavenumbers[valid_mask]
+                            intensities = intensities[valid_mask]
+                            
+                            # Basic validation
+                            if len(wavenumbers) > 10 and len(intensities) > 10:
+                                return {
+                                    'wavenumbers': wavenumbers.astype(np.float64),
+                                    'intensities': intensities.astype(np.float64)
+                                }
+                        except:
+                            continue
                 except:
                     continue
             
-            # If standard parsing fails, try numpy loadtxt
+            # If standard parsing fails, try numpy loadtxt (skips non-numeric rows automatically)
             try:
                 data = np.loadtxt(file_path)
                 if data.shape[1] >= 2:
                     return {
-                        'wavenumbers': data[:, 0],
-                        'intensities': data[:, 1]
+                        'wavenumbers': data[:, 0].astype(np.float64),
+                        'intensities': data[:, 1].astype(np.float64)
                     }
             except:
                 pass
@@ -1472,6 +1500,34 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
             if 'calinski_harabasz_score' in self.cluster_data and self.cluster_data['calinski_harabasz_score'] is not None:
                 text += f"Calinski-Harabasz Index: {self.cluster_data['calinski_harabasz_score']:.1f}\n"
+            
+            # Add filenames for each cluster (if available)
+            if 'filenames' in self.cluster_data and self.cluster_data['filenames'] is not None:
+                text += f"\n\nSPECTRA BY CLUSTER:\n"
+                text += f"{'='*50}\n"
+                
+                filenames = self.cluster_data['filenames']
+                for cluster_id in unique_labels:
+                    cluster_mask = labels == cluster_id
+                    cluster_files = [filenames[i] for i in range(len(filenames)) if cluster_mask[i]]
+                    
+                    text += f"\nCluster {int(cluster_id)+1} ({len(cluster_files)} spectra):\n"
+                    text += f"{'-'*50}\n"
+                    
+                    # Sort filenames alphabetically for easier reading
+                    cluster_files.sort()
+                    
+                    # Display filenames (limit to reasonable number for readability)
+                    if len(cluster_files) <= 50:
+                        for filename in cluster_files:
+                            text += f"  • {filename}\n"
+                    else:
+                        # Show first 25 and last 25 if there are too many
+                        for filename in cluster_files[:25]:
+                            text += f"  • {filename}\n"
+                        text += f"  ... ({len(cluster_files) - 50} more files) ...\n"
+                        for filename in cluster_files[-25:]:
+                            text += f"  • {filename}\n"
             
             return text
             
