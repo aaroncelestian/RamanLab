@@ -6985,7 +6985,6 @@ The map is now ready for analysis!"""
             # Update UI
             self._clear_map_cache()
             self.update_map()
-            self.update_spectrum_display()
             
             spectra_count = len(self.map_data.spectra)
             self.statusBar().showMessage(f"PKL map loaded: {spectra_count:,} spectra")
