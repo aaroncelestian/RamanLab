@@ -38,6 +38,13 @@ try:
 except ImportError:
     H5PY_INSTALL_DIALOG_AVAILABLE = False
 
+# Import multi-region dialog for H5 files with multiple regions
+try:
+    from .dialogs.multi_region_dialog import MultiRegionDialog
+    MULTI_REGION_DIALOG_AVAILABLE = True
+except ImportError:
+    MULTI_REGION_DIALOG_AVAILABLE = False
+
 # Import additional modules
 from ..core.template_management import TemplateSpectraManager
 
@@ -6658,8 +6665,156 @@ The map is now ready for analysis!"""
         if reply == QMessageBox.StandardButton.Yes:
             self.save_map_to_pkl()
     
+    def _process_h5_region_to_pkl(self, h5_file, region_key, start_wn, end_wn, output_path, file_path):
+        """
+        Helper method to process a single H5 region and save it as a PKL file.
+        
+        Args:
+            h5_file: Open h5py File object
+            region_key: Name of the region to process (e.g., 'Region1')
+            start_wn: Spectral range start wavenumber
+            end_wn: Spectral range end wavenumber
+            output_path: Path where PKL file should be saved
+            file_path: Original H5 file path (for metadata)
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        import os
+        import pickle
+        import multiprocessing
+        from joblib import Parallel, delayed
+        from ..core.spectrum_data import SpectrumData
+        
+        try:
+            regions = h5_file['Regions']
+            
+            if region_key not in regions:
+                QMessageBox.critical(self, "Error", f"Region '{region_key}' not found in H5 file.")
+                return False
+            
+            region = regions[region_key]
+            if 'Dataset' not in region:
+                QMessageBox.critical(self, "Error", f"No Dataset found in region '{region_key}'.")
+                return False
+            
+            dataset = region['Dataset']
+            shape = dataset.shape
+            
+            # Determine data layout
+            if len(shape) == 3:
+                n_x, n_y, n_wn = shape
+                n_spectra = n_x * n_y
+            elif len(shape) == 2:
+                n_spectra, n_wn = shape
+                n_x = int(np.sqrt(n_spectra))
+                n_y = n_spectra // n_x
+            else:
+                QMessageBox.critical(self, "Invalid Shape", f"Unexpected data shape for {region_key}: {shape}")
+                return False
+            
+            # Create wavenumber array
+            wavenumbers = np.linspace(start_wn, end_wn, n_wn)
+            logger.info(f"Processing {region_key}: {wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f} ({len(wavenumbers)} points)")
+            
+            # Check if wavenumbers are in descending order and reverse if needed
+            if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                logger.info(f"Detected descending wavenumbers, reversing to ascending order")
+                wavenumbers = wavenumbers[::-1]
+                reverse_spectra = True
+            else:
+                reverse_spectra = False
+            
+            self.progress_status.show_progress(f"Reading {n_spectra:,} spectra from {region_key}...")
+            
+            # Read all data from HDF5 at once
+            if len(shape) == 3:
+                all_data = dataset[:]
+            else:
+                all_data = dataset[:]
+            
+            self.progress_status.show_progress(f"Creating {n_spectra:,} spectrum objects for {region_key} (parallel)...")
+            
+            # Helper function for parallel processing
+            def create_spectrum(i, wavenumbers, all_data, shape, n_y, reverse_spectra):
+                if len(shape) == 3:
+                    x_idx = i // n_y
+                    y_idx = i % n_y
+                    intensities = all_data[x_idx, y_idx, :]
+                    x_pos = float(x_idx)
+                    y_pos = float(y_idx)
+                else:
+                    intensities = all_data[i, :]
+                    x_pos = float(i // n_y)
+                    y_pos = float(i % n_y)
+                
+                if reverse_spectra:
+                    intensities = intensities[::-1]
+                
+                spectrum = SpectrumData(
+                    wavenumbers=wavenumbers,
+                    intensities=np.array(intensities, dtype=np.float64),
+                    x_pos=x_pos,
+                    y_pos=y_pos,
+                    filename=f"spectrum_{i:06d}"
+                )
+                return ((x_pos, y_pos), spectrum)
+            
+            # Use all available cores for parallel processing
+            n_cores = multiprocessing.cpu_count()
+            logger.info(f"Converting {region_key} to PKL using {n_cores} cores...")
+            
+            # Process in parallel
+            results = Parallel(n_jobs=-1, backend='loky', verbose=0)(
+                delayed(create_spectrum)(i, wavenumbers, all_data, shape, n_y, reverse_spectra)
+                for i in range(n_spectra)
+            )
+            
+            # Convert results to dictionary
+            spectra_dict = dict(results)
+            
+            # Create map data container
+            map_data = SimpleMapData()
+            map_data.wavenumbers = wavenumbers
+            map_data.target_wavenumbers = wavenumbers
+            map_data.spectra = spectra_dict
+            map_data.x_positions = sorted(set(int(k[0]) for k in spectra_dict.keys()))
+            map_data.y_positions = sorted(set(int(k[1]) for k in spectra_dict.keys()))
+            map_data.data_dir = file_path
+            
+            self.progress_status.show_progress(f"Saving {region_key} to PKL file...")
+            
+            # Save to PKL
+            save_data = {
+                'map_data': map_data,
+                'cosmic_ray_config': CosmicRayConfig(),
+                'metadata': {
+                    'creation_time': datetime.now().isoformat(),
+                    'total_spectra': n_spectra,
+                    'has_processed_data': False,
+                    'source_file': file_path,
+                    'source_format': 'HDF5',
+                    'region': region_key,
+                    'version': '2.0.0'
+                }
+            }
+            
+            with open(output_path, 'wb') as pkl_file:
+                pickle.dump(save_data, pkl_file, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            logger.info(f"Successfully saved {region_key} to {output_path}")
+            return True
+            
+        except Exception as e:
+            logger.exception(f"Error processing region {region_key}")
+            QMessageBox.critical(
+                self, "Region Processing Error",
+                f"Error processing {region_key}:\n\n{str(e)}"
+            )
+            return False
+    
     def import_h5_to_pkl(self):
-        """Import HDF5 or MAPX file and convert to PKL format."""
+        """Import HDF5 or MAPX file and convert to PKL format. Handles both single and multiple regions."""
         # Get input file path
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Import HDF5/MAPX File", "", 
@@ -6680,6 +6835,8 @@ The map is now ready for analysis!"""
                 # Show custom dialog with diagnostic and install options
                 self._show_h5py_missing_dialog(sys.executable, error_details)
                 return
+            
+            import os
             
             self.progress_status.show_progress(f"Reading HDF5 file: {file_path}...")
             
@@ -6705,185 +6862,201 @@ The map is now ready for analysis!"""
                 
                 # Find the data in Regions
                 regions = f['Regions']
-                region_keys = list(regions.keys())
+                region_keys = sorted(list(regions.keys()))
                 if not region_keys:
                     QMessageBox.critical(self, "No Data", "No regions found in HDF5 file.")
                     self.progress_status.hide_progress()
                     return
                 
-                # Use first region
-                region = regions[region_keys[0]]
-                if 'Dataset' not in region:
-                    QMessageBox.critical(self, "No Data", "No Dataset found in region.")
-                    self.progress_status.hide_progress()
-                    return
-                
-                dataset = region['Dataset']
-                shape = dataset.shape
-                
-                # Determine data layout
-                if len(shape) == 3:
-                    # 3D: (X, Y, Wavenumbers)
-                    n_x, n_y, n_wn = shape
-                    n_spectra = n_x * n_y
-                elif len(shape) == 2:
-                    # 2D: (Spectra, Wavenumbers)
-                    n_spectra, n_wn = shape
-                    n_x = int(np.sqrt(n_spectra))
-                    n_y = n_spectra // n_x
-                else:
-                    QMessageBox.critical(self, "Invalid Shape", f"Unexpected data shape: {shape}")
-                    self.progress_status.hide_progress()
-                    return
-                
-                # Create wavenumber array
-                wavenumbers = np.linspace(start_wn, end_wn, n_wn)
-                logger.info(f"Created wavenumber array: {wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f} ({len(wavenumbers)} points)")
-                
-                # Check if wavenumbers are in descending order and reverse if needed
-                if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
-                    logger.info(f"Detected descending wavenumbers ({wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f}), reversing to ascending order")
-                    wavenumbers = wavenumbers[::-1]
-                    reverse_spectra = True
-                    logger.info(f"After reversal: {wavenumbers[0]:.1f} → {wavenumbers[-1]:.1f}")
-                else:
-                    reverse_spectra = False
-                    logger.info(f"Wavenumbers already in ascending order")
-                
-                # Show info and confirm
-                self.progress_status.hide_progress()
-                
-                reply = QMessageBox.question(
-                    self, "Confirm Import",
-                    f"HDF5 File Information:\n\n"
-                    f"File: {file_path}\n"
-                    f"Map Size: {n_x} × {n_y} = {n_spectra:,} spectra\n"
-                    f"Wavenumber Range: {start_wn:.1f} - {end_wn:.1f} cm⁻¹\n"
-                    f"Points per Spectrum: {n_wn}\n\n"
-                    f"This may take a while for large files.\n"
-                    f"Continue with import?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
-                )
-                
-                if reply != QMessageBox.StandardButton.Yes:
-                    return
-                
-                # Get output file path
-                import os
-                default_name = os.path.splitext(os.path.basename(file_path))[0] + '.pkl'
-                default_dir = os.path.dirname(file_path)
-                
-                output_path, _ = QFileDialog.getSaveFileName(
-                    self, "Save PKL File", os.path.join(default_dir, default_name),
-                    "Pickle files (*.pkl);;All files (*)")
-                
-                if not output_path:
-                    return
-                
-                if not output_path.endswith('.pkl'):
-                    output_path += '.pkl'
-                
-                self.progress_status.show_progress(f"Reading {n_spectra:,} spectra from HDF5...")
-                
-                # Import required modules
-                from ..core.spectrum_data import SpectrumData
-                import multiprocessing
-                from joblib import Parallel, delayed
-                
-                # Read all data from HDF5 at once (fast - HDF5 is optimized for this)
-                if len(shape) == 3:
-                    # Read entire 3D array
-                    all_data = dataset[:]  # Shape: (n_x, n_y, n_wn)
-                else:
-                    all_data = dataset[:]  # Shape: (n_spectra, n_wn)
-                
-                self.progress_status.show_progress(f"Creating {n_spectra:,} spectrum objects (parallel)...")
-                
-                # Helper function for parallel processing
-                def create_spectrum(i, wavenumbers, all_data, shape, n_y, reverse_spectra):
+                # Gather information about all regions
+                region_info = {}
+                total_spectra = 0
+                for region_key in region_keys:
+                    region = regions[region_key]
+                    if 'Dataset' not in region:
+                        logger.warning(f"No Dataset found in {region_key}, skipping")
+                        continue
+                    
+                    dataset = region['Dataset']
+                    shape = dataset.shape
+                    
                     if len(shape) == 3:
-                        x_idx = i // n_y
-                        y_idx = i % n_y
-                        intensities = all_data[x_idx, y_idx, :]
-                        x_pos = float(x_idx)
-                        y_pos = float(y_idx)
+                        n_x, n_y, n_wn = shape
+                        n_spectra = n_x * n_y
+                    elif len(shape) == 2:
+                        n_spectra, n_wn = shape
+                        n_x = int(np.sqrt(n_spectra))
+                        n_y = n_spectra // n_x
                     else:
-                        intensities = all_data[i, :]
-                        x_pos = float(i // n_y)
-                        y_pos = float(i % n_y)
+                        logger.warning(f"Unexpected shape for {region_key}: {shape}, skipping")
+                        continue
                     
-                    # Reverse intensities if wavenumbers were reversed
-                    if reverse_spectra:
-                        intensities = intensities[::-1]
-                    
-                    spectrum = SpectrumData(
-                        wavenumbers=wavenumbers,
-                        intensities=np.array(intensities, dtype=np.float64),
-                        x_pos=x_pos,
-                        y_pos=y_pos,
-                        filename=f"spectrum_{i:06d}"
-                    )
-                    return ((x_pos, y_pos), spectrum)
-                
-                # Use all available cores for parallel processing
-                n_cores = multiprocessing.cpu_count()
-                logger.info(f"Converting HDF5 to PKL using {n_cores} cores...")
-                
-                # Process in parallel
-                results = Parallel(n_jobs=-1, backend='loky', verbose=0)(
-                    delayed(create_spectrum)(i, wavenumbers, all_data, shape, n_y, reverse_spectra)
-                    for i in range(n_spectra)
-                )
-                
-                # Convert results to dictionary
-                spectra_dict = dict(results)
-                
-                # Create map data container (SimpleMapData is defined at module level for pickle compatibility)
-                map_data = SimpleMapData()
-                map_data.wavenumbers = wavenumbers
-                map_data.target_wavenumbers = wavenumbers  # Same as wavenumbers for HDF5 import
-                map_data.spectra = spectra_dict
-                map_data.x_positions = sorted(set(int(k[0]) for k in spectra_dict.keys()))
-                map_data.y_positions = sorted(set(int(k[1]) for k in spectra_dict.keys()))
-                map_data.data_dir = file_path  # Store source file path
-                
-                self.progress_status.show_progress("Saving PKL file...")
-                
-                # Save to PKL
-                import pickle
-                save_data = {
-                    'map_data': map_data,
-                    'cosmic_ray_config': CosmicRayConfig(),
-                    'metadata': {
-                        'creation_time': datetime.now().isoformat(),
-                        'total_spectra': n_spectra,
-                        'has_processed_data': False,
-                        'source_file': file_path,
-                        'source_format': 'HDF5',
-                        'version': '2.0.0'
+                    region_info[region_key] = {
+                        'n_x': n_x,
+                        'n_y': n_y,
+                        'n_wn': n_wn,
+                        'n_spectra': n_spectra,
+                        'shape': shape
                     }
-                }
+                    total_spectra += n_spectra
                 
-                with open(output_path, 'wb') as pkl_file:
-                    pickle.dump(save_data, pkl_file, protocol=pickle.HIGHEST_PROTOCOL)
+                if not region_info:
+                    QMessageBox.critical(self, "No Valid Data", "No valid datasets found in any region.")
+                    self.progress_status.hide_progress()
+                    return
                 
                 self.progress_status.hide_progress()
                 
-                # Ask if user wants to load the new PKL
-                reply = QMessageBox.question(
-                    self, "Import Complete",
-                    f"Successfully converted HDF5 to PKL!\n\n"
-                    f"Output: {output_path}\n"
-                    f"Spectra: {n_spectra:,}\n\n"
-                    f"Would you like to load this PKL file now?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.Yes
-                )
+                # Check if we have multiple regions
+                if len(region_info) == 1:
+                    # Single region - use original workflow
+                    region_key = list(region_info.keys())[0]
+                    info = region_info[region_key]
+                    
+                    reply = QMessageBox.question(
+                        self, "Confirm Import",
+                        f"HDF5 File Information:\n\n"
+                        f"File: {os.path.basename(file_path)}\n"
+                        f"Region: {region_key}\n"
+                        f"Map Size: {info['n_x']} × {info['n_y']} = {info['n_spectra']:,} spectra\n"
+                        f"Wavenumber Range: {start_wn:.1f} - {end_wn:.1f} cm⁻¹\n"
+                        f"Points per Spectrum: {info['n_wn']}\n\n"
+                        f"This may take a while for large files.\n"
+                        f"Continue with import?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
+                    )
+                    
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
+                    
+                    # Get output file path
+                    default_name = os.path.splitext(os.path.basename(file_path))[0] + '.pkl'
+                    default_dir = os.path.dirname(file_path)
+                    
+                    output_path, _ = QFileDialog.getSaveFileName(
+                        self, "Save PKL File", os.path.join(default_dir, default_name),
+                        "Pickle files (*.pkl);;All files (*)")
+                    
+                    if not output_path:
+                        return
+                    
+                    if not output_path.endswith('.pkl'):
+                        output_path += '.pkl'
+                    
+                    # Process single region
+                    success = self._process_h5_region_to_pkl(f, region_key, start_wn, end_wn, output_path, file_path)
+                    
+                    if success:
+                        self.progress_status.hide_progress()
+                        
+                        # Ask if user wants to load the new PKL
+                        reply = QMessageBox.question(
+                            self, "Import Complete",
+                            f"Successfully converted HDF5 to PKL!\n\n"
+                            f"Output: {output_path}\n"
+                            f"Spectra: {info['n_spectra']:,}\n\n"
+                            f"Would you like to load this PKL file now?",
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.Yes
+                        )
+                        
+                        if reply == QMessageBox.StandardButton.Yes:
+                            self._load_pkl_file(output_path)
+                    else:
+                        self.progress_status.hide_progress()
                 
-                if reply == QMessageBox.StandardButton.Yes:
-                    # Load the PKL file we just created
-                    self._load_pkl_file(output_path)
+                else:
+                    # Multiple regions - show dialog for naming
+                    if not MULTI_REGION_DIALOG_AVAILABLE:
+                        QMessageBox.critical(
+                            self, "Feature Unavailable",
+                            f"This H5 file contains {len(region_info)} regions, but the multi-region dialog is not available.\n\n"
+                            "Please contact support."
+                        )
+                        return
+                    
+                    # Show summary and ask to continue
+                    summary = f"Multiple Regions Detected:\n\n"
+                    summary += f"File: {os.path.basename(file_path)}\n"
+                    summary += f"Total Regions: {len(region_info)}\n"
+                    summary += f"Total Spectra: {total_spectra:,}\n"
+                    summary += f"Wavenumber Range: {start_wn:.1f} - {end_wn:.1f} cm⁻¹\n\n"
+                    summary += "Regions:\n"
+                    for rkey, rinfo in sorted(region_info.items()):
+                        summary += f"  • {rkey}: {rinfo['n_x']} × {rinfo['n_y']} = {rinfo['n_spectra']:,} spectra\n"
+                    summary += "\nEach region will be saved as a separate PKL file.\n"
+                    summary += "Continue?"
+                    
+                    reply = QMessageBox.question(
+                        self, "Multiple Regions Detected",
+                        summary,
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes
+                    )
+                    
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
+                    
+                    # Show multi-region dialog
+                    default_base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    dialog = MultiRegionDialog(region_info, default_base_name, self)
+                    
+                    if dialog.exec() != QDialog.DialogCode.Accepted:
+                        return
+                    
+                    region_names = dialog.get_region_names()
+                    default_dir = os.path.dirname(file_path)
+                    
+                    # Process each region
+                    successful_files = []
+                    failed_regions = []
+                    
+                    for region_key, filename in region_names.items():
+                        output_path = os.path.join(default_dir, filename)
+                        
+                        logger.info(f"Processing {region_key} -> {output_path}")
+                        success = self._process_h5_region_to_pkl(f, region_key, start_wn, end_wn, output_path, file_path)
+                        
+                        if success:
+                            successful_files.append((region_key, output_path))
+                        else:
+                            failed_regions.append(region_key)
+                    
+                    self.progress_status.hide_progress()
+                    
+                    # Show completion summary
+                    if successful_files and not failed_regions:
+                        summary_msg = f"Successfully converted all {len(successful_files)} regions to PKL files!\n\n"
+                        summary_msg += "Files created:\n"
+                        for rkey, fpath in successful_files:
+                            summary_msg += f"  • {rkey}: {os.path.basename(fpath)}\n"
+                        summary_msg += f"\nAll files saved to:\n{default_dir}\n\n"
+                        summary_msg += "Would you like to load the first region now?"
+                        
+                        reply = QMessageBox.question(
+                            self, "Import Complete",
+                            summary_msg,
+                            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                            QMessageBox.StandardButton.No
+                        )
+                        
+                        if reply == QMessageBox.StandardButton.Yes and successful_files:
+                            self._load_pkl_file(successful_files[0][1])
+                    
+                    elif successful_files and failed_regions:
+                        summary_msg = f"Partially completed: {len(successful_files)} of {len(region_names)} regions converted.\n\n"
+                        summary_msg += f"Successful:\n"
+                        for rkey, fpath in successful_files:
+                            summary_msg += f"  • {rkey}\n"
+                        summary_msg += f"\nFailed:\n"
+                        for rkey in failed_regions:
+                            summary_msg += f"  • {rkey}\n"
+                        
+                        QMessageBox.warning(self, "Partial Success", summary_msg)
+                    
+                    else:
+                        QMessageBox.critical(self, "Import Failed", "Failed to convert any regions.")
                     
         except Exception as e:
             self.progress_status.hide_progress()
