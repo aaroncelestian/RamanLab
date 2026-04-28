@@ -7,10 +7,11 @@ and connects them to the core functionality.
 
 import logging
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import curve_fit
+from scipy.optimize import OptimizeWarning, curve_fit
 from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
@@ -24,6 +25,7 @@ from datetime import datetime
 from ..core import RamanMapData
 from ..core.cosmic_ray_detection import CosmicRayConfig, SimpleCosmicRayManager
 from ..core.math_models import (
+    DEFAULT_CURVE_FIT_MAXFEV,
     create_multi_peak_model,
     get_num_params_for_shape,
     get_param_names,
@@ -10428,13 +10430,44 @@ The map is now ready for analysis!"""
             QMessageBox.warning(self, "Region Too Small", "The selected wavenumber region contains fewer points than the number of parameters.")
             return
 
+        if not np.all(np.isfinite(x_fit)) or not np.all(np.isfinite(y_fit)):
+            QMessageBox.warning(
+                self,
+                "Invalid Data",
+                "The selected fitting region contains NaN or infinite values. Try a different region or check preprocessing."
+            )
+            return
+
         model_func = create_multi_peak_model(config['shapes'])
         param_names = get_param_names(config['shapes'])
         bounds = config['bounds']
         pos_key = (self.current_selected_spectrum.x_pos, self.current_selected_spectrum.y_pos)
+        fit_warning = None
 
         try:
-            popt, _ = curve_fit(model_func, x_fit, y_fit, p0=config['initial_params'], bounds=bounds, maxfev=5000)
+            with warnings.catch_warnings(record=True) as caught_warnings:
+                warnings.simplefilter("always", OptimizeWarning)
+                warnings.simplefilter("always", RuntimeWarning)
+                popt, pcov = curve_fit(
+                    model_func,
+                    x_fit,
+                    y_fit,
+                    p0=config['initial_params'],
+                    bounds=bounds,
+                    maxfev=DEFAULT_CURVE_FIT_MAXFEV,
+                )
+
+            warning_messages = [
+                str(warning.message)
+                for warning in caught_warnings
+                if issubclass(warning.category, (OptimizeWarning, RuntimeWarning))
+            ]
+            if warning_messages:
+                fit_warning = "; ".join(warning_messages)
+
+            covariance_diag = np.diag(pcov)
+            if not np.all(np.isfinite(covariance_diag)):
+                fit_warning = "Fit converged, but parameter uncertainty could not be estimated reliably."
         except RuntimeError as e:
             logger.error("curve_fit failed at test pixel %s: %s", pos_key, e)
             QMessageBox.critical(
@@ -10480,7 +10513,10 @@ The map is now ready for analysis!"""
 
         # Show success message with params
         param_text = "\n".join([f"{name}: {val:.4f}" for name, val in zip(param_names, popt)])
-        QMessageBox.information(self, "Test Fit Success", f"Fit successful!\n\nParameters:\n{param_text}")
+        message = f"Fit successful!\n\nParameters:\n{param_text}"
+        if fit_warning:
+            message += f"\n\nWarning: {fit_warning}"
+        QMessageBox.information(self, "Test Fit Success", message)
 
     def run_map_peak_fitting(self):
         """Run peak fitting across the entire map."""
@@ -10520,6 +10556,7 @@ The map is now ready for analysis!"""
         self.peak_fitting_results = results
         self.peak_fitting_config = results.get('config', self.peak_fitting_config)
         failed_fit_count = len(results.get('fit_errors', {}))
+        warning_fit_count = len(results.get('fit_warnings', {}))
 
         control_panel = self.get_current_peak_fitting_control_panel()
         if control_panel is not None and self.peak_fitting_config is not None:
@@ -10529,6 +10566,11 @@ The map is now ready for analysis!"""
         message = "Map peak fitting completed."
         if failed_fit_count:
             message += f"\n\nFailed fits: {failed_fit_count}"
+        if warning_fit_count:
+            message += (
+                f"\n\nPotentially unreliable fits: {warning_fit_count}"
+                "\nThese fits converged, but the parameter uncertainty may be unreliable."
+            )
         QMessageBox.information(self, "Success", message)
 
         visualize_parameter = None
@@ -10548,7 +10590,7 @@ The map is now ready for analysis!"""
             self.peak_fitting_worker.deleteLater()
             self.peak_fitting_worker = None
 
-    def update_peak_fitting_visualization(self, parameter: str):
+    def update_peak_fitting_visualization(self, parameter: Optional[str]):
         """Update the map visualization for the selected peak fitting parameter."""
         if self.peak_fitting_results is None:
             return
@@ -10647,7 +10689,8 @@ The map is now ready for analysis!"""
                 row['R-Squared'] = np.nan
 
             row['Fit Error'] = self.peak_fitting_results.get('fit_errors', {}).get(pos_key, "")
-                
+            row['Fit Warning'] = self.peak_fitting_results.get('fit_warnings', {}).get(pos_key, "")
+
             data.append(row)
 
         df = pd.DataFrame(data)

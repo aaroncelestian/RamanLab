@@ -2,35 +2,23 @@ from typing import List
 
 import numpy as np
 
-
-def _lorentzian(x: np.ndarray, amplitude: float, center: float, width: float) -> np.ndarray:
-    """Lorentzian peak function."""
-    width = abs(width) + 1e-10
-    return amplitude * (width**2) / ((x - center)**2 + width**2)
-
-
-def _gaussian(x: np.ndarray, amplitude: float, center: float, width: float) -> np.ndarray:
-    """Gaussian peak function."""
-    width = abs(width) + 1e-10
-    return amplitude * np.exp(-((x - center) / width) ** 2)
+try:
+    from ...core.peak_fitting import PeakFitter
+except ImportError:
+    from core.peak_fitting import PeakFitter
 
 
-def _pseudo_voigt(x: np.ndarray, amplitude: float, center: float, width: float, eta: float) -> np.ndarray:
-    """Pseudo-Voigt profile as a linear combination of Gaussian and Lorentzian."""
-    eta = np.clip(eta, 0, 1)
-    gaussian_part = _gaussian(x, 1.0, center, width)
-    lorentzian_part = _lorentzian(x, 1.0, center, width)
-    return amplitude * ((1 - eta) * gaussian_part + eta * lorentzian_part)
+DEFAULT_CURVE_FIT_MAXFEV = 5000
 
 
 def get_peak_function(shape: str):
-    """Returns the peak function corresponding to the shape."""
+    """Returns the PeakFitter function corresponding to the shape."""
     if shape == "Lorentzian":
-        return _lorentzian
+        return PeakFitter.lorentzian
     elif shape == "Gaussian":
-        return _gaussian
+        return PeakFitter.gaussian
     elif shape == "Pseudo-Voigt":
-        return _pseudo_voigt
+        return PeakFitter.pseudo_voigt
     else:
         raise ValueError(f"Unsupported peak shape: {shape}")
 
