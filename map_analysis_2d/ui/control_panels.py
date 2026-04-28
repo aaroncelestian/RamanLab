@@ -1564,6 +1564,39 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         self.eta_labels = []
         
         self._rebuild_peaks_ui()
+
+    @staticmethod
+    def _create_param_row(
+        grid_layout,
+        label_text,
+        row_idx,
+        init_val,
+        min_val,
+        max_val,
+        step=1.0,
+        range_min=0.0,
+        range_max=1e9,
+    ):
+        """Create a parameter row with init/min/max spin boxes."""
+        label = QLabel(label_text)
+        grid_layout.addWidget(label, row_idx, 0)
+        spins = {}
+
+        for col_idx, default_val in enumerate([init_val, min_val, max_val], start=1):
+            spin = QDoubleSpinBox()
+            spin.setRange(range_min, range_max)
+            spin.setValue(default_val)
+            spin.setSingleStep(step)
+            grid_layout.addWidget(spin, row_idx, col_idx)
+
+            if col_idx == 1:
+                spins['init'] = spin
+            elif col_idx == 2:
+                spins['min'] = spin
+            elif col_idx == 3:
+                spins['max'] = spin
+
+        return spins, label
         
     def _rebuild_peaks_ui(self):
         """Rebuild the UI for peak parameters based on number of peaks."""
@@ -1579,24 +1612,6 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         self.wid_spins.clear()
         self.eta_spins.clear()
         self.eta_labels.clear()
-        
-        def _create_param_row(grid, label_text, row_idx, init_val, min_val, max_val, step=1.0, range_min=0.0, range_max=1e9):
-            label = QLabel(label_text)
-            grid.addWidget(label, row_idx, 0)
-            spins = {}
-            for col_idx, default_val in enumerate([init_val, min_val, max_val], start=1):
-                spin = QDoubleSpinBox()
-                spin.setRange(range_min, range_max)
-                spin.setValue(default_val)
-                spin.setSingleStep(step)
-                grid.addWidget(spin, row_idx, col_idx)
-                if col_idx == 1:
-                    spins['init'] = spin
-                elif col_idx == 2:
-                    spins['min'] = spin
-                elif col_idx == 3:
-                    spins['max'] = spin
-            return spins, label
 
         num_peaks = self.num_peaks_spin.value()
 
@@ -1620,19 +1635,19 @@ class MapPeakFittingControlPanel(BaseControlPanel):
             grid.addWidget(QLabel("Max"), 0, 3)
 
             # Amplitude
-            amp_spins, _ = _create_param_row(grid, "Amplitude:", 1, 100.0, 0.0, 1e5, step=10.0)
+            amp_spins, _ = self._create_param_row(grid, "Amplitude:", 1, 100.0, 0.0, 1e5, step=10.0)
             self.amp_spins.append(amp_spins)
 
             # Center
-            cen_spins, _ = _create_param_row(grid, "Center:", 2, 520.0, 400.0, 600.0, step=10.0, range_max=4000.0)
+            cen_spins, _ = self._create_param_row(grid, "Center:", 2, 520.0, 400.0, 600.0, step=10.0, range_max=4000.0)
             self.cen_spins.append(cen_spins)
 
             # Width
-            wid_spins, _ = _create_param_row(grid, "Width:", 3, 10.0, 0.1, 100.0, step=1.0)
+            wid_spins, _ = self._create_param_row(grid, "Width:", 3, 10.0, 0.1, 100.0, step=1.0)
             self.wid_spins.append(wid_spins)
 
             # Eta (for Pseudo-Voigt)
-            eta_spins, eta_label = _create_param_row(grid, "Eta (G/L):", 4, 0.5, 0.0, 1.0, step=0.1, range_max=1.0)
+            eta_spins, eta_label = self._create_param_row(grid, "Eta (G/L):", 4, 0.5, 0.0, 1.0, step=0.1, range_max=1.0)
             self.eta_spins.append(eta_spins)
             self.eta_labels.append(eta_label)
             
