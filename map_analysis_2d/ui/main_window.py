@@ -1261,13 +1261,17 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.peak_fitting_worker.stop()
                 if not self.peak_fitting_worker.wait(10000):
                     logger.warning("Peak fitting worker did not stop gracefully; leaving as orphan to avoid corrupting numpy/scipy state")
-            try:
-                self.peak_fitting_worker.fitting_complete.disconnect()
-                self.peak_fitting_worker.fitting_failed.disconnect()
-                self.peak_fitting_worker.progress_updated.disconnect()
-                self.peak_fitting_worker.finished.disconnect()
-            except RuntimeError:
-                pass
+            for signal in (
+                self.peak_fitting_worker.fitting_complete,
+                self.peak_fitting_worker.fitting_failed,
+                self.peak_fitting_worker.progress_updated,
+                self.peak_fitting_worker.finished,
+            ):
+                try:
+                    signal.disconnect()
+                except RuntimeError:
+                    pass
+            self.progress_status.hide_progress()
 
         self.peak_fitting_results = None
         if clear_config:
@@ -10427,47 +10431,56 @@ The map is now ready for analysis!"""
         model_func = create_multi_peak_model(config['shapes'])
         param_names = get_param_names(config['shapes'])
         bounds = config['bounds']
+        pos_key = (self.current_selected_spectrum.x_pos, self.current_selected_spectrum.y_pos)
 
         try:
-            # Adjust bounds if needed (curve_fit bounds format: ([lower1, lower2], [upper1, upper2]))
-            popt, pcov = curve_fit(model_func, x_fit, y_fit, p0=config['initial_params'], bounds=bounds, maxfev=5000)
+            popt, _ = curve_fit(model_func, x_fit, y_fit, p0=config['initial_params'], bounds=bounds, maxfev=5000)
+        except RuntimeError as e:
+            logger.error("curve_fit failed at test pixel %s: %s", pos_key, e)
+            QMessageBox.critical(
+                self,
+                "Fit Failed",
+                f"Curve fitting did not converge:\n{e}\n\nTry adjusting initial parameters or bounds."
+            )
+            return
+        except ValueError as e:
+            logger.error("curve_fit invalid input at test pixel %s: %s", pos_key, e)
+            QMessageBox.critical(self, "Fit Failed", f"Invalid fitting parameters:\n{e}")
+            return
 
-            # Plot the result
-            self.peak_fitting_plot_widget.show_spectrum_panel(True)
-            ax = self.peak_fitting_plot_widget.spectrum_widget.ax
-            ax.clear()
+        # Plot the result
+        self.peak_fitting_plot_widget.show_spectrum_panel(True)
+        ax = self.peak_fitting_plot_widget.spectrum_widget.ax
+        ax.clear()
 
-            # Plot original data in region
-            ax.plot(wavenumbers, intensities, color='lightgray', label='Full Spectrum')
-            ax.plot(x_fit, y_fit, color='blue', label='Data (Region)', marker='.', linestyle='none')
-            
-            # Plot full fit
-            y_fit_result = model_func(x_fit, *popt)
-            ax.plot(x_fit, y_fit_result, color='red', linewidth=2, label='Total Fit')
+        # Plot original data in region
+        ax.plot(wavenumbers, intensities, color='lightgray', label='Full Spectrum')
+        ax.plot(x_fit, y_fit, color='blue', label='Data (Region)', marker='.', linestyle='none')
 
-            # Plot individual peaks
-            idx = 0
-            for i, shape in enumerate(config['shapes']):
-                n_p = get_num_params_for_shape(shape)
-                peak_func = get_peak_function(shape)
-                params = popt[idx:idx+n_p]
-                y_peak = peak_func(x_fit, *params)
-                ax.plot(x_fit, y_peak, linestyle='--', label=f'Peak {i+1} ({shape})')
-                idx += n_p
+        # Plot full fit
+        y_fit_result = model_func(x_fit, *popt)
+        ax.plot(x_fit, y_fit_result, color='red', linewidth=2, label='Total Fit')
 
-            ax.set_xlabel('Wavenumber (cm⁻¹)')
-            ax.set_ylabel('Intensity')
-            ax.set_title('Test Peak Fitting')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            self.peak_fitting_plot_widget.spectrum_widget.draw()
+        # Plot individual peaks
+        idx = 0
+        for i, shape in enumerate(config['shapes']):
+            n_p = get_num_params_for_shape(shape)
+            peak_func = get_peak_function(shape)
+            params = popt[idx:idx+n_p]
+            y_peak = peak_func(x_fit, *params)
+            ax.plot(x_fit, y_peak, linestyle='--', label=f'Peak {i+1} ({shape})')
+            idx += n_p
 
-            # Show success message with params
-            param_text = "\n".join([f"{name}: {val:.4f}" for name, val in zip(param_names, popt)])
-            QMessageBox.information(self, "Test Fit Success", f"Fit successful!\n\nParameters:\n{param_text}")
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title('Test Peak Fitting')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        self.peak_fitting_plot_widget.spectrum_widget.draw()
 
-        except Exception as e:
-            QMessageBox.critical(self, "Fit Failed", f"Curve fitting failed:\n{str(e)}")
+        # Show success message with params
+        param_text = "\n".join([f"{name}: {val:.4f}" for name, val in zip(param_names, popt)])
+        QMessageBox.information(self, "Test Fit Success", f"Fit successful!\n\nParameters:\n{param_text}")
 
     def run_map_peak_fitting(self):
         """Run peak fitting across the entire map."""
@@ -10513,7 +10526,6 @@ The map is now ready for analysis!"""
             control_panel.set_peak_configuration(self.peak_fitting_config)
             control_panel.export_batch_btn.setEnabled(True)
 
-        self.progress_status.hide_progress()
         message = "Map peak fitting completed."
         if failed_fit_count:
             message += f"\n\nFailed fits: {failed_fit_count}"
@@ -10526,12 +10538,12 @@ The map is now ready for analysis!"""
 
     def _on_peak_fitting_failed(self, error_msg: str):
         """Handle a peak fitting worker failure."""
-        self.progress_status.hide_progress()
         QMessageBox.critical(self, "Peak Fitting Error", f"Error during map peak fitting:\n{error_msg}")
         logger.error(f"Map peak fitting error: {error_msg}")
 
     def _on_peak_fitting_worker_finished(self):
         """Clean up the peak fitting worker thread reference."""
+        self.progress_status.hide_progress()
         if self.peak_fitting_worker is not None:
             self.peak_fitting_worker.deleteLater()
             self.peak_fitting_worker = None
@@ -10579,13 +10591,21 @@ The map is now ready for analysis!"""
 
         if param_key == "R-Squared":
             for pos_key, val in self.peak_fitting_results['r_squared'].items():
-                x_idx = x_to_idx[pos_key[0]]
-                y_idx = y_to_idx[pos_key[1]]
+                x_pos, y_pos = pos_key
+                if x_pos not in x_to_idx or y_pos not in y_to_idx:
+                    logger.warning("Position %s from fitting results not found in current map grid; skipping.", pos_key)
+                    continue
+                x_idx = x_to_idx[x_pos]
+                y_idx = y_to_idx[y_pos]
                 map_array[y_idx, x_idx] = val
         elif param_key and param_key in self.peak_fitting_results['map_parameters']:
             for pos_key, val in self.peak_fitting_results['map_parameters'][param_key].items():
-                x_idx = x_to_idx[pos_key[0]]
-                y_idx = y_to_idx[pos_key[1]]
+                x_pos, y_pos = pos_key
+                if x_pos not in x_to_idx or y_pos not in y_to_idx:
+                    logger.warning("Position %s from fitting results not found in current map grid; skipping.", pos_key)
+                    continue
+                x_idx = x_to_idx[x_pos]
+                y_idx = y_to_idx[y_pos]
                 map_array[y_idx, x_idx] = val
 
         x_positions = [s.x_pos for s in self.map_data.spectra.values()]
@@ -10631,5 +10651,14 @@ The map is now ready for analysis!"""
             data.append(row)
 
         df = pd.DataFrame(data)
-        df.to_csv(file_path, index=False)
+        try:
+            df.to_csv(file_path, index=False)
+        except (OSError, PermissionError, UnicodeEncodeError) as e:
+            logger.error("Failed to export peak fitting results to %s: %s", file_path, e)
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Could not write to file:\n{file_path}\n\n{e}"
+            )
+            return
         QMessageBox.information(self, "Success", f"Results exported to {file_path}")
