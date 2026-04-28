@@ -6,7 +6,11 @@ and connects them to the core functionality.
 """
 
 import logging
+import re
+
 import numpy as np
+import pandas as pd
+from scipy.optimize import curve_fit
 from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
@@ -21,6 +25,7 @@ from ..core import RamanMapData
 from ..core.cosmic_ray_detection import CosmicRayConfig, SimpleCosmicRayManager
 from ..analysis import PCAAnalyzer, NMFAnalyzer
 from ..workers import MapAnalysisWorker
+from ..workers.peak_fitting_worker import PeakFittingWorker
 
 # Import UI components
 from .base_widgets import ScrollableControlPanel, ProgressStatusWidget
@@ -1180,7 +1185,7 @@ class MapAnalysisMainWindow(QMainWindow):
             title += " [Raw]"
 
         pos_key = (closest_spectrum.x_pos, closest_spectrum.y_pos)
-        if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results['r_squared']:
+        if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results.get('r_squared', {}):
             r_squared = self.template_fitting_results['r_squared'][pos_key]
             title += f" | Template Fit R²: {r_squared:.3f}"
 
@@ -1194,7 +1199,7 @@ class MapAnalysisMainWindow(QMainWindow):
             label='Measured Spectrum'
         )
 
-        if include_template_overlay and hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results['coefficients']:
+        if include_template_overlay and hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results.get('coefficients', {}):
             self.plot_template_fit_overlay(closest_spectrum, wavenumbers, intensities, plot_widget)
 
         spectrum_ax.set_xlabel('Wavenumber (cm⁻¹)')
@@ -1242,10 +1247,18 @@ class MapAnalysisMainWindow(QMainWindow):
 
     def _reset_peak_fitting_state(self, clear_config: bool = False):
         """Clear peak fitting results that no longer match the loaded map data."""
-        if self.peak_fitting_worker is not None and self.peak_fitting_worker.isRunning():
-            self.peak_fitting_worker.stop()
-            if not self.peak_fitting_worker.wait(10000):
-                logger.warning("Peak fitting worker did not stop gracefully; leaving as orphan to avoid corrupting numpy/scipy state")
+        if self.peak_fitting_worker is not None:
+            if self.peak_fitting_worker.isRunning():
+                self.peak_fitting_worker.stop()
+                if not self.peak_fitting_worker.wait(10000):
+                    logger.warning("Peak fitting worker did not stop gracefully; leaving as orphan to avoid corrupting numpy/scipy state")
+            try:
+                self.peak_fitting_worker.fitting_complete.disconnect()
+                self.peak_fitting_worker.fitting_failed.disconnect()
+                self.peak_fitting_worker.progress_updated.disconnect()
+                self.peak_fitting_worker.finished.disconnect()
+            except RuntimeError:
+                pass
 
         self.peak_fitting_results = None
         if clear_config:
@@ -10324,6 +10337,16 @@ The map is now ready for analysis!"""
             self.detection_worker.deleteLater()
             self.detection_worker = None
 
+    def _validate_peak_fitting_bounds(self, config: dict) -> Optional[str]:
+        """Return an error message if any parameter bounds are invalid, else None."""
+        lower, upper = config['bounds']
+        param_names = config.get('initial_params', [])
+        for i in range(len(lower)):
+            if lower[i] >= upper[i]:
+                label = param_names[i] if i < len(param_names) else f"parameter {i + 1}"
+                return f"Lower bound ≥ upper bound for {label} ({lower[i]:.3g} ≥ {upper[i]:.3g})."
+        return None
+
     def create_peak_fitting_tab(self):
         """Create the map peak fitting tab."""
         self.peak_fitting_plot_widget = SplitMapSpectrumWidget()
@@ -10349,6 +10372,11 @@ The map is now ready for analysis!"""
             QMessageBox.warning(self, "Invalid Region", f"Min wavenumber ({min_wn:.1f}) must be less than max wavenumber ({max_wn:.1f}).")
             return
 
+        bounds_error = self._validate_peak_fitting_bounds(config)
+        if bounds_error:
+            QMessageBox.warning(self, "Invalid Bounds", bounds_error)
+            return
+
         # Get wavenumbers and intensities
         wavenumbers = self.current_selected_spectrum.wavenumbers
         intensities = (self.current_selected_spectrum.processed_intensities
@@ -10371,9 +10399,6 @@ The map is now ready for analysis!"""
         bounds = config['bounds']
 
         try:
-            from scipy.optimize import curve_fit
-            import numpy as np
-
             # Adjust bounds if needed (curve_fit bounds format: ([lower1, lower2], [upper1, upper2]))
             popt, pcov = curve_fit(model_func, x_fit, y_fit, p0=config['initial_params'], bounds=bounds, maxfev=5000)
 
@@ -10430,11 +10455,14 @@ The map is now ready for analysis!"""
             QMessageBox.warning(self, "Invalid Region", f"Min wavenumber ({min_wn:.1f}) must be less than max wavenumber ({max_wn:.1f}).")
             return
 
+        bounds_error = self._validate_peak_fitting_bounds(config)
+        if bounds_error:
+            QMessageBox.warning(self, "Invalid Bounds", bounds_error)
+            return
+
         if self.peak_fitting_worker is not None and self.peak_fitting_worker.isRunning():
             QMessageBox.information(self, "Peak Fitting Running", "Map peak fitting is already in progress.")
             return
-
-        from ..workers.peak_fitting_worker import PeakFittingWorker
 
         self.progress_status.show_progress("Running map peak fitting...")
         self.progress_status.update_progress(0, "Preparing peak fitting worker...")
@@ -10488,9 +10516,6 @@ The map is now ready for analysis!"""
         if self.map_data is None:
             return
 
-        import numpy as np
-        import re
-
         if not parameter:
             return
 
@@ -10514,6 +10539,10 @@ The map is now ready for analysis!"""
                 peak_num = match.group(1)
                 param_type = {"Center": "Cen", "Width": "Wid", "Amplitude": "Amp", "Eta": "Eta"}[match.group(2)]
                 param_key = f"P{peak_num}_{param_type}"
+
+        if param_key is None:
+            logger.warning("Unknown peak fitting visualization parameter: %s", parameter)
+            return
 
         if self.peak_fitting_config is not None:
             self.peak_fitting_config['visualize_key'] = param_key
@@ -10551,9 +10580,6 @@ The map is now ready for analysis!"""
         )
         if not file_path:
             return
-
-        import pandas as pd
-        import numpy as np
 
         data = []
         for key, spectrum in self.map_data.spectra.items():

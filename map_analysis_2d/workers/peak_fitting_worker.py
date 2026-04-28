@@ -1,6 +1,10 @@
 """Worker thread for map peak fitting to keep the UI responsive."""
 
+import logging
+
 from PySide6.QtCore import QThread, Signal
+
+logger = logging.getLogger(__name__)
 
 
 class PeakFittingWorker(QThread):
@@ -78,7 +82,8 @@ class PeakFittingWorker(QThread):
                         for param_index, name in enumerate(param_names):
                             results['map_parameters'][name][pos_key] = popt[param_index]
                         results['r_squared'][pos_key] = r_squared
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Fit failed for position %s: %s", pos_key, e)
                         for name in param_names:
                             results['map_parameters'][name][pos_key] = np.nan
                         results['r_squared'][pos_key] = np.nan

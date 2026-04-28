@@ -1,5 +1,7 @@
+from typing import List
+
 import numpy as np
-from core.peak_fitting import PeakFitter
+from .peak_fitting import PeakFitter
 
 def get_peak_function(shape: str):
     """Returns the PeakFitter function corresponding to the shape."""
@@ -21,7 +23,7 @@ def get_num_params_for_shape(shape: str) -> int:
     else:
         raise ValueError(f"Unsupported peak shape: {shape}")
 
-def create_multi_peak_model(shapes: list[str]):
+def create_multi_peak_model(shapes: List[str]):
     """
     Creates a dynamic multi-peak function based on the list of shapes.
     
@@ -39,6 +41,9 @@ def create_multi_peak_model(shapes: list[str]):
     params_per_peak = [get_num_params_for_shape(shape) for shape in shapes]
     
     def multi_peak_model(x, *params):
+        expected = sum(params_per_peak)
+        if len(params) != expected:
+            raise ValueError(f"Expected {expected} parameters for {len(peak_funcs)}-peak model, got {len(params)}")
         y = np.zeros_like(x, dtype=float)
         param_idx = 0
         for i, func in enumerate(peak_funcs):
@@ -50,7 +55,7 @@ def create_multi_peak_model(shapes: list[str]):
         
     return multi_peak_model
 
-def get_param_names(shapes: list[str]) -> list[str]:
+def get_param_names(shapes: List[str]) -> List[str]:
     """
     Returns a list of parameter names for a given sequence of peak shapes.
     
