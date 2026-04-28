@@ -45,6 +45,7 @@ class PeakFittingWorker(QThread):
                 'param_names': param_names,
                 'map_parameters': {name: {} for name in param_names},
                 'r_squared': {},
+                'fit_errors': {},
                 'config': dict(self.config),
             }
 
@@ -82,12 +83,14 @@ class PeakFittingWorker(QThread):
                         for param_index, name in enumerate(param_names):
                             results['map_parameters'][name][pos_key] = popt[param_index]
                         results['r_squared'][pos_key] = r_squared
-                    except Exception as e:
-                        logger.debug("Fit failed for position %s: %s", pos_key, e)
+                    except Exception as exc:
+                        logger.debug("Fit failed for position %s: %s", pos_key, exc)
+                        results['fit_errors'][pos_key] = str(exc)
                         for name in param_names:
                             results['map_parameters'][name][pos_key] = np.nan
                         results['r_squared'][pos_key] = np.nan
                 else:
+                    results['fit_errors'][pos_key] = "Selected fitting region contains fewer points than the number of fit parameters."
                     for name in param_names:
                         results['map_parameters'][name][pos_key] = np.nan
                     results['r_squared'][pos_key] = np.nan

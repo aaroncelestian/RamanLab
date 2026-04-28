@@ -23,6 +23,12 @@ from datetime import datetime
 # Import core functionality
 from ..core import RamanMapData
 from ..core.cosmic_ray_detection import CosmicRayConfig, SimpleCosmicRayManager
+from ..core.math_models import (
+    create_multi_peak_model,
+    get_num_params_for_shape,
+    get_param_names,
+    get_peak_function,
+)
 from ..analysis import PCAAnalyzer, NMFAnalyzer
 from ..workers import MapAnalysisWorker
 from ..workers.peak_fitting_worker import PeakFittingWorker
@@ -614,7 +620,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Peak Fitting analysis
         peak_fitting_action = QAction('&Map Peak Fitting', self)
-        peak_fitting_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(6))
+        peak_fitting_action.triggered.connect(self._show_peak_fitting_tab)
         analysis_menu.addAction(peak_fitting_action)
         
         analysis_menu.addSeparator()
@@ -687,7 +693,7 @@ class MapAnalysisMainWindow(QMainWindow):
         view_menu.addAction(results_view_action)
         
         peak_fitting_view_action = QAction('&Peak Fitting', self)
-        peak_fitting_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(6))
+        peak_fitting_view_action.triggered.connect(self._show_peak_fitting_tab)
         view_menu.addAction(peak_fitting_view_action)
         
     def setup_status_bar(self):
@@ -837,7 +843,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 control_panel = self.microplastic_tab.create_control_panel()
                 self.controls_panel.add_section("microplastic_controls", control_panel)
                 
-        elif index == 6:  # Peak Fitting
+        elif index == self._get_peak_fitting_tab_index():
             control_panel = MapPeakFittingControlPanel()
             control_panel.test_fit_requested.connect(self.test_map_peak_fitting)
             control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
@@ -1228,7 +1234,10 @@ class MapAnalysisMainWindow(QMainWindow):
         """Persist peak fitting control state before dynamic panels are cleared."""
         control_panel = self.get_current_peak_fitting_control_panel()
         if control_panel is not None:
-            self.peak_fitting_config = control_panel.get_peak_configuration()
+            try:
+                self.peak_fitting_config = control_panel.get_peak_configuration()
+            except ValueError as exc:
+                logger.debug("Skipping invalid cached peak fitting configuration: %s", exc)
 
     def get_current_peak_fitting_control_panel(self):
         """Get the current peak fitting control panel if it exists."""
@@ -10339,19 +10348,46 @@ The map is now ready for analysis!"""
 
     def _validate_peak_fitting_bounds(self, config: dict) -> Optional[str]:
         """Return an error message if any parameter bounds are invalid, else None."""
+        min_wn, max_wn = config['region']
+        if min_wn >= max_wn:
+            return f"Min wavenumber ({min_wn:.1f}) must be less than max wavenumber ({max_wn:.1f})."
+
         lower, upper = config['bounds']
-        param_names = config.get('initial_params', [])
+        initial_params = config.get('initial_params', [])
+        param_names = get_param_names(config.get('shapes', []))
+
+        if len(lower) != len(upper) or len(lower) != len(initial_params):
+            return "Peak fitting parameters and bounds are inconsistent."
+
         for i in range(len(lower)):
             if lower[i] >= upper[i]:
                 label = param_names[i] if i < len(param_names) else f"parameter {i + 1}"
                 return f"Lower bound ≥ upper bound for {label} ({lower[i]:.3g} ≥ {upper[i]:.3g})."
+            if not lower[i] <= initial_params[i] <= upper[i]:
+                label = param_names[i] if i < len(param_names) else f"parameter {i + 1}"
+                return (
+                    f"Initial value for {label} ({initial_params[i]:.3g}) must be within "
+                    f"[{lower[i]:.3g}, {upper[i]:.3g}]."
+                )
         return None
+
+    def _get_peak_fitting_tab_index(self) -> int:
+        """Return the current peak fitting tab index."""
+        if not hasattr(self, 'peak_fitting_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.peak_fitting_plot_widget)
+
+    def _show_peak_fitting_tab(self):
+        """Switch to the peak fitting tab if it exists."""
+        peak_fitting_tab_index = self._get_peak_fitting_tab_index()
+        if peak_fitting_tab_index >= 0:
+            self.tab_widget.setCurrentIndex(peak_fitting_tab_index)
 
     def create_peak_fitting_tab(self):
         """Create the map peak fitting tab."""
         self.peak_fitting_plot_widget = SplitMapSpectrumWidget()
         self.peak_fitting_plot_widget.spectrum_requested.connect(self.on_peak_fitting_spectrum_requested)
-        self.tab_widget.addTab(self.peak_fitting_plot_widget, "Peak Fitting")
+        self.peak_fitting_tab_index = self.tab_widget.addTab(self.peak_fitting_plot_widget, "Peak Fitting")
 
     def test_map_peak_fitting(self):
         """Test the peak fitting on the currently selected pixel."""
@@ -10367,14 +10403,9 @@ The map is now ready for analysis!"""
         if config is None:
             return
 
-        min_wn, max_wn = config['region']
-        if min_wn >= max_wn:
-            QMessageBox.warning(self, "Invalid Region", f"Min wavenumber ({min_wn:.1f}) must be less than max wavenumber ({max_wn:.1f}).")
-            return
-
         bounds_error = self._validate_peak_fitting_bounds(config)
         if bounds_error:
-            QMessageBox.warning(self, "Invalid Bounds", bounds_error)
+            QMessageBox.warning(self, "Invalid Peak Fitting Configuration", bounds_error)
             return
 
         # Get wavenumbers and intensities
@@ -10393,7 +10424,6 @@ The map is now ready for analysis!"""
             QMessageBox.warning(self, "Region Too Small", "The selected wavenumber region contains fewer points than the number of parameters.")
             return
 
-        from map_analysis_2d.core.math_models import create_multi_peak_model, get_param_names
         model_func = create_multi_peak_model(config['shapes'])
         param_names = get_param_names(config['shapes'])
         bounds = config['bounds']
@@ -10418,7 +10448,6 @@ The map is now ready for analysis!"""
             # Plot individual peaks
             idx = 0
             for i, shape in enumerate(config['shapes']):
-                from map_analysis_2d.core.math_models import get_peak_function, get_num_params_for_shape
                 n_p = get_num_params_for_shape(shape)
                 peak_func = get_peak_function(shape)
                 params = popt[idx:idx+n_p]
@@ -10450,14 +10479,9 @@ The map is now ready for analysis!"""
         if config is None:
             return
 
-        min_wn, max_wn = config['region']
-        if min_wn >= max_wn:
-            QMessageBox.warning(self, "Invalid Region", f"Min wavenumber ({min_wn:.1f}) must be less than max wavenumber ({max_wn:.1f}).")
-            return
-
         bounds_error = self._validate_peak_fitting_bounds(config)
         if bounds_error:
-            QMessageBox.warning(self, "Invalid Bounds", bounds_error)
+            QMessageBox.warning(self, "Invalid Peak Fitting Configuration", bounds_error)
             return
 
         if self.peak_fitting_worker is not None and self.peak_fitting_worker.isRunning():
@@ -10482,6 +10506,7 @@ The map is now ready for analysis!"""
         """Handle successful completion of map peak fitting."""
         self.peak_fitting_results = results
         self.peak_fitting_config = results.get('config', self.peak_fitting_config)
+        failed_fit_count = len(results.get('fit_errors', {}))
 
         control_panel = self.get_current_peak_fitting_control_panel()
         if control_panel is not None and self.peak_fitting_config is not None:
@@ -10489,7 +10514,10 @@ The map is now ready for analysis!"""
             control_panel.export_batch_btn.setEnabled(True)
 
         self.progress_status.hide_progress()
-        QMessageBox.information(self, "Success", "Map peak fitting completed.")
+        message = "Map peak fitting completed."
+        if failed_fit_count:
+            message += f"\n\nFailed fits: {failed_fit_count}"
+        QMessageBox.information(self, "Success", message)
 
         visualize_parameter = None
         if self.peak_fitting_config is not None:
@@ -10542,6 +10570,7 @@ The map is now ready for analysis!"""
 
         if param_key is None:
             logger.warning("Unknown peak fitting visualization parameter: %s", parameter)
+            self.statusBar().showMessage(f"Unknown peak-fitting parameter: {parameter}", 4000)
             return
 
         if self.peak_fitting_config is not None:
@@ -10596,6 +10625,8 @@ The map is now ready for analysis!"""
                 row['R-Squared'] = self.peak_fitting_results['r_squared'][pos_key]
             else:
                 row['R-Squared'] = np.nan
+
+            row['Fit Error'] = self.peak_fitting_results.get('fit_errors', {}).get(pos_key, "")
                 
             data.append(row)
 
