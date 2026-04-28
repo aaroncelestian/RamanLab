@@ -15,8 +15,11 @@ __pycache__/
 
 # Virtual environments
 raman_env/
+ramanlab_env/
 venv/
 env/
+.venv/
+.env/
 
 # OS generated files
 .DS_Store

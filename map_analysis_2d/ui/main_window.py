@@ -754,9 +754,8 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.normalize_templates_requested.connect(self.normalize_templates)
             control_panel.show_detailed_stats.connect(self.show_detailed_template_statistics)
             control_panel.export_statistics.connect(lambda: self.export_template_statistics(self.calculate_template_statistics()))
-            control_panel.show_chemical_analysis.connect(self.show_chemical_validity_analysis)
-                    # Removed: hybrid analysis and quantitative calibration signal connections
             control_panel.show_pp_analysis.connect(self.show_template_only_polypropylene_results)
+            control_panel.export_batch_requested.connect(self.export_template_fitting_to_batch)
             self.controls_panel.add_section("template_controls", control_panel)
             
             # Update template list in the control panel
@@ -2048,6 +2047,11 @@ class MapAnalysisMainWindow(QMainWindow):
                 message += f"• {name} Contribution\n"
             message += f"• Template Fit Quality (R²)\n"
             
+            # Enable batch export button
+            control_panel = self.get_current_template_control_panel()
+            if control_panel:
+                control_panel.export_batch_btn.setEnabled(True)
+            
             QMessageBox.information(self, "Template Fitting Complete", message)
             
             # Update map features in control panel
@@ -2305,6 +2309,11 @@ class MapAnalysisMainWindow(QMainWindow):
             if control_panel:
                 template_names = self.template_manager.get_template_names()
                 control_panel.update_template_list(template_names)
+                
+                # Update export button state
+                has_results = hasattr(self, 'template_fitting_results') and self.template_fitting_results
+                if hasattr(control_panel, 'export_batch_btn'):
+                    control_panel.export_batch_btn.setEnabled(has_results)
         except Exception as e:
             logger.error(f"Error updating template control panel: {e}")
     
@@ -8443,6 +8452,93 @@ The map is now ready for analysis!"""
                 QMessageBox.information(self, "Export Complete", f"Statistics exported to:\n{filename}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export statistics:\n{str(e)}")
+
+    def export_template_fitting_to_batch(self):
+        """
+        Export template fitting results in a format consistent with the 
+        BatchProcessingMonitor infrastructure.
+        """
+        if not hasattr(self, 'template_fitting_results') or not self.template_fitting_results:
+            QMessageBox.warning(self, "No Results", "No template fitting results available. Please run fitting first.")
+            return
+            
+        try:
+            import pandas as pd
+            from datetime import datetime
+            
+            # Get save filename
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Export Template Fitting to Batch Format", 
+                f"map_template_fitting_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                "CSV Files (*.csv);;All Files (*)"
+            )
+            
+            if not filename:
+                return
+                
+            self.progress_status.show_progress("Exporting template fitting results...")
+            
+            # Prepare data for export
+            export_data = []
+            template_names = self.template_fitting_results['template_names']
+            use_baseline = self.template_fitting_results.get('use_baseline', False)
+            coefficients = self.template_fitting_results['coefficients']
+            r_squared_vals = self.template_fitting_results['r_squared']
+            
+            # Iterate through all fitted positions
+            for pos_key, coeffs in coefficients.items():
+                x, y = pos_key
+                r2 = r_squared_vals.get(pos_key, 0)
+                
+                row = {
+                    'Filename': f"Map_Pos_{x}_{y}",
+                    'X': x,
+                    'Y': y,
+                    'Total_R2': r2,
+                    'Fitting_Method': self.template_fitting_results.get('method', 'unknown')
+                }
+                
+                # Add individual template coefficients
+                for i, name in enumerate(template_names):
+                    if i < len(coeffs):
+                        row[f'Coeff_{name}'] = coeffs[i]
+                
+                # Add baseline if available
+                if use_baseline and len(coeffs) > len(template_names):
+                    row['Coeff_Baseline'] = coeffs[-1]
+                
+                export_data.append(row)
+            
+            # Create DataFrame and save
+            df = pd.DataFrame(export_data)
+            df.to_csv(filename, index=False)
+            
+            self.progress_status.hide_progress()
+            
+            # Offer to open the Batch Monitor with these results
+            reply = QMessageBox.question(
+                self, "Export Successful",
+                f"Successfully exported fitting results for {len(export_data)} spectra to:\n{filename}\n\n"
+                "The format is consistent with BatchProcessingMonitor.\n\n"
+                "Would you like to open the main Batch tab to view these results?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # This would require communication with the main app
+                # For now, just show a hint
+                QMessageBox.information(
+                    self, "Batch Integration",
+                    "To view these results in the Batch tab:\n"
+                    "1. Go to the main application window\n"
+                    "2. Select the 'Batch' tab\n"
+                    "3. Use 'Load Results' or similar tool to import this CSV"
+                )
+                
+        except Exception as e:
+            self.progress_status.hide_progress()
+            QMessageBox.critical(self, "Export Error", f"Failed to export results:\n{str(e)}")
+            logger.error(f"Error exporting template fitting to batch: {e}")
 
     def update_template_statistics_display(self):
         """Update the template statistics display in the control panel."""

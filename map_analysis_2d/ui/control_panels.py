@@ -678,6 +678,7 @@ class TemplateControlPanel(BaseControlPanel):
     show_chemical_analysis = Signal()
             # Removed: show_hybrid_analysis and show_quantitative_calibration signals
     show_pp_analysis = Signal()  # Template-only polypropylene analysis
+    export_batch_requested = Signal()  # New signal for batch system integration
     
     def __init__(self, parent=None):
         super().__init__("Template Analysis", parent)
@@ -821,6 +822,12 @@ class TemplateControlPanel(BaseControlPanel):
         fit_btn = StandardButton("Fit Templates to Map")
         fit_btn.clicked.connect(self.fit_templates_requested.emit)
         self.layout.addWidget(fit_btn)
+        
+        self.export_batch_btn = StandardButton("🚀 Export to Batch System")
+        self.export_batch_btn.clicked.connect(self.export_batch_requested.emit)
+        self.export_batch_btn.setEnabled(False)  # Initially disabled
+        self.export_batch_btn.setToolTip("Export fitting results to a format compatible with the main Batch Processing system")
+        self.layout.addWidget(self.export_batch_btn)
         
     def _on_remove_template(self):
         """Handle remove template button click."""
