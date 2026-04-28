@@ -3,11 +3,13 @@ Control panel widgets for the map analysis application.
 """
 
 import logging
+from functools import partial
 from typing import Dict
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, 
     QLabel, QCheckBox, QComboBox, QLineEdit, QListWidget, QTabWidget,
-    QTextEdit, QSlider, QDoubleSpinBox, QSizePolicy, QFrame
+    QTextEdit, QSlider, QDoubleSpinBox, QSizePolicy, QFrame,
+    QSpinBox, QScrollArea, QFormLayout, QGridLayout
 )
 from PySide6.QtCore import Signal, Qt, QTimer
 
@@ -1463,3 +1465,301 @@ class ResultsControlPanel(BaseControlPanel):
         action_layout.addWidget(export_btn)
         
         self.layout.addWidget(action_group)
+
+
+class MapPeakFittingControlPanel(BaseControlPanel):
+    """Control panel for Map Peak Fitting."""
+    
+    # Signals
+    test_fit_requested = Signal()
+    run_map_fitting_requested = Signal()
+    export_batch_requested = Signal()
+    visualization_parameter_changed = Signal(str)
+    
+    def __init__(self, parent=None):
+        super().__init__("Map Peak Fitting", parent)
+        
+    def setup_controls(self):
+        """Setup controls for map peak fitting."""
+        
+        # Region Selection
+        region_group = QGroupBox("Fitting Region")
+        region_layout = QVBoxLayout(region_group)
+        
+        self.min_wavenumber_spin = QDoubleSpinBox()
+        self.min_wavenumber_spin.setRange(0, 4000)
+        self.min_wavenumber_spin.setValue(400)
+        
+        self.max_wavenumber_spin = QDoubleSpinBox()
+        self.max_wavenumber_spin.setRange(0, 4000)
+        self.max_wavenumber_spin.setValue(600)
+        
+        region_layout.addWidget(QLabel("Min Wavenumber (cm⁻¹):"))
+        region_layout.addWidget(self.min_wavenumber_spin)
+        region_layout.addWidget(QLabel("Max Wavenumber (cm⁻¹):"))
+        region_layout.addWidget(self.max_wavenumber_spin)
+        self.layout.addWidget(region_group)
+        
+        # Peaks Configuration
+        peaks_group = QGroupBox("Peaks Configuration")
+        peaks_layout = QVBoxLayout(peaks_group)
+        
+        num_peaks_layout = QHBoxLayout()
+        num_peaks_layout.addWidget(QLabel("Number of Peaks:"))
+        self.num_peaks_spin = QSpinBox()
+        self.num_peaks_spin.setRange(1, 5)
+        self.num_peaks_spin.setValue(1)
+        self.num_peaks_spin.valueChanged.connect(self._rebuild_peaks_ui)
+        num_peaks_layout.addWidget(self.num_peaks_spin)
+        peaks_layout.addLayout(num_peaks_layout)
+        
+        # Scroll area for dynamic peak inputs
+        self.peaks_scroll = QScrollArea()
+        self.peaks_scroll.setWidgetResizable(True)
+        self.peaks_scroll_content = QWidget()
+        self.peaks_scroll_layout = QVBoxLayout(self.peaks_scroll_content)
+        self.peaks_scroll.setWidget(self.peaks_scroll_content)
+        peaks_layout.addWidget(self.peaks_scroll)
+        
+        self.layout.addWidget(peaks_group)
+        
+        # Visualization
+        viz_group = QGroupBox("Visualization")
+        viz_layout = QVBoxLayout(viz_group)
+        
+        self.visualization_combo = QComboBox()
+        self.visualization_combo.currentTextChanged.connect(
+            lambda text: self.visualization_parameter_changed.emit(text)
+        )
+        viz_layout.addWidget(QLabel("Parameter to Map:"))
+        viz_layout.addWidget(self.visualization_combo)
+        self.layout.addWidget(viz_group)
+        
+        # Actions
+        actions_group = QGroupBox("Actions")
+        actions_layout = QVBoxLayout(actions_group)
+        
+        self.test_fit_btn = StandardButton("Test Fit Current Pixel")
+        self.test_fit_btn.setToolTip("Click a pixel on the map, then click this to test your initial parameters.")
+        self.test_fit_btn.clicked.connect(self.test_fit_requested.emit)
+        actions_layout.addWidget(self.test_fit_btn)
+        
+        self.run_fit_btn = PrimaryButton("Run Map Fitting")
+        self.run_fit_btn.clicked.connect(self.run_map_fitting_requested.emit)
+        actions_layout.addWidget(self.run_fit_btn)
+        
+        self.export_batch_btn = StandardButton("Export to Batch System")
+        self.export_batch_btn.setEnabled(False)
+        self.export_batch_btn.clicked.connect(self.export_batch_requested.emit)
+        actions_layout.addWidget(self.export_batch_btn)
+        
+        self.layout.addWidget(actions_group)
+        
+        # Lists to hold dynamic widgets
+        self.shape_combos = []
+        self.amp_spins = []
+        self.cen_spins = []
+        self.wid_spins = []
+        self.eta_spins = []
+        self.eta_labels = []
+        
+        self._rebuild_peaks_ui()
+        
+    def _rebuild_peaks_ui(self):
+        """Rebuild the UI for peak parameters based on number of peaks."""
+        # Clear existing layout
+        while self.peaks_scroll_layout.count():
+            item = self.peaks_scroll_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+        self.shape_combos.clear()
+        self.amp_spins.clear()
+        self.cen_spins.clear()
+        self.wid_spins.clear()
+        self.eta_spins.clear()
+        self.eta_labels.clear()
+        
+        num_peaks = self.num_peaks_spin.value()
+        
+        for i in range(num_peaks):
+            group = QGroupBox(f"Peak {i+1}")
+            layout = QVBoxLayout(group)
+            
+            shape_layout = QHBoxLayout()
+            shape_combo = QComboBox()
+            shape_combo.addItems(["Lorentzian", "Gaussian", "Pseudo-Voigt"])
+            shape_layout.addWidget(QLabel("Shape:"))
+            shape_layout.addWidget(shape_combo)
+            shape_layout.addStretch()
+            layout.addLayout(shape_layout)
+            self.shape_combos.append(shape_combo)
+            
+            # Initial parameters and bounds grid
+            grid = QGridLayout()
+            grid.addWidget(QLabel("Init"), 0, 1)
+            grid.addWidget(QLabel("Min"), 0, 2)
+            grid.addWidget(QLabel("Max"), 0, 3)
+            
+            # Helper function to create a row of spinboxes
+            def create_param_row(label_text, row_idx, init_val, min_val, max_val, step=1.0, range_min=0.0, range_max=1e9):
+                label = QLabel(label_text)
+                grid.addWidget(label, row_idx, 0)
+                
+                spins = {}
+                for col_idx, default_val in enumerate([init_val, min_val, max_val], start=1):
+                    spin = QDoubleSpinBox()
+                    spin.setRange(range_min, range_max)
+                    spin.setValue(default_val)
+                    spin.setSingleStep(step)
+                    grid.addWidget(spin, row_idx, col_idx)
+                    
+                    if col_idx == 1: spins['init'] = spin
+                    elif col_idx == 2: spins['min'] = spin
+                    elif col_idx == 3: spins['max'] = spin
+                
+                return spins, label
+            
+            # Amplitude
+            amp_spins, _ = create_param_row("Amplitude:", 1, 100.0, 0.0, 1e5, step=10.0)
+            self.amp_spins.append(amp_spins)
+            
+            # Center
+            cen_spins, _ = create_param_row("Center:", 2, 520.0, 400.0, 600.0, step=10.0, range_max=4000.0)
+            self.cen_spins.append(cen_spins)
+            
+            # Width
+            wid_spins, _ = create_param_row("Width:", 3, 10.0, 0.1, 100.0, step=1.0)
+            self.wid_spins.append(wid_spins)
+            
+            # Eta (for Pseudo-Voigt)
+            eta_spins, eta_label = create_param_row("Eta (G/L):", 4, 0.5, 0.0, 1.0, step=0.1, range_max=1.0)
+            self.eta_spins.append(eta_spins)
+            self.eta_labels.append(eta_label)
+            
+            # Initially hide eta if not Pseudo-Voigt
+            is_pv = shape_combo.currentText() == "Pseudo-Voigt"
+            eta_label.setVisible(is_pv)
+            for spin in eta_spins.values():
+                spin.setVisible(is_pv)
+            
+            # Connect shape change to show/hide eta
+            shape_combo.currentTextChanged.connect(partial(self._on_shape_changed, idx=i))
+            
+            layout.addLayout(grid)
+            self.peaks_scroll_layout.addWidget(group)
+            
+        self.peaks_scroll_layout.addStretch()
+        self._update_visualization_combo()
+        
+    def _on_shape_changed(self, text, idx):
+        is_pv = text == "Pseudo-Voigt"
+        self.eta_labels[idx].setVisible(is_pv)
+        for spin in self.eta_spins[idx].values():
+            spin.setVisible(is_pv)
+        self._update_visualization_combo()
+        
+    def _update_visualization_combo(self):
+        current_key = self.visualization_combo.currentData()
+        self.visualization_combo.blockSignals(True)
+        self.visualization_combo.clear()
+        self.visualization_combo.addItem("R-Squared (Fit Quality)", "R-Squared")
+        for i in range(self.num_peaks_spin.value()):
+            peak_index = i + 1
+            self.visualization_combo.addItem(f"Peak {peak_index} Center", f"P{peak_index}_Cen")
+            self.visualization_combo.addItem(f"Peak {peak_index} Width", f"P{peak_index}_Wid")
+            self.visualization_combo.addItem(f"Peak {peak_index} Amplitude", f"P{peak_index}_Amp")
+            if self.shape_combos[i].currentText() == "Pseudo-Voigt":
+                self.visualization_combo.addItem(f"Peak {peak_index} Eta", f"P{peak_index}_Eta")
+        self.visualization_combo.blockSignals(False)
+
+        if current_key is not None:
+            selected_index = self.visualization_combo.findData(current_key)
+            if selected_index >= 0:
+                self.visualization_combo.setCurrentIndex(selected_index)
+            else:
+                # Previous selection no longer valid (e.g. Eta removed after shape change)
+                self.visualization_combo.setCurrentIndex(0)
+            
+    def get_peak_configuration(self):
+        """Returns the configured peak shapes, initial parameters, and bounds."""
+        shapes = []
+        initial_params = []
+        lower_bounds = []
+        upper_bounds = []
+        
+        for i in range(self.num_peaks_spin.value()):
+            shape = self.shape_combos[i].currentText()
+            shapes.append(shape)
+            
+            # Amp, Cen, Wid
+            for param_dict in [self.amp_spins[i], self.cen_spins[i], self.wid_spins[i]]:
+                initial_params.append(param_dict['init'].value())
+                lower_bounds.append(param_dict['min'].value())
+                upper_bounds.append(param_dict['max'].value())
+            
+            # Eta
+            if shape == "Pseudo-Voigt":
+                initial_params.append(self.eta_spins[i]['init'].value())
+                lower_bounds.append(self.eta_spins[i]['min'].value())
+                upper_bounds.append(self.eta_spins[i]['max'].value())
+                
+        return {
+            "region": (self.min_wavenumber_spin.value(), self.max_wavenumber_spin.value()),
+            "shapes": shapes,
+            "initial_params": initial_params,
+            "bounds": (lower_bounds, upper_bounds),
+            "visualize_param": self.visualization_combo.currentText(),
+            "visualize_key": self.visualization_combo.currentData()
+        }
+
+    def set_peak_configuration(self, config: dict):
+        """Restore a previously used peak fitting configuration."""
+        region = config.get("region")
+        if region is not None:
+            self.min_wavenumber_spin.setValue(region[0])
+            self.max_wavenumber_spin.setValue(region[1])
+
+        shapes = config.get("shapes", [])
+        if not shapes:
+            return
+
+        self.num_peaks_spin.setValue(len(shapes))
+
+        param_index = 0
+        initial_params = config.get("initial_params", [])
+        lower_bounds, upper_bounds = config.get("bounds", ([], []))
+
+        expected_param_count = sum(4 if shape == "Pseudo-Voigt" else 3 for shape in shapes)
+        if len(initial_params) < expected_param_count:
+            logger.warning("Skipping peak fitting config restore: initial parameters are incomplete")
+            return
+        if len(lower_bounds) < expected_param_count or len(upper_bounds) < expected_param_count:
+            logger.warning("Skipping peak fitting config restore: parameter bounds are incomplete")
+            return
+
+        for peak_index, shape in enumerate(shapes):
+            self.shape_combos[peak_index].setCurrentText(shape)
+
+            for param_group in (self.amp_spins[peak_index], self.cen_spins[peak_index], self.wid_spins[peak_index]):
+                param_group['init'].setValue(initial_params[param_index])
+                param_group['min'].setValue(lower_bounds[param_index])
+                param_group['max'].setValue(upper_bounds[param_index])
+                param_index += 1
+
+            if shape == "Pseudo-Voigt":
+                self.eta_spins[peak_index]['init'].setValue(initial_params[param_index])
+                self.eta_spins[peak_index]['min'].setValue(lower_bounds[param_index])
+                self.eta_spins[peak_index]['max'].setValue(upper_bounds[param_index])
+                param_index += 1
+
+        self._update_visualization_combo()
+
+        visualize_key = config.get("visualize_key")
+        if visualize_key is not None:
+            selected_index = self.visualization_combo.findData(visualize_key)
+            if selected_index >= 0:
+                # Block signals: _update_visualization_combo already fired once above
+                self.visualization_combo.blockSignals(True)
+                self.visualization_combo.setCurrentIndex(selected_index)
+                self.visualization_combo.blockSignals(False)
