@@ -1,0 +1,6 @@
+# Minimal dependencies for CI testing
+numpy
+scipy
+matplotlib
+pandas
+pytest
