@@ -439,14 +439,14 @@ class MapAnalysisMainWindow(QMainWindow):
         # Connect tab change signal
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
-        # Create all tabs
+        # Create all tabs. Peak Fitting is first so it is selected by default.
+        self.create_peak_fitting_tab()
         self.create_map_tab()
         self.create_template_tab()
         self.create_dimensionality_reduction_tab()
         self.create_ml_tab()
         self.create_results_tab()
         self.create_microplastic_tab()
-        self.create_peak_fitting_tab()
         
         parent.addWidget(viz_widget)
         
@@ -486,6 +486,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Create the main widget for the results tab
         results_widget = QWidget()
+        self.results_tab_widget = results_widget
         results_layout = QVBoxLayout(results_widget)
         
         # Add title and export button
@@ -600,12 +601,12 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # PCA submenu
         pca_action = QAction('Run &PCA Analysis', self)
-        pca_action.triggered.connect(lambda: (self.tab_widget.setCurrentIndex(2), self.run_pca()))
+        pca_action.triggered.connect(lambda: (self._show_dimensionality_tab(), self.run_pca()))
         analysis_menu.addAction(pca_action)
         
         # NMF submenu
         nmf_action = QAction('Run &NMF Analysis', self)
-        nmf_action.triggered.connect(lambda: (self.tab_widget.setCurrentIndex(2), self.run_nmf()))
+        nmf_action.triggered.connect(lambda: (self._show_dimensionality_tab(), self.run_nmf()))
         analysis_menu.addAction(nmf_action)
         
         analysis_menu.addSeparator()
@@ -623,7 +624,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Template analysis
         template_action = QAction('&Template Analysis', self)
-        template_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        template_action.triggered.connect(self._show_template_tab)
         analysis_menu.addAction(template_action)
         
         # Peak Fitting analysis
@@ -659,7 +660,7 @@ class MapAnalysisMainWindow(QMainWindow):
         ml_load_model_action.triggered.connect(self.load_ml_model)
         
         ml_view_action = ml_menu.addAction('&ML Analysis View')
-        ml_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
+        ml_view_action.triggered.connect(self._show_ml_tab)
         
         ml_menu.addSeparator()
         
@@ -681,23 +682,23 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Tab navigation
         map_view_action = QAction('&Map View', self)
-        map_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        map_view_action.triggered.connect(self._show_map_tab)
         view_menu.addAction(map_view_action)
         
         template_view_action = QAction('&Template Analysis', self)
-        template_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        template_view_action.triggered.connect(self._show_template_tab)
         view_menu.addAction(template_view_action)
         
         dimensionality_view_action = QAction('&PCA && NMF Analysis', self)
-        dimensionality_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(2))
+        dimensionality_view_action.triggered.connect(self._show_dimensionality_tab)
         view_menu.addAction(dimensionality_view_action)
         
         ml_view_action = QAction('&ML Analysis', self)
-        ml_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
+        ml_view_action.triggered.connect(self._show_ml_tab)
         view_menu.addAction(ml_view_action)
         
         results_view_action = QAction('&ML Results Summary', self)
-        results_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(4))
+        results_view_action.triggered.connect(self._show_results_tab)
         view_menu.addAction(results_view_action)
         
         peak_fitting_view_action = QAction('&Peak Fitting', self)
@@ -714,7 +715,27 @@ class MapAnalysisMainWindow(QMainWindow):
         self._cache_peak_fitting_config_from_panel()
         self.controls_panel.clear_dynamic_sections()
         
-        if index == 0:  # Map View
+        if index == self._get_peak_fitting_tab_index():
+            control_panel = MapPeakFittingControlPanel()
+            control_panel.test_fit_requested.connect(self.test_map_peak_fitting)
+            control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
+            control_panel.visualization_parameter_changed.connect(self.update_peak_fitting_visualization)
+            control_panel.export_batch_requested.connect(self.export_map_peak_fitting_to_batch)
+            self.controls_panel.add_section("peak_fitting_controls", control_panel)
+
+            if self.peak_fitting_config is not None:
+                # Restores all spinboxes and combo selection; fires visualization_parameter_changed once
+                control_panel.set_peak_configuration(self.peak_fitting_config)
+
+            if self.peak_fitting_results is not None:
+                control_panel.export_batch_btn.setEnabled(True)
+                # If config was not set above (no cached config), trigger an initial visualization
+                if self.peak_fitting_config is None and self.map_data is not None:
+                    self.update_peak_fitting_visualization(
+                        control_panel.get_peak_configuration().get('visualize_param')
+                    )
+
+        elif index == self._get_map_tab_index():
             # Always create a new control panel (don't cache due to widget lifecycle issues)
             control_panel = MapViewControlPanel()
             
@@ -777,7 +798,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 logger.info("Found template fitting results, adding to new map control panel...")
                 self.update_map_features_with_templates()
             
-        elif index == 1:  # Template Analysis
+        elif index == self._get_template_tab_index():
             control_panel = TemplateControlPanel()
             control_panel.load_template_file_requested.connect(self.load_template_file)
             control_panel.load_template_folder_requested.connect(self.load_template_folder)
@@ -800,7 +821,7 @@ class MapAnalysisMainWindow(QMainWindow):
             # Update statistics display if available
             self.update_template_statistics_display()
             
-        elif index == 2:  # Combined PCA & NMF
+        elif index == self._get_dimensionality_tab_index():
             control_panel = DimensionalityReductionControlPanel()
             control_panel.run_pca_requested.connect(self.run_pca)
             control_panel.run_nmf_requested.connect(self.run_nmf)
@@ -810,7 +831,7 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.load_nmf_requested.connect(self.load_nmf_results)
             self.controls_panel.add_section("dimensionality_controls", control_panel)
             
-        elif index == 3:  # ML Analysis
+        elif index == self._get_ml_tab_index():
             control_panel = MLControlPanel()
             control_panel.train_supervised_requested.connect(self.train_supervised_model)
             control_panel.train_unsupervised_requested.connect(self.train_unsupervised_model)
@@ -835,7 +856,7 @@ class MapAnalysisMainWindow(QMainWindow):
             # Populate model list from model manager
             self._populate_ml_control_panel_models(control_panel)
             
-        elif index == 4:  # Results
+        elif index == self._get_results_tab_index():
             control_panel = ResultsControlPanel()
             control_panel.generate_report_requested.connect(self.generate_report)
             control_panel.export_results_requested.connect(self.export_results)
@@ -845,32 +866,12 @@ class MapAnalysisMainWindow(QMainWindow):
             # Automatically refresh comprehensive results when switching to results tab
             self.plot_comprehensive_results()
             
-        elif index == 5:  # Microplastic Detection
+        elif index == self._get_microplastic_tab_index():
             # Get the control panel from the microplastic tab
             if hasattr(self, 'microplastic_tab'):
                 control_panel = self.microplastic_tab.create_control_panel()
                 self.controls_panel.add_section("microplastic_controls", control_panel)
                 
-        elif index == self._get_peak_fitting_tab_index():
-            control_panel = MapPeakFittingControlPanel()
-            control_panel.test_fit_requested.connect(self.test_map_peak_fitting)
-            control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
-            control_panel.visualization_parameter_changed.connect(self.update_peak_fitting_visualization)
-            control_panel.export_batch_requested.connect(self.export_map_peak_fitting_to_batch)
-            self.controls_panel.add_section("peak_fitting_controls", control_panel)
-
-            if self.peak_fitting_config is not None:
-                # Restores all spinboxes and combo selection; fires visualization_parameter_changed once
-                control_panel.set_peak_configuration(self.peak_fitting_config)
-
-            if self.peak_fitting_results is not None:
-                control_panel.export_batch_btn.setEnabled(True)
-                # If config was not set above (no cached config), trigger an initial visualization
-                if self.peak_fitting_config is None and self.map_data is not None:
-                    self.update_peak_fitting_visualization(
-                        control_panel.get_peak_configuration().get('visualize_param')
-                    )
-            
         # Add stretch to push all controls to the top
         self.controls_panel.add_stretch()
     
@@ -1753,7 +1754,7 @@ class MapAnalysisMainWindow(QMainWindow):
             results = self.pca_analyzer.run_analysis(X, n_components=n_components)
             
             if results['success']:
-                self.tab_widget.setCurrentIndex(2)  # Switch to combined tab
+                self._show_dimensionality_tab()
                 self.plot_pca_results(results)
                 self.statusBar().showMessage("PCA analysis completed")
             else:
@@ -1880,7 +1881,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Template removed")
                 
                 # Update plot if templates are currently displayed
-                if self.tab_widget.currentIndex() == 1:  # Template tab
+                if self.tab_widget.currentIndex() == self._get_template_tab_index():
                     self.plot_templates()
             else:
                 QMessageBox.warning(self, "Error", "Failed to remove template")
@@ -1897,7 +1898,7 @@ class MapAnalysisMainWindow(QMainWindow):
             self.statusBar().showMessage("All templates cleared")
             
             # Clear the plot
-            if self.tab_widget.currentIndex() == 1:  # Template tab
+            if self.tab_widget.currentIndex() == self._get_template_tab_index():
                 self.template_plot_widget.clear_plot()
                 
         except Exception as e:
@@ -1915,7 +1916,7 @@ class MapAnalysisMainWindow(QMainWindow):
             self.template_extraction_mode = True
             
             # Switch to Map View tab so user can click on map
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             # Show instruction message
             QMessageBox.information(
@@ -2209,7 +2210,7 @@ class MapAnalysisMainWindow(QMainWindow):
             logger.info("Updating map features with template results...")
             
             # Check if we're currently on the map tab - if so, update directly
-            if self.tab_widget.currentIndex() == 0:  # Map View tab
+            if self.tab_widget.currentIndex() == self._get_map_tab_index():
                 sections = self.controls_panel.sections
                 logger.info(f"Available control panel sections: {list(sections.keys())}")
                 
@@ -2428,7 +2429,7 @@ class MapAnalysisMainWindow(QMainWindow):
                     template.processed_intensities = data
             
             # Update plot if currently displayed
-            if self.tab_widget.currentIndex() == 1:  # Template tab
+            if self.tab_widget.currentIndex() == self._get_template_tab_index():
                 self.plot_templates()
                 
             self.statusBar().showMessage(f"Templates normalized using {method}")
@@ -2521,7 +2522,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.nmf_valid_positions = valid_positions
                 
                 # Switch to combined tab and plot results
-                self.tab_widget.setCurrentIndex(2)
+                self._show_dimensionality_tab()
                 self.plot_nmf_results(results)
                 
                 # Update map features to include NMF components
@@ -3414,7 +3415,7 @@ class MapAnalysisMainWindow(QMainWindow):
             }
             
             # Switch to ML tab and plot results
-            self.tab_widget.setCurrentIndex(3)  # ML tab is now at index 3, not 4
+            self._show_ml_tab()
             self.plot_ml_results(self.ml_results)
             
             # Update control panel with results
@@ -3563,7 +3564,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.ml_valid_positions = valid_positions
                 
                 # Switch to ML tab and plot results
-                self.tab_widget.setCurrentIndex(3)  # ML tab is now at index 3, not 4
+                self._show_ml_tab()
                 self.plot_ml_results(results)
                 
                 # Update map features to include clustering results
@@ -3850,12 +3851,12 @@ class MapAnalysisMainWindow(QMainWindow):
                 if hasattr(self, 'tab_widget'):
                     # Switch away and back to trigger refresh
                     current_tab = self.tab_widget.currentIndex()
-                    if current_tab != 0:  # If not already on map tab
-                        self.tab_widget.setCurrentIndex(0)  # Switch to map tab
+                    if current_tab != self._get_map_tab_index():
+                        self._show_map_tab()
                     else:
                         # If already on map tab, briefly switch to another tab and back
-                        self.tab_widget.setCurrentIndex(1)  # Switch away
-                        self.tab_widget.setCurrentIndex(0)  # Switch back
+                        self._show_template_tab()
+                        self._show_map_tab()
                         
                 logger.info("Forced refresh of map tab controls")
             except Exception as refresh_error:
@@ -3865,7 +3866,7 @@ class MapAnalysisMainWindow(QMainWindow):
             self.plot_comprehensive_results()
             
             # Switch to map view to show results
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             QMessageBox.information(
                 self, "Classification Complete", 
@@ -4737,7 +4738,7 @@ class MapAnalysisMainWindow(QMainWindow):
         # Plot comprehensive results first
         self.plot_comprehensive_results()
         # Switch to results tab
-        self.tab_widget.setCurrentIndex(4)  # Updated index for results tab
+        self._show_results_tab()
         self.statusBar().showMessage("Comprehensive analysis report generated")
         
     def plot_comprehensive_results(self):
@@ -5783,7 +5784,7 @@ class MapAnalysisMainWindow(QMainWindow):
                     }
                     
                     # Switch to NMF tab and plot results
-                    self.tab_widget.setCurrentIndex(3)
+                    self._show_dimensionality_tab()
                     self.plot_nmf_results(self.nmf_results)
                     
                     # Update map features
@@ -7561,7 +7562,7 @@ The map is now ready for analysis!"""
             self.update_map()
             
             # Switch to map tab
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             logger.info(f"Map updated to show results for model '{model_name}'")
             return True
@@ -7641,7 +7642,7 @@ The map is now ready for analysis!"""
             if map_control_panel is None:
                 logger.warning("Cannot refresh map features - map control panel is None")
                 # Try to ensure we're on the map tab and the control panel exists
-                self.tab_widget.setCurrentIndex(0)  # Switch to Map View tab
+                self._show_map_tab()
                 map_control_panel = self.get_current_map_control_panel()
                 if map_control_panel is None:
                     logger.error("Map control panel still None after switching to Map View tab")
@@ -9875,7 +9876,7 @@ The map is now ready for analysis!"""
             self.update_map()
             
             # Switch to map view
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             # Add custom feature to dropdown
             control_panel = self.get_current_map_control_panel()
@@ -10420,11 +10421,70 @@ The map is now ready for analysis!"""
             return -1
         return self.tab_widget.indexOf(self.peak_fitting_plot_widget)
 
+    def _get_map_tab_index(self) -> int:
+        """Return the current map tab index."""
+        if not hasattr(self, 'map_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.map_plot_widget)
+
+    def _get_template_tab_index(self) -> int:
+        """Return the current template tab index."""
+        if not hasattr(self, 'template_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.template_plot_widget)
+
+    def _get_dimensionality_tab_index(self) -> int:
+        """Return the current PCA/NMF tab index."""
+        if not hasattr(self, 'dimensionality_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.dimensionality_plot_widget)
+
+    def _get_ml_tab_index(self) -> int:
+        """Return the current ML tab index."""
+        if not hasattr(self, 'ml_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.ml_plot_widget)
+
+    def _get_results_tab_index(self) -> int:
+        """Return the current results tab index."""
+        if not hasattr(self, 'results_tab_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.results_tab_widget)
+
+    def _get_microplastic_tab_index(self) -> int:
+        """Return the current microplastic tab index."""
+        if not hasattr(self, 'microplastic_tab'):
+            return -1
+        return self.tab_widget.indexOf(self.microplastic_tab)
+
+    def _show_tab(self, tab_index: int):
+        """Switch to a tab if it exists."""
+        if tab_index >= 0:
+            self.tab_widget.setCurrentIndex(tab_index)
+
+    def _show_map_tab(self):
+        """Switch to the map tab if it exists."""
+        self._show_tab(self._get_map_tab_index())
+
+    def _show_template_tab(self):
+        """Switch to the template tab if it exists."""
+        self._show_tab(self._get_template_tab_index())
+
+    def _show_dimensionality_tab(self):
+        """Switch to the PCA/NMF tab if it exists."""
+        self._show_tab(self._get_dimensionality_tab_index())
+
+    def _show_ml_tab(self):
+        """Switch to the ML tab if it exists."""
+        self._show_tab(self._get_ml_tab_index())
+
+    def _show_results_tab(self):
+        """Switch to the results tab if it exists."""
+        self._show_tab(self._get_results_tab_index())
+
     def _show_peak_fitting_tab(self):
         """Switch to the peak fitting tab if it exists."""
-        peak_fitting_tab_index = self._get_peak_fitting_tab_index()
-        if peak_fitting_tab_index >= 0:
-            self.tab_widget.setCurrentIndex(peak_fitting_tab_index)
+        self._show_tab(self._get_peak_fitting_tab_index())
 
     def create_peak_fitting_tab(self):
         """Create the map peak fitting tab."""
