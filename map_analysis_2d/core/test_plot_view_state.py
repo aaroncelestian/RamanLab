@@ -1,11 +1,17 @@
 import unittest
+import sys
+from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
 
-from plot_view_state import capture_axis_view, restore_axis_view
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from map_analysis_2d.core.plot_view_state import capture_axis_view, restore_axis_view
 
 
 class PlotViewStateTests(unittest.TestCase):

@@ -172,7 +172,7 @@ You will see:
 **Cause:** Python version mismatch or corrupted file
 
 **Solutions:**
-1. Ensure you're using Python 3.8 or higher
+1. Ensure you're using Python 3.10 or higher
 2. Re-download the database file
 3. Check console for specific error message
 
@@ -224,7 +224,7 @@ If a new database version is released:
 If you continue to have problems:
 
 1. **Check console output** for detailed error messages
-2. **Verify Python version**: `python --version` (should be 3.8+)
+2. **Verify Python version**: `python --version` (should be 3.10+)
 3. **Check dependencies**: `pip install -r requirements_qt6.txt`
 4. **Contact support** with:
    - Operating system and version

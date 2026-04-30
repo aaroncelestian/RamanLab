@@ -11,7 +11,7 @@ REM Check if Python is available
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python is not found in PATH
-    echo Please install Python 3.8+ from python.org or Microsoft Store
+    echo Please install Python 3.10+ from python.org or Microsoft Store
     echo.
     pause
     exit /b 1

@@ -7,7 +7,7 @@
 # pip install -r requirements_qt6.txt
 #
 # SYSTEM REQUIREMENTS:
-# - Python 3.8+ (3.9+ recommended)
+# - Python 3.10+ (3.11+ recommended)
 # - 64-bit system recommended for large datasets
 # - Minimum 4GB RAM (8GB+ recommended for complex analyses)
 
@@ -199,4 +199,4 @@ pyinstaller>=5.0.0          # Creating standalone executable distributions
 # - umap-learn: Falls back to PCA for dimensionality reduction
 # - pymatgen: Advanced crystallography features disabled
 # - reportlab: PDF reports unavailable, but other exports work
-# - pyinstaller: Can't create standalone executables, but app runs normally 
+# - pyinstaller: Can't create standalone executables, but app runs normally
