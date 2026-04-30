@@ -2,10 +2,7 @@ from typing import List
 
 import numpy as np
 
-try:
-    from ...core.peak_fitting import PeakFitter
-except ImportError:
-    from core.peak_fitting import PeakFitter
+from core.peak_fitting import PeakFitter
 
 
 DEFAULT_CURVE_FIT_MAXFEV = 5000

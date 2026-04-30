@@ -31,6 +31,7 @@ from ..core.math_models import (
     get_param_names,
     get_peak_function,
 )
+from ..core.peak_fitting_state import invalidate_peak_fitting_results
 from ..analysis import PCAAnalyzer, NMFAnalyzer
 from ..workers import MapAnalysisWorker
 from ..workers.peak_fitting_worker import PeakFittingWorker, combine_fit_warning
@@ -10540,6 +10541,7 @@ The map is now ready for analysis!"""
             QMessageBox.information(self, "Peak Fitting Running", "Map peak fitting is already in progress.")
             return
 
+        invalidate_peak_fitting_results(self, control_panel)
         self.progress_status.show_progress("Running map peak fitting...")
         self.progress_status.update_progress(0, "Preparing peak fitting worker...")
         self.peak_fitting_worker = PeakFittingWorker(list(self.map_data.spectra.values()), self.use_processed, config)
