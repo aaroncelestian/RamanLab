@@ -54,6 +54,7 @@ dist/
 # IDE files
 .vscode/
 .idea/
+.codex
 *.swp
 *.swo
 
