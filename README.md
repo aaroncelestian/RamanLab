@@ -10,7 +10,7 @@ RamanLab is a comprehensive Python-based application for Raman spectroscopy data
 
 ### Prerequisites
 
-- **Python 3.8 or higher**
+- **Python 3.10 or higher**
 - **Operating System**: Windows, macOS, or Linux
 - **RAM**: 8GB minimum (16GB+ recommended for large datasets)
 - **Storage**: 500MB for application + 250MB for database
@@ -283,7 +283,7 @@ For optimal performance on multi-core systems:
 
 4. **Check Python version**:
    ```bash
-   python --version  # Should be 3.8 or higher
+   python --version  # Should be 3.10 or higher
    ```
 
 The dependency checker provides specific commands for any issues found.
@@ -384,7 +384,7 @@ The database uses Python pickle format with this structure:
 
 - **CPU**: Multi-core processor (4+ cores recommended)
 - **RAM**: 8GB minimum, 16GB+ for large datasets
-- **Python**: 3.8, 3.9, 3.10, or 3.11
+- **Python**: 3.10, 3.11, or 3.12
 - **Qt**: PySide6 (Qt6)
 
 ### Dependencies

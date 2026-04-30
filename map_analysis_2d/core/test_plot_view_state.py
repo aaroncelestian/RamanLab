@@ -5,7 +5,7 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib.figure import Figure
 
-from plot_view_state import capture_axis_view, restore_axis_view
+from map_analysis_2d.core.plot_view_state import capture_axis_view, restore_axis_view
 
 
 class PlotViewStateTests(unittest.TestCase):

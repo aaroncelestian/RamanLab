@@ -120,6 +120,20 @@ class PeakFittingReviewFixTests(unittest.TestCase):
 
         self.assertIsNone(error)
 
+    def test_validate_peak_fitting_window_ignores_non_numeric_wavenumbers(self):
+        state_module = load_module(
+            ROOT / "map_analysis_2d" / "core" / "peak_fitting_state.py",
+            "peak_fitting_state_under_test",
+        )
+
+        error = state_module.validate_peak_fitting_window(
+            [400.0, "bad", None, 500.0, 600.0],
+            (400.0, 600.0),
+            parameter_count=3,
+        )
+
+        self.assertIsNone(error)
+
     def test_math_models_import_exposes_peak_fitter(self):
         try:
             module = importlib.import_module("map_analysis_2d.core.math_models")

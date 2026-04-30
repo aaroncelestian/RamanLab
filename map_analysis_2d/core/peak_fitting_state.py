@@ -25,11 +25,17 @@ def merge_peak_fitting_configuration(existing_config, panel_config):
 
 def validate_peak_fitting_window(wavenumbers, region, parameter_count):
     """Return an error when a fit window cannot support the configured model."""
-    finite_wavenumbers = [
-        float(value)
-        for value in wavenumbers
-        if value is not None and math.isfinite(float(value))
-    ]
+    finite_wavenumbers = []
+    for value in wavenumbers:
+        if value is None:
+            continue
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(numeric_value):
+            finite_wavenumbers.append(numeric_value)
+
     if not finite_wavenumbers:
         return "No valid spectrum wavenumber axis is available for peak fitting."
 
