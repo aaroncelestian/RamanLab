@@ -19,7 +19,8 @@ from .plotting_widgets import (
 from .control_panels import (
     BaseControlPanel, MapViewControlPanel, PCAControlPanel,
     DimensionalityReductionControlPanel, TemplateControlPanel,
-    NMFControlPanel, MLControlPanel, ResultsControlPanel
+    NMFControlPanel, MLControlPanel, ResultsControlPanel,
+    MapPeakFittingControlPanel
 )
 
 __all__ = [
@@ -49,5 +50,6 @@ __all__ = [
     'TemplateControlPanel',
     'NMFControlPanel',
     'MLControlPanel',
-    'ResultsControlPanel'
-] 
+    'ResultsControlPanel',
+    'MapPeakFittingControlPanel'
+]

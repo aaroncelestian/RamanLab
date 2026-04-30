@@ -237,6 +237,7 @@ class SplitMapSpectrumWidget(QWidget):
         
         # Create spectrum widget (initially hidden)
         self.spectrum_widget = SpectrumPlotWidget()
+        self._spectrum_panel_default_size_applied = False
         
         # Add to splitter
         self.splitter.addWidget(self.map_widget)
@@ -256,9 +257,11 @@ class SplitMapSpectrumWidget(QWidget):
         """Show or hide the spectrum panel."""
         if show:
             self.spectrum_widget.show()
-            # Set sizes: 70% map, 30% spectrum
-            total_height = self.splitter.height()
-            self.splitter.setSizes([int(total_height * 0.7), int(total_height * 0.3)])
+            if not self._spectrum_panel_default_size_applied:
+                # Set an initial 70% map / 30% spectrum split, then preserve user resizing.
+                total_height = self.splitter.height()
+                self.splitter.setSizes([int(total_height * 0.7), int(total_height * 0.3)])
+                self._spectrum_panel_default_size_applied = True
         else:
             self.spectrum_widget.hide()
     

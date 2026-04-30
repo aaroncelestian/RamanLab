@@ -15,8 +15,12 @@ __pycache__/
 
 # Virtual environments
 raman_env/
+ramanlab_env/
 venv/
 env/
+.venv/
+.env
+.env/
 
 # OS generated files
 .DS_Store
@@ -50,6 +54,7 @@ dist/
 # IDE files
 .vscode/
 .idea/
+.codex
 *.swp
 *.swo
 

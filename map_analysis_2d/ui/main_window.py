@@ -6,7 +6,12 @@ and connects them to the core functionality.
 """
 
 import logging
+import re
+import warnings
+
 import numpy as np
+import pandas as pd
+from scipy.optimize import OptimizeWarning, curve_fit
 from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
@@ -19,8 +24,22 @@ from datetime import datetime
 # Import core functionality
 from ..core import RamanMapData
 from ..core.cosmic_ray_detection import CosmicRayConfig, SimpleCosmicRayManager
+from ..core.math_models import (
+    DEFAULT_CURVE_FIT_MAXFEV,
+    create_multi_peak_model,
+    get_num_params_for_shape,
+    get_param_names,
+    get_peak_function,
+)
+from ..core.peak_fitting_state import (
+    invalidate_peak_fitting_results,
+    merge_peak_fitting_configuration,
+    validate_peak_fitting_window,
+)
+from ..core.plot_view_state import capture_axis_view, restore_axis_view
 from ..analysis import PCAAnalyzer, NMFAnalyzer
 from ..workers import MapAnalysisWorker
+from ..workers.peak_fitting_worker import PeakFittingWorker, combine_fit_warning
 
 # Import UI components
 from .base_widgets import ScrollableControlPanel, ProgressStatusWidget
@@ -28,7 +47,7 @@ from .plotting_widgets import SplitMapSpectrumWidget, BasePlotWidget, PCANMFPlot
 from .control_panels import (
     MapViewControlPanel, PCAControlPanel, TemplateControlPanel,
     NMFControlPanel, MLControlPanel, ResultsControlPanel,
-    DimensionalityReductionControlPanel
+    DimensionalityReductionControlPanel, MapPeakFittingControlPanel
 )
 
 # Import h5py install dialog (optional - fallback to simple error if not available)
@@ -159,6 +178,11 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Initialize template extraction mode
         self.template_extraction_mode = False
+
+        # Peak fitting state
+        self.peak_fitting_results = None
+        self.peak_fitting_config = None
+        self.peak_fitting_worker = None
         
         # Performance optimization for large datasets
         self._map_cache = {}  # Cache computed maps to avoid recomputation
@@ -415,7 +439,8 @@ class MapAnalysisMainWindow(QMainWindow):
         # Connect tab change signal
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
         
-        # Create all tabs
+        # Create all tabs. Peak Fitting is first so it is selected by default.
+        self.create_peak_fitting_tab()
         self.create_map_tab()
         self.create_template_tab()
         self.create_dimensionality_reduction_tab()
@@ -461,6 +486,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Create the main widget for the results tab
         results_widget = QWidget()
+        self.results_tab_widget = results_widget
         results_layout = QVBoxLayout(results_widget)
         
         # Add title and export button
@@ -575,12 +601,12 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # PCA submenu
         pca_action = QAction('Run &PCA Analysis', self)
-        pca_action.triggered.connect(lambda: (self.tab_widget.setCurrentIndex(2), self.run_pca()))
+        pca_action.triggered.connect(lambda: (self._show_dimensionality_tab(), self.run_pca()))
         analysis_menu.addAction(pca_action)
         
         # NMF submenu
         nmf_action = QAction('Run &NMF Analysis', self)
-        nmf_action.triggered.connect(lambda: (self.tab_widget.setCurrentIndex(2), self.run_nmf()))
+        nmf_action.triggered.connect(lambda: (self._show_dimensionality_tab(), self.run_nmf()))
         analysis_menu.addAction(nmf_action)
         
         analysis_menu.addSeparator()
@@ -598,8 +624,13 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Template analysis
         template_action = QAction('&Template Analysis', self)
-        template_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        template_action.triggered.connect(self._show_template_tab)
         analysis_menu.addAction(template_action)
+        
+        # Peak Fitting analysis
+        peak_fitting_action = QAction('&Map Peak Fitting', self)
+        peak_fitting_action.triggered.connect(self._show_peak_fitting_tab)
+        analysis_menu.addAction(peak_fitting_action)
         
         analysis_menu.addSeparator()
         
@@ -629,7 +660,7 @@ class MapAnalysisMainWindow(QMainWindow):
         ml_load_model_action.triggered.connect(self.load_ml_model)
         
         ml_view_action = ml_menu.addAction('&ML Analysis View')
-        ml_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
+        ml_view_action.triggered.connect(self._show_ml_tab)
         
         ml_menu.addSeparator()
         
@@ -651,24 +682,28 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Tab navigation
         map_view_action = QAction('&Map View', self)
-        map_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        map_view_action.triggered.connect(self._show_map_tab)
         view_menu.addAction(map_view_action)
         
         template_view_action = QAction('&Template Analysis', self)
-        template_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        template_view_action.triggered.connect(self._show_template_tab)
         view_menu.addAction(template_view_action)
         
         dimensionality_view_action = QAction('&PCA && NMF Analysis', self)
-        dimensionality_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(2))
+        dimensionality_view_action.triggered.connect(self._show_dimensionality_tab)
         view_menu.addAction(dimensionality_view_action)
         
         ml_view_action = QAction('&ML Analysis', self)
-        ml_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
+        ml_view_action.triggered.connect(self._show_ml_tab)
         view_menu.addAction(ml_view_action)
         
         results_view_action = QAction('&ML Results Summary', self)
-        results_view_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(4))
+        results_view_action.triggered.connect(self._show_results_tab)
         view_menu.addAction(results_view_action)
+        
+        peak_fitting_view_action = QAction('&Peak Fitting', self)
+        peak_fitting_view_action.triggered.connect(self._show_peak_fitting_tab)
+        view_menu.addAction(peak_fitting_view_action)
         
     def setup_status_bar(self):
         """Set up the status bar."""
@@ -677,9 +712,30 @@ class MapAnalysisMainWindow(QMainWindow):
         
     def on_tab_changed(self, index: int):
         """Handle tab changes to update control panel."""
+        self._cache_peak_fitting_config_from_panel()
         self.controls_panel.clear_dynamic_sections()
         
-        if index == 0:  # Map View
+        if index == self._get_peak_fitting_tab_index():
+            control_panel = MapPeakFittingControlPanel()
+            control_panel.test_fit_requested.connect(self.test_map_peak_fitting)
+            control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
+            control_panel.visualization_parameter_changed.connect(self.update_peak_fitting_visualization)
+            control_panel.export_batch_requested.connect(self.export_map_peak_fitting_to_batch)
+            self.controls_panel.add_section("peak_fitting_controls", control_panel)
+
+            if self.peak_fitting_config is not None:
+                # Restores all spinboxes and combo selection; fires visualization_parameter_changed once
+                control_panel.set_peak_configuration(self.peak_fitting_config)
+
+            if self.peak_fitting_results is not None:
+                control_panel.export_batch_btn.setEnabled(True)
+                # If config was not set above (no cached config), trigger an initial visualization
+                if self.peak_fitting_config is None and self.map_data is not None:
+                    self.update_peak_fitting_visualization(
+                        control_panel.get_peak_configuration().get('visualize_param')
+                    )
+
+        elif index == self._get_map_tab_index():
             # Always create a new control panel (don't cache due to widget lifecycle issues)
             control_panel = MapViewControlPanel()
             
@@ -742,7 +798,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 logger.info("Found template fitting results, adding to new map control panel...")
                 self.update_map_features_with_templates()
             
-        elif index == 1:  # Template Analysis
+        elif index == self._get_template_tab_index():
             control_panel = TemplateControlPanel()
             control_panel.load_template_file_requested.connect(self.load_template_file)
             control_panel.load_template_folder_requested.connect(self.load_template_folder)
@@ -765,7 +821,7 @@ class MapAnalysisMainWindow(QMainWindow):
             # Update statistics display if available
             self.update_template_statistics_display()
             
-        elif index == 2:  # Combined PCA & NMF
+        elif index == self._get_dimensionality_tab_index():
             control_panel = DimensionalityReductionControlPanel()
             control_panel.run_pca_requested.connect(self.run_pca)
             control_panel.run_nmf_requested.connect(self.run_nmf)
@@ -775,7 +831,7 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.load_nmf_requested.connect(self.load_nmf_results)
             self.controls_panel.add_section("dimensionality_controls", control_panel)
             
-        elif index == 3:  # ML Analysis
+        elif index == self._get_ml_tab_index():
             control_panel = MLControlPanel()
             control_panel.train_supervised_requested.connect(self.train_supervised_model)
             control_panel.train_unsupervised_requested.connect(self.train_unsupervised_model)
@@ -800,7 +856,7 @@ class MapAnalysisMainWindow(QMainWindow):
             # Populate model list from model manager
             self._populate_ml_control_panel_models(control_panel)
             
-        elif index == 4:  # Results
+        elif index == self._get_results_tab_index():
             control_panel = ResultsControlPanel()
             control_panel.generate_report_requested.connect(self.generate_report)
             control_panel.export_results_requested.connect(self.export_results)
@@ -810,12 +866,12 @@ class MapAnalysisMainWindow(QMainWindow):
             # Automatically refresh comprehensive results when switching to results tab
             self.plot_comprehensive_results()
             
-        elif index == 5:  # Microplastic Detection
+        elif index == self._get_microplastic_tab_index():
             # Get the control panel from the microplastic tab
             if hasattr(self, 'microplastic_tab'):
                 control_panel = self.microplastic_tab.create_control_panel()
                 self.controls_panel.add_section("microplastic_controls", control_panel)
-            
+                
         # Add stretch to push all controls to the top
         self.controls_panel.add_stretch()
     
@@ -839,6 +895,7 @@ class MapAnalysisMainWindow(QMainWindow):
             try:
                 # Load map data with cosmic ray detection
                 self.map_data = RamanMapData(directory, cosmic_ray_config=self.cosmic_ray_config)
+                self._reset_peak_fitting_state(clear_config=True)
                 
                 # Clear map cache when new data is loaded
                 self._clear_map_cache()
@@ -909,6 +966,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 cosmic_ray_config=self.cosmic_ray_config,
                 progress_callback=progress_callback
             )
+            self._reset_peak_fitting_state(clear_config=True)
             
             # Clear map cache when new data is loaded
             self._clear_map_cache()
@@ -1055,89 +1113,22 @@ class MapAnalysisMainWindow(QMainWindow):
                     return
             
         try:
-            # Find the closest spectrum to the clicked position
-            closest_spectrum = self.find_closest_spectrum(x, y)
-            
-            if closest_spectrum is not None:
-                # Show the spectrum panel if it's not already shown
-                self.map_plot_widget.show_spectrum_panel(True)
-                
-                # Get wavenumbers and intensities
-                wavenumbers = closest_spectrum.wavenumbers
-                intensities = (closest_spectrum.processed_intensities 
-                             if self.use_processed and closest_spectrum.processed_intensities is not None
-                             else closest_spectrum.intensities)
-                
-                # Validate dimensions before plotting
-                if len(wavenumbers) != len(intensities):
-                    logger.warning(f"Dimension mismatch: wavenumbers({len(wavenumbers)}) != intensities({len(intensities)})")
-                    # Trim to shorter length to avoid plotting error
-                    min_len = min(len(wavenumbers), len(intensities))
-                    wavenumbers = wavenumbers[:min_len]
-                    intensities = intensities[:min_len]
-                    logger.info(f"Trimmed both arrays to length {min_len}")
-                
-                # Create title with position info
-                title = f"Spectrum at ({closest_spectrum.x_pos:.1f}, {closest_spectrum.y_pos:.1f})"
-                if closest_spectrum.processed_intensities is not None and self.use_processed:
-                    title += " [Processed]"
-                else:
-                    title += " [Raw]"
-                
-                # Add template fitting info to title if available
-                pos_key = (closest_spectrum.x_pos, closest_spectrum.y_pos)
-                if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results['r_squared']:
-                    r_squared = self.template_fitting_results['r_squared'][pos_key]
-                    title += f" | Template Fit R²: {r_squared:.3f}"
-                
-                # Clear previous plot
-                self.map_plot_widget.spectrum_widget.ax.clear()
-                
-                # Plot the original spectrum
-                self.map_plot_widget.spectrum_widget.ax.plot(
-                    wavenumbers, intensities,
-                    color='blue' if self.use_processed else 'red',
-                    linewidth=1.5,
-                    label='Measured Spectrum'
-                )
-                
-                # Plot template fitting results if available
-                if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results['coefficients']:
-                    self.plot_template_fit_overlay(closest_spectrum, wavenumbers, intensities)
-                
-                # Set labels and title
-                self.map_plot_widget.spectrum_widget.ax.set_xlabel('Wavenumber (cm⁻¹)')
-                self.map_plot_widget.spectrum_widget.ax.set_ylabel('Intensity')
-                self.map_plot_widget.spectrum_widget.ax.set_title(title)
-                self.map_plot_widget.spectrum_widget.ax.grid(True, alpha=0.3)
-                self.map_plot_widget.spectrum_widget.ax.legend()
-                
-                self.map_plot_widget.spectrum_widget.draw()
-                
-                # Add a marker on the map to show the selected position
-                self.add_position_marker(closest_spectrum.x_pos, closest_spectrum.y_pos)
-                
-                # Track the current marker position for CRE test
-                self.current_marker_position = (closest_spectrum.x_pos, closest_spectrum.y_pos)
-                self.current_selected_spectrum = closest_spectrum
-                
-                # Update status bar with template info
-                status_msg = f"Showing spectrum at position ({closest_spectrum.x_pos:.1f}, {closest_spectrum.y_pos:.1f})"
-                if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results['coefficients']:
-                    coeffs = self.template_fitting_results['coefficients'][pos_key]
-                    r_squared = self.template_fitting_results['r_squared'][pos_key]
-                    # Show contribution of dominant template
-                    if len(coeffs) > 0:
-                        max_coeff_idx = max(range(len(coeffs)), key=lambda i: coeffs[i])
-                        if max_coeff_idx < len(self.template_fitting_results['template_names']):
-                            dominant_template = self.template_fitting_results['template_names'][max_coeff_idx]
-                            status_msg += f" | Dominant: {dominant_template} ({coeffs[max_coeff_idx]:.2f})"
-                
-                self.statusBar().showMessage(status_msg)
+            self._display_selected_spectrum(x, y, self.map_plot_widget, include_template_overlay=True)
                 
         except Exception as e:
             logger.error(f"Error displaying spectrum: {e}")
             QMessageBox.warning(self, "Error", f"Failed to display spectrum:\n{str(e)}")
+
+    def on_peak_fitting_spectrum_requested(self, x: float, y: float):
+        """Handle spectrum requests from the peak fitting tab map."""
+        if self.map_data is None:
+            return
+
+        try:
+            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False)
+        except Exception as e:
+            logger.error(f"Error displaying peak fitting spectrum: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to display peak fitting spectrum:\n{str(e)}")
             
     def find_closest_spectrum(self, x: float, y: float):
         """Find the spectrum closest to the given coordinates."""
@@ -1155,11 +1146,14 @@ class MapAnalysisMainWindow(QMainWindow):
                 
         return closest_spectrum
         
-    def add_position_marker(self, x: float, y: float):
+    def add_position_marker(self, x: float, y: float, plot_widget=None):
         """Add a marker to show the selected position on the map."""
         try:
+            if plot_widget is None:
+                plot_widget = self.map_plot_widget
+
             # Get the map axes
-            map_ax = self.map_plot_widget.map_widget.ax
+            map_ax = plot_widget.map_widget.ax
             
             # Remove previous markers
             for artist in map_ax.get_children():
@@ -1172,10 +1166,156 @@ class MapAnalysisMainWindow(QMainWindow):
             marker._spectrum_marker = True  # Flag for easy removal
             
             # Refresh the canvas
-            self.map_plot_widget.map_widget.canvas.draw()
+            plot_widget.map_widget.canvas.draw()
             
         except Exception as e:
             logger.error(f"Error adding position marker: {e}")
+
+    def _display_selected_spectrum(self, x: float, y: float, plot_widget, include_template_overlay: bool):
+        """Render the selected spectrum into the requested plot widget."""
+        closest_spectrum = self.find_closest_spectrum(x, y)
+        if closest_spectrum is None:
+            return
+
+        plot_widget.show_spectrum_panel(True)
+        spectrum_view = self._capture_peak_fitting_spectrum_view(plot_widget)
+
+        wavenumbers = closest_spectrum.wavenumbers
+        intensities = (
+            closest_spectrum.processed_intensities
+            if self.use_processed and closest_spectrum.processed_intensities is not None
+            else closest_spectrum.intensities
+        )
+
+        if len(wavenumbers) != len(intensities):
+            logger.warning(f"Dimension mismatch: wavenumbers({len(wavenumbers)}) != intensities({len(intensities)})")
+            min_len = min(len(wavenumbers), len(intensities))
+            wavenumbers = wavenumbers[:min_len]
+            intensities = intensities[:min_len]
+            logger.info(f"Trimmed both arrays to length {min_len}")
+
+        title = f"Spectrum at ({closest_spectrum.x_pos:.1f}, {closest_spectrum.y_pos:.1f})"
+        if closest_spectrum.processed_intensities is not None and self.use_processed:
+            title += " [Processed]"
+        else:
+            title += " [Raw]"
+
+        pos_key = (closest_spectrum.x_pos, closest_spectrum.y_pos)
+        if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results.get('r_squared', {}):
+            r_squared = self.template_fitting_results['r_squared'][pos_key]
+            title += f" | Template Fit R²: {r_squared:.3f}"
+
+        spectrum_ax = plot_widget.spectrum_widget.ax
+        spectrum_ax.clear()
+        spectrum_ax.plot(
+            wavenumbers,
+            intensities,
+            color='blue' if self.use_processed else 'red',
+            linewidth=1.5,
+            label='Measured Spectrum'
+        )
+
+        if include_template_overlay and hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results.get('coefficients', {}):
+            self.plot_template_fit_overlay(closest_spectrum, wavenumbers, intensities, plot_widget)
+
+        spectrum_ax.set_xlabel('Wavenumber (cm⁻¹)')
+        spectrum_ax.set_ylabel('Intensity')
+        spectrum_ax.set_title(title)
+        spectrum_ax.grid(True, alpha=0.3)
+        spectrum_ax.legend()
+        self._restore_peak_fitting_spectrum_view(plot_widget, spectrum_view)
+        plot_widget.spectrum_widget.draw()
+
+        self.add_position_marker(closest_spectrum.x_pos, closest_spectrum.y_pos, plot_widget)
+        self.current_marker_position = (closest_spectrum.x_pos, closest_spectrum.y_pos)
+        self.current_selected_spectrum = closest_spectrum
+
+        status_msg = f"Showing spectrum at position ({closest_spectrum.x_pos:.1f}, {closest_spectrum.y_pos:.1f})"
+        if hasattr(self, 'template_fitting_results') and pos_key in self.template_fitting_results['coefficients']:
+            coeffs = self.template_fitting_results['coefficients'][pos_key]
+            if len(coeffs) > 0:
+                max_coeff_idx = max(range(len(coeffs)), key=lambda i: coeffs[i])
+                if max_coeff_idx < len(self.template_fitting_results['template_names']):
+                    dominant_template = self.template_fitting_results['template_names'][max_coeff_idx]
+                    status_msg += f" | Dominant: {dominant_template} ({coeffs[max_coeff_idx]:.2f})"
+
+        self.statusBar().showMessage(status_msg)
+
+    def _capture_peak_fitting_spectrum_view(self, plot_widget):
+        """Capture the Peak Fitting spectrum zoom before a redraw."""
+        if not hasattr(self, 'peak_fitting_plot_widget') or plot_widget is not self.peak_fitting_plot_widget:
+            return None
+
+        return capture_axis_view(plot_widget.spectrum_widget.ax)
+
+    def _restore_peak_fitting_spectrum_view(self, plot_widget, spectrum_view):
+        """Restore the Peak Fitting spectrum zoom after a redraw."""
+        if not hasattr(self, 'peak_fitting_plot_widget') or plot_widget is not self.peak_fitting_plot_widget:
+            return
+
+        restore_axis_view(plot_widget.spectrum_widget.ax, spectrum_view)
+
+    def _cache_peak_fitting_config_from_panel(self):
+        """Persist peak fitting control state before dynamic panels are cleared."""
+        control_panel = self.get_current_peak_fitting_control_panel()
+        if control_panel is not None:
+            try:
+                panel_config = control_panel.get_peak_configuration()
+                self.peak_fitting_config = merge_peak_fitting_configuration(self.peak_fitting_config, panel_config)
+            except ValueError as exc:
+                logger.debug("Skipping invalid cached peak fitting configuration: %s", exc)
+
+    def get_current_peak_fitting_control_panel(self):
+        """Get the current peak fitting control panel if it exists."""
+        for name, section in self.controls_panel.sections.items():
+            if name == "peak_fitting_controls":
+                return section['widget']
+        return None
+
+    def _get_peak_fitting_configuration(self):
+        """Get the current peak fitting configuration from the UI or cached state."""
+        control_panel = self.get_current_peak_fitting_control_panel()
+        if control_panel is not None:
+            panel_config = control_panel.get_peak_configuration()
+            self.peak_fitting_config = merge_peak_fitting_configuration(self.peak_fitting_config, panel_config)
+            return control_panel, self.peak_fitting_config
+        return None, self.peak_fitting_config
+
+    def _reset_peak_fitting_state(self, clear_config: bool = False):
+        """Clear peak fitting results that no longer match the loaded map data."""
+        if self.peak_fitting_worker is not None:
+            worker = self.peak_fitting_worker
+            for signal in (
+                worker.fitting_complete,
+                worker.fitting_failed,
+                worker.progress_updated,
+                worker.finished,
+            ):
+                try:
+                    signal.disconnect()
+                except RuntimeError:
+                    pass
+            if worker.isRunning():
+                worker.stop()
+                if not worker.wait(10000):
+                    logger.warning("Peak fitting worker did not stop gracefully; leaving as orphan to avoid corrupting numpy/scipy state")
+            self.progress_status.hide_progress()
+
+        self.peak_fitting_results = None
+        if clear_config:
+            self.peak_fitting_config = None
+
+        self.current_marker_position = None
+        self.current_selected_spectrum = None
+
+        if hasattr(self, 'peak_fitting_plot_widget'):
+            self.peak_fitting_plot_widget.map_widget.clear_plot()
+            self.peak_fitting_plot_widget.spectrum_widget.clear_plot()
+            self.peak_fitting_plot_widget.show_spectrum_panel(False)
+
+        control_panel = self.get_current_peak_fitting_control_panel()
+        if control_panel is not None:
+            control_panel.export_batch_btn.setEnabled(False)
         
     def _get_map_grid_info(self):
         """
@@ -1614,7 +1754,7 @@ class MapAnalysisMainWindow(QMainWindow):
             results = self.pca_analyzer.run_analysis(X, n_components=n_components)
             
             if results['success']:
-                self.tab_widget.setCurrentIndex(2)  # Switch to combined tab
+                self._show_dimensionality_tab()
                 self.plot_pca_results(results)
                 self.statusBar().showMessage("PCA analysis completed")
             else:
@@ -1741,7 +1881,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.statusBar().showMessage(f"Template removed")
                 
                 # Update plot if templates are currently displayed
-                if self.tab_widget.currentIndex() == 1:  # Template tab
+                if self.tab_widget.currentIndex() == self._get_template_tab_index():
                     self.plot_templates()
             else:
                 QMessageBox.warning(self, "Error", "Failed to remove template")
@@ -1758,7 +1898,7 @@ class MapAnalysisMainWindow(QMainWindow):
             self.statusBar().showMessage("All templates cleared")
             
             # Clear the plot
-            if self.tab_widget.currentIndex() == 1:  # Template tab
+            if self.tab_widget.currentIndex() == self._get_template_tab_index():
                 self.template_plot_widget.clear_plot()
                 
         except Exception as e:
@@ -1776,7 +1916,7 @@ class MapAnalysisMainWindow(QMainWindow):
             self.template_extraction_mode = True
             
             # Switch to Map View tab so user can click on map
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             # Show instruction message
             QMessageBox.information(
@@ -2070,7 +2210,7 @@ class MapAnalysisMainWindow(QMainWindow):
             logger.info("Updating map features with template results...")
             
             # Check if we're currently on the map tab - if so, update directly
-            if self.tab_widget.currentIndex() == 0:  # Map View tab
+            if self.tab_widget.currentIndex() == self._get_map_tab_index():
                 sections = self.controls_panel.sections
                 logger.info(f"Available control panel sections: {list(sections.keys())}")
                 
@@ -2289,7 +2429,7 @@ class MapAnalysisMainWindow(QMainWindow):
                     template.processed_intensities = data
             
             # Update plot if currently displayed
-            if self.tab_widget.currentIndex() == 1:  # Template tab
+            if self.tab_widget.currentIndex() == self._get_template_tab_index():
                 self.plot_templates()
                 
             self.statusBar().showMessage(f"Templates normalized using {method}")
@@ -2382,7 +2522,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.nmf_valid_positions = valid_positions
                 
                 # Switch to combined tab and plot results
-                self.tab_widget.setCurrentIndex(2)
+                self._show_dimensionality_tab()
                 self.plot_nmf_results(results)
                 
                 # Update map features to include NMF components
@@ -3275,7 +3415,7 @@ class MapAnalysisMainWindow(QMainWindow):
             }
             
             # Switch to ML tab and plot results
-            self.tab_widget.setCurrentIndex(3)  # ML tab is now at index 3, not 4
+            self._show_ml_tab()
             self.plot_ml_results(self.ml_results)
             
             # Update control panel with results
@@ -3424,7 +3564,7 @@ class MapAnalysisMainWindow(QMainWindow):
                 self.ml_valid_positions = valid_positions
                 
                 # Switch to ML tab and plot results
-                self.tab_widget.setCurrentIndex(3)  # ML tab is now at index 3, not 4
+                self._show_ml_tab()
                 self.plot_ml_results(results)
                 
                 # Update map features to include clustering results
@@ -3711,12 +3851,12 @@ class MapAnalysisMainWindow(QMainWindow):
                 if hasattr(self, 'tab_widget'):
                     # Switch away and back to trigger refresh
                     current_tab = self.tab_widget.currentIndex()
-                    if current_tab != 0:  # If not already on map tab
-                        self.tab_widget.setCurrentIndex(0)  # Switch to map tab
+                    if current_tab != self._get_map_tab_index():
+                        self._show_map_tab()
                     else:
                         # If already on map tab, briefly switch to another tab and back
-                        self.tab_widget.setCurrentIndex(1)  # Switch away
-                        self.tab_widget.setCurrentIndex(0)  # Switch back
+                        self._show_template_tab()
+                        self._show_map_tab()
                         
                 logger.info("Forced refresh of map tab controls")
             except Exception as refresh_error:
@@ -3726,7 +3866,7 @@ class MapAnalysisMainWindow(QMainWindow):
             self.plot_comprehensive_results()
             
             # Switch to map view to show results
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             QMessageBox.information(
                 self, "Classification Complete", 
@@ -4598,7 +4738,7 @@ class MapAnalysisMainWindow(QMainWindow):
         # Plot comprehensive results first
         self.plot_comprehensive_results()
         # Switch to results tab
-        self.tab_widget.setCurrentIndex(4)  # Updated index for results tab
+        self._show_results_tab()
         self.statusBar().showMessage("Comprehensive analysis report generated")
         
     def plot_comprehensive_results(self):
@@ -5644,7 +5784,7 @@ class MapAnalysisMainWindow(QMainWindow):
                     }
                     
                     # Switch to NMF tab and plot results
-                    self.tab_widget.setCurrentIndex(3)
+                    self._show_dimensionality_tab()
                     self.plot_nmf_results(self.nmf_results)
                     
                     # Update map features
@@ -6494,6 +6634,7 @@ All spectra have been processed and cleaned data is now available for analysis."
             if isinstance(save_data, dict):
                 # New format with metadata
                 self.map_data = save_data['map_data']
+                self._reset_peak_fitting_state(clear_config=True)
                 
                 # Restore cosmic ray config if available
                 if 'cosmic_ray_config' in save_data:
@@ -6508,6 +6649,7 @@ All spectra have been processed and cleaned data is now available for analysis."
             else:
                 # Legacy format (direct RamanMapData object)
                 self.map_data = save_data
+                self._reset_peak_fitting_state(clear_config=True)
                 creation_time = 'Unknown (Legacy Format)'
                 version = 'Legacy'
                 metadata = {}
@@ -7093,10 +7235,12 @@ The map is now ready for analysis!"""
             # Extract map data
             if isinstance(save_data, dict) and 'map_data' in save_data:
                 self.map_data = save_data['map_data']
+                self._reset_peak_fitting_state(clear_config=True)
                 if 'cosmic_ray_config' in save_data:
                     self.cosmic_ray_config = save_data['cosmic_ray_config']
             else:
                 self.map_data = save_data
+                self._reset_peak_fitting_state(clear_config=True)
             
             # Check if wavenumbers are in descending order and fix if needed
             reversed_count = 0
@@ -7327,10 +7471,13 @@ The map is now ready for analysis!"""
                 "conda install -c conda-forge h5py"
             )
 
-    def plot_template_fit_overlay(self, spectrum, wavenumbers, intensities):
+    def plot_template_fit_overlay(self, spectrum, wavenumbers, intensities, plot_widget=None):
         """Plot template fitting overlay on the spectrum."""
         try:
             import numpy as np
+
+            if plot_widget is None:
+                plot_widget = self.map_plot_widget
             
             pos_key = (spectrum.x_pos, spectrum.y_pos)
             coeffs = self.template_fitting_results['coefficients'][pos_key]
@@ -7351,7 +7498,7 @@ The map is now ready for analysis!"""
                 fitted_spectrum = template_matrix @ coeffs
                 
                 # Plot fitted spectrum
-                self.map_plot_widget.spectrum_widget.ax.plot(
+                plot_widget.spectrum_widget.ax.plot(
                     wavenumbers, fitted_spectrum,
                     color='green', linewidth=1.5, linestyle='--',
                     label='Template Fit'
@@ -7363,7 +7510,7 @@ The map is now ready for analysis!"""
                         if coeff > 0.01:  # Only show significant contributions
                             contribution = template.processed_intensities * coeff
                             if len(contribution) == len(wavenumbers):
-                                self.map_plot_widget.spectrum_widget.ax.plot(
+                                plot_widget.spectrum_widget.ax.plot(
                                     wavenumbers, contribution,
                                     color=template.color, alpha=0.7, linewidth=1,
                                     label=f'{template.name} ({coeff:.2f})'
@@ -7371,7 +7518,7 @@ The map is now ready for analysis!"""
                 
                 # Plot residual
                 residual = intensities - fitted_spectrum
-                self.map_plot_widget.spectrum_widget.ax.plot(
+                plot_widget.spectrum_widget.ax.plot(
                     wavenumbers, residual,
                     color='orange', alpha=0.6, linewidth=1,
                     label='Residual'
@@ -7415,7 +7562,7 @@ The map is now ready for analysis!"""
             self.update_map()
             
             # Switch to map tab
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             logger.info(f"Map updated to show results for model '{model_name}'")
             return True
@@ -7495,7 +7642,7 @@ The map is now ready for analysis!"""
             if map_control_panel is None:
                 logger.warning("Cannot refresh map features - map control panel is None")
                 # Try to ensure we're on the map tab and the control panel exists
-                self.tab_widget.setCurrentIndex(0)  # Switch to Map View tab
+                self._show_map_tab()
                 map_control_panel = self.get_current_map_control_panel()
                 if map_control_panel is None:
                     logger.error("Map control panel still None after switching to Map View tab")
@@ -9729,7 +9876,7 @@ The map is now ready for analysis!"""
             self.update_map()
             
             # Switch to map view
-            self.tab_widget.setCurrentIndex(0)
+            self._show_map_tab()
             
             # Add custom feature to dropdown
             control_panel = self.get_current_map_control_panel()
@@ -10230,3 +10377,445 @@ The map is now ready for analysis!"""
         if hasattr(self, 'detection_worker'):
             self.detection_worker.deleteLater()
             self.detection_worker = None
+
+    def _validate_peak_fitting_bounds(self, config: dict) -> Optional[str]:
+        """Return an error message if any parameter bounds are invalid, else None."""
+        min_wn, max_wn = config['region']
+        if min_wn >= max_wn:
+            return f"Min wavenumber ({min_wn:.1f}) must be less than max wavenumber ({max_wn:.1f})."
+
+        lower, upper = config['bounds']
+        initial_params = config.get('initial_params', [])
+        param_names = get_param_names(config.get('shapes', []))
+
+        if len(lower) != len(upper) or len(lower) != len(initial_params):
+            return "Peak fitting parameters and bounds are inconsistent."
+
+        for i in range(len(lower)):
+            if lower[i] >= upper[i]:
+                label = param_names[i] if i < len(param_names) else f"parameter {i + 1}"
+                return f"Lower bound ≥ upper bound for {label} ({lower[i]:.3g} ≥ {upper[i]:.3g})."
+            if not lower[i] <= initial_params[i] <= upper[i]:
+                label = param_names[i] if i < len(param_names) else f"parameter {i + 1}"
+                return (
+                    f"Initial value for {label} ({initial_params[i]:.3g}) must be within "
+                    f"[{lower[i]:.3g}, {upper[i]:.3g}]."
+                )
+        return None
+
+    def _validate_map_peak_fitting_window(self, config: dict) -> Optional[str]:
+        """Return an error if the map-wide fit window cannot support the model."""
+        if self.map_data is None or not self.map_data.spectra:
+            return "No map spectra are available for peak fitting."
+
+        representative_spectrum = next(iter(self.map_data.spectra.values()))
+        return validate_peak_fitting_window(
+            representative_spectrum.wavenumbers,
+            config['region'],
+            len(config.get('initial_params', [])),
+        )
+
+    def _get_peak_fitting_tab_index(self) -> int:
+        """Return the current peak fitting tab index."""
+        if not hasattr(self, 'peak_fitting_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.peak_fitting_plot_widget)
+
+    def _get_map_tab_index(self) -> int:
+        """Return the current map tab index."""
+        if not hasattr(self, 'map_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.map_plot_widget)
+
+    def _get_template_tab_index(self) -> int:
+        """Return the current template tab index."""
+        if not hasattr(self, 'template_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.template_plot_widget)
+
+    def _get_dimensionality_tab_index(self) -> int:
+        """Return the current PCA/NMF tab index."""
+        if not hasattr(self, 'dimensionality_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.dimensionality_plot_widget)
+
+    def _get_ml_tab_index(self) -> int:
+        """Return the current ML tab index."""
+        if not hasattr(self, 'ml_plot_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.ml_plot_widget)
+
+    def _get_results_tab_index(self) -> int:
+        """Return the current results tab index."""
+        if not hasattr(self, 'results_tab_widget'):
+            return -1
+        return self.tab_widget.indexOf(self.results_tab_widget)
+
+    def _get_microplastic_tab_index(self) -> int:
+        """Return the current microplastic tab index."""
+        if not hasattr(self, 'microplastic_tab'):
+            return -1
+        return self.tab_widget.indexOf(self.microplastic_tab)
+
+    def _show_tab(self, tab_index: int):
+        """Switch to a tab if it exists."""
+        if tab_index >= 0:
+            self.tab_widget.setCurrentIndex(tab_index)
+
+    def _show_map_tab(self):
+        """Switch to the map tab if it exists."""
+        self._show_tab(self._get_map_tab_index())
+
+    def _show_template_tab(self):
+        """Switch to the template tab if it exists."""
+        self._show_tab(self._get_template_tab_index())
+
+    def _show_dimensionality_tab(self):
+        """Switch to the PCA/NMF tab if it exists."""
+        self._show_tab(self._get_dimensionality_tab_index())
+
+    def _show_ml_tab(self):
+        """Switch to the ML tab if it exists."""
+        self._show_tab(self._get_ml_tab_index())
+
+    def _show_results_tab(self):
+        """Switch to the results tab if it exists."""
+        self._show_tab(self._get_results_tab_index())
+
+    def _show_peak_fitting_tab(self):
+        """Switch to the peak fitting tab if it exists."""
+        self._show_tab(self._get_peak_fitting_tab_index())
+
+    def create_peak_fitting_tab(self):
+        """Create the map peak fitting tab."""
+        self.peak_fitting_plot_widget = SplitMapSpectrumWidget()
+        self.peak_fitting_plot_widget.spectrum_requested.connect(self.on_peak_fitting_spectrum_requested)
+        self.peak_fitting_tab_index = self.tab_widget.addTab(self.peak_fitting_plot_widget, "Peak Fitting")
+
+    def test_map_peak_fitting(self):
+        """Test the peak fitting on the currently selected pixel."""
+        if self.map_data is None:
+            QMessageBox.warning(self, "No Data", "Load map data first.")
+            return
+
+        if self.current_selected_spectrum is None:
+            QMessageBox.warning(self, "No Pixel Selected", "Please select a pixel on the map first.")
+            return
+
+        control_panel, config = self._get_peak_fitting_configuration()
+        if config is None:
+            return
+
+        bounds_error = self._validate_peak_fitting_bounds(config)
+        if bounds_error:
+            QMessageBox.warning(self, "Invalid Peak Fitting Configuration", bounds_error)
+            return
+
+        # Get wavenumbers and intensities
+        wavenumbers = self.current_selected_spectrum.wavenumbers
+        intensities = (self.current_selected_spectrum.processed_intensities
+                       if self.use_processed and self.current_selected_spectrum.processed_intensities is not None
+                       else self.current_selected_spectrum.intensities)
+
+        # Region subset
+        min_wn, max_wn = config['region']
+        mask = (wavenumbers >= min_wn) & (wavenumbers <= max_wn)
+        x_fit = wavenumbers[mask]
+        y_fit = intensities[mask]
+
+        if len(x_fit) < len(config['initial_params']):
+            QMessageBox.warning(self, "Region Too Small", "The selected wavenumber region contains fewer points than the number of parameters.")
+            return
+
+        if not np.all(np.isfinite(x_fit)) or not np.all(np.isfinite(y_fit)):
+            QMessageBox.warning(
+                self,
+                "Invalid Data",
+                "The selected fitting region contains NaN or infinite values. Try a different region or check preprocessing."
+            )
+            return
+
+        model_func = create_multi_peak_model(config['shapes'])
+        param_names = get_param_names(config['shapes'])
+        bounds = config['bounds']
+        pos_key = (self.current_selected_spectrum.x_pos, self.current_selected_spectrum.y_pos)
+        fit_warning = None
+
+        try:
+            with warnings.catch_warnings(record=True) as caught_warnings:
+                warnings.simplefilter("always", OptimizeWarning)
+                warnings.simplefilter("always", RuntimeWarning)
+                popt, pcov = curve_fit(
+                    model_func,
+                    x_fit,
+                    y_fit,
+                    p0=config['initial_params'],
+                    bounds=bounds,
+                    maxfev=DEFAULT_CURVE_FIT_MAXFEV,
+                )
+
+            warning_messages = [
+                str(warning.message)
+                for warning in caught_warnings
+                if issubclass(warning.category, (OptimizeWarning, RuntimeWarning))
+            ]
+            if warning_messages:
+                fit_warning = "; ".join(warning_messages)
+
+            covariance_diag = np.diag(pcov)
+            if not np.all(np.isfinite(covariance_diag)):
+                fit_warning = combine_fit_warning(
+                    fit_warning,
+                    "Fit converged, but parameter uncertainty could not be estimated reliably.",
+                )
+        except RuntimeError as e:
+            logger.error("curve_fit failed at test pixel %s: %s", pos_key, e)
+            QMessageBox.critical(
+                self,
+                "Fit Failed",
+                f"Curve fitting did not converge:\n{e}\n\nTry adjusting initial parameters or bounds."
+            )
+            return
+        except ValueError as e:
+            logger.error("curve_fit invalid input at test pixel %s: %s", pos_key, e)
+            QMessageBox.critical(self, "Fit Failed", f"Invalid fitting parameters:\n{e}")
+            return
+
+        # Plot the result
+        self.peak_fitting_plot_widget.show_spectrum_panel(True)
+        ax = self.peak_fitting_plot_widget.spectrum_widget.ax
+        spectrum_view = self._capture_peak_fitting_spectrum_view(self.peak_fitting_plot_widget)
+        ax.clear()
+
+        # Plot original data in region
+        ax.plot(wavenumbers, intensities, color='lightgray', label='Full Spectrum')
+        ax.plot(x_fit, y_fit, color='blue', label='Data (Region)', marker='.', linestyle='none')
+
+        # Plot full fit
+        y_fit_result = model_func(x_fit, *popt)
+        ax.plot(x_fit, y_fit_result, color='red', linewidth=2, label='Total Fit')
+
+        # Plot individual peaks
+        idx = 0
+        for i, shape in enumerate(config['shapes']):
+            n_p = get_num_params_for_shape(shape)
+            peak_func = get_peak_function(shape)
+            params = popt[idx:idx+n_p]
+            y_peak = peak_func(x_fit, *params)
+            ax.plot(x_fit, y_peak, linestyle='--', label=f'Peak {i+1} ({shape})')
+            idx += n_p
+
+        ax.set_xlabel('Wavenumber (cm⁻¹)')
+        ax.set_ylabel('Intensity')
+        ax.set_title('Test Peak Fitting')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        self._restore_peak_fitting_spectrum_view(self.peak_fitting_plot_widget, spectrum_view)
+        self.peak_fitting_plot_widget.spectrum_widget.draw()
+
+        # Show success message with params
+        param_text = "\n".join([f"{name}: {val:.4f}" for name, val in zip(param_names, popt)])
+        message = f"Fit successful!\n\nParameters:\n{param_text}"
+        if fit_warning:
+            message += f"\n\nWarning: {fit_warning}"
+        QMessageBox.information(self, "Test Fit Success", message)
+
+    def run_map_peak_fitting(self):
+        """Run peak fitting across the entire map."""
+        if self.map_data is None:
+            QMessageBox.warning(self, "No Data", "Load map data first.")
+            return
+
+        control_panel, config = self._get_peak_fitting_configuration()
+        if config is None:
+            return
+
+        bounds_error = self._validate_peak_fitting_bounds(config)
+        if bounds_error:
+            QMessageBox.warning(self, "Invalid Peak Fitting Configuration", bounds_error)
+            return
+
+        window_error = self._validate_map_peak_fitting_window(config)
+        if window_error:
+            QMessageBox.warning(self, "Invalid Peak Fitting Window", window_error)
+            return
+
+        if self.peak_fitting_worker is not None and self.peak_fitting_worker.isRunning():
+            QMessageBox.information(self, "Peak Fitting Running", "Map peak fitting is already in progress.")
+            return
+
+        invalidate_peak_fitting_results(self, control_panel)
+        self.progress_status.show_progress("Running map peak fitting...")
+        self.progress_status.update_progress(0, "Preparing peak fitting worker...")
+        self.peak_fitting_worker = PeakFittingWorker(list(self.map_data.spectra.values()), self.use_processed, config)
+        self.peak_fitting_worker.progress_updated.connect(self._on_peak_fitting_progress)
+        self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_complete)
+        self.peak_fitting_worker.fitting_failed.connect(self._on_peak_fitting_failed)
+        self.peak_fitting_worker.finished.connect(self._on_peak_fitting_worker_finished)
+        self.peak_fitting_worker.start()
+
+    def _on_peak_fitting_progress(self, current: int, total: int, message: str):
+        """Handle progress updates from the peak fitting worker."""
+        progress = 0 if total == 0 else int((current / total) * 100)
+        self.progress_status.update_progress(progress, message)
+
+    def _on_peak_fitting_complete(self, results: dict):
+        """Handle successful completion of map peak fitting."""
+        self.peak_fitting_results = results
+        self.peak_fitting_config = results.get('config', self.peak_fitting_config)
+        failed_fit_count = len(results.get('fit_errors', {}))
+        warning_fit_count = len(results.get('fit_warnings', {}))
+
+        control_panel = self.get_current_peak_fitting_control_panel()
+        if control_panel is not None and self.peak_fitting_config is not None:
+            control_panel.set_peak_configuration(self.peak_fitting_config)
+            control_panel.export_batch_btn.setEnabled(True)
+
+        message = "Map peak fitting completed."
+        if failed_fit_count:
+            message += f"\n\nFailed fits: {failed_fit_count}"
+        if warning_fit_count:
+            message += (
+                f"\n\nPotentially unreliable fits: {warning_fit_count}"
+                "\nThese fits converged, but the parameter uncertainty may be unreliable."
+            )
+        QMessageBox.information(self, "Success", message)
+
+        visualize_parameter = None
+        if self.peak_fitting_config is not None:
+            visualize_parameter = self.peak_fitting_config.get('visualize_param') or self.peak_fitting_config.get('visualize_key')
+        self.update_peak_fitting_visualization(visualize_parameter)
+
+    def _on_peak_fitting_failed(self, error_msg: str):
+        """Handle a peak fitting worker failure."""
+        QMessageBox.critical(self, "Peak Fitting Error", f"Error during map peak fitting:\n{error_msg}")
+        logger.error(f"Map peak fitting error: {error_msg}")
+
+    def _on_peak_fitting_worker_finished(self):
+        """Clean up the peak fitting worker thread reference."""
+        worker = self.sender()
+        if worker is None:
+            worker = self.peak_fitting_worker
+
+        if worker is not None:
+            worker.deleteLater()
+
+        if worker is self.peak_fitting_worker:
+            self.progress_status.hide_progress()
+            self.peak_fitting_worker = None
+
+    def update_peak_fitting_visualization(self, parameter: Optional[str]):
+        """Update the map visualization for the selected peak fitting parameter."""
+        if self.peak_fitting_results is None:
+            return
+
+        if self.map_data is None:
+            return
+
+        if not parameter:
+            return
+
+        unique_x, unique_y, x_to_idx, y_to_idx, map_shape = self._get_map_grid_info()
+        map_array = np.full(map_shape, np.nan)
+
+        # Map human-readable dropdown text to internal parameter keys
+        # Dropdown uses: "Peak 1 Center", "Peak 2 Width", etc.
+        # Internal keys: "P1_Cen", "P2_Wid", etc.
+        param_key = None
+        display_parameter = parameter
+        if parameter == "R-Squared" or "R-Squared" in parameter:
+            param_key = "R-Squared"
+        elif parameter in self.peak_fitting_results['map_parameters']:
+            param_key = parameter
+            if self.peak_fitting_config is not None and self.peak_fitting_config.get('visualize_key') == parameter:
+                display_parameter = self.peak_fitting_config.get('visualize_param', parameter)
+        else:
+            match = re.match(r"Peak (\d+) (Center|Width|Amplitude|Eta)", parameter)
+            if match:
+                peak_num = match.group(1)
+                param_type = {"Center": "Cen", "Width": "Wid", "Amplitude": "Amp", "Eta": "Eta"}[match.group(2)]
+                param_key = f"P{peak_num}_{param_type}"
+
+        if param_key is None:
+            logger.warning("Unknown peak fitting visualization parameter: %s", parameter)
+            self.statusBar().showMessage(f"Unknown peak-fitting parameter: {parameter}", 4000)
+            return
+
+        if self.peak_fitting_config is not None:
+            self.peak_fitting_config['visualize_key'] = param_key
+            self.peak_fitting_config['visualize_param'] = parameter
+
+        if param_key == "R-Squared":
+            for pos_key, val in self.peak_fitting_results['r_squared'].items():
+                x_pos, y_pos = pos_key
+                if x_pos not in x_to_idx or y_pos not in y_to_idx:
+                    logger.warning("Position %s from fitting results not found in current map grid; skipping.", pos_key)
+                    continue
+                x_idx = x_to_idx[x_pos]
+                y_idx = y_to_idx[y_pos]
+                map_array[y_idx, x_idx] = val
+        elif param_key and param_key in self.peak_fitting_results['map_parameters']:
+            for pos_key, val in self.peak_fitting_results['map_parameters'][param_key].items():
+                x_pos, y_pos = pos_key
+                if x_pos not in x_to_idx or y_pos not in y_to_idx:
+                    logger.warning("Position %s from fitting results not found in current map grid; skipping.", pos_key)
+                    continue
+                x_idx = x_to_idx[x_pos]
+                y_idx = y_to_idx[y_pos]
+                map_array[y_idx, x_idx] = val
+
+        x_positions = [s.x_pos for s in self.map_data.spectra.values()]
+        y_positions = [s.y_pos for s in self.map_data.spectra.values()]
+        x_min, x_max = min(x_positions), max(x_positions)
+        y_min, y_max = min(y_positions), max(y_positions)
+        extent = [x_min - 0.5, x_max + 0.5, y_min - 0.5, y_max + 0.5]
+
+        self.peak_fitting_plot_widget.plot_map(
+            map_array, extent=extent, title=f"Map Peak Fitting: {display_parameter}", cmap="viridis"
+        )
+
+    def export_map_peak_fitting_to_batch(self):
+        """Export peak fitting results to CSV."""
+        if self.peak_fitting_results is None:
+            QMessageBox.warning(self, "No Results", "No peak fitting results to export.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Peak Fitting Results", "", "CSV Files (*.csv)"
+        )
+        if not file_path:
+            return
+
+        data = []
+        for key, spectrum in self.map_data.spectra.items():
+            pos_key = (spectrum.x_pos, spectrum.y_pos)
+            row = {'X': spectrum.x_pos, 'Y': spectrum.y_pos}
+            
+            for param_name in self.peak_fitting_results['param_names']:
+                if pos_key in self.peak_fitting_results['map_parameters'][param_name]:
+                    row[param_name] = self.peak_fitting_results['map_parameters'][param_name][pos_key]
+                else:
+                    row[param_name] = np.nan
+                    
+            if pos_key in self.peak_fitting_results['r_squared']:
+                row['R-Squared'] = self.peak_fitting_results['r_squared'][pos_key]
+            else:
+                row['R-Squared'] = np.nan
+
+            row['Fit Error'] = self.peak_fitting_results.get('fit_errors', {}).get(pos_key, "")
+            row['Fit Warning'] = self.peak_fitting_results.get('fit_warnings', {}).get(pos_key, "")
+
+            data.append(row)
+
+        df = pd.DataFrame(data)
+        try:
+            df.to_csv(file_path, index=False)
+        except (OSError, PermissionError, UnicodeEncodeError) as e:
+            logger.error("Failed to export peak fitting results to %s: %s", file_path, e)
+            QMessageBox.critical(
+                self,
+                "Export Failed",
+                f"Could not write to file:\n{file_path}\n\n{e}"
+            )
+            return
+        QMessageBox.information(self, "Success", f"Results exported to {file_path}")
