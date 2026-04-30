@@ -382,7 +382,7 @@ __changes__ = {
         ],
         "breaking_changes": [
             "Migration from legacy tkinter to Qt6",
-            "Updated Python requirements (3.8+)",
+            "Updated Python requirements for the Qt6 release",
             "New project structure and organization"
         ],
         "technical_notes": [
@@ -395,7 +395,7 @@ __changes__ = {
 }
 
 # Compatibility information
-__python_requires__ = ">=3.8"
+__python_requires__ = ">=3.10"
 __qt_version__ = "6.5+"
 __platforms__ = ["Windows", "macOS", "Linux"]
 
@@ -421,4 +421,4 @@ def get_full_version():
         "python_requires": __python_requires__,
         "qt_version": __qt_version__,
         "platforms": __platforms__
-    } 
+    }

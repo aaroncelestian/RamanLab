@@ -56,21 +56,21 @@ def check_python_version():
     print(f"Python Version: {platform.python_version()}")
     print(f"Platform: {platform.system()} {platform.release()} ({platform.machine()})")
     
-    # Minimum Python 3.8 for Qt6 compatibility
-    if current_version < (3, 8):
-        print("❌ Python 3.8+ is required for Qt6 compatibility")
+    # Minimum Python 3.10 for current RamanLab features and dependencies.
+    if current_version < (3, 10):
+        print("❌ Python 3.10+ is required for RamanLab")
         print("  Current version is too old for RamanLab v1.1.2")
         print("  To update Python:")
         print("  - Windows: Download from python.org or use Microsoft Store")
         print("  - macOS: Use 'brew install python' or download from python.org")
         print("  - Linux: Use your distribution's package manager")
         return False
-    elif current_version < (3, 9):
-        print("✅ Python version is sufficient (3.9+ recommended for optimal performance)")
+    elif current_version < (3, 11):
+        print("✅ Python version is sufficient (3.11+ recommended for optimal performance)")
     else:
         print("✅ Python version is excellent for RamanLab")
     
-    return current_version >= (3, 8)
+    return current_version >= (3, 10)
 
 def check_package(package_name, min_version=None, component_info=None, import_name=None):
     """Check if a package is installed and get its version."""

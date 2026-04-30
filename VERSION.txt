@@ -174,7 +174,7 @@ transformation from legacy tkinter to modern Qt6 framework.
 • Comprehensive documentation and help system
 
 🔧 **Technical Improvements:**
-• Python 3.8+ requirement for modern features
+• Python 3.10+ requirement for modern features
 • Enhanced scientific computing stack integration
 • Improved performance and stability
 • Modern packaging and distribution
@@ -192,7 +192,7 @@ transformation from legacy tkinter to modern Qt6 framework.
 
 📋 **Breaking Changes from Legacy Version:**
 • Migration from tkinter to Qt6 framework
-• Updated minimum Python version (3.8+)
+• Updated minimum Python version (3.10+)
 • New project structure and file organization
 • Updated dependency requirements
 
@@ -202,4 +202,4 @@ transformation from legacy tkinter to modern Qt6 framework.
 • 2.0.x - Major architectural updates when needed
 
 For installation and usage instructions, see README.md
-For technical documentation, see docs/ directory 
+For technical documentation, see docs/ directory
