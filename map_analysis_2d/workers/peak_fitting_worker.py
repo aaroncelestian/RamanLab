@@ -9,6 +9,17 @@ from scipy.optimize import OptimizeWarning
 logger = logging.getLogger(__name__)
 
 
+def combine_fit_warning(existing_warning, new_warning: str) -> str:
+    """Append a fit warning without discarding earlier diagnostics."""
+    if existing_warning:
+        return f"{existing_warning}; {new_warning}"
+    return new_warning
+
+
+def append_fit_warning(fit_warnings: dict, pos_key, warning_message: str):
+    fit_warnings[pos_key] = combine_fit_warning(fit_warnings.get(pos_key), warning_message)
+
+
 class PeakFittingWorker(QThread):
     """Run map peak fitting in a background worker thread."""
 
@@ -102,12 +113,14 @@ class PeakFittingWorker(QThread):
                             if issubclass(warning.category, (OptimizeWarning, RuntimeWarning))
                         ]
                         if warning_messages:
-                            results['fit_warnings'][pos_key] = "; ".join(warning_messages)
+                            append_fit_warning(results['fit_warnings'], pos_key, "; ".join(warning_messages))
 
                         covariance_diag = np.diag(pcov)
                         if not np.all(np.isfinite(covariance_diag)):
-                            results['fit_warnings'][pos_key] = (
-                                "Fit converged, but parameter uncertainty could not be estimated reliably."
+                            append_fit_warning(
+                                results['fit_warnings'],
+                                pos_key,
+                                "Fit converged, but parameter uncertainty could not be estimated reliably.",
                             )
 
                         ss_res = np.sum((y_fit - model_func(x_fit, *popt)) ** 2)

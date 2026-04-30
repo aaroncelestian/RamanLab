@@ -33,7 +33,7 @@ from ..core.math_models import (
 )
 from ..analysis import PCAAnalyzer, NMFAnalyzer
 from ..workers import MapAnalysisWorker
-from ..workers.peak_fitting_worker import PeakFittingWorker
+from ..workers.peak_fitting_worker import PeakFittingWorker, combine_fit_warning
 
 # Import UI components
 from .base_widgets import ScrollableControlPanel, ProgressStatusWidget
@@ -10467,7 +10467,10 @@ The map is now ready for analysis!"""
 
             covariance_diag = np.diag(pcov)
             if not np.all(np.isfinite(covariance_diag)):
-                fit_warning = "Fit converged, but parameter uncertainty could not be estimated reliably."
+                fit_warning = combine_fit_warning(
+                    fit_warning,
+                    "Fit converged, but parameter uncertainty could not be estimated reliably.",
+                )
         except RuntimeError as e:
             logger.error("curve_fit failed at test pixel %s: %s", pos_key, e)
             QMessageBox.critical(
@@ -10585,9 +10588,15 @@ The map is now ready for analysis!"""
 
     def _on_peak_fitting_worker_finished(self):
         """Clean up the peak fitting worker thread reference."""
-        self.progress_status.hide_progress()
-        if self.peak_fitting_worker is not None:
-            self.peak_fitting_worker.deleteLater()
+        worker = self.sender()
+        if worker is None:
+            worker = self.peak_fitting_worker
+
+        if worker is not None:
+            worker.deleteLater()
+
+        if worker is self.peak_fitting_worker:
+            self.progress_status.hide_progress()
             self.peak_fitting_worker = None
 
     def update_peak_fitting_visualization(self, parameter: Optional[str]):
