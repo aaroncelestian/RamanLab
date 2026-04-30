@@ -31,7 +31,12 @@ from ..core.math_models import (
     get_param_names,
     get_peak_function,
 )
-from ..core.peak_fitting_state import invalidate_peak_fitting_results
+from ..core.peak_fitting_state import (
+    invalidate_peak_fitting_results,
+    merge_peak_fitting_configuration,
+    validate_peak_fitting_window,
+)
+from ..core.plot_view_state import capture_axis_view, restore_axis_view
 from ..analysis import PCAAnalyzer, NMFAnalyzer
 from ..workers import MapAnalysisWorker
 from ..workers.peak_fitting_worker import PeakFittingWorker, combine_fit_warning
@@ -1172,6 +1177,7 @@ class MapAnalysisMainWindow(QMainWindow):
             return
 
         plot_widget.show_spectrum_panel(True)
+        spectrum_view = self._capture_peak_fitting_spectrum_view(plot_widget)
 
         wavenumbers = closest_spectrum.wavenumbers
         intensities = (
@@ -1216,6 +1222,7 @@ class MapAnalysisMainWindow(QMainWindow):
         spectrum_ax.set_title(title)
         spectrum_ax.grid(True, alpha=0.3)
         spectrum_ax.legend()
+        self._restore_peak_fitting_spectrum_view(plot_widget, spectrum_view)
         plot_widget.spectrum_widget.draw()
 
         self.add_position_marker(closest_spectrum.x_pos, closest_spectrum.y_pos, plot_widget)
@@ -1233,12 +1240,27 @@ class MapAnalysisMainWindow(QMainWindow):
 
         self.statusBar().showMessage(status_msg)
 
+    def _capture_peak_fitting_spectrum_view(self, plot_widget):
+        """Capture the Peak Fitting spectrum zoom before a redraw."""
+        if not hasattr(self, 'peak_fitting_plot_widget') or plot_widget is not self.peak_fitting_plot_widget:
+            return None
+
+        return capture_axis_view(plot_widget.spectrum_widget.ax)
+
+    def _restore_peak_fitting_spectrum_view(self, plot_widget, spectrum_view):
+        """Restore the Peak Fitting spectrum zoom after a redraw."""
+        if not hasattr(self, 'peak_fitting_plot_widget') or plot_widget is not self.peak_fitting_plot_widget:
+            return
+
+        restore_axis_view(plot_widget.spectrum_widget.ax, spectrum_view)
+
     def _cache_peak_fitting_config_from_panel(self):
         """Persist peak fitting control state before dynamic panels are cleared."""
         control_panel = self.get_current_peak_fitting_control_panel()
         if control_panel is not None:
             try:
-                self.peak_fitting_config = control_panel.get_peak_configuration()
+                panel_config = control_panel.get_peak_configuration()
+                self.peak_fitting_config = merge_peak_fitting_configuration(self.peak_fitting_config, panel_config)
             except ValueError as exc:
                 logger.debug("Skipping invalid cached peak fitting configuration: %s", exc)
 
@@ -1253,27 +1275,29 @@ class MapAnalysisMainWindow(QMainWindow):
         """Get the current peak fitting configuration from the UI or cached state."""
         control_panel = self.get_current_peak_fitting_control_panel()
         if control_panel is not None:
-            self.peak_fitting_config = control_panel.get_peak_configuration()
+            panel_config = control_panel.get_peak_configuration()
+            self.peak_fitting_config = merge_peak_fitting_configuration(self.peak_fitting_config, panel_config)
             return control_panel, self.peak_fitting_config
         return None, self.peak_fitting_config
 
     def _reset_peak_fitting_state(self, clear_config: bool = False):
         """Clear peak fitting results that no longer match the loaded map data."""
         if self.peak_fitting_worker is not None:
-            if self.peak_fitting_worker.isRunning():
-                self.peak_fitting_worker.stop()
-                if not self.peak_fitting_worker.wait(10000):
-                    logger.warning("Peak fitting worker did not stop gracefully; leaving as orphan to avoid corrupting numpy/scipy state")
+            worker = self.peak_fitting_worker
             for signal in (
-                self.peak_fitting_worker.fitting_complete,
-                self.peak_fitting_worker.fitting_failed,
-                self.peak_fitting_worker.progress_updated,
-                self.peak_fitting_worker.finished,
+                worker.fitting_complete,
+                worker.fitting_failed,
+                worker.progress_updated,
+                worker.finished,
             ):
                 try:
                     signal.disconnect()
                 except RuntimeError:
                     pass
+            if worker.isRunning():
+                worker.stop()
+                if not worker.wait(10000):
+                    logger.warning("Peak fitting worker did not stop gracefully; leaving as orphan to avoid corrupting numpy/scipy state")
             self.progress_status.hide_progress()
 
         self.peak_fitting_results = None
@@ -10378,6 +10402,18 @@ The map is now ready for analysis!"""
                 )
         return None
 
+    def _validate_map_peak_fitting_window(self, config: dict) -> Optional[str]:
+        """Return an error if the map-wide fit window cannot support the model."""
+        if self.map_data is None or not self.map_data.spectra:
+            return "No map spectra are available for peak fitting."
+
+        representative_spectrum = next(iter(self.map_data.spectra.values()))
+        return validate_peak_fitting_window(
+            representative_spectrum.wavenumbers,
+            config['region'],
+            len(config.get('initial_params', [])),
+        )
+
     def _get_peak_fitting_tab_index(self) -> int:
         """Return the current peak fitting tab index."""
         if not hasattr(self, 'peak_fitting_plot_widget'):
@@ -10488,6 +10524,7 @@ The map is now ready for analysis!"""
         # Plot the result
         self.peak_fitting_plot_widget.show_spectrum_panel(True)
         ax = self.peak_fitting_plot_widget.spectrum_widget.ax
+        spectrum_view = self._capture_peak_fitting_spectrum_view(self.peak_fitting_plot_widget)
         ax.clear()
 
         # Plot original data in region
@@ -10513,6 +10550,7 @@ The map is now ready for analysis!"""
         ax.set_title('Test Peak Fitting')
         ax.legend()
         ax.grid(True, alpha=0.3)
+        self._restore_peak_fitting_spectrum_view(self.peak_fitting_plot_widget, spectrum_view)
         self.peak_fitting_plot_widget.spectrum_widget.draw()
 
         # Show success message with params
@@ -10535,6 +10573,11 @@ The map is now ready for analysis!"""
         bounds_error = self._validate_peak_fitting_bounds(config)
         if bounds_error:
             QMessageBox.warning(self, "Invalid Peak Fitting Configuration", bounds_error)
+            return
+
+        window_error = self._validate_map_peak_fitting_window(config)
+        if window_error:
+            QMessageBox.warning(self, "Invalid Peak Fitting Window", window_error)
             return
 
         if self.peak_fitting_worker is not None and self.peak_fitting_worker.isRunning():

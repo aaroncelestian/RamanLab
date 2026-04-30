@@ -29,6 +29,11 @@ def test_param_names_length_matches_model(shapes):
     model(x, *dummy_params)
 
 
+def test_param_names_rejects_unknown_shape_with_index():
+    with pytest.raises(ValueError, match="Unsupported peak shape at index 2: Not-A-Peak"):
+        get_param_names(["Lorentzian", "Not-A-Peak"])
+
+
 def test_lorentzian_at_center_equals_amplitude():
     f = create_multi_peak_model(["Lorentzian"])
     y = f(np.array([500.0]), 75.0, 500.0, 15.0)

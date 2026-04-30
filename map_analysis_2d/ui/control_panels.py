@@ -1733,6 +1733,7 @@ class MapPeakFittingControlPanel(BaseControlPanel):
     def set_peak_configuration(self, config: dict):
         """Restore a previously used peak fitting configuration."""
         region = config.get("region")
+        saved_visualize_key = config.get("visualize_key")
         if region is not None:
             self.min_wavenumber_spin.setValue(region[0])
             self.max_wavenumber_spin.setValue(region[1])
@@ -1772,9 +1773,8 @@ class MapPeakFittingControlPanel(BaseControlPanel):
 
         self._update_visualization_combo()
 
-        visualize_key = config.get("visualize_key")
-        if visualize_key is not None:
-            selected_index = self.visualization_combo.findData(visualize_key)
+        if saved_visualize_key is not None:
+            selected_index = self.visualization_combo.findData(saved_visualize_key)
             if selected_index >= 0:
                 # Block signals during restore to avoid a double render; emit once after.
                 self.visualization_combo.blockSignals(True)

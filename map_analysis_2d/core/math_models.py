@@ -75,7 +75,10 @@ def get_param_names(shapes: List[str]) -> List[str]:
         A list of parameter names, e.g. ['P1_Amp', 'P1_Cen', 'P1_Wid', 'P2_Amp', ...]
     """
     param_names = []
+    allowed_shapes = {"Lorentzian", "Gaussian", "Pseudo-Voigt"}
     for i, shape in enumerate(shapes, 1):
+        if shape not in allowed_shapes:
+            raise ValueError(f"Unsupported peak shape at index {i}: {shape}")
         param_names.extend([f"P{i}_Amp", f"P{i}_Cen", f"P{i}_Wid"])
         if shape == "Pseudo-Voigt":
             param_names.append(f"P{i}_Eta")
