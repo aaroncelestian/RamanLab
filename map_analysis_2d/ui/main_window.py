@@ -1180,10 +1180,143 @@ class MapAnalysisMainWindow(QMainWindow):
             return
 
         try:
-            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False)
+            self._display_peak_fitting_pixel_details_and_spectrum(x, y)
         except Exception as e:
             logger.error(f"Error displaying peak fitting spectrum: {e}")
             QMessageBox.warning(self, "Error", f"Failed to display peak fitting spectrum:\n{str(e)}")
+
+    def _display_peak_fitting_pixel_details_and_spectrum(self, x: float, y: float):
+        """Update pixel details + spectrum pane for the clicked position."""
+        closest_spectrum = self.find_closest_spectrum(x, y)
+        if closest_spectrum is None:
+            return
+
+        self.peak_fitting_plot_widget.add_map_marker(closest_spectrum.x_pos, closest_spectrum.y_pos)
+
+        cp = self.get_current_peak_fitting_control_panel()
+        pixel_details = cp.results_panel.pixel_details if cp is not None else None
+
+        pos_key = (closest_spectrum.x_pos, closest_spectrum.y_pos)
+        position_text = self._format_pixel_position(closest_spectrum)
+
+        results = self.peak_fitting_results
+        if results is None:
+            if pixel_details is not None:
+                pixel_details.clear()
+            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False)
+            return
+
+        fit_errors = results.get("fit_errors", {})
+        has_fit_error = bool(fit_errors.get(pos_key))
+
+        if has_fit_error:
+            if pixel_details is not None:
+                pixel_details.show_fit_failed(position_text)
+            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False)
+            return
+
+        shapes = results.get("peak_shapes", [])
+        map_params = results.get("map_parameters", {})
+        r_squared_val = results.get("r_squared", {}).get(pos_key)
+
+        from map_analysis_2d.core.math_models import (
+            compute_integrated_intensity,
+            create_multi_peak_model,
+            get_num_params_for_shape,
+            get_peak_function,
+        )
+        import numpy as np
+
+        peak_rows = []
+        model_params = []
+        component_params: List[Tuple[str, str, list]] = []
+
+        for i, shape in enumerate(shapes, start=1):
+            amp = map_params.get(f"P{i}_Amp", {}).get(pos_key, np.nan)
+            cen = map_params.get(f"P{i}_Cen", {}).get(pos_key, np.nan)
+            wid = map_params.get(f"P{i}_Wid", {}).get(pos_key, np.nan)
+            eta = map_params.get(f"P{i}_Eta", {}).get(pos_key, 0.5)
+            area = compute_integrated_intensity(amp, wid, shape, eta)
+            peak_rows.append((f"P{i}", float(area), float(cen), float(wid)))
+
+            params = [amp, cen, wid] if shape != "Pseudo-Voigt" else [amp, cen, wid, eta]
+            model_params.extend(params)
+            component_params.append((f"P{i}", shape, params))
+
+        r_squared_value = float(r_squared_val) if r_squared_val is not None and np.isfinite(r_squared_val) else None
+        if pixel_details is not None:
+            pixel_details.show_results(
+                position_text=position_text,
+                r_squared=r_squared_value,
+                peak_rows=peak_rows,
+            )
+
+        # Plot raw + total fit + components (dashed)
+        self.peak_fitting_plot_widget.show_spectrum_panel(True)
+        spectrum_view = self._capture_peak_fitting_spectrum_view(self.peak_fitting_plot_widget)
+
+        wavenumbers = closest_spectrum.wavenumbers
+        intensities = (
+            closest_spectrum.processed_intensities
+            if self.use_processed and closest_spectrum.processed_intensities is not None
+            else closest_spectrum.intensities
+        )
+
+        spectrum_ax = self.peak_fitting_plot_widget.spectrum_widget.ax
+        spectrum_ax.clear()
+        spectrum_ax.plot(wavenumbers, intensities, color="red", linewidth=1.5, label="Raw spectrum")
+
+        model_func = create_multi_peak_model(shapes)
+        try:
+            total_fit = model_func(wavenumbers, *model_params)
+            spectrum_ax.plot(wavenumbers, total_fit, color="black", linewidth=1.5, label="Total fit")
+
+            for peak_name, shape, params in component_params:
+                func = get_peak_function(shape)
+                n_params = get_num_params_for_shape(shape)
+                component_y = func(wavenumbers, *params[:n_params])
+                spectrum_ax.plot(
+                    wavenumbers,
+                    component_y,
+                    linestyle="--",
+                    linewidth=1.2,
+                    label=f"{peak_name} {shape}",
+                )
+        except Exception as exc:
+            logger.debug("Failed to render fit overlay for %s: %s", pos_key, exc)
+
+        spectrum_ax.set_xlabel("Wavenumber (cm⁻¹)")
+        spectrum_ax.set_ylabel("Intensity")
+        spectrum_ax.set_title(position_text)
+        spectrum_ax.grid(True, alpha=0.3)
+        spectrum_ax.legend()
+
+        self._restore_peak_fitting_spectrum_view(self.peak_fitting_plot_widget, spectrum_view)
+        self.peak_fitting_plot_widget.spectrum_widget.draw()
+
+        self.current_selected_spectrum = closest_spectrum
+        self.current_marker_position = pos_key
+
+    def _format_pixel_position(self, spectrum) -> str:
+        """Return a user-facing position string (μm when available)."""
+        metadata = getattr(self.map_data, "metadata", {}) if self.map_data is not None else {}
+        spatial = {}
+        if isinstance(metadata, dict):
+            spatial = metadata.get("spatial", {}) or metadata.get("spatial_metadata", {}) or {}
+
+        x_unit = ""
+        y_unit = ""
+        if isinstance(spatial, dict):
+            x_unit = spatial.get("x_unit") or spatial.get("xUnit") or spatial.get("x_units") or ""
+            y_unit = spatial.get("y_unit") or spatial.get("yUnit") or spatial.get("y_units") or ""
+
+        unit_blob = f"{x_unit} {y_unit}".lower()
+        has_um = "µm" in unit_blob or "um" in unit_blob
+
+        if has_um:
+            return f"Position: ({spectrum.x_pos:.2f} µm, {spectrum.y_pos:.2f} µm)"
+
+        return f"Position: ({spectrum.x_pos:.1f}, {spectrum.y_pos:.1f})"
             
     def find_closest_spectrum(self, x: float, y: float):
         """Find the spectrum closest to the given coordinates."""
