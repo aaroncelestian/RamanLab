@@ -11,7 +11,7 @@ Implement a permanent results panel in the Peak Fitting interface that displays 
 
 ## 📖 Full Implementation Plan
 
-See detailed implementation plan: [docs/features/results-panel-implementation-plan.md](../docs/features/results-panel-implementation-plan.md)
+See detailed implementation plan: [docs/features/results-panel-implementation-plan.md](results-panel-implementation-plan.md)
 
 ## ✨ Key Features
 
@@ -151,7 +151,7 @@ This provides core functionality without export features or visual polish.
 
 - **User Request:** [Original conversation]
 - **Related Commit:** b67bebd - Add integrated intensity export and map session persistence
-- **Implementation Plan:** [docs/features/results-panel-implementation-plan.md](../docs/features/results-panel-implementation-plan.md)
+- **Implementation Plan:** [docs/features/results-panel-implementation-plan.md](results-panel-implementation-plan.md)
 
 ## 💡 Future Enhancements
 

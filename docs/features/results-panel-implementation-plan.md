@@ -414,7 +414,7 @@ docs/
 - No new dependencies required
 
 ### Python Compatibility
-- Python 3.8+ (per repository standard)
+- Python 3.10+ (per repository standard)
 - Use type hints where appropriate
 - Follow existing code style
 
