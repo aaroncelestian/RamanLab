@@ -1036,12 +1036,7 @@ class MapAnalysisMainWindow(QMainWindow):
             _cfg = ConfigManager()
             _cfg.set('map_analysis.last_map_path', file_path)
             _cfg.set('map_analysis.last_map_type', 'single_file')
-            
-            self._initialize_integration_slider()
-            
-            # Update the map display
-            self.update_map()
-            
+
             # Show success message
             QMessageBox.information(
                 self,
