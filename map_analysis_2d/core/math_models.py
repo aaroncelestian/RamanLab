@@ -62,8 +62,10 @@ def create_multi_peak_model(shapes: List[str]):
 
 def compute_integrated_intensity(amplitude: float, width: float, shape: str, eta: float = 0.5) -> float:
     """Analytical area under a fitted peak derived from its stored parameters."""
-    amp = abs(float(amplitude))
+    amp = float(amplitude)
     wid = abs(float(width))
+    if amp < 0:
+        return np.nan
     if shape == "Gaussian":
         return amp * wid * np.sqrt(np.pi)
     elif shape == "Lorentzian":
