@@ -77,7 +77,7 @@ Implementation of a permanent results panel in the Peak Fitting interface that d
 
 **Tasks:**
 - [ ] Create new file `map_analysis_2d/ui/results_panel.py`
-- [ ] Implement `ResultsPanel(QWidget)` class
+- [ ] Implement `ResultsPanel(QDockWidget)` class
 - [ ] Create two main sections:
   - `OverallStatsWidget` - overall statistics section
   - `PixelDetailsWidget` - pixel details section
@@ -103,7 +103,9 @@ class ResultsPanel(QDockWidget):
 
         # Add to layout
         self.layout.addWidget(self.overall_stats)
-        self.layout.addWidget(QSplitter())
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        self.layout.addWidget(separator)
         self.layout.addWidget(self.pixel_details)
 
         self.setWidget(self.main_widget)
@@ -123,7 +125,7 @@ class ResultsPanel(QDockWidget):
   - Per-peak totals (if multiple peaks)
 - [ ] Implement `update_overall_stats(results_dict)` method
 - [ ] Format numbers appropriately (thousands separators, scientific notation)
-- [ ] Connect to peak fitting worker completion signal
+- [ ] Connect to peak fitting worker completion signal (decorate slot with `@Slot` — worker runs on QThread, UI updates must arrive on the main thread via Qt's signal/slot mechanism)
 - [ ] Handle edge cases (no data, all failed fits, etc.)
 
 **Files to modify:**
@@ -380,7 +382,7 @@ if cfg.get('results_panel.visible', True):
 - [ ] Add screenshots
 
 **Files to modify:**
-- Modified: `/home/runner/work/RamanLab/RamanLab/README.md`
+- Modified: `README.md`
 - New: `docs/user_guide/results_panel.md` (optional)
 
 ## File Structure
