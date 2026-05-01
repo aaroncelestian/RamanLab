@@ -60,6 +60,20 @@ def create_multi_peak_model(shapes: List[str]):
         
     return multi_peak_model
 
+def compute_integrated_intensity(amplitude: float, width: float, shape: str, eta: float = 0.5) -> float:
+    """Analytical area under a fitted peak derived from its stored parameters."""
+    amp = float(amplitude)
+    wid = abs(float(width))
+    if shape == "Gaussian":
+        return amp * wid * np.sqrt(np.pi)
+    elif shape == "Lorentzian":
+        return amp * wid * np.pi
+    elif shape == "Pseudo-Voigt":
+        eta = float(np.clip(eta, 0.0, 1.0))
+        return amp * wid * ((1.0 - eta) * np.sqrt(np.pi) + eta * np.pi)
+    return np.nan
+
+
 def get_param_names(shapes: List[str]) -> List[str]:
     """
     Returns a list of parameter names for a given sequence of peak shapes.
