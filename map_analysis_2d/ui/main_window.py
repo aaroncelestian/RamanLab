@@ -50,6 +50,7 @@ from .control_panels import (
     NMFControlPanel, MLControlPanel, ResultsControlPanel,
     DimensionalityReductionControlPanel, MapPeakFittingControlPanel
 )
+from .overall_stats_widget import OverallStatsWidget
 
 # Import h5py install dialog (optional - fallback to simple error if not available)
 try:
@@ -117,7 +118,43 @@ class SimpleMapData:
             else:
                 # Use raw intensities if no processed data available
                 data_matrix[spectrum_index, :] = spectrum.intensities
-            spectrum_index += 1
+        spectrum_index += 1
+
+
+class _ResultsTabWithOverallStats(QWidget):
+    """Results tab container with an overall-statistics panel."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(8)
+
+        title = QLabel("Overall Statistics")
+        title.setFont(QFont("Arial", 11, QFont.Bold))
+        layout.addWidget(title)
+
+        self.overall_stats_widget = OverallStatsWidget()
+        layout.addWidget(self.overall_stats_widget)
+        layout.addStretch(1)
+
+
+class _OverallStatsBridge(QWidget):
+    """Qt slot wrapper for updating overall statistics."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._target: Optional[OverallStatsWidget] = None
+
+    def set_target(self, target: Optional[OverallStatsWidget]):
+        self._target = target
+
+    @Slot(dict)
+    def on_fitting_complete(self, fitting_results: dict):
+        if self._target is None:
+            return
+        self._target.update_from_fitting_results(fitting_results)
         
         return data_matrix
 
@@ -458,6 +495,9 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Make the splitter handle more responsive
         self.splitter.setOpaqueResize(True)  # Show content while dragging
+
+        self._overall_stats_bridge = _OverallStatsBridge(self)
+        self._overall_stats_bridge.set_target(getattr(self, "overall_stats_widget", None))
         
     def create_permanent_controls(self):
         """Create controls that are always visible."""
@@ -523,8 +563,11 @@ class MapAnalysisMainWindow(QMainWindow):
         from PySide6.QtCore import Qt
         
         # Create the main widget for the results tab
-        results_widget = QWidget()
+        results_widget = _ResultsTabWithOverallStats()
         self.results_tab_widget = results_widget
+        self.overall_stats_widget = results_widget.overall_stats_widget
+        if hasattr(self, "_overall_stats_bridge") and self._overall_stats_bridge is not None:
+            self._overall_stats_bridge.set_target(self.overall_stats_widget)
         results_layout = QVBoxLayout(results_widget)
         
         # Add title and export button
@@ -1351,6 +1394,8 @@ class MapAnalysisMainWindow(QMainWindow):
             self.progress_status.hide_progress()
 
         self.peak_fitting_results = None
+        if hasattr(self, "overall_stats_widget") and self.overall_stats_widget is not None:
+            self.overall_stats_widget.clear_stats()
         if clear_config:
             self.peak_fitting_config = None
 
@@ -10706,6 +10751,7 @@ The map is now ready for analysis!"""
         self.progress_status.update_progress(0, "Preparing peak fitting worker...")
         self.peak_fitting_worker = PeakFittingWorker(list(self.map_data.spectra.values()), self.use_processed, config)
         self.peak_fitting_worker.progress_updated.connect(self._on_peak_fitting_progress)
+        self.peak_fitting_worker.fitting_complete.connect(self._overall_stats_bridge.on_fitting_complete)
         self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_complete)
         self.peak_fitting_worker.fitting_failed.connect(self._on_peak_fitting_failed)
         self.peak_fitting_worker.finished.connect(self._on_peak_fitting_worker_finished)

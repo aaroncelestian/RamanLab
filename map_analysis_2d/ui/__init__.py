@@ -23,6 +23,8 @@ from .control_panels import (
     MapPeakFittingControlPanel
 )
 
+from .overall_stats_widget import OverallStatsWidget
+
 __all__ = [
     'MapAnalysisMainWindow',
     'SafeWidgetMixin', 
@@ -51,5 +53,6 @@ __all__ = [
     'NMFControlPanel',
     'MLControlPanel',
     'ResultsControlPanel',
-    'MapPeakFittingControlPanel'
+    'MapPeakFittingControlPanel',
+    'OverallStatsWidget'
 ]

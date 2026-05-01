@@ -7,6 +7,9 @@ def invalidate_peak_fitting_results(owner, control_panel=None):
     """Clear stale fit results and disable export until a new run completes."""
     owner.peak_fitting_results = None
 
+    if hasattr(owner, "overall_stats_widget") and owner.overall_stats_widget is not None:
+        owner.overall_stats_widget.clear_stats()
+
     if control_panel is not None and hasattr(control_panel, "export_batch_btn"):
         control_panel.export_batch_btn.setEnabled(False)
 
