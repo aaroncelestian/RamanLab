@@ -18,6 +18,7 @@ from .base_widgets import (
     PrimaryButton, SuccessButton, WarningButton, InfoButton, SafeWidgetMixin,
     apply_icon_button_style
 )
+from .results_panel import ResultsPanel
 
 logger = logging.getLogger(__name__)
 
@@ -1554,6 +1555,10 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         actions_layout.addWidget(self.export_batch_btn)
         
         self.layout.addWidget(actions_group)
+
+        # Results panel (Phase 1: placeholders only)
+        self.results_panel = ResultsPanel(self)
+        self.layout.addWidget(self.results_panel)
         
         # Lists to hold dynamic widgets
         self.shape_combos = []
