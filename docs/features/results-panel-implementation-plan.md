@@ -32,7 +32,7 @@ Implementation of a permanent results panel in the Peak Fitting interface that d
 
 ### Panel Structure
 
-```
+```text
 ┌─ Results Summary ──────────────────┐
 │ Overall Statistics                  │
 │ ├─ Total Area: 123,456.78          │
@@ -298,7 +298,7 @@ def _highlight_selected_pixel(self, pos):
 - Modified: `map_analysis_2d/ui/main_window.py`
 
 **Export Format:**
-```
+```text
 RamanLab Peak Fitting Results Summary
 Generated: 2026-05-01 19:35:00
 Map: silicon_sample_map.h5
@@ -387,7 +387,7 @@ if cfg.get('results_panel.visible', True):
 
 ## File Structure
 
-```
+```text
 map_analysis_2d/
 ├── ui/
 │   ├── __init__.py              # Update exports

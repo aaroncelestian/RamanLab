@@ -110,7 +110,7 @@ git commit -m "Complete Results Panel implementation. Closes #7"
 
 ## 📊 Структура работы
 
-```
+```text
 Epic Issue #7 (GitHub)
   │
   ├─ Фаза 1 → Issue #8 (опц.)

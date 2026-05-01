@@ -97,7 +97,7 @@ Click on any point on the map to see:
 
 ## 🎨 UI Mockup
 
-```
+```text
 ┌─ Results Summary ──────────────────┐
 │ Overall Statistics                  │
 │ ├─ Total Area: 123,456.78          │
