@@ -64,8 +64,6 @@ def compute_integrated_intensity(amplitude: float, width: float, shape: str, eta
     """Analytical area under a fitted peak derived from its stored parameters."""
     amp = float(amplitude)
     wid = abs(float(width))
-    if amp < 0:
-        return np.nan
     if shape == "Gaussian":
         return amp * wid * np.sqrt(np.pi)
     elif shape == "Lorentzian":
