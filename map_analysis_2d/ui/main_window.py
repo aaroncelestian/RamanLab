@@ -26,6 +26,7 @@ from ..core import RamanMapData
 from ..core.cosmic_ray_detection import CosmicRayConfig, SimpleCosmicRayManager
 from ..core.math_models import (
     DEFAULT_CURVE_FIT_MAXFEV,
+    compute_integrated_intensity,
     create_multi_peak_model,
     get_num_params_for_shape,
     get_param_names,
@@ -198,11 +199,47 @@ class MapAnalysisMainWindow(QMainWindow):
         self.setAcceptDrops(True)
         
         logger.info("Main window initialized")
-        
+
         # Try to auto-load database matching pattern RamanLab_Database_*.pkl
         # Do this AFTER UI is fully initialized
         self.auto_load_database()
+
+        # Restore the last opened map after the window is shown
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, self._restore_last_map)
     
+    def _restore_last_map(self):
+        """Reload the last opened map on startup, if the path still exists."""
+        try:
+            from core.config_manager import ConfigManager
+            from pathlib import Path
+            cfg = ConfigManager()
+            path = cfg.get('map_analysis.last_map_path')
+            kind = cfg.get('map_analysis.last_map_type')
+            if not path or not Path(path).exists():
+                return
+            self.progress_status.show_progress("Restoring last map...")
+            if kind == 'single_file':
+                from ..core.single_file_map_loader import SingleFileRamanMapData
+                self.map_data = SingleFileRamanMapData(
+                    filepath=path, cosmic_ray_config=self.cosmic_ray_config
+                )
+            else:
+                self.map_data = RamanMapData(path, cosmic_ray_config=self.cosmic_ray_config)
+            self._reset_peak_fitting_state(clear_config=True)
+            self._clear_map_cache()
+            self._initialize_integration_slider()
+            self.update_map()
+            self.progress_status.hide_progress()
+            self.statusBar().showMessage(
+                f"Restored last map: {Path(path).name} "
+                f"({len(self.map_data.spectra):,} spectra)"
+            )
+            logger.info("Restored last map from %s", path)
+        except Exception as e:
+            self.progress_status.hide_progress()
+            logger.warning("Could not restore last map: %s", e)
+
     def auto_load_database(self):
         """Automatically load database matching pattern RamanLab_Database_*.pkl"""
         import pickle
@@ -912,6 +949,11 @@ class MapAnalysisMainWindow(QMainWindow):
                 
                 self.statusBar().showMessage(f"Loaded {n_spectra:,} spectra{perf_msg}")
                 logger.info(f"Loaded map data with {n_spectra:,} spectra")
+
+                from core.config_manager import ConfigManager
+                _cfg = ConfigManager()
+                _cfg.set('map_analysis.last_map_path', directory)
+                _cfg.set('map_analysis.last_map_type', 'directory')
                 
                 # Initialize integration slider with spectrum midpoint
                 self._initialize_integration_slider()
@@ -989,6 +1031,11 @@ class MapAnalysisMainWindow(QMainWindow):
                 f"({self.map_data.width} × {self.map_data.height})"
             )
             logger.info(f"Loaded single-file map with {len(self.map_data.spectra)} spectra")
+
+            from core.config_manager import ConfigManager
+            _cfg = ConfigManager()
+            _cfg.set('map_analysis.last_map_path', file_path)
+            _cfg.set('map_analysis.last_map_type', 'single_file')
             
             self._initialize_integration_slider()
             
@@ -10796,7 +10843,24 @@ The map is now ready for analysis!"""
                     row[param_name] = self.peak_fitting_results['map_parameters'][param_name][pos_key]
                 else:
                     row[param_name] = np.nan
-                    
+
+            shapes = self.peak_fitting_results['peak_shapes']
+            map_params = self.peak_fitting_results['map_parameters']
+            total_int = 0.0
+            all_valid = True
+            for i, shape in enumerate(shapes, 1):
+                amp = map_params.get(f'P{i}_Amp', {}).get(pos_key, np.nan)
+                wid = map_params.get(f'P{i}_Wid', {}).get(pos_key, np.nan)
+                eta = map_params.get(f'P{i}_Eta', {}).get(pos_key, 0.5)
+                if np.isfinite(amp) and np.isfinite(wid):
+                    ii = compute_integrated_intensity(amp, wid, shape, eta)
+                    row[f'P{i}_IntInt'] = ii
+                    total_int += ii
+                else:
+                    row[f'P{i}_IntInt'] = np.nan
+                    all_valid = False
+            row['Total_IntInt'] = total_int if all_valid else np.nan
+
             if pos_key in self.peak_fitting_results['r_squared']:
                 row['R-Squared'] = self.peak_fitting_results['r_squared'][pos_key]
             else:
