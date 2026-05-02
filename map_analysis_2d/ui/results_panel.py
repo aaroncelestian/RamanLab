@@ -2,28 +2,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGroupBox, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QGroupBox, QVBoxLayout
 
 from .overall_stats_widget import OverallStatsWidget
-
-
-class PixelDetailsWidget(QGroupBox):
-    """Per-pixel detail display — populated in Phase 3."""
-
-    PLACEHOLDER_TEXT = "Click a map pixel to see details"
-
-    def __init__(self, parent=None):
-        super().__init__("Pixel details", parent)
-        layout = QVBoxLayout(self)
-        self._placeholder_label = QLabel(self.PLACEHOLDER_TEXT)
-        self._placeholder_label.setWordWrap(True)
-        self._placeholder_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self._placeholder_label.setStyleSheet("color: #777;")
-        layout.addWidget(self._placeholder_label)
-
-    def clear(self) -> None:
-        self._placeholder_label.setText(self.PLACEHOLDER_TEXT)
+from .pixel_details_widget import PixelDetailsWidget
 
 
 class ResultsPanel(QGroupBox):
