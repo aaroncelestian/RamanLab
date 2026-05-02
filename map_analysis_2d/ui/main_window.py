@@ -787,6 +787,8 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
             control_panel.visualization_parameter_changed.connect(self.update_peak_fitting_visualization)
             control_panel.export_batch_requested.connect(self.export_map_peak_fitting_to_batch)
+            if hasattr(self, "overall_stats_widget") and self.overall_stats_widget is not None:
+                control_panel.fitting_config_changed.connect(self.overall_stats_widget.clear_stats)
             self.controls_panel.add_section("peak_fitting_controls", control_panel)
 
             if self.peak_fitting_config is not None:
