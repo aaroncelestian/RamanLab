@@ -1203,7 +1203,7 @@ class MapAnalysisMainWindow(QMainWindow):
         if results is None:
             if pixel_details is not None:
                 pixel_details.clear()
-            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False)
+            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False, add_marker=False)
             return
 
         fit_errors = results.get("fit_errors", {})
@@ -1212,24 +1212,16 @@ class MapAnalysisMainWindow(QMainWindow):
         if has_fit_error:
             if pixel_details is not None:
                 pixel_details.show_fit_failed(position_text)
-            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False)
+            self._display_selected_spectrum(x, y, self.peak_fitting_plot_widget, include_template_overlay=False, add_marker=False)
             return
 
         shapes = results.get("peak_shapes", [])
         map_params = results.get("map_parameters", {})
         r_squared_val = results.get("r_squared", {}).get(pos_key)
 
-        from map_analysis_2d.core.math_models import (
-            compute_integrated_intensity,
-            create_multi_peak_model,
-            get_num_params_for_shape,
-            get_peak_function,
-        )
-        import numpy as np
-
         peak_rows = []
         model_params = []
-        component_params: List[Tuple[str, str, list]] = []
+        component_params: list[tuple[str, str, list]] = []
 
         for i, shape in enumerate(shapes, start=1):
             amp = map_params.get(f"P{i}_Amp", {}).get(pos_key, np.nan)
@@ -1359,7 +1351,7 @@ class MapAnalysisMainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error adding position marker: {e}")
 
-    def _display_selected_spectrum(self, x: float, y: float, plot_widget, include_template_overlay: bool):
+    def _display_selected_spectrum(self, x: float, y: float, plot_widget, include_template_overlay: bool, add_marker: bool = True):
         """Render the selected spectrum into the requested plot widget."""
         closest_spectrum = self.find_closest_spectrum(x, y)
         if closest_spectrum is None:
@@ -1414,7 +1406,8 @@ class MapAnalysisMainWindow(QMainWindow):
         self._restore_peak_fitting_spectrum_view(plot_widget, spectrum_view)
         plot_widget.spectrum_widget.draw()
 
-        self.add_position_marker(closest_spectrum.x_pos, closest_spectrum.y_pos, plot_widget)
+        if add_marker:
+            self.add_position_marker(closest_spectrum.x_pos, closest_spectrum.y_pos, plot_widget)
         self.current_marker_position = (closest_spectrum.x_pos, closest_spectrum.y_pos)
         self.current_selected_spectrum = closest_spectrum
 
