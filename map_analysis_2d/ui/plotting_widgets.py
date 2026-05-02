@@ -277,9 +277,9 @@ class SplitMapSpectrumWidget(QWidget):
         """Add/update a marker on the map (e.g., selected pixel)."""
         ax = self.map_widget.ax
 
-        # Remove previous marker(s)
+        # Remove previous marker(s) — both tag types so switching flows doesn't leave stale markers
         for artist in list(ax.get_children()):
-            if hasattr(artist, "_selected_pixel_marker"):
+            if hasattr(artist, "_selected_pixel_marker") or hasattr(artist, "_spectrum_marker"):
                 try:
                     artist.remove()
                 except Exception:
@@ -295,7 +295,10 @@ class SplitMapSpectrumWidget(QWidget):
             markeredgewidth=1.0,
         )[0]
         plot_artist._selected_pixel_marker = True
-        self.map_widget.canvas.draw()
+        canvas = self.map_widget.canvas
+        canvas.flush_events()
+        canvas.draw_idle()
+        canvas.draw()
 
 
 class PCANMFPlotWidget(BasePlotWidget):

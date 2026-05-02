@@ -1219,6 +1219,7 @@ class MapAnalysisMainWindow(QMainWindow):
         map_params = results.get("map_parameters", {})
         r_squared_val = results.get("r_squared", {}).get(pos_key)
 
+        _PSEUDO_VOIGT_DEFAULT_ETA = 0.5  # mixing ratio used when not stored in fit results
         peak_rows = []
         model_params = []
         component_params: list[tuple[str, str, list]] = []
@@ -1227,7 +1228,7 @@ class MapAnalysisMainWindow(QMainWindow):
             amp = map_params.get(f"P{i}_Amp", {}).get(pos_key, np.nan)
             cen = map_params.get(f"P{i}_Cen", {}).get(pos_key, np.nan)
             wid = map_params.get(f"P{i}_Wid", {}).get(pos_key, np.nan)
-            eta = map_params.get(f"P{i}_Eta", {}).get(pos_key, 0.5)
+            eta = map_params.get(f"P{i}_Eta", {}).get(pos_key, _PSEUDO_VOIGT_DEFAULT_ETA)
             area = compute_integrated_intensity(amp, wid, shape, eta)
             peak_rows.append((f"P{i}", float(area), float(cen), float(wid)))
 
@@ -1281,7 +1282,9 @@ class MapAnalysisMainWindow(QMainWindow):
         spectrum_ax.set_ylabel("Intensity")
         spectrum_ax.set_title(position_text)
         spectrum_ax.grid(True, alpha=0.3)
-        spectrum_ax.legend()
+        n_legend_items = 2 + len(shapes)  # raw + total fit + one per peak component
+        legend_fontsize = "small" if n_legend_items > 5 else None
+        spectrum_ax.legend(fontsize=legend_fontsize)
 
         self._restore_peak_fitting_spectrum_view(self.peak_fitting_plot_widget, spectrum_view)
         self.peak_fitting_plot_widget.spectrum_widget.draw()
