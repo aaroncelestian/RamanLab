@@ -3,13 +3,13 @@
 ## Overview
 
 Implementation of a permanent results panel in the Peak Fitting interface that displays:
-1. Overall statistics after fitting completion (total area, count, mean, etc.)
-2. Detailed information about a specific pixel when clicking on the map
-3. Automatic updates and always visible
+1. Per-peak total integrated areas across the whole map, with a grand total and Copy button
+2. Detailed per-pixel information (integrated area, center, width per peak + R²) when clicking on the map
+3. Auto-shows the fitted spectrum in the bottom pane on click
 
-**Status:** Planning
+**Status:** Planning — decisions finalized
 **Priority:** High
-**Estimated Time:** 15-20 hours
+**Estimated Time:** 12-16 hours
 **Target Version:** 2.1.0
 
 ## User Requirements
@@ -17,116 +17,128 @@ Implementation of a permanent results panel in the Peak Fitting interface that d
 > "Когда появляется постоянная панель с результатами, которые ты предложил, то есть в ней будет показываться всегда, после того как фитинг произошел, общее количество, общая площадь, а также будет значение точечные. То есть, когда я тыкаю мышкой на определенную точку карты, должны показываться значения в этой точке."
 
 ### Key Features
-- Permanent panel showing results after peak fitting
-- Overall statistics: total area, total count, averages
-- Click on map point → show values for that specific pixel
-- Always visible during peak fitting workflow
+- Permanent panel showing results after peak fitting completes
+- Overall statistics: per-peak total integrated areas + grand total (easy to copy)
+- Click on map point → show integrated area, center, width per peak + R² for that pixel
+- Click auto-shows the fitted spectrum (raw + total fit + individual peak components) in bottom pane
+- Always visible during peak fitting workflow; grayed-out placeholder before first fit
 
 ## Architecture
 
 ### Panel Location
-- **Position:** Right side of Peak Fitting interface
-- **Implementation:** QDockWidget (allows moving/hiding)
-- **Size:** Minimum width 250px, recommended 300-350px
-- **State:** Dockable, resizable, closable via View menu
+- **Position:** Bottom of the existing left sidebar (`MapPeakFittingControlPanel`)
+- **Implementation:** `QGroupBox` embedded in the existing `QScrollArea` — no dock widget needed
+- **Collapsible:** No — the scroll area handles overflow
+- **State:** Always expanded; cleared when fitting config changes
+
+### Rationale for QGroupBox over QDockWidget
+The left sidebar already has empty space below the existing controls (due to `addStretch()`). Embedding there avoids adding a floating dock widget and keeps the UI consistent with the existing control panel pattern.
 
 ### Panel Structure
 
 ```text
 ┌─ Results Summary ──────────────────┐
-│ Overall Statistics                  │
-│ ├─ Total Area: 123,456.78          │
-│ ├─ Fitted Pixels: 2,500/2,500      │
-│ ├─ Success Rate: 98.2%             │
-│ ├─ Mean Area: 49.38 ± 12.45        │
-│ └─ Median Area: 47.82              │
+│ [grayed placeholder until fit runs] │
 │                                     │
-│ Per-Peak Statistics:                │
-│ ├─ Peak 1 Total: 95,234.56         │
-│ └─ Peak 2 Total: 28,222.22         │
-│                                     │
-│ [Export Summary] [Copy to Clipboard]│
+│ Peak 1 total area:  45,231.42       │
+│ Peak 2 total area:  28,110.20       │
+│ ─────────────────────────────────── │
+│ Total:              73,341.62  [Copy]│
 ├─────────────────────────────────────┤
-│ Selected Pixel Details              │
-│ Position: (X=10, Y=15)              │
+│ Selected Pixel                      │
+│ [click a map pixel to see details]  │
 │                                     │
-│ Integrated Intensities:             │
-│ ├─ Peak 1: 45.23                   │
-│ ├─ Peak 2: 12.15                   │
-│ └─ Total: 57.38                    │
+│ Position: (X=12.5 μm, Y=8.0 μm)    │
 │                                     │
-│ Fit Parameters:                     │
-│ ├─ P1_Amp: 1234.5                  │
-│ ├─ P1_Cen: 520.3                   │
-│ ├─ P1_Wid: 8.2                     │
-│ └─ ...                              │
+│ Peak 1:  area 45.23 | cen 520.3 | wid 8.2  │
+│ Peak 2:  area 12.15 | cen 480.1 | wid 5.4  │
 │                                     │
-│ Fit Quality:                        │
-│ ├─ R²: 0.9845                      │
-│ └─ Status: ✓ Success               │
-│                                     │
-│ [Show Spectrum] [Export Point Data] │
+│ R²:  0.98                           │
 └─────────────────────────────────────┘
 ```
+
+**Failed pixel state:**
+```text
+│ Selected Pixel                      │
+│ Position: (X=12.5 μm, Y=8.0 μm)    │
+│ Fit failed for this pixel           │
+```
+(Bottom spectrum pane shows raw spectrum only, no fit overlay.)
+
+## Design Decisions (finalized 2026-05-01)
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Panel widget type | `QGroupBox` in left sidebar | Existing empty space; no dock complexity |
+| Update trigger | Click only (not hover) | Low overhead; sufficient for analysis |
+| Overall stats | Per-peak total areas + grand total | Physically meaningful; per-peak useful for separating contributions |
+| Copy button | Next to grand total only | Most common copy target |
+| Per-pixel: coordinates | Spatial (μm) from LabSpec metadata; fall back to array indices | Directly relatable to physical sample |
+| Per-pixel: parameters shown | Integrated area + center + width per peak, R² | Amplitude and eta omitted — not actionable in results view |
+| Spectrum on click | Auto-show in bottom pane | No manual "Show Spectrum" button needed |
+| Spectrum content | Raw data + total fit curve + individual peak components | Deconvolved view confirms peak separation |
+| Failed pixel | "Fit failed" message + raw spectrum in bottom pane | Honest; lets user see why the fit failed |
+| Panel state (no results) | Grayed-out placeholder text | Always visible so user knows it exists |
+| Panel state (config change) | Clear immediately | Stale numbers in a results panel are worse than empty |
+| Collapsible | No | Scroll area handles overflow |
+| Number format (panel) | Fixed 2 decimal places | Easier to compare visually |
+| Number format (CSV) | Full precision | For downstream analysis |
+| Export format | Per-pixel CSV: X, Y, Peak1_area, Peak1_center, Peak1_width, …, R² | Full spatial grid for downstream analysis |
+| New file | `map_analysis_2d/ui/results_panel.py` | Panel has its own state; keeps control_panels.py focused |
 
 ## Implementation Phases
 
 ### Phase 1: Base Panel Structure (2-3 hours)
 
-**Goal:** Create the basic panel widget and integrate it into main window
+**Goal:** Create the panel widget as a `QGroupBox` and embed it in `MapPeakFittingControlPanel`
 
 **Tasks:**
 - [ ] Create new file `map_analysis_2d/ui/results_panel.py`
-- [ ] Implement `ResultsPanel(QDockWidget)` class
-- [ ] Create two main sections:
-  - `OverallStatsWidget` - overall statistics section
-  - `PixelDetailsWidget` - pixel details section
-- [ ] Integrate panel into `main_window.py` as QDockWidget
-- [ ] Add View menu option to show/hide panel
-- [ ] Basic styling and layout
+- [ ] Implement `ResultsPanel(QGroupBox)` class with two sections:
+  - `OverallStatsWidget` — overall statistics section
+  - `PixelDetailsWidget` — pixel details section
+- [ ] Append panel to `MapPeakFittingControlPanel` layout in `control_panels.py`
+- [ ] Show grayed-out placeholder text in both sections on init
 
 **Files to modify:**
 - New: `map_analysis_2d/ui/results_panel.py`
-- Modified: `map_analysis_2d/ui/main_window.py`
+- Modified: `map_analysis_2d/ui/control_panels.py`
 
 **Code Structure:**
 ```python
-class ResultsPanel(QDockWidget):
+class ResultsPanel(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Results Summary", parent)
-        self.main_widget = QWidget()
-        self.layout = QVBoxLayout(self.main_widget)
+        layout = QVBoxLayout(self)
 
-        # Create sections
         self.overall_stats = OverallStatsWidget()
         self.pixel_details = PixelDetailsWidget()
 
-        # Add to layout
-        self.layout.addWidget(self.overall_stats)
         separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        self.layout.addWidget(separator)
-        self.layout.addWidget(self.pixel_details)
+        separator.setFrameShape(QFrame.Shape.HLine)
 
-        self.setWidget(self.main_widget)
+        layout.addWidget(self.overall_stats)
+        layout.addWidget(separator)
+        layout.addWidget(self.pixel_details)
+
+    def clear(self):
+        self.overall_stats.clear()
+        self.pixel_details.clear()
 ```
 
 ### Phase 2: Overall Statistics Display (2-3 hours)
 
-**Goal:** Compute and display overall statistics after peak fitting
+**Goal:** Compute and display per-peak totals + grand total after fitting completes
 
 **Tasks:**
-- [ ] Create `compute_overall_statistics()` function
-- [ ] Calculate key metrics:
-  - Total integrated area (sum of all Total_IntInt)
-  - Number of fitted pixels / total pixels
-  - Success rate (% of successful fits based on R²)
-  - Mean, median, std dev for Total_IntInt
-  - Per-peak totals (if multiple peaks)
+- [ ] Create `compute_overall_statistics()` function in `map_analysis_2d/core/statistics.py`
+- [ ] Calculate per-peak total integrated areas (using `compute_integrated_intensity()`)
+- [ ] Calculate grand total (sum of all per-peak totals across all pixels)
 - [ ] Implement `update_overall_stats(results_dict)` method
-- [ ] Format numbers appropriately (thousands separators, scientific notation)
-- [ ] Connect to peak fitting worker completion signal (decorate slot with `@Slot` — worker runs on QThread, UI updates must arrive on the main thread via Qt's signal/slot mechanism)
-- [ ] Handle edge cases (no data, all failed fits, etc.)
+- [ ] Format numbers: fixed 2 decimal places with thousands separator
+- [ ] Add Copy button next to grand total (copies plain number to clipboard)
+- [ ] Connect to peak fitting worker completion signal (`@Slot` — worker on QThread)
+- [ ] Clear stats when fitting config changes (wavenumber range, number of peaks)
 
 **Files to modify:**
 - New: `map_analysis_2d/core/statistics.py`
@@ -135,29 +147,15 @@ class ResultsPanel(QDockWidget):
 
 **Statistics Computation:**
 ```python
-def compute_overall_statistics(map_data, peak_fitting_results):
-    """Compute overall statistics from peak fitting results."""
-    stats = {
-        'total_area': 0.0,
-        'mean_area': 0.0,
-        'median_area': 0.0,
-        'std_area': 0.0,
-        'fitted_count': 0,
-        'total_count': len(map_data.spectra),
-        'success_rate': 0.0,
-        'per_peak_totals': {}
-    }
-
-    # Extract data
-    total_areas = []
+def compute_overall_statistics(peak_fitting_results):
+    """Compute per-peak and grand total integrated areas."""
+    n_peaks = peak_fitting_results['n_peaks']
     shapes = peak_fitting_results['peak_shapes']
     map_params = peak_fitting_results['map_parameters']
 
-    for pos_key, spectrum in map_data.spectra.items():
-        # Compute total IntInt for this pixel
-        total_int = 0.0
-        all_valid = True
+    per_peak_totals = {f'Peak {i}': 0.0 for i in range(1, n_peaks + 1)}
 
+    for pos_key in peak_fitting_results['positions']:
         for i, shape in enumerate(shapes, 1):
             amp = map_params.get(f'P{i}_Amp', {}).get(pos_key, np.nan)
             wid = map_params.get(f'P{i}_Wid', {}).get(pos_key, np.nan)
@@ -165,50 +163,27 @@ def compute_overall_statistics(map_data, peak_fitting_results):
 
             if np.isfinite(amp) and np.isfinite(wid):
                 ii = compute_integrated_intensity(amp, wid, shape, eta)
-                total_int += ii
+                per_peak_totals[f'Peak {i}'] += ii
 
-                # Per-peak tracking
-                peak_key = f'Peak {i}'
-                if peak_key not in stats['per_peak_totals']:
-                    stats['per_peak_totals'][peak_key] = 0.0
-                stats['per_peak_totals'][peak_key] += ii
-            else:
-                all_valid = False
-
-        if all_valid:
-            total_areas.append(total_int)
-            stats['fitted_count'] += 1
-
-    # Calculate statistics
-    if total_areas:
-        stats['total_area'] = np.sum(total_areas)
-        stats['mean_area'] = np.mean(total_areas)
-        stats['median_area'] = np.median(total_areas)
-        stats['std_area'] = np.std(total_areas)
-        stats['success_rate'] = (stats['fitted_count'] / stats['total_count']) * 100
-
-    return stats
+    grand_total = sum(per_peak_totals.values())
+    return {'per_peak_totals': per_peak_totals, 'grand_total': grand_total}
 ```
 
 ### Phase 3: Pixel Details on Map Click (3-4 hours)
 
-**Goal:** Show detailed information when user clicks on a pixel in the map
+**Goal:** Show per-pixel details and auto-display fitted spectrum when user clicks a map pixel
 
 **Tasks:**
-- [ ] Implement map click event handler in main_window
-- [ ] Connect matplotlib event (`button_press_event`) to handler
-- [ ] Convert click coordinates to map pixel position
-- [ ] Find closest pixel with data
-- [ ] Implement `update_pixel_details(pos, results)` method
-- [ ] Display pixel information:
-  - Coordinates (X, Y)
-  - Integrated intensity per peak
-  - Total integrated intensity
-  - All fit parameters (Amp, Cen, Wid, Eta)
-  - R-squared value
-  - Fit status (Success/Warning/Error)
-- [ ] Add visual marker on map for selected pixel
-- [ ] Clear previous selection marker when new pixel is clicked
+- [ ] Connect matplotlib `button_press_event` on the peak fitting map canvas
+- [ ] Convert click `(xdata, ydata)` to spatial coordinates → nearest pixel index
+- [ ] Use spatial coordinates from LabSpec metadata when available; fall back to array indices
+- [ ] Display in panel: position (μm), area + center + width per peak (fixed 2 dp), R²
+- [ ] For failed pixels: show "Fit failed for this pixel" with coordinates
+- [ ] Auto-show bottom spectrum pane with:
+  - Successful pixel: raw spectrum + total fit curve + individual peak components (dashed)
+  - Failed pixel: raw spectrum only, no fit overlay
+- [ ] Add/update visual marker (red star) on map for selected pixel
+- [ ] Clear pixel details when fitting config changes
 
 **Files to modify:**
 - Modified: `map_analysis_2d/ui/results_panel.py`
@@ -216,174 +191,82 @@ def compute_overall_statistics(map_data, peak_fitting_results):
 
 **Click Handler Implementation:**
 ```python
-def _connect_map_click_handler(self):
-    """Connect click handler to peak fitting map."""
-    if hasattr(self, 'peak_fitting_plot_widget'):
-        canvas = self.peak_fitting_plot_widget.canvas
-        self._map_click_cid = canvas.mpl_connect(
-            'button_press_event', self._on_peak_fitting_map_click
-        )
+def _connect_peak_fitting_click_handler(self):
+    canvas = self.peak_fitting_plot_widget.map_widget.canvas
+    self._peak_fitting_click_cid = canvas.mpl_connect(
+        'button_press_event', self._on_peak_fitting_map_click
+    )
 
 def _on_peak_fitting_map_click(self, event):
-    """Handle click on peak fitting map."""
     if not event.inaxes or self.peak_fitting_results is None:
         return
 
-    x_click = event.xdata
-    y_click = event.ydata
+    pos = self._find_closest_pixel(event.xdata, event.ydata)
+    if pos is None:
+        return
 
-    # Find closest pixel
-    closest_pos = self._find_closest_pixel(x_click, y_click)
+    # Update results panel
+    self.peak_fitting_control_panel.results_panel.update_pixel_details(
+        pos, self.peak_fitting_results, self.map_data
+    )
 
-    if closest_pos:
-        # Update results panel
-        self.results_panel.update_pixel_details(
-            closest_pos,
-            self.peak_fitting_results,
-            self.map_data
-        )
+    # Auto-show spectrum in bottom pane
+    self._show_peak_fitting_spectrum(pos)
 
-        # Add visual marker
-        self._highlight_selected_pixel(closest_pos)
+    # Update map marker
+    self._highlight_peak_fitting_pixel(pos)
 
 def _find_closest_pixel(self, x, y):
-    """Find the closest pixel to clicked coordinates."""
-    min_dist = float('inf')
-    closest_pos = None
-
-    for pos_key in self.map_data.spectra.keys():
-        px, py = pos_key
-        dist = np.sqrt((px - x)**2 + (py - y)**2)
-        if dist < min_dist:
-            min_dist = dist
-            closest_pos = pos_key
-
-    return closest_pos
-
-def _highlight_selected_pixel(self, pos):
-    """Add visual marker for selected pixel on map."""
-    if hasattr(self, '_selected_pixel_marker') and self._selected_pixel_marker:
-        self._selected_pixel_marker.remove()
-
-    ax = self.peak_fitting_plot_widget.ax
-    x, y = pos
-    self._selected_pixel_marker = ax.plot(
-        x, y, 'r*', markersize=15, markeredgecolor='white',
-        markeredgewidth=1.5, zorder=100
-    )[0]
-    self.peak_fitting_plot_widget.canvas.draw_idle()
+    """Find nearest pixel to clicked coordinates using spatial positions."""
+    positions = self.peak_fitting_results['positions']  # list of (x, y) tuples
+    if not positions:
+        return None
+    coords = np.array(positions)
+    dists = np.hypot(coords[:, 0] - x, coords[:, 1] - y)
+    return positions[int(np.argmin(dists))]
 ```
 
-### Phase 4: Export and Copy Functionality (1-2 hours)
+### Phase 4: Export to CSV (1-2 hours)
 
-**Goal:** Allow users to export and copy statistics
+**Goal:** Export full per-pixel fitting results as a CSV file
 
 **Tasks:**
-- [ ] Implement "Export Summary" button
-  - Save statistics to .txt file
-  - Include all overall statistics
-  - Timestamp and map filename
-- [ ] Implement "Copy to Clipboard" button
-  - Format statistics as text
-  - Copy to system clipboard
-- [ ] Implement "Show Spectrum" button (for selected pixel)
-  - Open spectrum in separate plot window
-  - Show fit overlay
-- [ ] Implement "Export Point Data" button
-  - Export selected pixel data to CSV
-  - Include all parameters and integrated intensities
+- [ ] Add "Export Results CSV" button to the results panel
+- [ ] On click: open file dialog, write CSV with one row per pixel
+- [ ] Columns: X (μm), Y (μm), Peak1_area, Peak1_center, Peak1_width, [Peak2_...], ..., R², fit_status
+- [ ] Use full float precision in CSV (not the 2 dp display format)
+- [ ] Skip or mark NaN rows for failed pixels
 
 **Files to modify:**
 - Modified: `map_analysis_2d/ui/results_panel.py`
 - Modified: `map_analysis_2d/ui/main_window.py`
 
-**Export Format:**
-```text
-RamanLab Peak Fitting Results Summary
-Generated: 2026-05-01 19:35:00
-Map: silicon_sample_map.h5
-
-OVERALL STATISTICS
-==================
-Total Integrated Area: 123,456.78
-Fitted Pixels: 2,500 / 2,500
-Success Rate: 98.2%
-Mean Area: 49.38 ± 12.45
-Median Area: 47.82
-
-PER-PEAK STATISTICS
-===================
-Peak 1 Total: 95,234.56
-Peak 2 Total: 28,222.22
+**CSV Format:**
+```
+X_um,Y_um,Peak1_area,Peak1_center,Peak1_width,Peak2_area,Peak2_center,Peak2_width,R2,status
+12.5,8.0,45.234567,520.312,8.215,12.154321,480.1,5.432,0.9845,success
+12.5,8.5,,,,,,,nan,failed
 ```
 
-### Phase 5: Visual Improvements (1-2 hours)
-
-**Goal:** Enhance visual appearance and usability
-
-**Tasks:**
-- [ ] Add color coding (green for good fits, yellow/red for poor)
-- [ ] Add icons for sections and buttons
-- [ ] Create mini histogram for area distribution
-- [ ] Add tooltips with additional information
-- [ ] Implement number format toggle (scientific notation on/off)
-- [ ] Add collapsible sections
-- [ ] Improve spacing and alignment
-- [ ] Add loading indicator during computation
-
-**Files to modify:**
-- Modified: `map_analysis_2d/ui/results_panel.py`
-- New: `map_analysis_2d/ui/widgets/` (optional widget submodules)
-
-### Phase 6: State Persistence (1 hour)
-
-**Goal:** Remember panel state between sessions
-
-**Tasks:**
-- [ ] Save panel position and size to config
-- [ ] Save panel visibility state (shown/hidden)
-- [ ] Save format preferences (scientific notation, etc.)
-- [ ] Restore state on startup
-- [ ] Use existing ConfigManager
-
-**Files to modify:**
-- Modified: `map_analysis_2d/ui/main_window.py`
-- Modified: `map_analysis_2d/ui/results_panel.py`
-
-**Config Storage:**
-```python
-# Save state
-cfg.set('results_panel.visible', self.results_panel.isVisible())
-cfg.set('results_panel.width', self.results_panel.width())
-cfg.set('results_panel.floating', self.results_panel.isFloating())
-cfg.set('results_panel.scientific_notation', self.results_panel.use_scientific)
-
-# Restore state
-if cfg.get('results_panel.visible', True):
-    self.results_panel.show()
-```
-
-### Phase 7: Testing and Documentation (2-3 hours)
+### Phase 5: Testing and Documentation (2-3 hours)
 
 **Goal:** Ensure robustness and document the feature
 
 **Tasks:**
-- [ ] Test with real silicon Raman data
-- [ ] Test with different map sizes (small, medium, large)
+- [ ] Test with real silicon Raman data (1-peak and 2-peak fits)
 - [ ] Test edge cases:
-  - No successful fits
+  - No successful fits (all-failed map)
   - Single pixel map
-  - Multiple peak shapes
-  - Missing parameters
-- [ ] Performance testing on large maps (10,000+ pixels)
-- [ ] Add docstrings to all new functions
+  - Mixed success/failure map
+  - LabSpec file without spatial coordinates (array index fallback)
+- [ ] Test Copy button copies correct value to clipboard
+- [ ] Test CSV export column headers match number of fitted peaks
+- [ ] Performance test on large maps (10,000+ pixels)
 - [ ] Update README.md with new feature description
-- [ ] Create user guide section in docs
-- [ ] Add screenshots
 
 **Files to modify:**
+- New: `map_analysis_2d/test_results_panel.py`
 - Modified: `README.md`
-- New: `docs/user_guide/results_panel.md` (optional)
 
 ## File Structure
 
@@ -391,28 +274,24 @@ if cfg.get('results_panel.visible', True):
 map_analysis_2d/
 ├── ui/
 │   ├── __init__.py              # Update exports
-│   ├── results_panel.py         # NEW: Main panel class
-│   ├── widgets/                 # NEW: (optional) Widget submodules
-│   │   ├── __init__.py
-│   │   ├── overall_stats.py    # NEW: Overall statistics widget
-│   │   └── pixel_details.py    # NEW: Pixel details widget
-│   └── main_window.py          # MODIFIED: Panel integration
+│   ├── results_panel.py         # NEW: ResultsPanel, OverallStatsWidget, PixelDetailsWidget
+│   ├── control_panels.py        # MODIFIED: append ResultsPanel to MapPeakFittingControlPanel
+│   └── main_window.py           # MODIFIED: click handler, spectrum display, export wiring
 └── core/
     ├── __init__.py              # Update exports
-    └── statistics.py            # NEW: Statistics utilities
+    └── statistics.py            # NEW: compute_overall_statistics()
 
 docs/
 └── features/
-    ├── README.md                # NEW: Features index
     └── results-panel-implementation-plan.md  # This document
 ```
 
 ## Technical Requirements
 
 ### Dependencies
-- PySide6 (Qt6) - already included
-- NumPy - already included
-- Matplotlib - already included
+- PySide6 (Qt6) — already included
+- NumPy — already included
+- Matplotlib — already included
 - No new dependencies required
 
 ### Python Compatibility
@@ -421,118 +300,80 @@ docs/
 - Follow existing code style
 
 ### Performance Considerations
-- Statistics computation: O(n) where n = number of pixels
-- Click handling: O(n) for finding closest pixel (consider spatial index if slow)
-- Memory: Minimal additional memory (statistics dict only)
-- UI updates: Use Qt signals/slots for async updates
+- Statistics computation: O(n) where n = number of pixels; runs once after fitting
+- Click handling: O(n) for nearest-pixel search; acceptable for typical map sizes (<10,000 pixels); consider `scipy.spatial.KDTree` if slow on very large maps
+- Spectrum display: reuses existing `SplitMapSpectrumWidget` bottom pane
 
 ### Error Handling
-- Handle missing/incomplete fit results gracefully
-- Validate pixel position before access
+- Handle missing/incomplete fit results gracefully — show "Fit failed" for bad pixels
+- Validate pixel position before data access
 - Catch and log matplotlib event errors
-- Display user-friendly error messages
-
-## Testing Strategy
-
-### Unit Tests
-- Statistics computation accuracy
-- Coordinate transformation
-- Data formatting functions
-
-### Integration Tests
-- Panel initialization with main window
-- Event handler connections
-- State persistence
-
-### Manual Tests
-- Click accuracy on different map sizes
-- Export file generation
-- Copy to clipboard functionality
-- Visual appearance on different platforms (Windows, macOS, Linux)
+- Clear panel immediately on fitting config change (never show stale data)
 
 ## Time Estimates
 
 | Phase | Description | Time Estimate |
 |-------|-------------|---------------|
-| 1 | Base Panel Structure | 2-3 hours |
-| 2 | Overall Statistics | 2-3 hours |
-| 3 | Pixel Details on Click | 3-4 hours |
-| 4 | Export/Copy Functionality | 1-2 hours |
-| 5 | Visual Improvements | 1-2 hours |
-| 6 | State Persistence | 1 hour |
-| 7 | Testing & Documentation | 2-3 hours |
-| **Total** | **Full Implementation** | **15-20 hours** |
+| 1 | Base Panel Structure (QGroupBox) | 2-3 hours |
+| 2 | Overall Statistics + Copy button | 2-3 hours |
+| 3 | Pixel Details on Click + Spectrum | 3-4 hours |
+| 4 | Export to CSV | 1-2 hours |
+| 5 | Testing & Documentation | 2-3 hours |
+| **Total** | | **10-15 hours** |
 
 ### Minimum Viable Product (MVP)
-Phases 1-3 only: **8-10 hours**
-- Basic panel with overall statistics and pixel click details
-- No export functionality yet
-- Basic styling only
-
-## Prioritization
-
-### Must Have (Critical)
-- ✅ Phase 1: Base panel structure
-- ✅ Phase 2: Overall statistics display
-- ✅ Phase 3: Pixel details on click
-
-### Should Have (Important)
-- ⚠️ Phase 4: Export and copy functionality
-- ⚠️ Phase 6: State persistence
-
-### Nice to Have (Optional)
-- ➕ Phase 5: Enhanced visualization
-- ➕ Phase 7: Comprehensive testing
+Phases 1-3: **7-10 hours**
+- Panel with per-peak totals, Copy button, and per-pixel click details
+- Auto-show spectrum on click
+- No CSV export yet
 
 ## Success Criteria
 
 ### Functional Requirements
-- [ ] Panel displays after peak fitting completion
-- [ ] Shows total area and per-peak statistics
-- [ ] Click on map updates pixel details
-- [ ] All statistics are mathematically correct
-- [ ] Export functions work as expected
+- [ ] Panel displays grayed placeholder before first fit; populates after fitting completes
+- [ ] Shows per-peak total areas and grand total after fitting
+- [ ] Copy button copies grand total to clipboard
+- [ ] Click on map pixel updates per-pixel section with area, center, width, R²
+- [ ] Click auto-shows fitted spectrum (raw + total + components) in bottom pane
+- [ ] Failed pixel shows "Fit failed" message and raw spectrum only
+- [ ] Spatial coordinates shown in μm when available; array indices as fallback
+- [ ] Panel clears when fitting config changes
+- [ ] CSV export contains one row per pixel at full precision
 
 ### User Experience
-- [ ] Panel is intuitive and easy to read
-- [ ] Response to clicks is immediate (<100ms)
-- [ ] Panel doesn't obstruct map view
-- [ ] Numbers are formatted clearly
+- [ ] Response to map clicks is immediate (<100ms)
+- [ ] Numbers formatted with 2 decimal places and thousands separator
+- [ ] Panel does not obstruct map view (embedded in existing sidebar)
 
 ### Code Quality
-- [ ] Follows existing code style
-- [ ] Properly documented
-- [ ] No performance degradation
-- [ ] Error handling implemented
+- [ ] Follows existing code style (PySide6, Qt signals/slots, `@Slot` decorator)
+- [ ] No performance degradation on maps up to 10,000 pixels
+- [ ] Error handling for all edge cases
 
 ## Future Enhancements
 
-Potential improvements for future versions:
-- Multi-pixel selection (shift+click for range)
-- Statistics filtering (by R² threshold, area range)
-- Time-series analysis (if multiple maps)
-- Compare statistics between different fitting runs
+- Multi-pixel selection (shift+click for range statistics)
+- Statistics filtering (by R² threshold)
 - Export statistics to Excel with charts
 - Integration with database for historical tracking
 
 ## References
 
-- Related Issue: TBD (to be created)
-- Related PR: TBD
 - Related Commits:
-  - b67bebd - Add integrated intensity export and map session persistence
-- User Request: See issue comments
+  - b67bebd — Add integrated intensity export and map session persistence
+  - cc6069ec — Merge feature/map-peak-fitting (base implementation)
+- `compute_integrated_intensity()` in `map_analysis_2d/core/math_models.py` — reused for area calculation
 
 ## Notes
 
-- This feature builds on the integrated intensity export functionality added in commit b67bebd
-- The `compute_integrated_intensity()` function from `core/math_models.py` will be reused
-- Panel should be disabled/hidden when no peak fitting results are available
-- Consider accessibility (screen readers, keyboard navigation) in future iterations
+- `QGroupBox` chosen over `QDockWidget`: existing `QScrollArea` sidebar has space below controls; simpler integration
+- Panel state persistence (position, floating) not needed since panel is embedded, not dockable
+- The `compute_integrated_intensity()` function from `core/math_models.py` is reused for all area calculations
+- Spectrum display reuses the existing hidden bottom pane in `SplitMapSpectrumWidget`
 
 ---
 
-**Document Version:** 1.0
+**Document Version:** 2.0
 **Last Updated:** 2026-05-01
-**Author:** Implementation planning session
+**Author:** Implementation planning session with user review
 **Status:** Ready for implementation

@@ -1476,6 +1476,7 @@ class MapPeakFittingControlPanel(BaseControlPanel):
     run_map_fitting_requested = Signal()
     export_batch_requested = Signal()
     visualization_parameter_changed = Signal(str)
+    fitting_config_changed = Signal()
     
     def __init__(self, parent=None):
         super().__init__("Map Peak Fitting", parent)
@@ -1495,6 +1496,9 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         self.max_wavenumber_spin.setRange(0, 4000)
         self.max_wavenumber_spin.setValue(600)
         
+        self.min_wavenumber_spin.valueChanged.connect(self.fitting_config_changed.emit)
+        self.max_wavenumber_spin.valueChanged.connect(self.fitting_config_changed.emit)
+
         region_layout.addWidget(QLabel("Min Wavenumber (cm⁻¹):"))
         region_layout.addWidget(self.min_wavenumber_spin)
         region_layout.addWidget(QLabel("Max Wavenumber (cm⁻¹):"))
@@ -1511,6 +1515,7 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         self.num_peaks_spin.setRange(1, 5)
         self.num_peaks_spin.setValue(1)
         self.num_peaks_spin.valueChanged.connect(self._rebuild_peaks_ui)
+        self.num_peaks_spin.valueChanged.connect(self.fitting_config_changed.emit)
         num_peaks_layout.addWidget(self.num_peaks_spin)
         peaks_layout.addLayout(num_peaks_layout)
         
@@ -1739,15 +1744,23 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         """Restore a previously used peak fitting configuration."""
         region = config.get("region")
         saved_visualize_key = config.get("visualize_key")
-        if region is not None:
-            self.min_wavenumber_spin.setValue(region[0])
-            self.max_wavenumber_spin.setValue(region[1])
 
-        shapes = config.get("shapes", [])
-        if not shapes:
-            return
+        # Block signals to avoid spurious fitting_config_changed during restore.
+        for spin in (self.min_wavenumber_spin, self.max_wavenumber_spin, self.num_peaks_spin):
+            spin.blockSignals(True)
+        try:
+            if region is not None:
+                self.min_wavenumber_spin.setValue(region[0])
+                self.max_wavenumber_spin.setValue(region[1])
 
-        self.num_peaks_spin.setValue(len(shapes))
+            shapes = config.get("shapes", [])
+            if not shapes:
+                return
+
+            self.num_peaks_spin.setValue(len(shapes))
+        finally:
+            for spin in (self.min_wavenumber_spin, self.max_wavenumber_spin, self.num_peaks_spin):
+                spin.blockSignals(False)
 
         param_index = 0
         initial_params = config.get("initial_params", [])

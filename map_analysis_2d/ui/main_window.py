@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
     QTabWidget, QMessageBox, QFileDialog, QDialog, QTextEdit, QPushButton, QLabel
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QAction, QFont
 from datetime import datetime
 
@@ -118,7 +118,7 @@ class SimpleMapData:
                 # Use raw intensities if no processed data available
                 data_matrix[spectrum_index, :] = spectrum.intensities
             spectrum_index += 1
-        
+
         return data_matrix
 
 
@@ -458,7 +458,7 @@ class MapAnalysisMainWindow(QMainWindow):
         
         # Make the splitter handle more responsive
         self.splitter.setOpaqueResize(True)  # Show content while dragging
-        
+
     def create_permanent_controls(self):
         """Create controls that are always visible."""
         # Data loading functions have been moved to the File menu
@@ -521,7 +521,7 @@ class MapAnalysisMainWindow(QMainWindow):
         """Create the results summary tab."""
         from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QLabel, QTextEdit
         from PySide6.QtCore import Qt
-        
+
         # Create the main widget for the results tab
         results_widget = QWidget()
         self.results_tab_widget = results_widget
@@ -542,7 +542,7 @@ class MapAnalysisMainWindow(QMainWindow):
         header_layout.addWidget(self.export_results_btn)
         
         results_layout.addLayout(header_layout)
-        
+
         # Create the comprehensive plot widget
         self.results_plot_widget = BasePlotWidget(figsize=(14, 10))
         results_layout.addWidget(self.results_plot_widget)
@@ -759,11 +759,17 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
             control_panel.visualization_parameter_changed.connect(self.update_peak_fitting_visualization)
             control_panel.export_batch_requested.connect(self.export_map_peak_fitting_to_batch)
+            control_panel.fitting_config_changed.connect(control_panel.results_panel.clear)
             self.controls_panel.add_section("peak_fitting_controls", control_panel)
 
             if self.peak_fitting_config is not None:
                 # Restores all spinboxes and combo selection; fires visualization_parameter_changed once
                 control_panel.set_peak_configuration(self.peak_fitting_config)
+
+            pending = getattr(self, "_pending_peak_fitting_stats", None)
+            if pending is not None:
+                control_panel.results_panel.overall_stats.update_from_fitting_results(pending)
+                self._pending_peak_fitting_stats = None
 
             if self.peak_fitting_results is not None:
                 control_panel.export_batch_btn.setEnabled(True)
@@ -1351,6 +1357,9 @@ class MapAnalysisMainWindow(QMainWindow):
             self.progress_status.hide_progress()
 
         self.peak_fitting_results = None
+        cp = self.get_current_peak_fitting_control_panel()
+        if cp is not None:
+            cp.results_panel.clear()
         if clear_config:
             self.peak_fitting_config = None
 
@@ -10706,6 +10715,7 @@ The map is now ready for analysis!"""
         self.progress_status.update_progress(0, "Preparing peak fitting worker...")
         self.peak_fitting_worker = PeakFittingWorker(list(self.map_data.spectra.values()), self.use_processed, config)
         self.peak_fitting_worker.progress_updated.connect(self._on_peak_fitting_progress)
+        self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_stats_ready)
         self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_complete)
         self.peak_fitting_worker.fitting_failed.connect(self._on_peak_fitting_failed)
         self.peak_fitting_worker.finished.connect(self._on_peak_fitting_worker_finished)
@@ -10715,6 +10725,15 @@ The map is now ready for analysis!"""
         """Handle progress updates from the peak fitting worker."""
         progress = 0 if total == 0 else int((current / total) * 100)
         self.progress_status.update_progress(progress, message)
+
+    @Slot(dict)
+    def _on_peak_fitting_stats_ready(self, fitting_results: dict):
+        """Forward fitting results to the current results panel, or cache for later."""
+        cp = self.get_current_peak_fitting_control_panel()
+        if cp is not None:
+            cp.results_panel.overall_stats.update_from_fitting_results(fitting_results)
+        else:
+            self._pending_peak_fitting_stats = fitting_results
 
     def _on_peak_fitting_complete(self, results: dict):
         """Handle successful completion of map peak fitting."""
