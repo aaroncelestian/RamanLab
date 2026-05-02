@@ -766,6 +766,11 @@ class MapAnalysisMainWindow(QMainWindow):
                 # Restores all spinboxes and combo selection; fires visualization_parameter_changed once
                 control_panel.set_peak_configuration(self.peak_fitting_config)
 
+            pending = getattr(self, "_pending_peak_fitting_stats", None)
+            if pending is not None:
+                control_panel.results_panel.overall_stats.update_from_fitting_results(pending)
+                self._pending_peak_fitting_stats = None
+
             if self.peak_fitting_results is not None:
                 control_panel.export_batch_btn.setEnabled(True)
                 # If config was not set above (no cached config), trigger an initial visualization
@@ -10723,10 +10728,12 @@ The map is now ready for analysis!"""
 
     @Slot(dict)
     def _on_peak_fitting_stats_ready(self, fitting_results: dict):
-        """Forward fitting results to whichever results panel is currently visible."""
+        """Forward fitting results to the current results panel, or cache for later."""
         cp = self.get_current_peak_fitting_control_panel()
         if cp is not None:
             cp.results_panel.overall_stats.update_from_fitting_results(fitting_results)
+        else:
+            self._pending_peak_fitting_stats = fitting_results
 
     def _on_peak_fitting_complete(self, results: dict):
         """Handle successful completion of map peak fitting."""

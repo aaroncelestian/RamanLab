@@ -1744,15 +1744,23 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         """Restore a previously used peak fitting configuration."""
         region = config.get("region")
         saved_visualize_key = config.get("visualize_key")
-        if region is not None:
-            self.min_wavenumber_spin.setValue(region[0])
-            self.max_wavenumber_spin.setValue(region[1])
 
-        shapes = config.get("shapes", [])
-        if not shapes:
-            return
+        # Block signals to avoid spurious fitting_config_changed during restore.
+        for spin in (self.min_wavenumber_spin, self.max_wavenumber_spin, self.num_peaks_spin):
+            spin.blockSignals(True)
+        try:
+            if region is not None:
+                self.min_wavenumber_spin.setValue(region[0])
+                self.max_wavenumber_spin.setValue(region[1])
 
-        self.num_peaks_spin.setValue(len(shapes))
+            shapes = config.get("shapes", [])
+            if not shapes:
+                return
+
+            self.num_peaks_spin.setValue(len(shapes))
+        finally:
+            for spin in (self.min_wavenumber_spin, self.max_wavenumber_spin, self.num_peaks_spin):
+                spin.blockSignals(False)
 
         param_index = 0
         initial_params = config.get("initial_params", [])

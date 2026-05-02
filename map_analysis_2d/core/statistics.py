@@ -64,7 +64,7 @@ def compute_overall_statistics(fitting_results: dict) -> Optional[OverallStatist
 
         per_pos_values: List[float] = []
         valid = True
-        for shape, amp_dict, wid_dict, eta_dict in zip(shapes, peak_amp_dicts, peak_wid_dicts, peak_eta_dicts):
+        for shape, amp_dict, wid_dict, eta_dict in zip(shapes, peak_amp_dicts, peak_wid_dicts, peak_eta_dicts, strict=True):
             amp = amp_dict.get(pos_key, np.nan)
             wid = wid_dict.get(pos_key, np.nan)
             eta = eta_dict.get(pos_key, 0.5)

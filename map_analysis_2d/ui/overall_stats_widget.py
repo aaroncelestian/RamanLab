@@ -44,13 +44,15 @@ class OverallStatsWidget(QWidget):
         self._main_layout.addWidget(self._grand_total_row)
         self.clear_stats()
 
-    def clear_stats(self):
+    def _clear_rows(self) -> None:
         while self._rows_layout.count():
             item = self._rows_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
 
+    def clear_stats(self):
+        self._clear_rows()
         self._stats = None
         self._grand_total_label.setText(self._placeholder_text)
         self._copy_button.setEnabled(False)
@@ -63,11 +65,7 @@ class OverallStatsWidget(QWidget):
             return
 
         self._stats = stats
-        while self._rows_layout.count():
-            item = self._rows_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
+        self._clear_rows()
 
         for index, total in enumerate(stats.per_peak_total_areas, start=1):
             label = QLabel(f"Peak {index} total area: {self._format_number(total)}")
@@ -85,4 +83,3 @@ class OverallStatsWidget(QWidget):
     @staticmethod
     def _format_number(value: float) -> str:
         return f"{value:,.2f}"
-
