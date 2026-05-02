@@ -1570,6 +1570,11 @@ class MapPeakFittingControlPanel(BaseControlPanel):
         
         self._rebuild_peaks_ui()
 
+        # Results panel — embedded at the bottom of the sidebar (Phase 1/2)
+        from .results_panel import ResultsPanel
+        self.results_panel = ResultsPanel()
+        self.layout.addWidget(self.results_panel)
+
     @staticmethod
     def _create_param_row(
         grid_layout,

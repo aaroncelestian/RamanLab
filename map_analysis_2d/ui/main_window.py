@@ -50,7 +50,6 @@ from .control_panels import (
     NMFControlPanel, MLControlPanel, ResultsControlPanel,
     DimensionalityReductionControlPanel, MapPeakFittingControlPanel
 )
-from .overall_stats_widget import OverallStatsWidget
 
 # Import h5py install dialog (optional - fallback to simple error if not available)
 try:
@@ -121,23 +120,6 @@ class SimpleMapData:
             spectrum_index += 1
 
         return data_matrix
-
-
-class _OverallStatsBridge(QWidget):
-    """Qt slot wrapper for updating overall statistics."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._target: Optional[OverallStatsWidget] = None
-
-    def set_target(self, target: Optional[OverallStatsWidget]):
-        self._target = target
-
-    @Slot(dict)
-    def on_fitting_complete(self, fitting_results: dict):
-        if self._target is None:
-            return
-        self._target.update_from_fitting_results(fitting_results)
 
 
 class MapAnalysisMainWindow(QMainWindow):
@@ -477,9 +459,6 @@ class MapAnalysisMainWindow(QMainWindow):
         # Make the splitter handle more responsive
         self.splitter.setOpaqueResize(True)  # Show content while dragging
 
-        self._overall_stats_bridge = _OverallStatsBridge(self)
-        self._overall_stats_bridge.set_target(getattr(self, "overall_stats_widget", None))
-        
     def create_permanent_controls(self):
         """Create controls that are always visible."""
         # Data loading functions have been moved to the File menu
@@ -542,8 +521,7 @@ class MapAnalysisMainWindow(QMainWindow):
         """Create the results summary tab."""
         from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QLabel, QTextEdit
         from PySide6.QtCore import Qt
-        from .overall_stats_widget import OverallStatsWidget
-        
+
         # Create the main widget for the results tab
         results_widget = QWidget()
         self.results_tab_widget = results_widget
@@ -565,12 +543,6 @@ class MapAnalysisMainWindow(QMainWindow):
         
         results_layout.addLayout(header_layout)
 
-        # Overall statistics panel
-        self.overall_stats_widget = OverallStatsWidget()
-        if hasattr(self, "_overall_stats_bridge") and self._overall_stats_bridge is not None:
-            self._overall_stats_bridge.set_target(self.overall_stats_widget)
-        results_layout.addWidget(self.overall_stats_widget)
-        
         # Create the comprehensive plot widget
         self.results_plot_widget = BasePlotWidget(figsize=(14, 10))
         results_layout.addWidget(self.results_plot_widget)
@@ -787,8 +759,7 @@ class MapAnalysisMainWindow(QMainWindow):
             control_panel.run_map_fitting_requested.connect(self.run_map_peak_fitting)
             control_panel.visualization_parameter_changed.connect(self.update_peak_fitting_visualization)
             control_panel.export_batch_requested.connect(self.export_map_peak_fitting_to_batch)
-            if hasattr(self, "overall_stats_widget") and self.overall_stats_widget is not None:
-                control_panel.fitting_config_changed.connect(self.overall_stats_widget.clear_stats)
+            control_panel.fitting_config_changed.connect(control_panel.results_panel.clear)
             self.controls_panel.add_section("peak_fitting_controls", control_panel)
 
             if self.peak_fitting_config is not None:
@@ -1381,8 +1352,9 @@ class MapAnalysisMainWindow(QMainWindow):
             self.progress_status.hide_progress()
 
         self.peak_fitting_results = None
-        if hasattr(self, "overall_stats_widget") and self.overall_stats_widget is not None:
-            self.overall_stats_widget.clear_stats()
+        cp = self.get_current_peak_fitting_control_panel()
+        if cp is not None:
+            cp.results_panel.clear()
         if clear_config:
             self.peak_fitting_config = None
 
@@ -10738,7 +10710,7 @@ The map is now ready for analysis!"""
         self.progress_status.update_progress(0, "Preparing peak fitting worker...")
         self.peak_fitting_worker = PeakFittingWorker(list(self.map_data.spectra.values()), self.use_processed, config)
         self.peak_fitting_worker.progress_updated.connect(self._on_peak_fitting_progress)
-        self.peak_fitting_worker.fitting_complete.connect(self._overall_stats_bridge.on_fitting_complete)
+        self.peak_fitting_worker.fitting_complete.connect(control_panel.results_panel.overall_stats.update_from_fitting_results)
         self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_complete)
         self.peak_fitting_worker.fitting_failed.connect(self._on_peak_fitting_failed)
         self.peak_fitting_worker.finished.connect(self._on_peak_fitting_worker_finished)

@@ -24,6 +24,7 @@ from .control_panels import (
 )
 
 from .overall_stats_widget import OverallStatsWidget
+from .results_panel import ResultsPanel, PixelDetailsWidget
 
 __all__ = [
     'MapAnalysisMainWindow',
@@ -54,5 +55,7 @@ __all__ = [
     'MLControlPanel',
     'ResultsControlPanel',
     'MapPeakFittingControlPanel',
-    'OverallStatsWidget'
+    'OverallStatsWidget',
+    'ResultsPanel',
+    'PixelDetailsWidget',
 ]
