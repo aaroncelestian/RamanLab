@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
     QTabWidget, QMessageBox, QFileDialog, QDialog, QTextEdit, QPushButton, QLabel
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QAction, QFont
 from datetime import datetime
 
@@ -118,26 +118,9 @@ class SimpleMapData:
             else:
                 # Use raw intensities if no processed data available
                 data_matrix[spectrum_index, :] = spectrum.intensities
-        spectrum_index += 1
+            spectrum_index += 1
 
-
-class _ResultsTabWithOverallStats(QWidget):
-    """Results tab container with an overall-statistics panel."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(8)
-
-        title = QLabel("Overall Statistics")
-        title.setFont(QFont("Arial", 11, QFont.Bold))
-        layout.addWidget(title)
-
-        self.overall_stats_widget = OverallStatsWidget()
-        layout.addWidget(self.overall_stats_widget)
-        layout.addStretch(1)
+        return data_matrix
 
 
 class _OverallStatsBridge(QWidget):
@@ -155,8 +138,6 @@ class _OverallStatsBridge(QWidget):
         if self._target is None:
             return
         self._target.update_from_fitting_results(fitting_results)
-        
-        return data_matrix
 
 
 class MapAnalysisMainWindow(QMainWindow):
@@ -561,13 +542,11 @@ class MapAnalysisMainWindow(QMainWindow):
         """Create the results summary tab."""
         from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QLabel, QTextEdit
         from PySide6.QtCore import Qt
+        from .overall_stats_widget import OverallStatsWidget
         
         # Create the main widget for the results tab
-        results_widget = _ResultsTabWithOverallStats()
+        results_widget = QWidget()
         self.results_tab_widget = results_widget
-        self.overall_stats_widget = results_widget.overall_stats_widget
-        if hasattr(self, "_overall_stats_bridge") and self._overall_stats_bridge is not None:
-            self._overall_stats_bridge.set_target(self.overall_stats_widget)
         results_layout = QVBoxLayout(results_widget)
         
         # Add title and export button
@@ -585,6 +564,12 @@ class MapAnalysisMainWindow(QMainWindow):
         header_layout.addWidget(self.export_results_btn)
         
         results_layout.addLayout(header_layout)
+
+        # Overall statistics panel
+        self.overall_stats_widget = OverallStatsWidget()
+        if hasattr(self, "_overall_stats_bridge") and self._overall_stats_bridge is not None:
+            self._overall_stats_bridge.set_target(self.overall_stats_widget)
+        results_layout.addWidget(self.overall_stats_widget)
         
         # Create the comprehensive plot widget
         self.results_plot_widget = BasePlotWidget(figsize=(14, 10))
