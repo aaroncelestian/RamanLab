@@ -10710,7 +10710,7 @@ The map is now ready for analysis!"""
         self.progress_status.update_progress(0, "Preparing peak fitting worker...")
         self.peak_fitting_worker = PeakFittingWorker(list(self.map_data.spectra.values()), self.use_processed, config)
         self.peak_fitting_worker.progress_updated.connect(self._on_peak_fitting_progress)
-        self.peak_fitting_worker.fitting_complete.connect(control_panel.results_panel.overall_stats.update_from_fitting_results)
+        self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_stats_ready)
         self.peak_fitting_worker.fitting_complete.connect(self._on_peak_fitting_complete)
         self.peak_fitting_worker.fitting_failed.connect(self._on_peak_fitting_failed)
         self.peak_fitting_worker.finished.connect(self._on_peak_fitting_worker_finished)
@@ -10720,6 +10720,13 @@ The map is now ready for analysis!"""
         """Handle progress updates from the peak fitting worker."""
         progress = 0 if total == 0 else int((current / total) * 100)
         self.progress_status.update_progress(progress, message)
+
+    @Slot(dict)
+    def _on_peak_fitting_stats_ready(self, fitting_results: dict):
+        """Forward fitting results to whichever results panel is currently visible."""
+        cp = self.get_current_peak_fitting_control_panel()
+        if cp is not None:
+            cp.results_panel.overall_stats.update_from_fitting_results(fitting_results)
 
     def _on_peak_fitting_complete(self, results: dict):
         """Handle successful completion of map peak fitting."""
