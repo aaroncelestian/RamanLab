@@ -6750,12 +6750,10 @@ All spectra have been processed and cleaned data is now available for analysis."
             self.progress_status.show_progress("Loading map data from PKL...")
             
             # Load from pickle file with module compatibility handling
-            import pickle
-            import sys
-            import types
+            from pkl_utils import CrossPlatformUnpickler
             
             # Create module compatibility mapping
-            class ModuleCompatibilityUnpickler(pickle.Unpickler):
+            class ModuleCompatibilityUnpickler(CrossPlatformUnpickler):
                 def find_class(self, module, name):
                     # Handle old module names that have been renamed
                     if module.startswith('map_analysis_2d_qt6'):
@@ -7409,10 +7407,10 @@ The map is now ready for analysis!"""
         try:
             self.progress_status.show_progress("Loading PKL file...")
             
-            import pickle
+            from pkl_utils import CrossPlatformUnpickler
             
             # Use the same compatibility unpickler as load_map_from_pkl
-            class ModuleCompatibilityUnpickler(pickle.Unpickler):
+            class ModuleCompatibilityUnpickler(CrossPlatformUnpickler):
                 def find_class(self, module, name):
                     if module.startswith('map_analysis_2d_qt6'):
                         new_module = module.replace('map_analysis_2d_qt6', 'map_analysis_2d')

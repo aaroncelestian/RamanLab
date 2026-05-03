@@ -8,10 +8,31 @@ import os
 import sys
 import pickle
 import logging
+import pathlib
 from pathlib import Path
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+class CrossPlatformUnpickler(pickle.Unpickler):
+    """Unpickler that can load concrete pathlib paths from other operating systems."""
+
+    def find_class(self, module, name):
+        if module == "pathlib":
+            if name == "WindowsPath" and os.name != "nt":
+                logger.info("PKL Compatibility: Loading pathlib.WindowsPath as PureWindowsPath")
+                return pathlib.PureWindowsPath
+            if name == "PosixPath" and os.name == "nt":
+                logger.info("PKL Compatibility: Loading pathlib.PosixPath as PurePosixPath")
+                return pathlib.PurePosixPath
+
+        return super().find_class(module, name)
+
+
+def cross_platform_pickle_load(file_obj):
+    """Load pickle data while tolerating OS-specific pathlib objects."""
+    return CrossPlatformUnpickler(file_obj).load()
 
 def ensure_module_path():
     """
@@ -142,7 +163,7 @@ def safe_pickle_load(file_path, ensure_path=True):
     
     try:
         with open(file_path, 'rb') as f:
-            data = pickle.load(f)
+            data = cross_platform_pickle_load(f)
         logger.info(f"Successfully loaded PKL file: {file_path}")
         return data
         
