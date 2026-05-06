@@ -6483,6 +6483,26 @@ All spectra have been processed and cleaned data is now available for analysis."
                         else:
                             return SimpleCosmicRayManager
                     
+                    # Handle NumPy 2.x -> 1.x compatibility (numpy._core -> numpy.core)
+                    elif module.startswith('numpy._core'):
+                        new_module = module.replace('numpy._core', 'numpy.core')
+                        logger.info(f"PKL Compatibility: NumPy version compatibility {module} -> {new_module}")
+                        try:
+                            mod = __import__(new_module, fromlist=[name])
+                            return getattr(mod, name)
+                        except (ImportError, AttributeError):
+                            pass
+                    
+                    # Handle NumPy 1.x -> 2.x compatibility (numpy.core -> numpy._core)
+                    elif module.startswith('numpy.core'):
+                        new_module = module.replace('numpy.core', 'numpy._core')
+                        logger.info(f"PKL Compatibility: NumPy version compatibility {module} -> {new_module}")
+                        try:
+                            mod = __import__(new_module, fromlist=[name])
+                            return getattr(mod, name)
+                        except (ImportError, AttributeError):
+                            pass
+                    
                     # Fall back to default behavior
                     return super().find_class(module, name)
             
@@ -7077,6 +7097,7 @@ The map is now ready for analysis!"""
             # Use the same compatibility unpickler as load_map_from_pkl
             class ModuleCompatibilityUnpickler(pickle.Unpickler):
                 def find_class(self, module, name):
+                    # Handle map_analysis_2d_qt6 -> map_analysis_2d rename
                     if module.startswith('map_analysis_2d_qt6'):
                         new_module = module.replace('map_analysis_2d_qt6', 'map_analysis_2d')
                         try:
@@ -7084,6 +7105,25 @@ The map is now ready for analysis!"""
                             return getattr(mod, name)
                         except (ImportError, AttributeError):
                             pass
+                    
+                    # Handle NumPy 2.x -> 1.x compatibility (numpy._core -> numpy.core)
+                    if module.startswith('numpy._core'):
+                        new_module = module.replace('numpy._core', 'numpy.core')
+                        try:
+                            mod = __import__(new_module, fromlist=[name])
+                            return getattr(mod, name)
+                        except (ImportError, AttributeError):
+                            pass
+                    
+                    # Handle NumPy 1.x -> 2.x compatibility (numpy.core -> numpy._core)
+                    if module.startswith('numpy.core'):
+                        new_module = module.replace('numpy.core', 'numpy._core')
+                        try:
+                            mod = __import__(new_module, fromlist=[name])
+                            return getattr(mod, name)
+                        except (ImportError, AttributeError):
+                            pass
+                    
                     return super().find_class(module, name)
             
             with open(file_path, 'rb') as f:
