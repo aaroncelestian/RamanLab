@@ -1573,10 +1573,19 @@ class MicroplasticDetector:
             window = smoothing_window if smoothing_window % 2 == 1 else smoothing_window + 1
             intensities = signal.savgol_filter(intensities, window, 3)
         
+        # Check for invalid values (inf/NaN) and clean them
+        if not np.all(np.isfinite(intensities)):
+            # Replace inf with max finite value, NaN with 0
+            intensities = np.nan_to_num(intensities, nan=0.0, posinf=0.0, neginf=0.0)
+        
         # Normalize
         intensities = intensities - np.min(intensities)
-        if np.max(intensities) > 0:
-            intensities = intensities / np.max(intensities)
+        max_val = np.max(intensities)
+        if max_val > 0 and np.isfinite(max_val):
+            intensities = intensities / max_val
+        else:
+            # If max is 0 or invalid, return empty results
+            return {}
         
         results = {}
         
@@ -1762,9 +1771,19 @@ class MicroplasticDetector:
             """Process a batch of spectra."""
             batch_results = []
             for idx in batch_indices:
-                spectrum = intensity_map[idx]
-                matches = self.template_match_spectrum(wavenumbers, spectrum)
-                batch_results.append((idx, matches))
+                try:
+                    spectrum = intensity_map[idx]
+                    # Validate spectrum data
+                    if not np.all(np.isfinite(spectrum)):
+                        # Skip invalid spectra
+                        batch_results.append((idx, {}))
+                        continue
+                    matches = self.template_match_spectrum(wavenumbers, spectrum)
+                    batch_results.append((idx, matches))
+                except Exception as e:
+                    # Log error but continue processing other spectra
+                    print(f"Warning: Error processing spectrum {idx}: {e}")
+                    batch_results.append((idx, {}))
             return batch_results
         
         # Run parallel processing
