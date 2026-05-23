@@ -52,7 +52,7 @@ class _FallbackLattice:
                             [0, b * sg, c * cy],
                             [0, 0,     c * cz]])
     def get_cartesian_coords(self, frac):
-        return (self._M @ np.asarray(frac, dtype=float)).tolist()
+        return self._M @ np.asarray(frac, dtype=float)
 
 
 class _FallbackStructure:
@@ -790,7 +790,7 @@ class CrystalStructureWidget(QWidget):
                 sites.append({
                     'index': i, 'element': atom.element,
                     'frac_coords': [atom.x, atom.y, atom.z],
-                    'cart_coords': fb_lat.get_cartesian_coords([atom.x, atom.y, atom.z]),
+                    'cart_coords': fb_lat.get_cartesian_coords([atom.x, atom.y, atom.z]).tolist(),
                     'atomic_number': self._element_to_z(atom.element),
                     'radius': _AR.get(atom.element, 1.0),
                     'wyckoff_symbol': 'a', 'site_symmetry': '1', 'multiplicity': 1,
