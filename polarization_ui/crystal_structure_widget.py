@@ -813,8 +813,8 @@ class CrystalStructureWidget(QWidget):
                                      for i, s in enumerate(sites)},
             }
             self.update_structure_info_display()
-            self.update_3d_plot()
             self._calculate_bonds_fallback()
+            self.update_3d_plot()
             self.structure_loaded.emit(self.current_structure)
             lp_d = self.current_structure['lattice_params']
             QMessageBox.information(self, "Loaded",
@@ -1222,11 +1222,15 @@ class CrystalStructureWidget(QWidget):
                     filtered_bonds.append((i, j))
             
             print(f"Bonds calculated: {len(filtered_bonds)} (filtered from {len(bonds)} initial bonds)")
+            self.bonds = filtered_bonds
+            self.update_3d_plot()
             return filtered_bonds
             
         except ImportError:
-            print("pymatgen not available for bond calculation")
-            return []           
+            print("pymatgen not available — using covalent-radii fallback")
+            self._calculate_bonds_fallback()
+            self.update_3d_plot()
+            return self.bonds           
     
     def update_visualization_settings(self, setting_name=None, value=None):
         """Update visualization settings and refresh the 3D plot."""
