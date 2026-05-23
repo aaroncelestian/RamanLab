@@ -89,6 +89,10 @@ ipykernel>=6.0.0            # IPython kernel for Jupyter console integration
 pymatgen>=2022.0.0          # Materials analysis and crystal structure processing
                             # OPTIONAL: Skip if installation fails - only needed for advanced polarization analysis
                             # CIF file parsing and tensor calculations
+spglib>=2.0.0               # Lightweight space group analysis library
+                            # OPTIONAL: pip install spglib  (no heavy dependencies)
+                            # Provides crystal system, point group, Wyckoff positions from CIF data
+                            # Falls back to pure-Python H-M name analysis if not installed
 
 # ============================================================================
 # REPORT GENERATION & EXPORT (OPTIONAL - Enhanced features, basic functionality works without)

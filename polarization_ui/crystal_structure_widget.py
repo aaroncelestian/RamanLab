@@ -39,6 +39,28 @@ except ImportError:
     print("⚠ pymatgen not available - install with: pip install pymatgen")
 
 
+class _FallbackLattice:
+    """Minimal drop-in for pymatgen Lattice: converts frac→Cartesian using the general triclinic matrix."""
+    def __init__(self, a, b, c, alpha, beta, gamma):
+        self.a, self.b, self.c = a, b, c
+        self.alpha, self.beta, self.gamma = alpha, beta, gamma
+        cg = np.cos(np.radians(gamma)); sg = np.sin(np.radians(gamma))
+        cb = np.cos(np.radians(beta));  ca = np.cos(np.radians(alpha))
+        cy = (ca - cb * cg) / max(sg, 1e-10)
+        cz = np.sqrt(max(0.0, 1.0 - cb**2 - cy**2))
+        self._M = np.array([[a, b * cg, c * cb],
+                            [0, b * sg, c * cy],
+                            [0, 0,     c * cz]])
+    def get_cartesian_coords(self, frac):
+        return (self._M @ np.asarray(frac, dtype=float)).tolist()
+
+
+class _FallbackStructure:
+    """Minimal drop-in for pymatgen Structure: holds a _FallbackLattice."""
+    def __init__(self, lattice: _FallbackLattice):
+        self.lattice = lattice
+
+
 class CrystalStructureWidget(QWidget):
     """Advanced crystal structure visualization widget with CIF import and 3D interaction."""
     
@@ -712,66 +734,129 @@ class CrystalStructureWidget(QWidget):
         return viz_frame
     
     def load_cif_file(self):
-        """Load crystal structure from CIF file."""
-        if not PYMATGEN_AVAILABLE:
-            QMessageBox.critical(self, "Error", 
-                               "pymatgen is not available. Please install it with:\npip install pymatgen")
-            return
-        
+        """Load crystal structure from CIF file (pymatgen or fallback)."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load CIF File", "", "CIF files (*.cif);;All files (*.*)"
         )
-        
         if not file_path:
             return
-        
+
+        if PYMATGEN_AVAILABLE:
+            try:
+                parser = CifParser(file_path)
+                structures = parser.parse_structures(primitive=False)
+                if not structures:
+                    QMessageBox.warning(self, "Warning", "No structures found in CIF file.")
+                    return
+                self.pymatgen_structure = structures[0]
+                self.extract_structure_info()
+                self.update_structure_info_display()
+                self.update_wyckoff_table()
+                self.update_symmetry_info()
+                self.update_equivalent_sites_info()
+                self.update_3d_plot()
+                self.calculate_bonds()
+                self.structure_loaded.emit(self.current_structure)
+                lp = self.current_structure.get('lattice_params', {})
+                QMessageBox.information(self, "Loaded",
+                    f"{os.path.basename(file_path)}\n"
+                    f"System: {self.current_structure.get('crystal_system')}  "
+                    f"SG: {self.current_structure.get('space_group')}\n"
+                    f"a={lp.get('a',0):.3f}  b={lp.get('b',0):.3f}  c={lp.get('c',0):.3f} Å")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Error loading CIF file:\n{str(e)}")
+        else:
+            self._load_cif_with_fallback(file_path)
+
+    def _load_cif_with_fallback(self, file_path):
+        """Load CIF using CifStructureParser when pymatgen is not installed."""
         try:
-            # Parse CIF file using pymatgen
-            parser = CifParser(file_path)
-            structures = parser.parse_structures(primitive=False)  # Use conventional cell to match main app
-            
-            if not structures:
-                QMessageBox.warning(self, "Warning", "No structures found in CIF file.")
+            import sys as _sys, os as _os
+            _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+            from parsers.cif_parser import CifStructureParser
+            result = CifStructureParser(use_pymatgen=False).parse_cif_file(file_path)
+            if not result:
+                QMessageBox.warning(self, "Error", "Could not parse CIF file")
                 return
-            
-            # Take the first structure
-            self.pymatgen_structure = structures[0]
-            
-            # Extract structure information
-            self.extract_structure_info()
-            
-            # Update displays
+            lp = result.lattice_parameters
+            fb_lat = _FallbackLattice(lp.a, lp.b, lp.c, lp.alpha, lp.beta, lp.gamma)
+            self.pymatgen_structure = _FallbackStructure(fb_lat)
+            _AR = {'H':0.53,'Li':1.67,'Be':1.12,'B':0.87,'C':0.67,'N':0.56,'O':0.48,'F':0.42,
+                   'Na':1.90,'Mg':1.45,'Al':1.18,'Si':1.11,'P':0.98,'S':0.88,'Cl':0.79,
+                   'K':2.43,'Ca':1.94,'Ti':1.76,'V':1.71,'Cr':1.66,'Mn':1.61,'Fe':1.56,
+                   'Co':1.52,'Ni':1.49,'Cu':1.45,'Zn':1.42,'Zr':2.06,'Nb':1.98,'Mo':1.90}
+            sites = []
+            for i, atom in enumerate(result.atoms):
+                sites.append({
+                    'index': i, 'element': atom.element,
+                    'frac_coords': [atom.x, atom.y, atom.z],
+                    'cart_coords': fb_lat.get_cartesian_coords([atom.x, atom.y, atom.z]),
+                    'atomic_number': self._element_to_z(atom.element),
+                    'radius': _AR.get(atom.element, 1.0),
+                    'wyckoff_symbol': 'a', 'site_symmetry': '1', 'multiplicity': 1,
+                })
+            elements = sorted({s['element'] for s in sites})
+            formula = ' '.join(f"{el}{sum(1 for s in sites if s['element']==el)}" for el in elements)
+            self.current_structure = {
+                'formula': formula,
+                'space_group': result.space_group or 'Unknown',
+                'space_group_number': 0,
+                'crystal_system': result.crystal_system or 'Unknown',
+                'point_group': result.point_group or 'Unknown',
+                'lattice_params': {'a': lp.a, 'b': lp.b, 'c': lp.c,
+                                   'alpha': lp.alpha, 'beta': lp.beta,
+                                   'gamma': lp.gamma, 'volume': lp.volume or 0.0},
+                'num_atoms': len(sites), 'elements': elements,
+                'symmetry_operations': [], 'sites': sites,
+                'wyckoff_positions': {},
+                'equivalent_sites': {i: [{'frac_coords': s['frac_coords']}]
+                                     for i, s in enumerate(sites)},
+            }
             self.update_structure_info_display()
-            self.update_wyckoff_table()
-            self.update_symmetry_info()
-            self.update_equivalent_sites_info()
             self.update_3d_plot()
-            
-            # Calculate bonds automatically
-            self.calculate_bonds()
-            
-            # Emit signal
+            self._calculate_bonds_fallback()
             self.structure_loaded.emit(self.current_structure)
-            
-            # Get crystal system info for the message
-            crystal_system = self.current_structure.get('crystal_system', 'Unknown')
-            lattice_params = self.current_structure.get('lattice_params', {})
-            
-            success_msg = (f"Successfully loaded crystal structure from {os.path.basename(file_path)}\n\n"
-                          f"Crystal System: {crystal_system}\n"
-                          f"Unit Cell: a={lattice_params.get('a', 0):.3f}Å, "
-                          f"b={lattice_params.get('b', 0):.3f}Å, "
-                          f"c={lattice_params.get('c', 0):.3f}Å\n"
-                          f"Angles: α={lattice_params.get('alpha', 0):.1f}°, "
-                          f"β={lattice_params.get('beta', 0):.1f}°, "
-                          f"γ={lattice_params.get('gamma', 0):.1f}°\n\n"
-                          f"✓ Crystal geometry is being preserved based on actual lattice parameters.\n"
-                          f"Check 'View' tab if unit cell appears distorted.")
-            
-            QMessageBox.information(self, "Crystal Structure Loaded", success_msg)
-            
+            lp_d = self.current_structure['lattice_params']
+            QMessageBox.information(self, "Loaded",
+                f"{os.path.basename(file_path)}\n"
+                f"System: {result.crystal_system}  PG: {result.point_group}\n"
+                f"SG: {result.space_group}\n"
+                f"a={lp_d['a']:.3f}  b={lp_d['b']:.3f}  c={lp_d['c']:.3f} Å\n"
+                f"{len(sites)} atoms in unit cell")
         except Exception as e:
+            import traceback; traceback.print_exc()
             QMessageBox.critical(self, "Error", f"Error loading CIF file:\n{str(e)}")
+
+    @staticmethod
+    def _element_to_z(symbol):
+        """Return atomic number for a given element symbol."""
+        _Z = {'H':1,'He':2,'Li':3,'Be':4,'B':5,'C':6,'N':7,'O':8,'F':9,'Ne':10,
+              'Na':11,'Mg':12,'Al':13,'Si':14,'P':15,'S':16,'Cl':17,'Ar':18,
+              'K':19,'Ca':20,'Sc':21,'Ti':22,'V':23,'Cr':24,'Mn':25,'Fe':26,
+              'Co':27,'Ni':28,'Cu':29,'Zn':30,'Ga':31,'Ge':32,'As':33,'Se':34,
+              'Br':35,'Kr':36,'Zr':40,'Nb':41,'Mo':42,'Ru':44,'Pd':46,'Ag':47,
+              'Sn':50,'Ba':56,'La':57,'Ce':58,'Pb':82,'Bi':83}
+        return _Z.get(symbol, 0)
+
+    def _calculate_bonds_fallback(self):
+        """Calculate bonds with covalent-radii cutoffs when pymatgen is not available."""
+        _CR = {'H':0.31,'C':0.77,'N':0.75,'O':0.73,'F':0.71,'Si':1.11,'P':1.06,
+               'S':1.02,'Cl':0.99,'Ti':1.36,'Fe':1.25,'Ca':1.74,'Mg':1.30,
+               'Al':1.21,'Na':1.54,'K':1.96,'Zr':1.48,'V':1.22,'Cr':1.19,
+               'Mn':1.17,'Ni':1.16,'Co':1.16,'Cu':1.12,'Zn':1.20}
+        sites = self.current_structure.get('sites', [])
+        bonds = []
+        for i in range(len(sites)):
+            for j in range(i + 1, len(sites)):
+                c1 = np.array(sites[i]['cart_coords'])
+                c2 = np.array(sites[j]['cart_coords'])
+                dist = float(np.linalg.norm(c1 - c2))
+                e1, e2 = sites[i]['element'], sites[j]['element']
+                cutoff = (_CR.get(e1, 0.85) + _CR.get(e2, 0.85)) * 1.2
+                if 0.5 < dist <= cutoff:
+                    bonds.append((i, j))
+        self.bonds = bonds
+        print(f"Bonds (fallback): {len(bonds)}")
     
     def extract_structure_info(self):
         """Extract structure information from pymatgen structure."""

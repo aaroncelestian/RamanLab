@@ -15,9 +15,17 @@ Author: RamanLab Development Team
 """
 
 import os
+import re
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any, Union
 from dataclasses import dataclass
+
+# Optional spglib for advanced symmetry analysis
+try:
+    import spglib
+    SPGLIB_AVAILABLE = True
+except ImportError:
+    SPGLIB_AVAILABLE = False
 
 # Try to import pymatgen for advanced CIF parsing
 PYMATGEN_AVAILABLE = False
@@ -226,70 +234,72 @@ class CifStructureParser:
     def _parse_with_fallback(self, file_path: str) -> Optional[StructureData]:
         """
         Parse CIF file using simplified fallback parser.
-        
-        Args:
-            file_path: Path to the CIF file
-            
-        Returns:
-            StructureData object with basic structure information
+
+        Extracts lattice parameters, space group, crystal system, point group,
+        symmetry operations, and a fully expanded unit cell.
         """
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-            
-            # Initialize structure data
+
             lattice_params = LatticeParameters(a=1.0, b=1.0, c=1.0, alpha=90.0, beta=90.0, gamma=90.0)
             space_group = 'Unknown'
-            atoms = []
-            
-            # Parse basic structure information
-            for i, line in enumerate(lines):
-                line = line.strip()
-                
-                # Skip comments and empty lines
-                if not line or line.startswith('#'):
+
+            # --- Pass 1: scalar key-value pairs ---
+            for line in lines:
+                s = line.strip()
+                if not s or s.startswith('#'):
                     continue
-                
-                # Lattice parameters
-                if '_cell_length_a' in line:
-                    lattice_params.a = self._extract_numeric_value(line)
-                elif '_cell_length_b' in line:
-                    lattice_params.b = self._extract_numeric_value(line)
-                elif '_cell_length_c' in line:
-                    lattice_params.c = self._extract_numeric_value(line)
-                elif '_cell_angle_alpha' in line:
-                    lattice_params.alpha = self._extract_numeric_value(line)
-                elif '_cell_angle_beta' in line:
-                    lattice_params.beta = self._extract_numeric_value(line)
-                elif '_cell_angle_gamma' in line:
-                    lattice_params.gamma = self._extract_numeric_value(line)
-                
-                # Space group
-                elif '_space_group_name_H-M_alt' in line or '_symmetry_space_group_name_H-M' in line:
-                    space_group = self._extract_space_group(line)
-                
-                # Atomic positions
-                elif line.startswith('_atom_site_label') or (line == 'loop_' and 
-                     any('_atom_site' in lines[j] for j in range(i, min(i+10, len(lines))))):
+                if '_cell_length_a' in s and not s.startswith('loop_'):
+                    lattice_params.a = self._extract_numeric_value(s)
+                elif '_cell_length_b' in s and not s.startswith('loop_'):
+                    lattice_params.b = self._extract_numeric_value(s)
+                elif '_cell_length_c' in s and not s.startswith('loop_'):
+                    lattice_params.c = self._extract_numeric_value(s)
+                elif '_cell_angle_alpha' in s:
+                    lattice_params.alpha = self._extract_numeric_value(s)
+                elif '_cell_angle_beta' in s:
+                    lattice_params.beta = self._extract_numeric_value(s)
+                elif '_cell_angle_gamma' in s:
+                    lattice_params.gamma = self._extract_numeric_value(s)
+                elif '_space_group_name_H-M_alt' in s or '_symmetry_space_group_name_H-M' in s:
+                    space_group = self._extract_space_group(s)
+
+            # --- Pass 2: find atom site loop ---
+            atoms = []
+            for i, line in enumerate(lines):
+                s = line.strip()
+                if (s.startswith('_atom_site_label') or
+                        (s == 'loop_' and
+                         any('_atom_site' in lines[j] for j in range(i, min(i + 10, len(lines)))))):
                     atoms = self._parse_atom_site_loop(lines, i)
                     break
-            
-            # Calculate volume (simplified)
+
+            # --- Pass 3: parse symmetry ops and expand unit cell ---
+            sym_ops = self._parse_symmetry_ops(lines)
+            if sym_ops and atoms:
+                atoms = self._apply_symmetry_ops(atoms, sym_ops)
+
+            # Compute Cartesian coordinates
+            self._compute_cartesian_coords(atoms, lattice_params)
             lattice_params.volume = self._calculate_unit_cell_volume(lattice_params)
-            
-            # Create structure data
+
+            # Derive crystal system and point group from H-M name
+            crystal_system = self._crystal_system_from_sg_name(space_group)
+            point_group = self._point_group_from_sg_name(space_group, crystal_system)
+
             structure = StructureData(
                 name=os.path.basename(file_path).replace('.cif', ''),
                 lattice_parameters=lattice_params,
                 space_group=space_group,
+                crystal_system=crystal_system,
+                point_group=point_group,
                 atoms=atoms
             )
-            
-            # Print summary
+
             self._print_structure_summary(structure)
-            
             return structure
-            
+
         except Exception as e:
             print(f"Error parsing CIF file with fallback parser: {e}")
             return None
@@ -307,19 +317,155 @@ class CifStructureParser:
         return 1.0
     
     def _extract_space_group(self, line: str) -> str:
-        """Extract space group from CIF data line."""
+        """Extract space group from CIF data line, handling quoted values."""
         try:
             if '"' in line:
-                # Extract text between quotes
                 return line.split('"')[1]
+            elif "'" in line:
+                parts = line.split("'")
+                if len(parts) >= 2:
+                    return parts[1].strip()
             else:
-                # Extract after tag
                 parts = line.split()
                 if len(parts) >= 2:
-                    return ' '.join(parts[1:])
+                    return ' '.join(parts[1:]).strip()
         except (IndexError, ValueError):
             pass
         return 'Unknown'
+
+    def _crystal_system_from_sg_name(self, sg_name: str) -> str:
+        """Determine crystal system from H-M space group name."""
+        sg = sg_name.strip().strip("'\"")
+        if not sg or sg == 'Unknown':
+            return 'Unknown'
+        # Remove centering letter
+        sym = sg[1:].strip() if sg[0].upper() in 'PIFABCRH' else sg
+        sym_cmp = sym.replace(' ', '').replace('_', '').lower()
+        # Cubic: 4+3 together, or m-3 pattern
+        if ('4' in sym and '3' in sym) or 'm-3' in sym_cmp or 'm3' in sym_cmp:
+            return 'cubic'
+        if '6' in sym:
+            return 'hexagonal'
+        if '4' in sym:
+            return 'tetragonal'
+        if '3' in sym or (sg and sg[0].upper() in 'RH'):
+            return 'trigonal'
+        parts = [p for p in sym.split() if p not in ('1', '-1')]
+        if len(parts) >= 3:
+            return 'orthorhombic'
+        if len(parts) >= 1 and any('2' in p or 'm' in p for p in parts):
+            return 'monoclinic'
+        return 'triclinic'
+
+    def _point_group_from_sg_name(self, sg_name: str, crystal_system: str = None) -> str:
+        """Derive point group from H-M space group name."""
+        _highest = {
+            'cubic': 'm-3m', 'hexagonal': '6/mmm', 'tetragonal': '4/mmm',
+            'trigonal': '-3m', 'orthorhombic': 'mmm', 'monoclinic': '2/m', 'triclinic': '-1'
+        }
+        sg = sg_name.strip().strip("'\"")
+        if not sg or sg == 'Unknown':
+            return _highest.get(crystal_system or '', 'Unknown')
+        # Remove centering letter
+        sym = sg[1:].strip() if sg and sg[0].upper() in 'PIFABCRH' else sg
+        # Strip underscores used for subscripts in some CIF files
+        sym = sym.replace('_', '')
+        # Replace screw axes (e.g. 41 -> 4, 63 -> 6, 21 -> 2)
+        sym = re.sub(r'([1-6])([1-6])', r'\1', sym)
+        # Replace glide planes in '/' context: /a /b /c /n /d /e -> /m
+        sym = re.sub(r'/[abcnde]', '/m', sym)
+        # Replace standalone glide planes
+        parts = sym.split()
+        sym = ' '.join(re.sub(r'^([abcnde])$', 'm', p) for p in parts)
+        sym_compact = sym.replace(' ', '').lower()
+        _pg_map = {
+            '4/mmm': '4/mmm', '4/mm': '4/mmm', '4mmm': '4/mmm',
+            '4/m': '4/m', '4mm': '4mm', '422': '422',
+            '-42m': '-42m', '-4m2': '-4m2', '-4': '-4', '4': '4',
+            '6/mmm': '6/mmm', '6/mm': '6/mmm', '6mmm': '6/mmm',
+            '6/m': '6/m', '6mm': '6mm', '622': '622',
+            '-6m2': '-6m2', '-62m': '-6m2', '-6': '-6', '6': '6',
+            'm-3m': 'm-3m', 'm3m': 'm-3m', '-43m': '-43m', '-4 3m': '-43m',
+            'm-3': 'm-3', 'm3': 'm-3', '432': '432', '23': '23',
+            'mmm': 'mmm', 'mm2': 'mm2', '2mm': 'mm2', '222': '222',
+            '2/m': '2/m', 'm': 'm', '2': '2',
+            '-3m': '-3m', '-3m1': '-3m', '3m': '3m', '3m1': '3m',
+            '32': '32', '321': '32', '312': '32', '-3': '-3', '3': '3',
+            '-1': '-1', '1': '1',
+        }
+        if sym_compact in _pg_map:
+            return _pg_map[sym_compact]
+        for k, v in _pg_map.items():
+            if sym.lower().replace(' ', '') == k.lower():
+                return v
+        cs = crystal_system or self._crystal_system_from_sg_name(sg_name)
+        return _highest.get(cs.lower(), 'Unknown')
+
+    def _parse_symmetry_ops(self, lines: list) -> list:
+        """Parse symmetry operations from _space_group_symop_operation_xyz block."""
+        ops = []
+        in_block = False
+        for line in lines:
+            s = line.strip()
+            if not s:
+                continue
+            if ('_space_group_symop_operation_xyz' in s or
+                    '_symmetry_equiv_pos_as_xyz' in s):
+                in_block = True
+                continue
+            if in_block:
+                if s.startswith('_') or (s == 'loop_' and ops):
+                    break
+                if s == 'loop_':
+                    continue
+                op = s.strip("'\" ")
+                if ',' in op:
+                    ops.append(op)
+        return ops if ops else ['x,y,z']
+
+    def _apply_sym_op(self, op_str: str, x: float, y: float, z: float) -> list:
+        """Apply a symmetry operation string to fractional coordinates using eval."""
+        op = op_str.strip("'\" ").lower().replace(' ', '')
+        ns = {'x': float(x), 'y': float(y), 'z': float(z)}
+        try:
+            result = [float(eval(c, {'__builtins__': {}}, ns)) for c in op.split(',')]
+            return [v % 1.0 for v in result]
+        except Exception:
+            return [x, y, z]
+
+    def _apply_symmetry_ops(self, atoms: list, sym_ops: list) -> list:
+        """Generate all symmetry-equivalent positions in the unit cell."""
+        all_atoms = []
+        tol = 1e-3
+        for atom in atoms:
+            for op in sym_ops:
+                nx, ny, nz = self._apply_sym_op(op, atom.x, atom.y, atom.z)
+                duplicate = any(
+                    a.element == atom.element and
+                    abs(a.x - nx) < tol and abs(a.y - ny) < tol and abs(a.z - nz) < tol
+                    for a in all_atoms
+                )
+                if not duplicate:
+                    all_atoms.append(AtomData(
+                        label=atom.label, element=atom.element,
+                        x=nx, y=ny, z=nz, occupancy=atom.occupancy
+                    ))
+        return all_atoms if all_atoms else atoms
+
+    def _compute_cartesian_coords(self, atoms: list, lattice: 'LatticeParameters') -> None:
+        """Convert fractional to Cartesian coordinates (general triclinic formula)."""
+        a, b, c = lattice.a, lattice.b, lattice.c
+        cg = np.cos(np.radians(lattice.gamma))
+        sg = np.sin(np.radians(lattice.gamma))
+        cb = np.cos(np.radians(lattice.beta))
+        ca = np.cos(np.radians(lattice.alpha))
+        cy = (ca - cb * cg) / max(sg, 1e-10)
+        cz = np.sqrt(max(0.0, 1.0 - cb**2 - cy**2))
+        M = np.array([[a, b * cg, c * cb],
+                      [0.0, b * sg, c * cy],
+                      [0.0, 0.0,   c * cz]])
+        for atom in atoms:
+            atom.cartesian_coords = M @ np.array([atom.x, atom.y, atom.z])
     
     def _parse_atom_site_loop(self, lines: List[str], start_idx: int) -> List[AtomData]:
         """
