@@ -75,7 +75,7 @@ class MicroplasticDetectionWorker(QThread):
                     plastic_types=plastic_types,
                     threshold=self.params['threshold'],
                     progress_callback=progress_callback,
-                    n_jobs=-1,
+                    n_jobs=-1,  # Will be capped at 16 cores in detector
                     max_templates_per_type=5
                 )
                 
@@ -107,7 +107,7 @@ class MicroplasticDetectionWorker(QThread):
                 plastic_types=self.params['plastic_types'],
                 threshold=self.params['threshold'],
                 progress_callback=progress_callback,
-                n_jobs=-1,
+                n_jobs=-1,  # Will be capped appropriately in detector
                 fast_mode=use_fast_mode,
                 lam=lam,
                 p=p,

@@ -1289,8 +1289,13 @@ class MicroplasticDetector:
         if plastic_types is None:
             plastic_types = list(self.PLASTIC_SIGNATURES.keys())
         
-        n_cores = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
+        # Limit cores to avoid memory/disk issues with large datasets
+        if n_jobs == -1:
+            n_cores = min(multiprocessing.cpu_count(), 16)  # Cap at 16 cores
+        else:
+            n_cores = n_jobs
         logger.info(f"Scanning map for plastics: {plastic_types} using {n_cores} cores")
+        logger.info(f"Using threading backend to minimize memory overhead")
         
         # Import threading for progress tracking
         from threading import Lock
@@ -1372,7 +1377,7 @@ class MicroplasticDetector:
                             progress_callback(completed_baseline[0], len(baseline_batches), 
                                             f"ALS baseline: {prog}% ({spectra_done:,}/{n_spectra:,} spectra)")
                 
-                Parallel(n_jobs=n_jobs, backend='threading', verbose=0)(
+                Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
                     delayed(baseline_with_progress)(batch) for batch in baseline_batches
                 )
                 
@@ -1383,9 +1388,9 @@ class MicroplasticDetector:
             if progress_callback:
                 progress_callback(0, len(batches), f"Detecting plastics in {len(batches)} batches using {n_cores} cores...")
             
-            # Process batches in parallel using multiprocessing
-            # Note: Progress updates not available during parallel execution
-            batch_results = Parallel(n_jobs=n_jobs, backend='loky', verbose=0)(
+            # Process batches in parallel using threading backend
+            # Threading avoids pickling large arrays, preventing disk space issues
+            batch_results = Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
                 delayed(self._process_spectrum_batch)(
                     batch, wavenumbers, intensity_map, plastic_types, 
                     fast_mode, lam, p, niter,
@@ -1750,9 +1755,15 @@ class MicroplasticDetector:
             return {}
         
         n_spectra = intensity_map.shape[0]
-        n_cores = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
+        # Limit cores for template matching to avoid memory/disk issues
+        # Use threading backend to avoid pickling overhead
+        if n_jobs == -1:
+            n_cores = min(multiprocessing.cpu_count(), 16)  # Cap at 16 cores
+        else:
+            n_cores = n_jobs
         
         logger.info(f"Template matching {n_spectra:,} spectra against {sum(len(v) for v in self.plastic_templates.values())} templates using {n_cores} cores")
+        logger.info(f"Using threading backend to minimize memory overhead")
         logger.info(f"Applying ALS baseline correction to each spectrum before matching")
         
         if progress_callback:
@@ -1786,8 +1797,9 @@ class MicroplasticDetector:
                     batch_results.append((idx, {}))
             return batch_results
         
-        # Run parallel processing
-        all_results = Parallel(n_jobs=n_jobs, backend='loky', verbose=0)(
+        # Run parallel processing with threading backend
+        # Threading avoids pickling large arrays, preventing disk space issues
+        all_results = Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
             delayed(process_batch)(batch) for batch in batches
         )
         
