@@ -464,24 +464,28 @@ class CrystalStructureWidget(QWidget):
         """Initialize core modules."""
         try:
             self.crystal_analyzer = CrystalAnalyzer()
+        except Exception:
+            pass
+        try:
             self.database_manager = DatabaseManager()
-            self.cif_parser = CIFParser()
-        except Exception as e:
-            print(f"Warning: Could not initialize crystal structure modules: {e}")
+        except Exception:
+            pass
+        try:
+            from parsers.cif_parser import CifStructureParser
+            self.cif_parser = CifStructureParser()
+        except Exception:
+            self.cif_parser = None
             
     def initialize_3d_plot(self):
         """Initialize the 3D plot."""
-        self.ax_3d.clear()
-        self.ax_3d.set_xlabel('X (Å)')
-        self.ax_3d.set_ylabel('Y (Å)')
-        self.ax_3d.set_zlabel('Z (Å)')
+        self.figure.clear()
+        self.ax_3d = self.figure.add_subplot(111, projection='3d')
+        self.ax_3d.set_xlabel('a')
+        self.ax_3d.set_ylabel('b')
+        self.ax_3d.set_zlabel('c')
         self.ax_3d.set_title('Crystal Structure Visualization')
-        
-        # Add placeholder text
-        self.ax_3d.text(0.5, 0.5, 0.5, 'Load a crystal structure to begin visualization',
-                       transform=self.ax_3d.transAxes, ha='center', va='center',
-                       fontsize=12, alpha=0.6)
-        
+        self.ax_3d.text(0.5, 0.5, 0.5, 'Load a crystal structure to begin',
+                       ha='center', va='center', fontsize=11, alpha=0.5)
         self.canvas.draw()
         
     def load_cif_file(self):
@@ -548,11 +552,164 @@ class CrystalStructureWidget(QWidget):
             raise Exception(f"Pymatgen parsing failed: {str(e)}")
             
     def parse_cif_file(self, file_path):
-        """Parse CIF file using simplified parser."""
+        """Parse CIF file using simplified parser with inline fallback."""
         if self.cif_parser:
-            return self.cif_parser.parse_file(file_path)
-        else:
-            raise Exception("CIF parser not available")
+            try:
+                result = self.cif_parser.parse_cif_file(file_path)
+                if result:
+                    lattice = result.lattice_parameters
+                    atoms = []
+                    for atom in result.atoms:
+                        cart = atom.cartesian_coords.tolist() if atom.cartesian_coords is not None else [atom.x, atom.y, atom.z]
+                        atoms.append({'element': atom.element, 'position': [atom.x, atom.y, atom.z], 'cartesian_position': cart})
+                    return {
+                        'name': result.name,
+                        'space_group': result.space_group or 'Unknown',
+                        'crystal_system': result.crystal_system or 'Unknown',
+                        'point_group': result.point_group or 'Unknown',
+                        'lattice_parameters': {'a': lattice.a, 'b': lattice.b, 'c': lattice.c,
+                            'alpha': lattice.alpha, 'beta': lattice.beta, 'gamma': lattice.gamma,
+                            'volume': lattice.volume or 0.0},
+                        'atoms': atoms
+                    }
+            except Exception as e:
+                print(f"CIF parser failed: {e}, using inline fallback")
+        return self._parse_cif_simple(file_path)
+
+    def _parse_cif_simple(self, file_path):
+        """Inline simple CIF parser as fallback."""
+        import os
+        crystal_data = {
+            'name': os.path.basename(file_path).replace('.cif', ''),
+            'space_group': 'Unknown', 'crystal_system': 'Unknown', 'point_group': 'Unknown',
+            'lattice_parameters': {'a': 1.0, 'b': 1.0, 'c': 1.0, 'alpha': 90.0, 'beta': 90.0, 'gamma': 90.0, 'volume': 1.0},
+            'atoms': []
+        }
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+            for line in lines:
+                s = line.strip()
+                if not s or s.startswith('#'):
+                    continue
+                for key, lp_key in [('_cell_length_a', 'a'), ('_cell_length_b', 'b'), ('_cell_length_c', 'c'),
+                                    ('_cell_angle_alpha', 'alpha'), ('_cell_angle_beta', 'beta'),
+                                    ('_cell_angle_gamma', 'gamma'), ('_cell_volume', 'volume')]:
+                    if s.startswith(key):
+                        try:
+                            crystal_data['lattice_parameters'][lp_key] = float(s.split()[1].split('(')[0])
+                        except Exception:
+                            pass
+                if s.startswith('_chemical_formula_sum'):
+                    parts = s.split(None, 1)
+                    if len(parts) > 1:
+                        crystal_data['name'] = parts[1].strip().strip("'\"")
+                elif s.startswith('_space_group_name_H-M_alt') or s.startswith('_symmetry_space_group_name_H-M'):
+                    parts = s.split(None, 1)
+                    if len(parts) > 1:
+                        crystal_data['space_group'] = parts[1].strip().strip("'\"")
+            crystal_data['crystal_system'] = self._determine_crystal_system_from_params(
+                crystal_data['lattice_parameters'])
+            asym_atoms = self._parse_cif_atoms(lines, crystal_data['lattice_parameters'])
+            crystal_data['atoms'] = asym_atoms
+            # Expand to full unit cell and derive symmetry info using CifStructureParser helpers
+            try:
+                from parsers.cif_parser import CifStructureParser, AtomData, LatticeParameters
+                _p = CifStructureParser(use_pymatgen=False)
+                # Crystal system and point group from H-M name
+                cs = _p._crystal_system_from_sg_name(crystal_data['space_group'])
+                if cs and cs != 'Unknown':
+                    crystal_data['crystal_system'] = cs
+                crystal_data['point_group'] = _p._point_group_from_sg_name(
+                    crystal_data['space_group'], crystal_data['crystal_system'])
+                # Parse symmetry ops and expand unit cell
+                sym_ops = _p._parse_symmetry_ops(lines)
+                lp_dict = crystal_data['lattice_parameters']
+                lp = LatticeParameters(
+                    a=lp_dict['a'], b=lp_dict['b'], c=lp_dict['c'],
+                    alpha=lp_dict['alpha'], beta=lp_dict['beta'], gamma=lp_dict['gamma']
+                )
+                atom_data = [
+                    AtomData(label=a['element'], element=a['element'],
+                             x=a['position'][0], y=a['position'][1], z=a['position'][2])
+                    for a in asym_atoms
+                ]
+                expanded = _p._apply_symmetry_ops(atom_data, sym_ops)
+                _p._compute_cartesian_coords(expanded, lp)
+                crystal_data['atoms'] = [
+                    {'element': a.element,
+                     'position': [a.x, a.y, a.z],
+                     'cartesian_position': a.cartesian_coords.tolist()}
+                    for a in expanded
+                ]
+            except Exception as _e:
+                print(f"Symmetry expansion failed, using asymmetric unit: {_e}")
+        except Exception as e:
+            print(f"Error in simple CIF parsing: {e}")
+        return crystal_data
+
+    def _parse_cif_atoms(self, lines, lattice):
+        """Parse fractional atom coordinates from CIF loop_ block."""
+        atoms = []
+        col_names = []
+        in_atom_loop = False
+        for line in lines:
+            s = line.strip()
+            if s == 'loop_':
+                col_names = []
+                in_atom_loop = False
+                continue
+            if s.startswith('_atom_site_'):
+                col_names.append(s.split()[0])
+                in_atom_loop = True
+                continue
+            if in_atom_loop and col_names:
+                if not s or s.startswith('_') or s == 'loop_':
+                    if atoms:
+                        break
+                    in_atom_loop = False
+                    continue
+                parts = s.split()
+                has_frac = any('fract_x' in c for c in col_names)
+                if not has_frac:
+                    in_atom_loop = False
+                    continue
+                try:
+                    label_i = next((i for i, c in enumerate(col_names) if 'label' in c), 0)
+                    x_i = next((i for i, c in enumerate(col_names) if 'fract_x' in c), 1)
+                    y_i = next((i for i, c in enumerate(col_names) if 'fract_y' in c), 2)
+                    z_i = next((i for i, c in enumerate(col_names) if 'fract_z' in c), 3)
+                    if len(parts) > max(label_i, x_i, y_i, z_i):
+                        label = parts[label_i]
+                        element = ''.join(c for c in label if c.isalpha())[:2].capitalize()
+                        x = float(parts[x_i].split('(')[0])
+                        y = float(parts[y_i].split('(')[0])
+                        z = float(parts[z_i].split('(')[0])
+                        cart = [x * lattice.get('a', 1), y * lattice.get('b', 1), z * lattice.get('c', 1)]
+                        atoms.append({'element': element, 'position': [x, y, z], 'cartesian_position': cart})
+                except (ValueError, IndexError, StopIteration):
+                    pass
+        return atoms
+
+    def _determine_crystal_system_from_params(self, lattice):
+        """Determine crystal system from lattice parameters dict."""
+        a, b, c = lattice.get('a', 1), lattice.get('b', 1), lattice.get('c', 1)
+        alpha, beta, gamma = lattice.get('alpha', 90), lattice.get('beta', 90), lattice.get('gamma', 90)
+        tol = 0.1
+        all90 = all(abs(x - 90) < tol for x in [alpha, beta, gamma])
+        if abs(a-b) < tol and abs(b-c) < tol and all90:
+            return 'cubic'
+        if abs(a-b) < tol and abs(alpha-90) < tol and abs(beta-90) < tol and abs(gamma-120) < tol:
+            return 'hexagonal'
+        if abs(a-b) < tol and abs(b-c) < tol and abs(alpha-beta) < tol and abs(beta-gamma) < tol and abs(alpha-90) > tol:
+            return 'trigonal'
+        if abs(a-b) < tol and all90:
+            return 'tetragonal'
+        if all90:
+            return 'orthorhombic'
+        if abs(alpha-90) < tol and abs(gamma-90) < tol:
+            return 'monoclinic'
+        return 'triclinic'
             
     def load_from_database(self):
         """Load crystal structure from mineral database."""
@@ -661,47 +818,120 @@ class CrystalStructureWidget(QWidget):
         self.structure_info_text.setPlainText(info_text)
         
     def generate_unit_cell(self):
-        """Generate all atomic positions in the unit cell."""
+        """Display all atoms in the unit cell (already expanded by symmetry on load)."""
         if not self.crystal_structure:
             QMessageBox.warning(self, "No Structure", "Please load a crystal structure first")
             return
-            
-        try:
-            if self.crystal_analyzer:
-                self.atomic_positions = self.crystal_analyzer.generate_unit_cell(self.crystal_structure)
-                self.atom_count_label.setText(f"Atoms: {len(self.atomic_positions)}")
-                self.update_3d_plot()
-            else:
-                QMessageBox.warning(self, "Error", "Crystal analyzer not available")
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to generate unit cell: {str(e)}")
+        atoms = self.crystal_structure.get('atoms', [])
+        self.atomic_positions = atoms
+        elem_counts = {}
+        for at in atoms:
+            el = at.get('element', '?')
+            elem_counts[el] = elem_counts.get(el, 0) + 1
+        summary = '  '.join(f"{el}×{cnt}" for el, cnt in sorted(elem_counts.items()))
+        self.atom_count_label.setText(f"Atoms: {len(atoms)}  ({summary})")
+        self.update_3d_plot()
             
     def calculate_bond_lengths(self):
-        """Calculate bond lengths in the structure."""
+        """Calculate bonds using covalent-radii cutoffs (pure numpy, no external libs)."""
         if not self.crystal_structure:
             QMessageBox.warning(self, "No Structure", "Please load a crystal structure first")
             return
-            
-        try:
-            if self.crystal_analyzer:
-                self.bond_analysis = self.crystal_analyzer.analyze_bonds(self.crystal_structure)
-                bond_count = len(self.bond_analysis.get('bonds', []))
-                self.bond_count_label.setText(f"Bonds: {bond_count}")
-                self.update_3d_plot()
-            else:
-                QMessageBox.warning(self, "Error", "Crystal analyzer not available")
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to calculate bonds: {str(e)}")
+        atoms = self.crystal_structure.get('atoms', [])
+        lp = self.crystal_structure.get('lattice_parameters', {})
+        if not atoms:
+            QMessageBox.warning(self, "No Data", "No atom data available")
+            return
+        # Approximate covalent radii (Å)
+        _CR = {'H':0.31,'Li':1.28,'Be':0.96,'B':0.84,'C':0.77,'N':0.75,'O':0.73,'F':0.71,
+               'Na':1.54,'Mg':1.30,'Al':1.21,'Si':1.11,'P':1.06,'S':1.02,'Cl':0.99,
+               'K':1.96,'Ca':1.74,'Ti':1.36,'V':1.22,'Cr':1.19,'Mn':1.17,'Fe':1.25,
+               'Co':1.16,'Ni':1.16,'Cu':1.12,'Zn':1.20,'Ga':1.22,'Ge':1.20,
+               'As':1.19,'Se':1.20,'Br':1.14,'Zr':1.48,'Nb':1.37,'Mo':1.29,'Ru':1.25,
+               'Rh':1.25,'Pd':1.20,'Ag':1.28,'In':1.42,'Sn':1.39,'Sb':1.39,'Te':1.38,
+               'I':1.39,'Ba':2.15,'La':2.07,'Ce':2.04,'Pb':1.46,'Bi':1.48}
+        bonds = []
+        n = len(atoms)
+        for i in range(n):
+            for j in range(i + 1, n):
+                a1, a2 = atoms[i], atoms[j]
+                # Prefer pre-computed Cartesian; fall back to simple orthogonal approx
+                c1 = a1.get('cartesian_position') or [
+                    a1['position'][0]*lp.get('a',1),
+                    a1['position'][1]*lp.get('b',1),
+                    a1['position'][2]*lp.get('c',1)]
+                c2 = a2.get('cartesian_position') or [
+                    a2['position'][0]*lp.get('a',1),
+                    a2['position'][1]*lp.get('b',1),
+                    a2['position'][2]*lp.get('c',1)]
+                dist = float(np.linalg.norm(np.array(c1) - np.array(c2)))
+                e1, e2 = a1.get('element','C'), a2.get('element','C')
+                cutoff = (_CR.get(e1, 0.85) + _CR.get(e2, 0.85)) * 1.20
+                if 0.5 < dist <= cutoff:
+                    bonds.append({
+                        'atom1_idx': i, 'atom2_idx': j,
+                        'atom1_element': e1, 'atom2_element': e2,
+                        'atom1_position': a1.get('position', [0,0,0]),
+                        'atom2_position': a2.get('position', [0,0,0]),
+                        'length': round(dist, 4),
+                        'type': f"{min(e1,e2)}-{max(e1,e2)}"
+                    })
+        self.bond_analysis = {'bonds': bonds}
+        self.bond_count_label.setText(f"Bonds: {len(bonds)}")
+        # Summarise by bond type
+        bond_types = {}
+        for b in bonds:
+            bond_types.setdefault(b['type'], []).append(b['length'])
+        lines = ["BOND ANALYSIS", "="*30,
+                 f"Total bonds found: {len(bonds)}", ""]
+        for t, ls in sorted(bond_types.items()):
+            lines.append(f"{t}: {len(ls)} bonds  "
+                         f"{min(ls):.3f}–{max(ls):.3f} Å  avg {np.mean(ls):.3f} Å")
+        self.structure_info_text.setPlainText(
+            self.structure_info_text.toPlainText() + "\n\n" + "\n".join(lines))
+        self.update_3d_plot()
             
     def analyze_coordination(self):
-        """Analyze coordination geometry."""
+        """Analyze coordination numbers from bond data."""
         if not self.crystal_structure:
             QMessageBox.warning(self, "No Structure", "Please load a crystal structure first")
             return
-            
-        QMessageBox.information(self, "Info", "Coordination analysis feature coming soon")
+        if not self.bond_analysis or not self.bond_analysis.get('bonds'):
+            reply = QMessageBox.question(
+                self, "No Bond Data",
+                "Bond analysis not yet run. Calculate bonds now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.calculate_bond_lengths()
+            return
+        atoms = self.crystal_structure.get('atoms', [])
+        bonds = self.bond_analysis.get('bonds', [])
+        # Build neighbor list
+        nbrs = {i: [] for i in range(len(atoms))}
+        for b in bonds:
+            i, j = b['atom1_idx'], b['atom2_idx']
+            nbrs[i].append((j, b['atom2_element'], b['length']))
+            nbrs[j].append((i, b['atom1_element'], b['length']))
+        # Group CN by element
+        el_cn = {}
+        el_nbr_types = {}
+        for i, nlist in nbrs.items():
+            el = atoms[i].get('element', '?')
+            el_cn.setdefault(el, []).append(len(nlist))
+            for _, el2, dist in nlist:
+                el_nbr_types.setdefault(el, {}).setdefault(el2, []).append(dist)
+        lines = ["COORDINATION ANALYSIS", "="*30, ""]
+        for el in sorted(el_cn):
+            cns = el_cn[el]
+            lines.append(f"{el}:  CN = {np.mean(cns):.1f}"
+                         f"  (min {min(cns)}, max {max(cns)}, {len(cns)} sites)")
+            for el2, dists in sorted(el_nbr_types.get(el, {}).items()):
+                lines.append(f"    {el}-{el2}: {len(dists)} bonds, "
+                             f"{min(dists):.3f}–{max(dists):.3f} Å  avg {np.mean(dists):.3f} Å")
+        result = "\n".join(lines)
+        self.structure_info_text.setPlainText(
+            self.structure_info_text.toPlainText() + "\n\n" + result)
+        QMessageBox.information(self, "Coordination Analysis", result)
         
     def calculate_phonon_modes(self):
         """Calculate phonon modes (placeholder)."""
@@ -737,57 +967,89 @@ class CrystalStructureWidget(QWidget):
         self.atom_size_label.setText(f"{self.atom_size:.1f}")
         self.update_3d_plot()
         
+    def _lattice_matrix(self):
+        """Return 3x3 matrix M where M @ frac = Cartesian (Å). Columns are a,b,c vectors."""
+        lp = self.crystal_structure.get('lattice_parameters', {})
+        a, b, c = lp.get('a', 1.0), lp.get('b', 1.0), lp.get('c', 1.0)
+        cg = np.cos(np.radians(lp.get('gamma', 90)))
+        sg = np.sin(np.radians(lp.get('gamma', 90)))
+        cb = np.cos(np.radians(lp.get('beta',  90)))
+        ca = np.cos(np.radians(lp.get('alpha', 90)))
+        cy = (ca - cb * cg) / max(sg, 1e-10)
+        cz = np.sqrt(max(0.0, 1.0 - cb**2 - cy**2))
+        return np.array([[a, b * cg, c * cb],
+                         [0, b * sg, c * cy],
+                         [0, 0,     c * cz]])
+
     def update_3d_plot(self):
-        """Update the 3D structure visualization."""
-        self.ax_3d.clear()
-        
+        """Update 3D visualization in Cartesian coordinates with proportional axis scaling."""
+        self.figure.clear()
+        self.ax_3d = self.figure.add_subplot(111, projection='3d')
+
         if not self.crystal_structure:
             self.initialize_3d_plot()
             return
-            
+
         try:
-            # Plot atoms
             atoms = self.crystal_structure.get('atoms', [])
-            if atoms:
-                # Get element colors
-                element_colors = self.get_element_colors()
-                
-                for atom in atoms:
-                    element = atom.get('element', 'C')
-                    pos = atom.get('cartesian_position', [0, 0, 0])
-                    
-                    color = element_colors.get(element, 'gray')
-                    self.ax_3d.scatter(pos[0], pos[1], pos[2], 
-                                     c=color, s=self.atom_size*1000, alpha=0.8)
-                    
-                    if self.show_labels:
-                        self.ax_3d.text(pos[0], pos[1], pos[2], element,
-                                       fontsize=8, ha='center', va='center')
-                        
-            # Plot bonds if calculated
+            lp = self.crystal_structure.get('lattice_parameters', {})
+            a, b, c = lp.get('a', 1.0), lp.get('b', 1.0), lp.get('c', 1.0)
+            element_colors = self.get_element_colors()
+            M = self._lattice_matrix()
+
+            def to_cart(frac):
+                return M @ np.array(frac)
+
+            # --- atoms in Cartesian coordinates ---
+            for atom in atoms:
+                element = atom.get('element', 'C')
+                cart = atom.get('cartesian_position')
+                if cart is None:
+                    cart = to_cart(atom.get('position', [0, 0, 0])).tolist()
+                color = element_colors.get(element, '#aaaaaa')
+                self.ax_3d.scatter(
+                    cart[0], cart[1], cart[2],
+                    c=color, s=max(50, self.atom_size * 800),
+                    alpha=0.88, edgecolors='#555555', linewidths=0.3,
+                    depthshade=True
+                )
+                if self.show_labels:
+                    self.ax_3d.text(cart[0], cart[1], cart[2], element,
+                                   fontsize=7, ha='center', va='bottom')
+
+            # --- bonds: convert stored fractional positions to Cartesian ---
             if self.show_bonds and self.bond_analysis:
-                bonds = self.bond_analysis.get('bonds', [])
-                for bond in bonds:
-                    atom1_pos = bond.get('atom1_position', [0, 0, 0])
-                    atom2_pos = bond.get('atom2_position', [0, 0, 0])
-                    
-                    self.ax_3d.plot([atom1_pos[0], atom2_pos[0]],
-                                   [atom1_pos[1], atom2_pos[1]], 
-                                   [atom1_pos[2], atom2_pos[2]],
-                                   'k-', alpha=0.5, linewidth=1)
-                                   
-            # Plot unit cell edges if requested
+                for bond in self.bond_analysis.get('bonds', []):
+                    p1 = to_cart(bond.get('atom1_position', [0, 0, 0]))
+                    p2 = to_cart(bond.get('atom2_position', [0, 0, 0]))
+                    self.ax_3d.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+                                   color='#666666', alpha=0.55, linewidth=1.5)
+
+            # --- unit cell as correct parallelepiped ---
             if self.show_unit_cell:
-                self.plot_unit_cell_edges()
-                
-            self.ax_3d.set_xlabel('X (Å)')
-            self.ax_3d.set_ylabel('Y (Å)')
-            self.ax_3d.set_zlabel('Z (Å)')
-            self.ax_3d.set_title(f"Crystal Structure: {self.crystal_structure.get('name', 'Unknown')}")
-            
+                self.plot_unit_cell_edges(M)
+
+            # --- proportional aspect: visual axis lengths = a : b : c ---
+            self.ax_3d.set_box_aspect([a, b, c])
+            pad = 0.2
+            self.ax_3d.set_xlim(-pad, a + pad)
+            self.ax_3d.set_ylim(-pad, b + pad)
+            self.ax_3d.set_zlim(-pad, c + pad)
+            self.ax_3d.set_xlabel(f"a ({a:.3f} Å)", fontsize=8)
+            self.ax_3d.set_ylabel(f"b ({b:.3f} Å)", fontsize=8)
+            self.ax_3d.set_zlabel(f"c ({c:.3f} Å)", fontsize=8)
+            sg = self.crystal_structure.get('space_group', '')
+            pg = self.crystal_structure.get('point_group', '')
+            nm = self.crystal_structure.get('name', 'Unknown')
+            self.ax_3d.set_title(
+                f"{nm}  –  SG: {sg}  |  PG: {pg}  |  {len(atoms)} atoms",
+                fontsize=8
+            )
+
         except Exception as e:
             print(f"Error updating 3D plot: {e}")
-            
+            import traceback; traceback.print_exc()
+
         self.canvas.draw()
         
     def get_element_colors(self):
@@ -802,11 +1064,21 @@ class CrystalStructureWidget(QWidget):
         }
         return colors
         
-    def plot_unit_cell_edges(self):
-        """Plot unit cell edges."""
-        # This would require lattice vectors to be properly calculated
-        # Placeholder implementation
-        pass
+    def plot_unit_cell_edges(self, M=None):
+        """Draw the unit cell parallelepiped in Cartesian coordinates."""
+        if M is None:
+            M = self._lattice_matrix() if self.crystal_structure else np.eye(3)
+        # 8 corners in fractional coords
+        corners_frac = np.array([[0,0,0],[1,0,0],[0,1,0],[1,1,0],
+                                  [0,0,1],[1,0,1],[0,1,1],[1,1,1]], dtype=float)
+        corners = (M @ corners_frac.T).T  # shape (8, 3)
+        # 12 edges as index pairs
+        edge_pairs = [(0,1),(0,2),(0,4),(1,3),(1,5),(2,3),(2,6),
+                      (3,7),(4,5),(4,6),(5,7),(6,7)]
+        for i, j in edge_pairs:
+            p1, p2 = corners[i], corners[j]
+            self.ax_3d.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
+                           color='#1144cc', alpha=0.7, linewidth=1.2)
         
     def export_structure(self):
         """Export structure data."""

@@ -66,6 +66,7 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
         # Initialize variables
         self.current_spectrum = None
         self.imported_spectrum = None
+        self.active_peak_spectrum_source = None  # 'file' or 'database'
         self.selected_peaks = []
         self.fitted_peaks = []
         self.peak_selection_mode = False
@@ -213,6 +214,22 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
         title_label.setFont(QFont("Arial", 12, QFont.Bold))
         title_label.setAlignment(Qt.AlignCenter)
         side_layout.addWidget(title_label)
+        
+        # Active spectrum selector
+        spectrum_group = QGroupBox("Active Spectrum for Fitting")
+        spectrum_layout = QVBoxLayout(spectrum_group)
+        
+        self.peak_spectrum_combo = QComboBox()
+        self.peak_spectrum_combo.addItem("(no spectrum loaded)", None)
+        self.peak_spectrum_combo.currentIndexChanged.connect(self.on_peak_spectrum_changed)
+        spectrum_layout.addWidget(self.peak_spectrum_combo)
+        
+        self.peak_spectrum_status = QLabel("No spectrum selected")
+        self.peak_spectrum_status.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+        self.peak_spectrum_status.setWordWrap(True)
+        spectrum_layout.addWidget(self.peak_spectrum_status)
+        
+        side_layout.addWidget(spectrum_group)
         
         # Peak selection controls
         peak_group = QGroupBox("Peak Selection")
@@ -605,9 +622,61 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
             mineral_name = item.text()
             self.import_mineral_spectrum(mineral_name)
     
+    @property
+    def _peak_spectrum(self):
+        """Return the spectrum to use for peak fitting based on the active selection."""
+        source = getattr(self, 'active_peak_spectrum_source', None)
+        if source == 'file':
+            return self.current_spectrum
+        elif source == 'database':
+            return self.imported_spectrum
+        return self.current_spectrum or self.imported_spectrum
+
+    def on_peak_spectrum_changed(self, index):
+        """Handle spectrum selection change for peak fitting."""
+        if not hasattr(self, 'peak_spectrum_combo'):
+            return
+        self.active_peak_spectrum_source = self.peak_spectrum_combo.currentData()
+        spec = self._peak_spectrum
+        if spec and hasattr(self, 'peak_spectrum_status'):
+            self.peak_spectrum_status.setText(f"Using: {spec['name']}")
+        elif hasattr(self, 'peak_spectrum_status'):
+            self.peak_spectrum_status.setText("No spectrum selected")
+        self.selected_peaks.clear()
+        self.fitted_peaks.clear()
+        self.update_peak_plot()
+
+    def update_peak_spectrum_selector(self, auto_select_new=True):
+        """Rebuild the spectrum selector combo and optionally select the newest entry."""
+        if not hasattr(self, 'peak_spectrum_combo'):
+            return
+        prev_source = self.active_peak_spectrum_source
+        self.peak_spectrum_combo.blockSignals(True)
+        self.peak_spectrum_combo.clear()
+        if self.current_spectrum:
+            self.peak_spectrum_combo.addItem(f"File: {self.current_spectrum['name']}", 'file')
+        if self.imported_spectrum:
+            self.peak_spectrum_combo.addItem(f"DB: {self.imported_spectrum['name']}", 'database')
+        if self.peak_spectrum_combo.count() == 0:
+            self.peak_spectrum_combo.addItem("(no spectrum loaded)", None)
+        self.peak_spectrum_combo.blockSignals(False)
+        # Auto-select the most recently added entry, or restore previous selection
+        if auto_select_new:
+            self.peak_spectrum_combo.setCurrentIndex(self.peak_spectrum_combo.count() - 1)
+        else:
+            idx = self.peak_spectrum_combo.findData(prev_source)
+            self.peak_spectrum_combo.setCurrentIndex(max(0, idx))
+        self.active_peak_spectrum_source = self.peak_spectrum_combo.currentData()
+        spec = self._peak_spectrum
+        if spec and hasattr(self, 'peak_spectrum_status'):
+            self.peak_spectrum_status.setText(f"Using: {spec['name']}")
+        elif hasattr(self, 'peak_spectrum_status'):
+            self.peak_spectrum_status.setText("No spectrum selected")
+        self.update_peak_plot()
+
     def on_peak_click(self, event):
         """Handle peak selection clicks."""
-        if not self.peak_selection_mode or not event.inaxes or not self.current_spectrum:
+        if not self.peak_selection_mode or not event.inaxes or not self._peak_spectrum:
             return
         
         if event.xdata is not None:
@@ -628,7 +697,14 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
             return
         
         try:
-            data = np.loadtxt(file_path, delimiter=None)
+            # Try comma delimiter first (RRUFF format), then whitespace
+            try:
+                data = np.loadtxt(file_path, comments='#', delimiter=',')
+            except ValueError:
+                data = np.loadtxt(file_path, comments='#', delimiter=None)
+            
+            if data.ndim == 1:
+                raise ValueError("File must contain at least 2 columns (wavenumber, intensity)")
             if data.shape[1] < 2:
                 QMessageBox.warning(self, "Error", "File must have 2 columns")
                 return
@@ -642,6 +718,7 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
             }
             
             self.update_spectrum_plot()
+            self.update_peak_spectrum_selector()
             QMessageBox.information(self, "Success", f"Loaded: {filename}")
             
         except Exception as e:
@@ -678,6 +755,7 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
                 
                 self.selected_reference_mineral = mineral_name
                 self.update_spectrum_plot()
+                self.update_peak_spectrum_selector()
                 
                 # Show crystal system info
                 crystal_info = self.database.get_crystal_system_info(mineral_name)
@@ -705,12 +783,12 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
     
     def auto_find_peaks(self):
         """Auto-find peaks using modular peak fitting."""
-        if not self.current_spectrum:
+        if not self._peak_spectrum:
             QMessageBox.warning(self, "Warning", "Load a spectrum first")
             return
         
-        wavenumbers = self.current_spectrum['wavenumbers']
-        intensities = self.current_spectrum['intensities']
+        wavenumbers = self._peak_spectrum['wavenumbers']
+        intensities = self._peak_spectrum['intensities']
         
         # Use modular auto peak finding
         peaks = auto_find_peaks(wavenumbers, intensities, height_threshold=0.1, distance=15.0)
@@ -728,13 +806,13 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
     
     def fit_peaks(self):
         """Fit peaks using modular peak fitting."""
-        if not self.selected_peaks or not self.current_spectrum:
+        if not self.selected_peaks or not self._peak_spectrum:
             QMessageBox.warning(self, "Warning", "Select peaks first")
             return
         
         try:
-            wavenumbers = self.current_spectrum['wavenumbers']
-            intensities = self.current_spectrum['intensities']
+            wavenumbers = self._peak_spectrum['wavenumbers']
+            intensities = self._peak_spectrum['intensities']
             shape = self.shape_combo.currentText()
             
             # Use modular peak fitter
@@ -824,9 +902,9 @@ class RamanPolarizationAnalyzerModular(QMainWindow):
         
         ax.clear()
         
-        if self.current_spectrum:
-            wavenumbers = self.current_spectrum['wavenumbers']
-            intensities = self.current_spectrum['intensities']
+        if self._peak_spectrum:
+            wavenumbers = self._peak_spectrum['wavenumbers']
+            intensities = self._peak_spectrum['intensities']
             
             ax.plot(wavenumbers, intensities, 'b-', linewidth=1, alpha=0.7, label='Spectrum')
             
