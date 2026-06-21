@@ -1497,6 +1497,11 @@ class RamanAnalysisAppQt6(QMainWindow):
         wavenumbers = np.array(wavenumbers)
         intensities = np.array(intensities)
         
+        # Ensure wavenumbers are in ascending order (required for np.interp in search)
+        if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+            wavenumbers = wavenumbers[::-1]
+            intensities = intensities[::-1]
+        
         # Add file information to metadata
         metadata['file_path'] = str(file_path)
         metadata['file_name'] = Path(file_path).name
