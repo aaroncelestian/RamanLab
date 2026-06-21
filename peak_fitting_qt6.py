@@ -1294,6 +1294,7 @@ class SpectralDeconvolutionQt6(QDialog):
         self.fit_result = None
         self.background = None
         self.background_preview_active = False  # Track background preview state
+        self.no_subtraction_mode = False  # When True, model includes a constant offset param
         self.residuals = None
         self.components = []
         self.pca_result = None
@@ -1968,7 +1969,7 @@ class SpectralDeconvolutionQt6(QDialog):
         method_layout = QVBoxLayout(method_group)
         
         self.bg_method_combo = QComboBox()
-        self.bg_method_combo.addItems(["ALS", "Linear", "Polynomial", "Moving Average", "Spline"])
+        self.bg_method_combo.addItems(["No Subtraction", "Residual Polynomial", "ALS", "SNIP", "Excluded Regions", "Anchor Spline", "Linear", "Polynomial", "Moving Average", "Spline"])
         self.bg_method_combo.currentTextChanged.connect(self._on_bg_method_changed)
         method_layout.addWidget(self.bg_method_combo)
         
@@ -2152,6 +2153,90 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.bg_params_stack.addWidget(spline_widget)
         
+        # SNIP parameters (index 5)
+        snip_widget = QWidget()
+        snip_layout = QFormLayout(snip_widget)
+        snip_info = QLabel("Iterative peak-clipping — safest for carbon Raman.\nCannot over-subtract peaks.")
+        snip_info.setWordWrap(True)
+        snip_info.setStyleSheet("color: #555; font-size: 10px;")
+        snip_layout.addRow(snip_info)
+        self.snip_iter_slider = QSlider(Qt.Horizontal)
+        self.snip_iter_slider.setRange(5, 100)
+        self.snip_iter_slider.setValue(40)
+        self.snip_iter_slider.valueChanged.connect(self._trigger_background_update)
+        self.snip_iter_label = QLabel("40")
+        self.snip_iter_slider.valueChanged.connect(lambda v: self.snip_iter_label.setText(str(v)))
+        snip_iter_layout = QHBoxLayout()
+        snip_iter_layout.addWidget(self.snip_iter_slider)
+        snip_iter_layout.addWidget(self.snip_iter_label)
+        snip_layout.addRow("Iterations:", snip_iter_layout)
+        self.bg_params_stack.addWidget(snip_widget)
+        
+        # Excluded Regions parameters (index 6)
+        excl_widget = QWidget()
+        excl_layout = QFormLayout(excl_widget)
+        excl_info = QLabel("Fit polynomial to baseline-only regions.\nEnter wavenumber ranges, e.g.: 900-1100, 1750-2000")
+        excl_info.setWordWrap(True)
+        excl_info.setStyleSheet("color: #555; font-size: 10px;")
+        excl_layout.addRow(excl_info)
+        from PySide6.QtWidgets import QLineEdit
+        self.excl_regions_edit = QLineEdit("900-1100, 1750-2000")
+        self.excl_regions_edit.setPlaceholderText("e.g. 900-1100, 1750-2000")
+        self.excl_regions_edit.textChanged.connect(self._trigger_background_update)
+        excl_layout.addRow("Regions:", self.excl_regions_edit)
+        self.excl_poly_order_slider = QSlider(Qt.Horizontal)
+        self.excl_poly_order_slider.setRange(1, 5)
+        self.excl_poly_order_slider.setValue(2)
+        self.excl_poly_order_label = QLabel("2")
+        self.excl_poly_order_slider.valueChanged.connect(lambda v: self.excl_poly_order_label.setText(str(v)))
+        self.excl_poly_order_slider.valueChanged.connect(self._trigger_background_update)
+        excl_order_layout = QHBoxLayout()
+        excl_order_layout.addWidget(self.excl_poly_order_slider)
+        excl_order_layout.addWidget(self.excl_poly_order_label)
+        excl_layout.addRow("Poly Order:", excl_order_layout)
+        self.bg_params_stack.addWidget(excl_widget)
+        
+        # Anchor Spline parameters (index 7)
+        anchor_widget = QWidget()
+        anchor_layout = QFormLayout(anchor_widget)
+        anchor_info = QLabel("Cubic spline through known baseline positions.\nEnter anchor wavenumbers, e.g.: 920, 1150, 1480, 1770, 1980")
+        anchor_info.setWordWrap(True)
+        anchor_info.setStyleSheet("color: #555; font-size: 10px;")
+        anchor_layout.addRow(anchor_info)
+        self.anchor_positions_edit = QLineEdit("920, 1150, 1480, 1770, 1980")
+        self.anchor_positions_edit.setPlaceholderText("e.g. 920, 1150, 1480, 1770, 1980")
+        self.anchor_positions_edit.textChanged.connect(self._trigger_background_update)
+        anchor_layout.addRow("Anchors (cm⁻¹):", self.anchor_positions_edit)
+        self.bg_params_stack.addWidget(anchor_widget)
+
+        # No Subtraction parameters (index 8)
+        none_widget = QWidget()
+        none_layout = QFormLayout(none_widget)
+        none_info = QLabel("No background subtracted.\nFit peaks directly to the raw spectrum.\nBackground modeled as broad peaks (IFORS approach).")
+        none_info.setWordWrap(True)
+        none_info.setStyleSheet("color: #555; font-size: 10px;")
+        none_layout.addRow(none_info)
+        self.bg_params_stack.addWidget(none_widget)
+
+        # Residual Polynomial parameters (index 9)
+        respoly_widget = QWidget()
+        respoly_layout = QFormLayout(respoly_widget)
+        respoly_info = QLabel("IFORS-style: polynomial fitted to low-intensity regions,\nclamped \u22650 so it never subtracts from real peaks.")
+        respoly_info.setWordWrap(True)
+        respoly_info.setStyleSheet("color: #555; font-size: 10px;")
+        respoly_layout.addRow(respoly_info)
+        self.respoly_order_slider = QSlider(Qt.Horizontal)
+        self.respoly_order_slider.setRange(1, 9)
+        self.respoly_order_slider.setValue(5)
+        self.respoly_order_label = QLabel("5")
+        self.respoly_order_slider.valueChanged.connect(lambda v: self.respoly_order_label.setText(str(v)))
+        self.respoly_order_slider.valueChanged.connect(self._trigger_background_update)
+        respoly_order_layout = QHBoxLayout()
+        respoly_order_layout.addWidget(self.respoly_order_slider)
+        respoly_order_layout.addWidget(self.respoly_order_label)
+        respoly_layout.addRow("Poly Order:", respoly_order_layout)
+        self.bg_params_stack.addWidget(respoly_widget)
+
         # Add the stack to the layout
         bg_params_group = QGroupBox("Parameters")
         bg_params_group_layout = QVBoxLayout(bg_params_group)
@@ -2175,7 +2260,7 @@ class SpectralDeconvolutionQt6(QDialog):
         
         print(f"✅ Enhanced background controls created successfully!")
         print(f"   📋 Available methods: {[self.bg_method_combo.itemText(i) for i in range(self.bg_method_combo.count())]}")
-        print(f"   🔢 Parameter panels: {self.bg_params_stack.count()} (ALS, Linear, Polynomial, Moving Average, Spline)")
+        print(f"   🔢 Parameter panels: {self.bg_params_stack.count()} (ALS, SNIP, Excluded Regions, Anchor Spline, Linear, Polynomial, Moving Average, Spline)")
         print(f"   🎯 Currently showing: {self.bg_method_combo.currentText()} parameters")
         print(f"   🎛️ All controls now use sliders for consistent user experience!")
     
@@ -2189,23 +2274,15 @@ class SpectralDeconvolutionQt6(QDialog):
         print(f"🔄 Background method changed to: {method}")
         
         # Update the stacked widget to show appropriate parameters
-        if method == "ALS":
-            self.bg_params_stack.setCurrentIndex(0)
-            print("📊 Showing ALS parameters")
-        elif method == "Linear":
-            self.bg_params_stack.setCurrentIndex(1)
-            print("📊 Showing Linear parameters")
-        elif method == "Polynomial":
-            self.bg_params_stack.setCurrentIndex(2)
-            print("📊 Showing Polynomial parameters")
-        elif method == "Moving Average":
-            self.bg_params_stack.setCurrentIndex(3)
-            print("📊 Showing Moving Average parameters (Window Size, Window Type)")
-        elif method == "Spline":
-            self.bg_params_stack.setCurrentIndex(4)
-            print("📊 Showing Spline parameters (Knots, Smoothing, Degree)")
-        else:
-            print(f"⚠️ Unknown background method: {method}")
+        method_index = {
+            "ALS": 0, "Linear": 1, "Polynomial": 2,
+            "Moving Average": 3, "Spline": 4,
+            "SNIP": 5, "Excluded Regions": 6, "Anchor Spline": 7,
+            "No Subtraction": 8, "Residual Polynomial": 9
+        }
+        idx = method_index.get(method, 0)
+        self.bg_params_stack.setCurrentIndex(idx)
+        print(f"📊 Showing {method} parameters")
         
         # Trigger background update after method change
         self._trigger_background_update()
@@ -2325,6 +2402,29 @@ class SpectralDeconvolutionQt6(QDialog):
                     'n_knots': self.n_knots_slider.value() if hasattr(self, 'n_knots_slider') else 10,
                     'smoothing': self.smoothing_slider.value() if hasattr(self, 'smoothing_slider') else 100,
                     'degree': int(self.spline_degree_combo.currentText()) if hasattr(self, 'spline_degree_combo') else 3
+                }
+            elif method == "SNIP":
+                return {
+                    'method': 'SNIP',
+                    'n_iter': self.snip_iter_slider.value() if hasattr(self, 'snip_iter_slider') else 40
+                }
+            elif method == "Excluded Regions":
+                return {
+                    'method': 'ExcludedRegions',
+                    'regions': self.excl_regions_edit.text() if hasattr(self, 'excl_regions_edit') else '900-1100, 1750-2000',
+                    'order': self.excl_poly_order_slider.value() if hasattr(self, 'excl_poly_order_slider') else 2
+                }
+            elif method == "Anchor Spline":
+                return {
+                    'method': 'AnchorSpline',
+                    'anchors': self.anchor_positions_edit.text() if hasattr(self, 'anchor_positions_edit') else '920, 1150, 1480, 1770, 1980'
+                }
+            elif method == "No Subtraction":
+                return {'method': 'None'}
+            elif method == "Residual Polynomial":
+                return {
+                    'method': 'ResidualPoly',
+                    'order': self.respoly_order_slider.value() if hasattr(self, 'respoly_order_slider') else 5
                 }
             else:
                 return {
@@ -4681,46 +4781,101 @@ class SpectralDeconvolutionQt6(QDialog):
     
     def _calculate_background_with_method(self, method, params):
         """Calculate background using specified method and parameters."""
-        if method == "Linear":
+        if method == "None":
+            return self._baseline_none(self.original_intensities)
+        elif method == "ResidualPoly":
+            self.no_subtraction_mode = False
+            return self._baseline_residual_poly(
+                self.original_intensities,
+                order=params.get('order', 5),
+                wavenumbers=self.wavenumbers
+            )
+        elif method == "SNIP":
+            self.no_subtraction_mode = False
+            return self._baseline_snip(self.original_intensities, params.get('n_iter', 40))
+        elif method == "ExcludedRegions":
+            self.no_subtraction_mode = False
+            return self._baseline_excluded_regions(
+                self.wavenumbers, self.original_intensities,
+                params.get('regions', '900-1100, 1750-2000'),
+                params.get('order', 2)
+            )
+        elif method == "AnchorSpline":
+            self.no_subtraction_mode = False
+            return self._baseline_anchor_spline(
+                self.wavenumbers, self.original_intensities,
+                params.get('anchors', '920, 1150, 1480, 1770, 1980')
+            )
+        elif method == "Linear":
+            self.no_subtraction_mode = False
             return self._calculate_linear_background(
                 params.get('start_weight', 1.0), 
-                params.get('end_weight', 1.0)
+                params.get('end_weight', 1.0),
+                params.get('edge_fraction', 0.08)
             )
         elif method == "Polynomial":
+            self.no_subtraction_mode = False
             return self._calculate_polynomial_background(
                 params.get('order', 2), 
                 params.get('poly_method', "Least Squares")
             )
         elif method == "Moving Average":
+            self.no_subtraction_mode = False
             return self._calculate_moving_average_background(
                 params.get('window_percent', 15),
                 params.get('window_type', "Uniform")
             )
         elif method == "Spline":
+            self.no_subtraction_mode = False
             return self._calculate_spline_background_for_subtraction(
                 params.get('n_knots', 10),
                 params.get('smoothing', 100),
                 params.get('degree', 3)
             )
         else:
-            # Default to ALS
+            self.no_subtraction_mode = False
             return self._get_baseline_fitter().baseline_als(self.original_intensities)
     
-    def _calculate_background_for_batch(self, intensities, method, params):
+    def _calculate_background_for_batch(self, intensities, method, params, wavenumbers=None):
         """Calculate background for batch processing using specified method and parameters.
         
         Args:
             intensities: Input intensities (numpy array)
             method: Background method name
             params: Parameter dictionary
+            wavenumbers: Wavenumber array (required for ExcludedRegions and AnchorSpline)
             
         Returns:
             numpy array: Background values
         """
-        if method == "Linear":
+        if method == "None":
+            return self._baseline_none(intensities)
+        elif method == "ResidualPoly":
+            return self._baseline_residual_poly(
+                intensities,
+                order=params.get('order', 5),
+                wavenumbers=wavenumbers
+            )
+        elif method == "SNIP":
+            return self._baseline_snip(intensities, params.get('n_iter', 40))
+        elif method == "ExcludedRegions":
+            x = wavenumbers if wavenumbers is not None else np.arange(len(intensities))
+            return self._baseline_excluded_regions(
+                x, intensities,
+                params.get('regions', '900-1100, 1750-2000'),
+                params.get('order', 2)
+            )
+        elif method == "AnchorSpline":
+            x = wavenumbers if wavenumbers is not None else np.arange(len(intensities))
+            return self._baseline_anchor_spline(
+                x, intensities,
+                params.get('anchors', '920, 1150, 1480, 1770, 1980')
+            )
+        elif method == "Linear":
             return self._calculate_linear_background_for_batch(intensities, 
                 params.get('start_weight', 1.0), 
-                params.get('end_weight', 1.0)
+                params.get('end_weight', 1.0),
+                params.get('edge_fraction', 0.08)
             )
         elif method == "Polynomial":
             return self._calculate_polynomial_background_for_batch(intensities,
@@ -4747,27 +4902,133 @@ class SpectralDeconvolutionQt6(QDialog):
                 params.get('niter', 10)
             )
     
-    def _calculate_linear_background(self, start_weight, end_weight):
-        """Calculate linear background between weighted endpoints."""
+    def _calculate_linear_background(self, start_weight, end_weight, edge_fraction=0.08):
+        """Calculate automatic linear background by fitting through low-intensity end regions."""
         try:
             y = self.original_intensities
-            start_val = y[0] * start_weight
-            end_val = y[-1] * end_weight
-            return np.linspace(start_val, end_val, len(y))
+            return self._auto_linear_baseline(y, edge_fraction=edge_fraction)
         except Exception as e:
             print(f"Linear background calculation error: {str(e)}")
             return np.linspace(y[0], y[-1], len(y))
     
-    def _calculate_linear_background_for_batch(self, intensities, start_weight, end_weight):
-        """Calculate linear background for batch processing."""
+    def _calculate_linear_background_for_batch(self, intensities, start_weight, end_weight, edge_fraction=0.08):
+        """Calculate automatic linear background for batch processing."""
         try:
-            start_val = intensities[0] * start_weight
-            end_val = intensities[-1] * end_weight
-            return np.linspace(start_val, end_val, len(intensities))
+            return self._auto_linear_baseline(intensities, edge_fraction=edge_fraction)
         except Exception as e:
             print(f"Linear background calculation error: {str(e)}")
             return np.linspace(intensities[0], intensities[-1], len(intensities))
     
+    def _auto_linear_baseline(self, y, edge_fraction=0.08):
+        """Fit a linear baseline through the minimum-intensity regions at each end.
+        
+        Uses the lowest-intensity points within the first and last `edge_fraction`
+        of the spectrum to anchor the line, which is robust to endpoint noise.
+        """
+        n = len(y)
+        n_edge = max(int(n * edge_fraction), 3)
+        
+        # Use the median of the lowest-third of each edge window to anchor the line
+        left_window = y[:n_edge]
+        right_window = y[-n_edge:]
+        
+        n_low = max(n_edge // 3, 1)
+        left_val = np.mean(np.sort(left_window)[:n_low])
+        right_val = np.mean(np.sort(right_window)[:n_low])
+        
+        return np.linspace(left_val, right_val, n)
+    
+    def _baseline_none(self, y):
+        """No background subtraction — return zeros so raw spectrum is passed to fitter."""
+        self.no_subtraction_mode = True
+        return np.zeros_like(y)
+
+    def _baseline_residual_poly(self, y, order=5, wavenumbers=None):
+        """IFORS-style residual polynomial baseline.
+
+        Fits a polynomial to the residual (data minus current peak model estimate),
+        then clamps the result to >= 0 so it can never over-subtract peaks.
+        On first call (no peak model) uses a minimum-envelope estimate.
+        """
+        x = wavenumbers if wavenumbers is not None else np.arange(len(y))
+        x_norm = (x - x[0]) / (x[-1] - x[0]) * 100  # normalise like IFORS
+
+        # Estimate peak regions using minimum filtering
+        from scipy import ndimage
+        window = max(len(y) // 15, 5)
+        y_min = ndimage.minimum_filter1d(y, size=window)
+
+        # Residual = data - smoothed lower envelope
+        residual = y - y_min
+        threshold = np.percentile(residual, 25)
+        baseline_mask = residual <= threshold
+
+        if baseline_mask.sum() < order + 1:
+            baseline_mask = np.ones(len(y), dtype=bool)
+
+        coeffs = np.polyfit(x_norm[baseline_mask], y[baseline_mask], order)
+        bg = np.polyval(coeffs, x_norm)
+        bg = np.maximum(bg, 0)   # clamp to zero — cannot over-subtract
+        return np.minimum(bg, y) # cannot exceed data
+
+    def _baseline_snip(self, y, n_iter=40):
+        """SNIP (Statistics-sensitive Non-linear Iterative Peak-clipping) baseline.
+        
+        Iteratively clips peaks downward. Can never subtract more than the actual
+        background — the safest automatic method for carbon Raman spectra.
+        """
+        z = np.log(np.log(np.sqrt(y - np.min(y) + 1) + 1) + 1)
+        for p in range(1, n_iter + 1):
+            z_new = z.copy()
+            for i in range(p, len(z) - p):
+                z_new[i] = min(z[i], (z[i - p] + z[i + p]) / 2)
+            z = z_new
+        background = (np.exp(np.exp(z) - 1) - 1) ** 2 + np.min(y) - 1
+        return np.maximum(background, np.min(y))
+
+    def _baseline_excluded_regions(self, x, y, regions_str, order=2):
+        """Fit a polynomial only to user-defined baseline wavenumber ranges.
+        
+        regions_str: comma-separated ranges like '900-1100, 1750-2000'
+        """
+        mask = np.zeros(len(x), dtype=bool)
+        for part in regions_str.split(','):
+            part = part.strip()
+            if '-' in part:
+                try:
+                    lo, hi = [float(v) for v in part.split('-')]
+                    mask |= (x >= lo) & (x <= hi)
+                except ValueError:
+                    pass
+        if mask.sum() < order + 1:
+            return self._auto_linear_baseline(y)
+        coeffs = np.polyfit(x[mask], y[mask], order)
+        return np.polyval(coeffs, x)
+
+    def _baseline_anchor_spline(self, x, y, anchors_str):
+        """Cubic spline baseline through user-defined anchor wavenumber positions.
+        
+        anchors_str: comma-separated wavenumbers like '920, 1150, 1480, 1770, 1980'
+        At each anchor position the nearest actual data point intensity is used.
+        """
+        from scipy.interpolate import CubicSpline
+        try:
+            anchor_wns = sorted([float(v.strip()) for v in anchors_str.split(',') if v.strip()])
+        except ValueError:
+            return self._auto_linear_baseline(y)
+        anchor_wns = [w for w in anchor_wns if x[0] <= w <= x[-1]]
+        if len(anchor_wns) < 2:
+            return self._auto_linear_baseline(y)
+        anchor_ints = []
+        for w in anchor_wns:
+            idx = np.argmin(np.abs(x - w))
+            n = max(int(len(x) * 0.01), 1)
+            lo, hi = max(0, idx - n), min(len(y), idx + n + 1)
+            anchor_ints.append(np.min(y[lo:hi]))
+        cs = CubicSpline(anchor_wns, anchor_ints, extrapolate=True)
+        background = cs(x)
+        return np.minimum(background, y)
+
     def _calculate_polynomial_background(self, order, method):
         """Calculate polynomial background fit using proper baseline estimation."""
         try:
@@ -5261,6 +5522,14 @@ class SpectralDeconvolutionQt6(QDialog):
         n_peaks = len(validated_peaks)
         model = self.current_model
         
+        # Determine parameters per peak based on model
+        if model == "Asymmetric Voigt":
+            params_per_peak = 5
+        elif model in ("Pseudo-Voigt", "Voigt"):
+            params_per_peak = 4
+        else:
+            params_per_peak = 3
+        
         # Define a color palette for individual peaks
         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
                  '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9']
@@ -5269,18 +5538,40 @@ class SpectralDeconvolutionQt6(QDialog):
         individual_r2_values = self.calculate_individual_r2_values()
         
         for i in range(n_peaks):
-            start_idx = i * 3
-            if start_idx + 2 < len(self.fit_params):
-                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+            start_idx = i * params_per_peak
+            if start_idx + params_per_peak - 1 < len(self.fit_params):
                 
-                # Generate individual peak curve
-                if model == "Gaussian":
+                # Generate individual peak curve based on model
+                if model == "Asymmetric Voigt":
+                    amp, cen, left_wid, right_wid, eta = self.fit_params[start_idx:start_idx+5]
+                    left_wid = max(abs(left_wid), 1.0)
+                    right_wid = max(abs(right_wid), 1.0)
+                    eta = max(0.0, min(1.0, eta))
+                    mask_left = self.wavenumbers <= cen
+                    mask_right = self.wavenumbers > cen
+                    peak_curve = np.zeros_like(self.wavenumbers)
+                    if np.any(mask_left):
+                        x_left = self.wavenumbers[mask_left]
+                        g_left = np.exp(-(x_left - cen)**2 / (2 * left_wid**2))
+                        l_left = left_wid**2 / ((x_left - cen)**2 + left_wid**2)
+                        peak_curve[mask_left] = amp * ((1 - eta) * g_left + eta * l_left)
+                    if np.any(mask_right):
+                        x_right = self.wavenumbers[mask_right]
+                        g_right = np.exp(-(x_right - cen)**2 / (2 * right_wid**2))
+                        l_right = right_wid**2 / ((x_right - cen)**2 + right_wid**2)
+                        peak_curve[mask_right] = amp * ((1 - eta) * g_right + eta * l_right)
+                    wid = (left_wid + right_wid) / 2  # for annotation only
+                elif model == "Gaussian":
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
                 elif model == "Lorentzian":
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
                 elif model == "Pseudo-Voigt":
+                    amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
                     peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
                 else:
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)  # Default
                 
                 # Select color from palette (cycle if more peaks than colors)
@@ -5341,19 +5632,49 @@ class SpectralDeconvolutionQt6(QDialog):
         total_fit = self.multi_peak_model(self.wavenumbers, *self.fit_params)
         
         # Calculate R² for each peak in its local region
+        # Determine parameters per peak based on model
+        if model == "Asymmetric Voigt":
+            params_per_peak = 5
+        elif model in ("Pseudo-Voigt", "Voigt"):
+            params_per_peak = 4
+        else:
+            params_per_peak = 3
+        
         for i in range(n_peaks):
-            start_idx = i * 3
-            if start_idx + 2 < len(self.fit_params):
-                amp, cen, wid = self.fit_params[start_idx:start_idx+3]
+            start_idx = i * params_per_peak
+            if start_idx + params_per_peak - 1 < len(self.fit_params):
                 
-                # Generate individual peak curve
-                if model == "Gaussian":
+                # Generate individual peak curve based on model
+                if model == "Asymmetric Voigt":
+                    amp, cen, left_wid, right_wid, eta = self.fit_params[start_idx:start_idx+5]
+                    left_wid = max(abs(left_wid), 1.0)
+                    right_wid = max(abs(right_wid), 1.0)
+                    eta = max(0.0, min(1.0, eta))
+                    mask_left = self.wavenumbers <= cen
+                    mask_right = self.wavenumbers > cen
+                    peak_curve = np.zeros_like(self.wavenumbers)
+                    if np.any(mask_left):
+                        x_left = self.wavenumbers[mask_left]
+                        g_left = np.exp(-(x_left - cen)**2 / (2 * left_wid**2))
+                        l_left = left_wid**2 / ((x_left - cen)**2 + left_wid**2)
+                        peak_curve[mask_left] = amp * ((1 - eta) * g_left + eta * l_left)
+                    if np.any(mask_right):
+                        x_right = self.wavenumbers[mask_right]
+                        g_right = np.exp(-(x_right - cen)**2 / (2 * right_wid**2))
+                        l_right = right_wid**2 / ((x_right - cen)**2 + right_wid**2)
+                        peak_curve[mask_right] = amp * ((1 - eta) * g_right + eta * l_right)
+                    wid = (left_wid + right_wid) / 2
+                elif model == "Gaussian":
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
                 elif model == "Lorentzian":
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
                 elif model == "Pseudo-Voigt":
+                    amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
                     peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
                 else:
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.gaussian(self.wavenumbers, amp, cen, wid)
                 
                 # Calculate R² for this peak in a focused region
@@ -5891,10 +6212,13 @@ class SpectralDeconvolutionQt6(QDialog):
         else:
             params_per_peak = 3
             
-        # Ensure we have the right number of parameters for the peaks
+        # Ensure we have the right number of parameters for the peaks.
+        # When no_subtraction_mode is on, the last param is the offset — don't count it.
         n_peaks = len(validated_peaks)
-        expected_params = n_peaks * params_per_peak
-        if len(params) < expected_params:
+        no_sub = getattr(self, 'no_subtraction_mode', False)
+        expected_params = n_peaks * params_per_peak + (1 if no_sub else 0)
+        peak_params_count = len(params) - (1 if no_sub else 0)
+        if peak_params_count < n_peaks * params_per_peak:
             # Pad with default values if not enough parameters
             if params_per_peak == 5:
                 # For asymmetric: amp, center, left_width, right_width, eta
@@ -5903,8 +6227,11 @@ class SpectralDeconvolutionQt6(QDialog):
                 # For symmetric: amp, center, width
                 default_params = [100, 1500, 50]
             
-            missing_peaks = (expected_params - len(params)) // params_per_peak
-            params = list(params) + default_params * missing_peaks
+            missing_peaks = (n_peaks * params_per_peak - peak_params_count) // params_per_peak
+            if no_sub:
+                params = list(params[:-1]) + default_params * missing_peaks + [params[-1]]
+            else:
+                params = list(params) + default_params * missing_peaks
         
         model = np.zeros_like(x)
         
@@ -5959,6 +6286,12 @@ class SpectralDeconvolutionQt6(QDialog):
                 
                 model += component
         
+        # When no background was subtracted, include a constant offset parameter
+        # (the last parameter) to account for the fluorescence/Raman floor.
+        if getattr(self, 'no_subtraction_mode', False) and len(params) > 0:
+            offset = params[-1]
+            model += offset
+
         return model
     
     def fit_peaks(self):
@@ -5985,11 +6318,18 @@ class SpectralDeconvolutionQt6(QDialog):
             bounds_lower = []
             bounds_upper = []
             
+            # When no background subtracted, estimate the spectral floor for offset init
+            no_sub = getattr(self, 'no_subtraction_mode', False)
+            if no_sub:
+                floor_estimate = float(np.percentile(self.processed_intensities, 5))
+
             for i, peak_idx in enumerate(all_peaks):
                 if 0 <= peak_idx < len(self.wavenumbers):
-                    # Amplitude: Use actual intensity at peak
-                    amp = self.processed_intensities[peak_idx]
-                    
+                    # Amplitude: Use intensity above floor when no subtraction mode
+                    raw_amp = self.processed_intensities[peak_idx]
+                    amp = raw_amp - floor_estimate if no_sub else raw_amp
+                    amp = max(amp, 1.0)
+
                     # Center: Use wavenumber at peak
                     cen = self.wavenumbers[peak_idx]
                     
@@ -6014,6 +6354,12 @@ class SpectralDeconvolutionQt6(QDialog):
                         # Set reasonable bounds
                         bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
                         bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
+
+            # Append offset parameter when no background subtracted
+            if no_sub:
+                initial_params.append(floor_estimate)
+                bounds_lower.append(0.0)
+                bounds_upper.append(float(np.max(self.processed_intensities)))
             
             if not initial_params:
                 QMessageBox.warning(self, "Invalid Peaks", "No valid peak parameters could be estimated.")
@@ -6987,71 +7333,15 @@ class SpectralDeconvolutionQt6(QDialog):
         # This method kept for compatibility with auto-preview (though spline removed from auto-preview)
         return self._calculate_spline_background_for_subtraction(n_knots, smoothing, 3)
     
-    def _calculate_linear_background(self, start_weight, end_weight):
-        """Calculate linear background that fits the baseline, not the data."""
+    def _calculate_linear_background(self, start_weight, end_weight, edge_fraction=0.08):
+        """Calculate automatic linear background by fitting through low-intensity end regions."""
         try:
-            from scipy import ndimage
-            
             y = self.original_intensities
-            
-            # Method 1: Use minimum filtering to identify baseline regions
-            window_size = max(len(y) // 15, 5)  # Adaptive window size for minimum filtering
-            y_min_filtered = ndimage.minimum_filter1d(y, size=window_size)
-            
-            # Method 2: Identify baseline points using percentile approach
-            # Take points in the lower percentile as likely baseline
-            percentile_threshold = 30  # Use bottom 30% as baseline candidates
-            threshold = np.percentile(y, percentile_threshold)
-            baseline_mask = y <= threshold
-            
-            # Combine minimum filtered data with baseline mask
-            baseline_indices = np.where(baseline_mask)[0]
-            
-            if len(baseline_indices) < 2:  # Need at least 2 points for linear fit
-                # Fallback: use endpoint-weighted linear fit to minimum filtered data
-                start_val = y_min_filtered[0] * start_weight
-                end_val = y_min_filtered[-1] * end_weight
-            else:
-                # Fit line to identified baseline points
-                baseline_y = y[baseline_indices]
-                
-                # Apply weights to endpoints
-                if len(baseline_indices) > 0:
-                    # Find closest baseline points to start and end
-                    start_idx = baseline_indices[0]
-                    end_idx = baseline_indices[-1]
-                    
-                    start_val = y[start_idx] * start_weight
-                    end_val = y[end_idx] * end_weight
-                else:
-                    start_val = y[0] * start_weight
-                    end_val = y[-1] * end_weight
-            
-            # Create linear background
-            background = np.linspace(start_val, end_val, len(y))
-            
-            # Ensure background doesn't exceed data unrealistically
-            background = np.minimum(background, y)
-            
-            return background
-            
-        except ImportError:
-            # Fallback without scipy
-            y = self.original_intensities
-            
-            # Simple approach: weight the endpoints and create linear baseline
-            start_val = y[0] * start_weight
-            end_val = y[-1] * end_weight
-            background = np.linspace(start_val, end_val, len(y))
-            
-            return np.minimum(background, y)
-        
+            return self._auto_linear_baseline(y, edge_fraction=edge_fraction)
         except Exception as e:
             print(f"Linear background calculation error: {str(e)}")
-            # Final fallback
             y = self.original_intensities
-            background = np.linspace(y[0], y[-1], len(y))
-            return np.minimum(background, y)
+            return np.linspace(y[0], y[-1], len(y))
     
     def _calculate_polynomial_background(self, poly_order, poly_method):
         """Calculate polynomial background that fits the baseline, not the data."""
@@ -7575,9 +7865,10 @@ class SpectralDeconvolutionQt6(QDialog):
             self.background_options.clear()
             self.background_option_lines.clear()
             
-            # Reset dropdown
-            self.bg_options_combo.clear()
-            self.bg_options_combo.addItem("None - Generate options first")
+            # Reset dropdown (only present in some subclasses)
+            if hasattr(self, 'bg_options_combo'):
+                self.bg_options_combo.clear()
+                self.bg_options_combo.addItem("None - Generate options first")
             
             # Clear results text if it was showing option info
             if hasattr(self, 'results_text') and "Selected Background Option:" in self.results_text.toPlainText():
@@ -8407,7 +8698,7 @@ class SpectralDeconvolutionQt6(QDialog):
                         # Use the same background method selected in the background tab
                         method = bg_params.get('method', 'ALS')
                         try:
-                            background = self._calculate_background_for_batch(region_int, method, bg_params)
+                            background = self._calculate_background_for_batch(region_int, method, bg_params, wavenumbers=region_wave)
                             region_int = region_int - background
                             print(f"✅ Applied {method} background correction to {Path(file_path).name}")
                         except Exception as e:
@@ -8973,6 +9264,36 @@ class SpectralDeconvolutionQt6(QDialog):
                     residuals = region_result.get('residuals')
                     if residuals is not None:
                         spectrum_data['residuals'] = residuals
+                    
+                    # Build a peaks_df from fit_params so ParameterExtractor can use
+                    # exact fitted peak positions/areas instead of re-detecting peaks
+                    # on the total fitted curve (which includes background-modeling peaks)
+                    if peaks is not None and fit_params is not None and len(peaks) > 0:
+                        peak_model = region_result.get('peak_params', {}).get('model', 'gaussian')
+                        if peak_model in ('asymmetric voigt', 'Asymmetric Voigt'):
+                            params_per_peak = 5
+                        elif peak_model in ('pseudo-voigt', 'Pseudo-Voigt', 'voigt', 'Voigt'):
+                            params_per_peak = 4
+                        else:
+                            params_per_peak = 3
+                        n_peaks_fit = len(peaks)
+                        peak_rows = []
+                        for i in range(n_peaks_fit):
+                            base = i * params_per_peak
+                            if base + 2 < len(fit_params):
+                                amp = fit_params[base]
+                                cen = fit_params[base + 1]
+                                wid = fit_params[base + 2]
+                                fwhm_val = wid * 2 * np.sqrt(2 * np.log(2))
+                                area_val = amp * wid * np.sqrt(2 * np.pi)
+                                peak_rows.append({
+                                    'peak_center': cen,
+                                    'amplitude': amp,
+                                    'fwhm': fwhm_val,
+                                    'area': area_val
+                                })
+                        if peak_rows:
+                            spectrum_data['peaks_df'] = pd.DataFrame(peak_rows)
                     
                     # Add full spectrum data if available (beyond just the region)
                     # This is useful for plotting complete spectra

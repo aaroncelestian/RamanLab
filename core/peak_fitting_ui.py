@@ -51,7 +51,12 @@ class BackgroundControlsWidget(QWidget):
         
         self.bg_method_combo = QComboBox()
         self.bg_method_combo.addItems([
+            "No Subtraction",
+            "Residual Polynomial (IFORS)",
             "ALS (Asymmetric Least Squares)",
+            "SNIP (Peak-Clipping)",
+            "Excluded Regions Polynomial",
+            "Anchor Spline",
             "Linear Baseline",
             "Polynomial Fit",
             "Moving Average",
@@ -62,12 +67,47 @@ class BackgroundControlsWidget(QWidget):
         layout.addLayout(method_layout)
         
         # Parameter controls (stacked based on method)
+        self.create_no_subtraction_controls(layout)
+        self.create_residual_poly_controls(layout)
         self.create_als_controls(layout)
+        self.create_snip_controls(layout)
+        self.create_excluded_regions_controls(layout)
+        self.create_anchor_spline_controls(layout)
         self.create_linear_controls(layout)
         self.create_polynomial_controls(layout)
         
         # Note: Action buttons are handled by the parent application
         
+    def create_no_subtraction_controls(self, parent_layout):
+        """Create No Subtraction info panel"""
+        self.no_subtraction_group = QGroupBox("No Background Subtraction")
+        ns_layout = QGridLayout(self.no_subtraction_group)
+        info_label = QLabel("Fit peaks directly to the raw spectrum.\nNo baseline is subtracted. Use broad background\npeaks in your model to absorb fluorescence (IFORS approach).")
+        info_label.setStyleSheet("color: #555; font-size: 10px;")
+        info_label.setWordWrap(True)
+        ns_layout.addWidget(info_label, 0, 0)
+        parent_layout.addWidget(self.no_subtraction_group)
+        self.no_subtraction_group.hide()
+
+    def create_residual_poly_controls(self, parent_layout):
+        """Create IFORS-style residual polynomial controls"""
+        self.respoly_group = QGroupBox("Residual Polynomial (IFORS)")
+        rp_layout = QGridLayout(self.respoly_group)
+        info_label = QLabel("Polynomial fitted to low-intensity (non-peak) regions,\nclamped \u22650 so it can never over-subtract peaks.")
+        info_label.setStyleSheet("color: #555; font-size: 10px;")
+        info_label.setWordWrap(True)
+        rp_layout.addWidget(info_label, 0, 0, 1, 3)
+        rp_layout.addWidget(QLabel("Poly Order:"), 1, 0)
+        self.respoly_order_slider = QSlider(Qt.Horizontal)
+        self.respoly_order_slider.setRange(1, 9)
+        self.respoly_order_slider.setValue(5)
+        self.respoly_order_slider.valueChanged.connect(self.on_respoly_order_changed)
+        rp_layout.addWidget(self.respoly_order_slider, 1, 1)
+        self.respoly_order_label = QLabel("5")
+        rp_layout.addWidget(self.respoly_order_label, 1, 2)
+        parent_layout.addWidget(self.respoly_group)
+        self.respoly_group.hide()
+
     def create_als_controls(self, parent_layout):
         """Create ALS parameter controls with sliders"""
         self.als_group = QGroupBox("ALS Parameters")
@@ -105,30 +145,97 @@ class BackgroundControlsWidget(QWidget):
         
         parent_layout.addWidget(self.als_group)
         
+    def create_snip_controls(self, parent_layout):
+        """Create SNIP peak-clipping parameter controls"""
+        self.snip_group = QGroupBox("SNIP Parameters")
+        snip_layout = QGridLayout(self.snip_group)
+
+        info_label = QLabel("Iterative peak-clipping — can never over-subtract.\nGood default for carbon Raman batch processing.")
+        info_label.setStyleSheet("color: #555; font-size: 10px;")
+        info_label.setWordWrap(True)
+        snip_layout.addWidget(info_label, 0, 0, 1, 3)
+
+        snip_layout.addWidget(QLabel("Iterations:"), 1, 0)
+        self.snip_iter_slider = QSlider(Qt.Horizontal)
+        self.snip_iter_slider.setRange(5, 100)
+        self.snip_iter_slider.setValue(40)
+        self.snip_iter_slider.valueChanged.connect(self.on_snip_iter_changed)
+        snip_layout.addWidget(self.snip_iter_slider, 1, 1)
+        self.snip_iter_label = QLabel("40")
+        snip_layout.addWidget(self.snip_iter_label, 1, 2)
+
+        parent_layout.addWidget(self.snip_group)
+        self.snip_group.hide()
+
+    def create_excluded_regions_controls(self, parent_layout):
+        """Create excluded-regions polynomial controls"""
+        from PySide6.QtWidgets import QLineEdit
+        self.excluded_regions_group = QGroupBox("Excluded Regions Polynomial")
+        excl_layout = QGridLayout(self.excluded_regions_group)
+
+        info_label = QLabel("Fit polynomial only to baseline regions.\nEnter comma-separated wavenumber ranges, e.g.:\n900-1100, 1750-2000")
+        info_label.setStyleSheet("color: #555; font-size: 10px;")
+        info_label.setWordWrap(True)
+        excl_layout.addWidget(info_label, 0, 0, 1, 3)
+
+        excl_layout.addWidget(QLabel("Regions:"), 1, 0)
+        self.excl_regions_edit = QLineEdit("900-1100, 1750-2000")
+        self.excl_regions_edit.setPlaceholderText("e.g. 900-1100, 1750-2000")
+        self.excl_regions_edit.textChanged.connect(lambda: self.parameters_changed.emit())
+        excl_layout.addWidget(self.excl_regions_edit, 1, 1, 1, 2)
+
+        excl_layout.addWidget(QLabel("Poly Order:"), 2, 0)
+        self.excl_poly_order_slider = QSlider(Qt.Horizontal)
+        self.excl_poly_order_slider.setRange(1, 5)
+        self.excl_poly_order_slider.setValue(2)
+        self.excl_poly_order_slider.valueChanged.connect(self.on_excl_poly_order_changed)
+        excl_layout.addWidget(self.excl_poly_order_slider, 2, 1)
+        self.excl_poly_order_label = QLabel("2")
+        excl_layout.addWidget(self.excl_poly_order_label, 2, 2)
+
+        parent_layout.addWidget(self.excluded_regions_group)
+        self.excluded_regions_group.hide()
+
+    def create_anchor_spline_controls(self, parent_layout):
+        """Create anchor-point spline controls"""
+        from PySide6.QtWidgets import QLineEdit
+        self.anchor_spline_group = QGroupBox("Anchor Spline")
+        anchor_layout = QGridLayout(self.anchor_spline_group)
+
+        info_label = QLabel("Cubic spline through fixed baseline anchor points.\nEnter wavenumbers of known baseline positions, e.g.:\n920, 1150, 1480, 1770, 1980")
+        info_label.setStyleSheet("color: #555; font-size: 10px;")
+        info_label.setWordWrap(True)
+        anchor_layout.addWidget(info_label, 0, 0, 1, 3)
+
+        anchor_layout.addWidget(QLabel("Anchors (cm⁻¹):"), 1, 0)
+        self.anchor_positions_edit = QLineEdit("920, 1150, 1480, 1770, 1980")
+        self.anchor_positions_edit.setPlaceholderText("e.g. 920, 1150, 1480, 1770, 1980")
+        self.anchor_positions_edit.textChanged.connect(lambda: self.parameters_changed.emit())
+        anchor_layout.addWidget(self.anchor_positions_edit, 1, 1, 1, 2)
+
+        parent_layout.addWidget(self.anchor_spline_group)
+        self.anchor_spline_group.hide()
+
     def create_linear_controls(self, parent_layout):
-        """Create linear baseline controls with sliders"""
+        """Create linear baseline controls"""
         self.linear_group = QGroupBox("Linear Parameters")
         linear_layout = QGridLayout(self.linear_group)
         
-        # Start weight
-        linear_layout.addWidget(QLabel("Start Weight:"), 0, 0)
-        self.start_weight_slider = QSlider(Qt.Horizontal)
-        self.start_weight_slider.setRange(1, 100)  # 0.1 to 10.0, scaled by 10
-        self.start_weight_slider.setValue(10)  # Default 1.0
-        self.start_weight_slider.valueChanged.connect(self.on_start_weight_changed)
-        linear_layout.addWidget(self.start_weight_slider, 0, 1)
-        self.start_weight_label = QLabel("1.0")
-        linear_layout.addWidget(self.start_weight_label, 0, 2)
+        # Info label
+        info_label = QLabel("Auto-fits a line through the lowest-intensity\npoints at each end of the spectrum.")
+        info_label.setStyleSheet("color: #555; font-size: 10px;")
+        info_label.setWordWrap(True)
+        linear_layout.addWidget(info_label, 0, 0, 1, 3)
         
-        # End weight
-        linear_layout.addWidget(QLabel("End Weight:"), 1, 0)
-        self.end_weight_slider = QSlider(Qt.Horizontal)
-        self.end_weight_slider.setRange(1, 100)  # 0.1 to 10.0, scaled by 10
-        self.end_weight_slider.setValue(10)  # Default 1.0
-        self.end_weight_slider.valueChanged.connect(self.on_end_weight_changed)
-        linear_layout.addWidget(self.end_weight_slider, 1, 1)
-        self.end_weight_label = QLabel("1.0")
-        linear_layout.addWidget(self.end_weight_label, 1, 2)
+        # Edge fraction slider
+        linear_layout.addWidget(QLabel("Edge %:"), 1, 0)
+        self.edge_fraction_slider = QSlider(Qt.Horizontal)
+        self.edge_fraction_slider.setRange(2, 20)  # 2% to 20% of spectrum
+        self.edge_fraction_slider.setValue(8)  # Default 8%
+        self.edge_fraction_slider.valueChanged.connect(self.on_edge_fraction_changed)
+        linear_layout.addWidget(self.edge_fraction_slider, 1, 1)
+        self.edge_fraction_label = QLabel("8%")
+        linear_layout.addWidget(self.edge_fraction_label, 1, 2)
         
         parent_layout.addWidget(self.linear_group)
         self.linear_group.hide()  # Hidden by default
@@ -154,13 +261,28 @@ class BackgroundControlsWidget(QWidget):
     def on_method_changed(self, method_text):
         """Handle background method change"""
         # Hide all parameter groups
+        self.no_subtraction_group.hide()
+        self.respoly_group.hide()
         self.als_group.hide()
+        self.snip_group.hide()
+        self.excluded_regions_group.hide()
+        self.anchor_spline_group.hide()
         self.linear_group.hide()
         self.poly_group.hide()
         
         # Show relevant group
-        if "ALS" in method_text:
+        if "No Subtraction" in method_text:
+            self.no_subtraction_group.show()
+        elif "Residual" in method_text:
+            self.respoly_group.show()
+        elif "ALS" in method_text:
             self.als_group.show()
+        elif "SNIP" in method_text:
+            self.snip_group.show()
+        elif "Excluded" in method_text:
+            self.excluded_regions_group.show()
+        elif "Anchor" in method_text:
+            self.anchor_spline_group.show()
         elif "Linear" in method_text:
             self.linear_group.show()
         elif "Polynomial" in method_text:
@@ -186,39 +308,69 @@ class BackgroundControlsWidget(QWidget):
         self.niter_label.setText(str(value))
         self.parameters_changed.emit()
     
-    def on_start_weight_changed(self, value):
-        """Handle start weight slider change"""
-        weight_val = value / 10.0
-        self.start_weight_label.setText(f"{weight_val:.1f}")
+    def on_snip_iter_changed(self, value):
+        """Handle SNIP iterations slider change"""
+        self.snip_iter_label.setText(str(value))
         self.parameters_changed.emit()
-    
-    def on_end_weight_changed(self, value):
-        """Handle end weight slider change"""
-        weight_val = value / 10.0
-        self.end_weight_label.setText(f"{weight_val:.1f}")
+
+    def on_excl_poly_order_changed(self, value):
+        """Handle excluded-regions polynomial order slider change"""
+        self.excl_poly_order_label.setText(str(value))
+        self.parameters_changed.emit()
+
+    def on_edge_fraction_changed(self, value):
+        """Handle edge fraction slider change"""
+        self.edge_fraction_label.setText(f"{value}%")
         self.parameters_changed.emit()
     
     def on_poly_order_changed(self, value):
         """Handle polynomial order slider change"""
         self.poly_order_label.setText(str(value))
         self.parameters_changed.emit()
+
+    def on_respoly_order_changed(self, value):
+        """Handle residual polynomial order slider change"""
+        self.respoly_order_label.setText(str(value))
+        self.parameters_changed.emit()
         
     def get_background_parameters(self):
         """Get current background parameters"""
         method = self.bg_method_combo.currentText()
         
-        if "ALS" in method:
+        if "No Subtraction" in method:
+            return {'method': 'None'}
+        elif "Residual" in method:
+            return {
+                'method': 'ResidualPoly',
+                'order': self.respoly_order_slider.value()
+            }
+        elif "ALS" in method:
             return {
                 'method': 'ALS',
                 'lambda': 10 ** self.lambda_slider.value(),
                 'p': self.p_slider.value() / 1000.0,
                 'niter': self.niter_slider.value()
             }
+        elif "SNIP" in method:
+            return {
+                'method': 'SNIP',
+                'n_iter': self.snip_iter_slider.value()
+            }
+        elif "Excluded" in method:
+            return {
+                'method': 'ExcludedRegions',
+                'order': self.excl_poly_order_slider.value(),
+                'regions': self.excl_regions_edit.text()
+            }
+        elif "Anchor" in method:
+            return {
+                'method': 'AnchorSpline',
+                'anchors': self.anchor_positions_edit.text()
+            }
         elif "Linear" in method:
             return {
                 'method': 'Linear',
-                'start_weight': self.start_weight_slider.value() / 10.0,
-                'end_weight': self.end_weight_slider.value() / 10.0
+                'edge_fraction': self.edge_fraction_slider.value() / 100.0
             }
         elif "Polynomial" in method:
             return {

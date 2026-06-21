@@ -4054,7 +4054,50 @@ class RamanAnalysisAppQt6(QMainWindow):
         spatial_layout.addWidget(mixture_analysis_btn)
         
         layout.addWidget(spatial_group)
-        
+
+        # IFORS Carbon Geothermometry group
+        ifors_group = QGroupBox("Carbon Raman Geothermometry")
+        ifors_layout = QVBoxLayout(ifors_group)
+
+        ifors_style = """
+            QPushButton {
+                background-color: #D97706;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #B45309;
+            }
+            QPushButton:pressed {
+                background-color: #92400E;
+            }
+        """
+
+        ifors_btn = QPushButton("\U0001f321\ufe0f  IFORS Carbon Geothermometry")
+        ifors_btn.setToolTip(
+            "Iterative Fitting of Raman Spectra (IFORS) for carbon geothermometry.\n"
+            "Automatically fits pseudo-Voigt peaks, computes D/G STA metrics,\n"
+            "and estimates peak metamorphic temperature using Beyssac, Rahl,\n"
+            "Kouketsu, Aoya, and IFORS STA calibrations."
+        )
+        ifors_btn.clicked.connect(self.launch_ifors_geothermometry)
+        ifors_btn.setStyleSheet(ifors_style)
+        ifors_layout.addWidget(ifors_btn)
+
+        ifors_info = QLabel(
+            "Works on a single spectrum or a batch pickle file. "
+            "No manual peak picking required \u2014 peaks are found iteratively from the residual."
+        )
+        ifors_info.setWordWrap(True)
+        ifors_info.setStyleSheet("color: #666; font-size: 10px; padding: 2px 4px;")
+        ifors_layout.addWidget(ifors_info)
+
+        layout.addWidget(ifors_group)
+
         # Mechanical Analysis Tools group
         mechanical_group = QGroupBox("Mechanical Analysis Tools")
         mechanical_layout = QVBoxLayout(mechanical_group)
@@ -4091,7 +4134,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         mechanical_layout.addWidget(chemical_strain_btn)
         
         layout.addWidget(mechanical_group)
-        
+
         # Additional Processing Tools group
         processing_group = QGroupBox("Additional Processing Tools")
         processing_layout = QVBoxLayout(processing_group)
@@ -4494,6 +4537,47 @@ class RamanAnalysisAppQt6(QMainWindow):
             mixture_analyzer.log_status(f"   Range: {wn_min:.1f} - {wn_max:.1f} cm⁻¹")
         except Exception as e:
             print(f"⚠️ Warning: Could not update mixture analyzer constraint UI: {e}")
+
+    def launch_ifors_geothermometry(self):
+        """Launch the IFORS Carbon Geothermometry analysis module."""
+        try:
+            from geothermometry_analysis import GeothermometryAnalysisDialog
+
+            # Try to use a batch pickle file if one is already selected
+            pkl_file = getattr(self, 'selected_data_file', None)
+
+            if not pkl_file:
+                reply = QMessageBox.question(
+                    self,
+                    'IFORS Geothermometry',
+                    'Open with a batch pickle file?\n\n'
+                    'Click Yes to select a .pkl file from a previous batch run,\n'
+                    'or No to open with the currently loaded spectrum.',
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                if reply == QMessageBox.Yes:
+                    file_path, _ = QFileDialog.getOpenFileName(
+                        self,
+                        'Select Batch Results File',
+                        '',
+                        'Pickle Files (*.pkl);;All Files (*)'
+                    )
+                    if file_path:
+                        pkl_file = file_path
+
+            dialog = GeothermometryAnalysisDialog(self, pkl_file=pkl_file)
+            dialog.show()
+
+        except ImportError as e:
+            QMessageBox.warning(
+                self, 'Module Not Available',
+                f'Geothermometry module could not be loaded:\n{e}\n\n'
+                'Ensure geothermometry_analysis.py is in the RamanLab directory.'
+            )
+        except Exception as e:
+            QMessageBox.critical(self, 'Launch Error',
+                                 f'Failed to launch IFORS Geothermometry:\n{e}')
 
     def launch_stress_strain_analysis(self):
         """Launch stress/strain analysis tool."""
