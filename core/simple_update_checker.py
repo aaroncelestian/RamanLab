@@ -273,6 +273,77 @@ class SimpleUpdateDialog(QDialog):
                               "Please try the manual update method.")
 
 
+def _check_commits_vs_local(github_api_url):
+    """
+    Compare the latest commit on GitHub against the local git HEAD.
+    Returns an update_info dict if GitHub has newer commits, else None.
+    Works even when the version number hasn't changed between pushes.
+    """
+    try:
+        # Get local HEAD commit SHA
+        local_result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=5
+        )
+        if local_result.returncode != 0:
+            return None  # Not a git repo or git not available
+        local_sha = local_result.stdout.strip()
+
+        # Get latest commit from GitHub API
+        commits_url = f"{github_api_url}/commits?per_page=1"
+        resp = requests.get(commits_url, timeout=10)
+        if resp.status_code != 200:
+            return None
+
+        commits_data = resp.json()
+        if not commits_data:
+            return None
+
+        latest_commit = commits_data[0]
+        remote_sha = latest_commit['sha']
+
+        if remote_sha == local_sha:
+            return None  # Already up to date
+
+        # There are newer commits — build update_info
+        commit_msg = latest_commit['commit']['message'].split('\n')[0]  # First line only
+        commit_date = latest_commit['commit']['committer']['date'][:10]  # YYYY-MM-DD
+        num_commits_behind = _count_commits_behind(github_api_url, local_sha)
+
+        behind_text = f" ({num_commits_behind} commit(s) behind)" if num_commits_behind else ""
+        return {
+            'version': f"{__version__} (new commits available)",
+            'name': f"Code Updates Available{behind_text}",
+            'body': (
+                f"Your version number ({__version__}) is current, but there are newer "
+                f"commits on GitHub that haven't been downloaded yet.\n\n"
+                f"Latest commit ({commit_date}):\n  {commit_msg}\n\n"
+                f"Local commit:  {local_sha[:7]}\n"
+                f"Remote commit: {remote_sha[:7]}\n\n"
+                f"Use 'Auto Update' (git pull) to download the latest changes."
+            ),
+            'html_url': f"https://github.com/aaroncelestian/RamanLab/commits/main"
+        }
+    except Exception:
+        return None
+
+
+def _count_commits_behind(github_api_url, local_sha):
+    """Return how many commits ahead of local_sha the remote is (up to 30)."""
+    try:
+        commits_url = f"{github_api_url}/commits?per_page=30"
+        resp = requests.get(commits_url, timeout=10)
+        if resp.status_code != 200:
+            return None
+        commits = resp.json()
+        for i, c in enumerate(commits):
+            if c['sha'] == local_sha:
+                return i  # i commits ahead
+        return f"30+"  # local commit not found in last 30
+    except Exception:
+        return None
+
+
 def simple_check_for_updates(parent=None, show_no_update=True):
     """
     Simple, synchronous update check without background threads.
@@ -358,35 +429,32 @@ def simple_check_for_updates(parent=None, show_no_update=True):
             latest_version = release_data['tag_name'].lstrip('v')
             
             # Compare versions
+            version_newer = False
             try:
-                if packaging_version.parse(latest_version) > packaging_version.parse(__version__):
-                    # Update available
-                    update_info = {
-                        'version': latest_version,
-                        'name': release_data.get('name', 'Latest Release'),
-                        'body': release_data.get('body', 'No release notes available.'),
-                        'html_url': release_data.get('html_url', f"https://github.com/aaroncelestian/RamanLab/releases/latest")
-                    }
-                    
-                    # Show update dialog
-                    dialog = SimpleUpdateDialog(update_info, parent)
-                    dialog.exec()
-                    return
-                    
-            except Exception as e:
-                # Version comparison failed, but we can still show info
-                if latest_version != __version__:
-                    update_info = {
-                        'version': latest_version,
-                        'name': release_data.get('name', 'Latest Release'),
-                        'body': release_data.get('body', 'No release notes available.'),
-                        'html_url': release_data.get('html_url', f"https://github.com/aaroncelestian/RamanLab/releases/latest")
-                    }
-                    dialog = SimpleUpdateDialog(update_info, parent)
-                    dialog.exec()
-                    return
-            
-            # No update available
+                version_newer = packaging_version.parse(latest_version) > packaging_version.parse(__version__)
+            except Exception:
+                version_newer = latest_version != __version__
+
+            if version_newer:
+                update_info = {
+                    'version': latest_version,
+                    'name': release_data.get('name', 'Latest Release'),
+                    'body': release_data.get('body', 'No release notes available.'),
+                    'html_url': release_data.get('html_url', "https://github.com/aaroncelestian/RamanLab/releases/latest")
+                }
+                dialog = SimpleUpdateDialog(update_info, parent)
+                dialog.exec()
+                return
+
+            # Same version — check if there are newer commits on GitHub that
+            # aren't reflected locally (pushes without a version bump).
+            commit_update_info = _check_commits_vs_local(github_api_url)
+            if commit_update_info:
+                dialog = SimpleUpdateDialog(commit_update_info, parent)
+                dialog.exec()
+                return
+
+            # Truly up to date
             if show_no_update:
                 QMessageBox.information(
                     parent,
