@@ -45,7 +45,7 @@ from PySide6.QtCore import Qt, QTimer, QStandardPaths, QUrl, QThread, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QPixmap, QFont
 
 # Version info
-from version import __version__, __author__, __copyright__
+from version import __version__, __version_string__, __author__, __copyright__
 
 
 
@@ -418,7 +418,11 @@ class RamanAnalysisAppQt6(QMainWindow):
         # Profile subtab (peaks and smoothing)
         profile_tab = self.create_profile_subtab()
         subtabs.addTab(profile_tab, "Profile")
-        
+
+        # File management subtab
+        filemgmt_tab = self.create_file_management_subtab()
+        subtabs.addTab(filemgmt_tab, "File Mgmt")
+
         layout.addWidget(subtabs)
         
         return tab
@@ -952,6 +956,253 @@ class RamanAnalysisAppQt6(QMainWindow):
         
         return tab
 
+    def create_file_management_subtab(self):
+        """Create the file management subtab with save, export, and database add actions."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(8)
+
+        # ── Current file info ─────────────────────────────────────────────
+        info_group = QGroupBox("Current Spectrum")
+        info_layout = QVBoxLayout(info_group)
+
+        self.filemgmt_info_label = QLabel("No spectrum loaded")
+        self.filemgmt_info_label.setWordWrap(True)
+        self.filemgmt_info_label.setStyleSheet("color: #666; font-size: 11px;")
+        info_layout.addWidget(self.filemgmt_info_label)
+
+        open_folder_btn = QPushButton("📂 Open Containing Folder")
+        open_folder_btn.clicked.connect(self.filemgmt_open_folder)
+        info_layout.addWidget(open_folder_btn)
+
+        layout.addWidget(info_group)
+
+        # ── Save / Export ─────────────────────────────────────────────────
+        save_group = QGroupBox("Save / Export")
+        save_layout = QVBoxLayout(save_group)
+
+        # Which data to export
+        data_row = QHBoxLayout()
+        data_row.addWidget(QLabel("Data:"))
+        self.filemgmt_data_combo = QComboBox()
+        self.filemgmt_data_combo.addItems(["Processed (current)", "Raw (original)"])
+        data_row.addWidget(self.filemgmt_data_combo)
+        save_layout.addLayout(data_row)
+
+        save_txt_btn = QPushButton("💾 Save as TXT (tab-delimited)")
+        save_txt_btn.clicked.connect(lambda: self.filemgmt_save("txt"))
+        save_layout.addWidget(save_txt_btn)
+
+        save_csv_btn = QPushButton("💾 Save as CSV")
+        save_csv_btn.clicked.connect(lambda: self.filemgmt_save("csv"))
+        save_layout.addWidget(save_csv_btn)
+
+        layout.addWidget(save_group)
+
+        # ── Add to Database ───────────────────────────────────────────────
+        db_group = QGroupBox("Add to Database")
+        db_layout = QFormLayout(db_group)
+        db_layout.setRowWrapPolicy(QFormLayout.WrapAllRows)
+
+        self.filemgmt_name_edit = QLineEdit()
+        self.filemgmt_name_edit.setPlaceholderText("e.g. Kaolinite_sample_01")
+        db_layout.addRow("Spectrum Name *", self.filemgmt_name_edit)
+
+        self.filemgmt_mineral_edit = QLineEdit()
+        self.filemgmt_mineral_edit.setPlaceholderText("e.g. Kaolinite")
+        db_layout.addRow("Mineral Name", self.filemgmt_mineral_edit)
+
+        self.filemgmt_desc_edit = QTextEdit()
+        self.filemgmt_desc_edit.setPlaceholderText("Optional notes about this sample…")
+        self.filemgmt_desc_edit.setFixedHeight(60)
+        db_layout.addRow("Description", self.filemgmt_desc_edit)
+
+        add_db_btn = QPushButton("➕ Add to Database")
+        add_db_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #45A049; }
+            QPushButton:disabled { background-color: #aaa; }
+        """)
+        add_db_btn.clicked.connect(self.filemgmt_add_to_database)
+        db_layout.addRow(add_db_btn)
+
+        layout.addWidget(db_group)
+        layout.addStretch()
+
+        return tab
+
+    def filemgmt_refresh_info(self):
+        """Update the file info label in the File Mgmt subtab."""
+        if not hasattr(self, 'filemgmt_info_label'):
+            return
+        if self.current_wavenumbers is None:
+            self.filemgmt_info_label.setText("No spectrum loaded")
+            return
+        fname = ""
+        if hasattr(self, 'current_spectrum_metadata') and self.current_spectrum_metadata:
+            fname = self.current_spectrum_metadata.get('file_name', '')
+        n = len(self.current_wavenumbers)
+        wmin = self.current_wavenumbers.min()
+        wmax = self.current_wavenumbers.max()
+        lines = []
+        if fname:
+            lines.append(f"File: {fname}")
+        lines.append(f"Points: {n}  |  Range: {wmin:.0f}–{wmax:.0f} cm⁻¹")
+        self.filemgmt_info_label.setText("\n".join(lines))
+        # Pre-fill spectrum name from filename stem if field is empty
+        if hasattr(self, 'filemgmt_name_edit') and not self.filemgmt_name_edit.text() and fname:
+            from pathlib import Path
+            self.filemgmt_name_edit.setText(Path(fname).stem)
+
+    def filemgmt_open_folder(self):
+        """Open the folder containing the currently loaded spectrum file."""
+        import subprocess, platform as _platform
+        path = None
+        if hasattr(self, 'current_spectrum_metadata') and self.current_spectrum_metadata:
+            path = self.current_spectrum_metadata.get('file_path')
+        if not path:
+            QMessageBox.information(self, "No File", "No file path available for the current spectrum.")
+            return
+        from pathlib import Path
+        folder = str(Path(path).parent)
+        try:
+            if _platform.system() == "Darwin":
+                subprocess.Popen(["open", folder])
+            elif _platform.system() == "Windows":
+                import os
+                os.startfile(folder)
+            else:
+                subprocess.Popen(["xdg-open", folder])
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not open folder:\n{e}")
+
+    def filemgmt_save(self, fmt="txt"):
+        """Save the current spectrum to TXT or CSV."""
+        if self.current_wavenumbers is None:
+            QMessageBox.warning(self, "No Data", "No spectrum loaded.")
+            return
+
+        use_processed = self.filemgmt_data_combo.currentIndex() == 0
+        intensities = self.processed_intensities if use_processed else self.current_intensities
+        if intensities is None:
+            intensities = self.current_intensities
+
+        import numpy as _np
+        from pathlib import Path
+
+        default_name = ""
+        if hasattr(self, 'current_spectrum_metadata') and self.current_spectrum_metadata:
+            fn = self.current_spectrum_metadata.get('file_name', '')
+            default_name = Path(fn).stem if fn else ""
+
+        if fmt == "csv":
+            filter_str = "CSV files (*.csv);;All files (*.*)"
+            default_suffix = ".csv"
+        else:
+            filter_str = "Text files (*.txt);;All files (*.*)"
+            default_suffix = ".txt"
+
+        start_dir = QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Spectrum",
+            str(Path(start_dir) / (default_name + default_suffix)),
+            filter_str
+        )
+        if not file_path:
+            return
+
+        try:
+            data = _np.column_stack([self.current_wavenumbers, intensities])
+            if fmt == "csv":
+                _np.savetxt(file_path, data, delimiter=',', header='Wavenumber,Intensity', comments='')
+            else:
+                _np.savetxt(file_path, data, delimiter='\t', header='Wavenumber\tIntensity', comments='')
+            self.status_bar.showMessage(f"Saved: {Path(file_path).name}")
+            QMessageBox.information(self, "Saved", f"Spectrum saved to:\n{file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save:\n{e}")
+
+    def filemgmt_add_to_database(self):
+        """Add current spectrum to database using the File Mgmt form fields."""
+        if self.current_wavenumbers is None or self.current_intensities is None:
+            QMessageBox.warning(self, "No Data", "No spectrum loaded.")
+            return
+        if self.raman_db is None:
+            QMessageBox.warning(self, "Database Unavailable", "Database is not available.")
+            return
+
+        name = self.filemgmt_name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Name Required", "Please enter a Spectrum Name.")
+            self.filemgmt_name_edit.setFocus()
+            return
+
+        # Check for duplicate name
+        if name in self.raman_db.database:
+            reply = QMessageBox.question(
+                self, "Name Exists",
+                f"A spectrum named '{name}' already exists.\nOverwrite it?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        metadata = {
+            'mineral_name': self.filemgmt_mineral_edit.text().strip(),
+            'description': self.filemgmt_desc_edit.toPlainText().strip(),
+            'data_points': len(self.current_wavenumbers),
+            'wavenumber_range': f"{self.current_wavenumbers.min():.1f} – {self.current_wavenumbers.max():.1f} cm⁻¹",
+        }
+
+        # Merge any file-level metadata (instrument, laser, etc.)
+        if hasattr(self, 'current_spectrum_metadata') and self.current_spectrum_metadata:
+            file_meta = {k: v for k, v in self.current_spectrum_metadata.items()
+                         if k not in ('file_path', 'file_name', 'data_points', 'wavenumber_range')}
+            file_meta.update(metadata)
+            metadata = file_meta
+
+        # Collect all peaks: auto-detected + manually placed, merged and sorted
+        all_peaks = []
+        if self.detected_peaks is not None and len(self.detected_peaks) > 0:
+            all_peaks.extend(self.current_wavenumbers[self.detected_peaks].tolist())
+        if self.manual_peaks:
+            all_peaks.extend(self.manual_peaks)
+        peak_wavenumbers = sorted(set(round(p, 3) for p in all_peaks)) if all_peaks else None
+
+        # Always store the processed (background-subtracted/smoothed) intensities
+        success = self.raman_db.add_to_database(
+            name=name,
+            wavenumbers=self.current_wavenumbers,
+            intensities=self.processed_intensities,
+            metadata=metadata,
+            peaks=peak_wavenumbers
+        )
+
+        if success:
+            self.update_database_stats()
+            peak_summary = f"{len(peak_wavenumbers)} peaks stored" if peak_wavenumbers else "no peaks stored"
+            data_note = "processed" if self.processed_intensities is not self.current_intensities else "raw"
+            QMessageBox.information(
+                self, "Added to Database",
+                f"'{name}' added successfully.\n\n"
+                f"• Spectrum data: {data_note}\n"
+                f"• Peaks: {peak_summary}\n\n"
+                "Use the Database Browser to add more details."
+            )
+            # Clear the form
+            self.filemgmt_name_edit.clear()
+            self.filemgmt_mineral_edit.clear()
+            self.filemgmt_desc_edit.clear()
+        else:
+            QMessageBox.warning(self, "Failed", "Could not add spectrum to database.")
+
     def create_search_tab(self):
         """Create the comprehensive search functionality tab with basic and advanced search subtabs."""
         tab = QWidget()
@@ -1399,6 +1650,7 @@ class RamanAnalysisAppQt6(QMainWindow):
             
             self.update_plot()
             self.update_info_display(file_path)
+            self.filemgmt_refresh_info()
             
             # Auto-trigger peak detection for newly loaded spectra
             if (self.processed_intensities is not None and 
@@ -2349,7 +2601,7 @@ class RamanAnalysisAppQt6(QMainWindow):
         about_text = f"""
         RamanLab PySide6 Version
         
-        Version: {__version__}
+        Version: {__version_string__}
         Author: {__author__}
         
         The Raman Spectrum Analysis Tool.

@@ -2158,6 +2158,10 @@ class DatabaseBrowserQt6(QDialog):
         try:
             data = np.loadtxt(file_path)
             if data.ndim == 2 and data.shape[1] >= 2:
+                wn = data[:, 0]
+                descending_note = ""
+                if len(wn) > 1 and wn[0] > wn[-1]:
+                    descending_note = "\n⚠ Wavenumbers are in descending order — will be reversed on import."
                 QMessageBox.information(
                     self,
                     "Preview",
@@ -2165,6 +2169,7 @@ class DatabaseBrowserQt6(QDialog):
                     f"Data points: {len(data)}\n"
                     f"Wavenumber range: {data[:, 0].min():.1f} - {data[:, 0].max():.1f} cm⁻¹\n"
                     f"Intensity range: {data[:, 1].min():.2e} - {data[:, 1].max():.2e}"
+                    f"{descending_note}"
                 )
             else:
                 QMessageBox.warning(self, "Invalid Format", "File must contain at least two columns.")
@@ -2190,6 +2195,11 @@ class DatabaseBrowserQt6(QDialog):
             if data.ndim == 2 and data.shape[1] >= 2:
                 wavenumbers = data[:, 0]
                 intensities = data[:, 1]
+                # Ensure wavenumbers are in ascending order (some instruments output high→low)
+                if len(wavenumbers) > 1 and wavenumbers[0] > wavenumbers[-1]:
+                    sort_idx = np.argsort(wavenumbers)
+                    wavenumbers = wavenumbers[sort_idx]
+                    intensities = intensities[sort_idx]
             else:
                 raise ValueError("Invalid file format")
             

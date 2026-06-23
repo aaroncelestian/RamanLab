@@ -5,11 +5,19 @@ Version information for RamanLab Qt6
 
 __version__ = "1.5.0"
 __version_info__ = (1, 5, 0)
+
+# Build number — increment manually with each notable push within a version.
+# Reset to 1 when the version number changes.
+__build__ = 1
+
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
 __email__ = "aaron.celestian@gmail.com"
 __copyright__ = "Copyright 2025, RamanLab"
 __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
+
+# Full version string shown in UI (e.g. "1.5.0 build 3")
+__version_string__ = f"{__version__} build {__build__}"
 
 # Release information
 __release_date__ = "2025-01-29"
@@ -400,8 +408,16 @@ __qt_version__ = "6.5+"
 __platforms__ = ["Windows", "macOS", "Linux"]
 
 def get_version():
-    """Return the current version string."""
+    """Return the current version string (without build number)."""
     return __version__
+
+def get_build():
+    """Return the current build number."""
+    return __build__
+
+def get_display_version():
+    """Return the full version string for display (e.g. '1.5.0 build 3')."""
+    return __version_string__
 
 def get_version_info():
     """Return the current version as a tuple."""
@@ -411,6 +427,8 @@ def get_full_version():
     """Return detailed version information."""
     return {
         "version": __version__,
+        "build": __build__,
+        "version_string": __version_string__,
         "version_info": __version_info__,
         "release_date": __release_date__,
         "release_name": __release_name__,

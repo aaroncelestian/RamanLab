@@ -98,7 +98,7 @@ class RamanSpectraQt6:
                 'name': name,
                 'wavenumbers': np.array(wavenumbers).tolist(),
                 'intensities': np.array(intensities).tolist(),
-                'peaks': peaks.tolist() if peaks is not None else [],
+                'peaks': (peaks.tolist() if hasattr(peaks, 'tolist') else list(peaks)) if peaks is not None else [],
                 'metadata': metadata or {},
                 'timestamp': datetime.now().isoformat()
             }

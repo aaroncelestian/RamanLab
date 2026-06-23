@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushBu
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 
-from version import __version__
+from version import __version__, __build__, __version_string__
 
 
 class SimpleUpdateDialog(QDialog):
@@ -45,7 +45,7 @@ class SimpleUpdateDialog(QDialog):
         layout.addWidget(title)
         
         # Version info
-        version_text = QLabel(f"Version {self.update_info['version']} is now available\n(You have version {__version__})")
+        version_text = QLabel(f"Version {self.update_info['version']} is now available\n(You have {__version_string__})")
         version_text.setFont(QFont("Arial", 12))
         version_text.setAlignment(Qt.AlignCenter)
         layout.addWidget(version_text)
@@ -273,6 +273,67 @@ class SimpleUpdateDialog(QDialog):
                               "Please try the manual update method.")
 
 
+def _check_build_vs_remote(raw_base_url):
+    """
+    Fetch version.py from the remote repo's main branch and compare
+    the __build__ number to the local one.  Returns an update_info dict
+    if the remote build is newer, else None.
+
+    raw_base_url example:
+        "https://raw.githubusercontent.com/aaroncelestian/RamanLab/main"
+    """
+    try:
+        resp = requests.get(f"{raw_base_url}/version.py", timeout=10)
+        if resp.status_code != 200:
+            return None
+
+        # Parse __version__ and __build__ from the raw file text
+        remote_version = None
+        remote_build = None
+        for line in resp.text.splitlines():
+            line = line.strip()
+            if line.startswith('__version__') and '=' in line and not remote_version:
+                try:
+                    remote_version = line.split('=')[1].strip().strip('"\'')
+                except Exception:
+                    pass
+            if line.startswith('__build__') and '=' in line and not line.startswith('__build___'):
+                try:
+                    remote_build = int(line.split('=')[1].strip().split('#')[0].strip())
+                except Exception:
+                    pass
+
+        if remote_version is None or remote_build is None:
+            return None
+
+        # Only compare builds when the version strings match
+        try:
+            versions_equal = packaging_version.parse(remote_version) == packaging_version.parse(__version__)
+        except Exception:
+            versions_equal = remote_version == __version__
+
+        if not versions_equal:
+            return None  # Version difference handled elsewhere
+
+        if remote_build <= __build__:
+            return None  # Local build is current
+
+        return {
+            'version': f"{remote_version} build {remote_build}",
+            'name': f"Build Update Available (build {__build__} → build {remote_build})",
+            'body': (
+                f"A newer build of RamanLab {remote_version} is available.\n\n"
+                f"Your build:   {__build__}\n"
+                f"Remote build: {remote_build}\n\n"
+                f"This is a within-version update containing bug fixes and improvements.\n"
+                f"Use \u2018Auto Update\u2019 (git pull) to download the latest changes."
+            ),
+            'html_url': "https://github.com/aaroncelestian/RamanLab/commits/main"
+        }
+    except Exception:
+        return None
+
+
 def _check_commits_vs_local(github_api_url):
     """
     Compare the latest commit on GitHub against the local git HEAD.
@@ -446,8 +507,16 @@ def simple_check_for_updates(parent=None, show_no_update=True):
                 dialog.exec()
                 return
 
-            # Same version — check if there are newer commits on GitHub that
-            # aren't reflected locally (pushes without a version bump).
+            # Same version — first check if the remote has a higher build number.
+            raw_base_url = "https://raw.githubusercontent.com/aaroncelestian/RamanLab/main"
+            build_update_info = _check_build_vs_remote(raw_base_url)
+            if build_update_info:
+                dialog = SimpleUpdateDialog(build_update_info, parent)
+                dialog.exec()
+                return
+
+            # Same version & build — check if there are newer commits on GitHub
+            # that aren't reflected locally (pushes without a version or build bump).
             commit_update_info = _check_commits_vs_local(github_api_url)
             if commit_update_info:
                 dialog = SimpleUpdateDialog(commit_update_info, parent)
@@ -459,7 +528,7 @@ def simple_check_for_updates(parent=None, show_no_update=True):
                 QMessageBox.information(
                     parent,
                     "No Updates Available",
-                    f"You have the latest version ({__version__})"
+                    f"You have the latest version ({__version_string__})"
                 )
         elif response.status_code == 404:
             # No releases found - repository exists but no releases

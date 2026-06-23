@@ -15,7 +15,10 @@ from PySide6.QtCore import Qt, QCoreApplication
 from PySide6.QtGui import QIcon
 
 # Version info
-from version import __version__, __author__, __copyright__
+from version import __version__, __version_string__, __author__, __copyright__
+
+# Crash reporter
+from core.crash_reporter import install_crash_reporter
 
 # Import the Qt6 version of the main app
 from raman_analysis_app_qt6 import RamanAnalysisAppQt6
@@ -33,7 +36,7 @@ def setup_application():
     """Set up the Qt application with proper configuration."""
     # Set application properties before creating QApplication
     QCoreApplication.setApplicationName("RamanLab")
-    QCoreApplication.setApplicationVersion(__version__)
+    QCoreApplication.setApplicationVersion(__version_string__)
     QCoreApplication.setOrganizationName("RamanLab")
     QCoreApplication.setOrganizationDomain("ramanlab.org")
     
@@ -68,6 +71,9 @@ def setup_application():
     # app.setAttribute(Qt.AA_EnableHighDpiScaling, True)  # Deprecated in Qt6
     # app.setAttribute(Qt.AA_UseHighDpiPixmaps, True)  # Deprecated in Qt6
     
+    # Install global crash reporter (writes logs + shows dialog on unhandled exceptions)
+    install_crash_reporter(app)
+
     return app
 
 
