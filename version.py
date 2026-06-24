@@ -8,7 +8,7 @@ __version_info__ = (1, 5, 0)
 
 # Build number — increment manually with each notable push within a version.
 # Reset to 1 when the version number changes.
-__build__ = 1
+__build__ = 2
 
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
@@ -20,7 +20,7 @@ __description__ = "Cross-platform Raman spectrum analysis tool built with Qt6"
 __version_string__ = f"{__version__} build {__build__}"
 
 # Release information
-__release_date__ = "2025-01-29"
+__release_date__ = "2026-06-24"
 __release_name__ = "Microplastic Detection Enhancements"
 __release_status__ = "stable"
 

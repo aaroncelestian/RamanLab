@@ -1537,6 +1537,88 @@ class MicroplasticDetector:
         
         return self.plastic_templates
     
+    def _batch_apply_baseline_parallel(
+        self,
+        intensity_map: np.ndarray,
+        n_cores: int,
+        progress_callback: Optional[Callable] = None,
+        phase_start: int = 0,
+        phase_end: int = 40,
+        method: str = 'als',
+        lam: float = 1e6,
+        p: float = 0.001,
+        niter: int = 10,
+    ) -> None:
+        """Apply baseline correction to all spectra in-place using parallel batches."""
+        from threading import Lock
+        from scipy.ndimage import minimum_filter1d
+
+        n_spectra = intensity_map.shape[0]
+        if n_spectra == 0:
+            return
+
+        batch_size = max(100, n_spectra // max(n_cores * 4, 1))
+        batches = [
+            list(range(i, min(i + batch_size, n_spectra)))
+            for i in range(0, n_spectra, batch_size)
+        ]
+
+        if method == 'rolling_ball':
+            if progress_callback:
+                progress_callback(
+                    phase_start, 100,
+                    f"Fast baseline removal on {n_spectra:,} spectra..."
+                )
+
+            def remove_baseline_batch(indices):
+                for i in indices:
+                    baseline = minimum_filter1d(intensity_map[i], size=100, mode='nearest')
+                    intensity_map[i] = intensity_map[i] - baseline
+
+            method_label = "Rolling ball"
+        else:
+            if progress_callback:
+                progress_callback(
+                    phase_start, 100,
+                    f"Batch ALS baseline on {n_spectra:,} spectra ({n_cores} cores)..."
+                )
+
+            def remove_baseline_batch(indices):
+                for i in indices:
+                    intensity_map[i] = self.baseline_als(
+                        intensity_map[i], lam=lam, p=p, niter=niter
+                    )
+
+            method_label = "ALS"
+
+        completed = [0]
+        lock = Lock()
+        update_interval = max(1, len(batches) // 20)
+        phase_span = max(1, phase_end - phase_start)
+
+        def batch_with_progress(batch):
+            remove_baseline_batch(batch)
+            with lock:
+                completed[0] += 1
+                if progress_callback and (
+                    completed[0] % update_interval == 0 or completed[0] == len(batches)
+                ):
+                    frac = completed[0] / len(batches)
+                    pct = phase_start + int(frac * phase_span)
+                    spectra_done = min(completed[0] * batch_size, n_spectra)
+                    progress_callback(
+                        pct, 100,
+                        f"{method_label} baseline: {int(frac * 100)}% "
+                        f"({spectra_done:,}/{n_spectra:,} spectra)"
+                    )
+
+        Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
+            delayed(batch_with_progress)(batch) for batch in batches
+        )
+
+        if progress_callback:
+            progress_callback(phase_end, 100, f"{method_label} baseline complete")
+
     def template_match_spectrum(self, wavenumbers: np.ndarray, 
                                 intensities: np.ndarray,
                                 baseline_correct: bool = True,
@@ -1725,11 +1807,16 @@ class MicroplasticDetector:
                                 threshold: float = 0.5,
                                 progress_callback: Optional[Callable] = None,
                                 n_jobs: int = -1,
-                                max_templates_per_type: int = 3) -> Dict[str, np.ndarray]:
+                                max_templates_per_type: int = 3,
+                                baseline_method: str = 'als',
+                                lam: float = 1e6,
+                                p: float = 0.001,
+                                niter: int = 10) -> Dict[str, np.ndarray]:
         """
         Scan entire map using template matching against database plastic spectra.
         
-        This is faster and more accurate than peak-based detection for noisy data.
+        Baseline correction is applied once in parallel batches before matching,
+        rather than per-spectrum inside template_match_spectrum.
         
         Args:
             wavenumbers: Wavenumber array
@@ -1740,10 +1827,16 @@ class MicroplasticDetector:
             progress_callback: Optional callback function(current, total, message)
             n_jobs: Number of parallel jobs (-1 = all cores)
             max_templates_per_type: Max reference spectra per plastic type
+            baseline_method: 'als' or 'rolling_ball' for batch pre-processing
+            lam: ALS smoothness parameter
+            p: ALS asymmetry parameter
+            niter: ALS iterations
         
         Returns:
             Dictionary mapping plastic type to 2D correlation score map
         """
+        from threading import Lock
+
         # Load templates if not already loaded
         if not hasattr(self, 'plastic_templates') or not self.plastic_templates:
             if progress_callback:
@@ -1755,56 +1848,97 @@ class MicroplasticDetector:
             return {}
         
         n_spectra = intensity_map.shape[0]
-        # Limit cores for template matching to avoid memory/disk issues
-        # Use threading backend to avoid pickling overhead
+        n_templates = sum(len(v) for v in self.plastic_templates.values())
         if n_jobs == -1:
-            n_cores = min(multiprocessing.cpu_count(), 16)  # Cap at 16 cores
+            n_cores = min(multiprocessing.cpu_count(), 16)
         else:
             n_cores = n_jobs
         
-        logger.info(f"Template matching {n_spectra:,} spectra against {sum(len(v) for v in self.plastic_templates.values())} templates using {n_cores} cores")
-        logger.info(f"Using threading backend to minimize memory overhead")
-        logger.info(f"Applying ALS baseline correction to each spectrum before matching")
-        
-        if progress_callback:
-            progress_callback(0, 100, f"Template matching {n_spectra:,} spectra (with baseline correction)...")
-        
-        # Initialize score maps
-        score_maps = {ptype: np.zeros(n_spectra) for ptype in self.plastic_templates.keys()}
-        match_info = {}
-        
-        # Process in batches for parallel execution
-        batch_size = max(100, n_spectra // (n_cores * 4))
-        batches = [list(range(i, min(i + batch_size, n_spectra))) 
-                   for i in range(0, n_spectra, batch_size)]
-        
-        def process_batch(batch_indices):
-            """Process a batch of spectra."""
-            batch_results = []
-            for idx in batch_indices:
-                try:
-                    spectrum = intensity_map[idx]
-                    # Validate spectrum data
-                    if not np.all(np.isfinite(spectrum)):
-                        # Skip invalid spectra
-                        batch_results.append((idx, {}))
-                        continue
-                    matches = self.template_match_spectrum(wavenumbers, spectrum)
-                    batch_results.append((idx, matches))
-                except Exception as e:
-                    # Log error but continue processing other spectra
-                    print(f"Warning: Error processing spectrum {idx}: {e}")
-                    batch_results.append((idx, {}))
-            return batch_results
-        
-        # Run parallel processing with threading backend
-        # Threading avoids pickling large arrays, preventing disk space issues
-        all_results = Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
-            delayed(process_batch)(batch) for batch in batches
+        logger.info(
+            f"Template matching {n_spectra:,} spectra against {n_templates} templates "
+            f"using {n_cores} cores (batch baseline: {baseline_method})"
         )
         
         if progress_callback:
-            progress_callback(80, 100, "Combining results...")
+            progress_callback(
+                5, 100,
+                f"Preparing {n_spectra:,} spectra (batch baseline + template matching)..."
+            )
+
+        # Batch baseline correction once (in-place on intensity_map copy)
+        working_map = np.array(intensity_map, copy=True)
+        self._batch_apply_baseline_parallel(
+            working_map,
+            n_cores,
+            progress_callback=progress_callback,
+            phase_start=5,
+            phase_end=45,
+            method=baseline_method,
+            lam=lam,
+            p=p,
+            niter=niter,
+        )
+        
+        score_maps = {ptype: np.zeros(n_spectra) for ptype in self.plastic_templates.keys()}
+        match_info = {}
+        
+        batch_size = max(100, n_spectra // max(n_cores * 4, 1))
+        batches = [
+            list(range(i, min(i + batch_size, n_spectra)))
+            for i in range(0, n_spectra, batch_size)
+        ]
+        
+        if progress_callback:
+            progress_callback(
+                45, 100,
+                f"Template matching {n_spectra:,} spectra against {n_templates} references..."
+            )
+        
+        def process_batch(batch_indices):
+            """Process a batch of spectra (baseline already applied)."""
+            batch_results = []
+            for idx in batch_indices:
+                try:
+                    spectrum = working_map[idx]
+                    if not np.all(np.isfinite(spectrum)):
+                        batch_results.append((idx, {}))
+                        continue
+                    matches = self.template_match_spectrum(
+                        wavenumbers, spectrum, baseline_correct=False
+                    )
+                    batch_results.append((idx, matches))
+                except Exception as e:
+                    logger.warning(f"Error processing spectrum {idx}: {e}")
+                    batch_results.append((idx, {}))
+            return batch_results
+        
+        completed = [0]
+        match_lock = Lock()
+        update_interval = max(1, len(batches) // 20)
+        
+        def process_batch_with_progress(batch_indices):
+            result = process_batch(batch_indices)
+            with match_lock:
+                completed[0] += 1
+                if progress_callback and (
+                    completed[0] % update_interval == 0 or completed[0] == len(batches)
+                ):
+                    frac = completed[0] / len(batches)
+                    pct = 45 + int(frac * 45)  # 45-90%
+                    spectra_done = min(completed[0] * batch_size, n_spectra)
+                    progress_callback(
+                        pct, 100,
+                        f"Template matching: {int(frac * 100)}% "
+                        f"({spectra_done:,}/{n_spectra:,} spectra)"
+                    )
+            return result
+        
+        all_results = Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
+            delayed(process_batch_with_progress)(batch) for batch in batches
+        )
+        
+        if progress_callback:
+            progress_callback(90, 100, "Combining results...")
         
         # Combine results
         for batch_results in all_results:

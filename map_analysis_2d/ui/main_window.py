@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QSplitter, 
     QTabWidget, QMessageBox, QFileDialog, QDialog, QTextEdit, QPushButton, QLabel
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QFont
 from datetime import datetime
 
@@ -1199,6 +1199,39 @@ class MapAnalysisMainWindow(QMainWindow):
         map_shape = (len(unique_y), len(unique_x))
         
         return unique_x, unique_y, x_to_idx, y_to_idx, map_shape
+    
+    LARGE_MAP_SPECTRA_THRESHOLD = 10000
+
+    def _schedule_map_display_after_load(self, post_update_callback=None):
+        """Update map display, deferring for large datasets so the UI stays responsive."""
+        if self.map_data is None:
+            return
+
+        spectra_count = len(self.map_data.spectra)
+        if spectra_count >= self.LARGE_MAP_SPECTRA_THRESHOLD:
+            self.progress_status.show_progress(
+                f"Rendering map display ({spectra_count:,} spectra)..."
+            )
+            self._pkl_load_post_update_callback = post_update_callback
+            QTimer.singleShot(50, self._deferred_update_map_after_load)
+        else:
+            self._clear_map_cache()
+            self.update_map()
+            self.progress_status.hide_progress()
+            if post_update_callback:
+                post_update_callback()
+
+    def _deferred_update_map_after_load(self):
+        """Render map after PKL load (runs on next event-loop tick)."""
+        try:
+            self._clear_map_cache()
+            self.update_map()
+        finally:
+            self.progress_status.hide_progress()
+            callback = getattr(self, '_pkl_load_post_update_callback', None)
+            self._pkl_load_post_update_callback = None
+            if callback:
+                callback()
     
     def update_map(self):
         """Update the map display based on current settings."""
@@ -6579,36 +6612,31 @@ All spectra have been processed and cleaned data is now available for analysis."
             else:
                 print(f"[PKL LOAD] ✓ Wavenumbers already in correct order")
             
-            self.progress_status.hide_progress()
-            
             # Initialize integration slider with spectrum midpoint
             self._initialize_integration_slider()
             
-            # Update the display
-            self.update_map()
-            
-            # Show loading summary
             spectra_count = len(self.map_data.spectra)
             processed_count = sum(1 for s in self.map_data.spectra.values() 
                                 if s.processed_intensities is not None)
             
-            summary_text = f"""Map Data Loaded Successfully!
+            def show_load_summary():
+                summary_text = f"""Map Data Loaded Successfully!
 
 File: {file_path}
 Version: {version}
 Creation Time: {creation_time}
 
 Data Summary:
-• Total Spectra: {spectra_count}
-• Processed Spectra: {processed_count}
+• Total Spectra: {spectra_count:,}
+• Processed Spectra: {processed_count:,}
 • Has Processed Data: {'Yes' if processed_count > 0 else 'No'}
 • Cosmic Ray Config: {'Restored' if 'cosmic_ray_config' in (save_data if isinstance(save_data, dict) else {}) else 'Default Used'}
 
 The map is now ready for analysis!"""
+                QMessageBox.information(self, "Load Successful", summary_text)
+                self.statusBar().showMessage(f"PKL map loaded: {spectra_count:,} spectra")
             
-            QMessageBox.information(self, "Load Successful", summary_text)
-            
-            self.statusBar().showMessage(f"PKL map loaded: {spectra_count} spectra")
+            self._schedule_map_display_after_load(post_update_callback=show_load_summary)
             
         except Exception as e:
             self.progress_status.hide_progress()
@@ -7193,14 +7221,12 @@ The map is now ready for analysis!"""
                 print(f"[PKL LOAD] ✓ Wavenumbers already in correct order")
                 logger.info(f"✓ PKL wavenumbers already in correct order")
             
-            self.progress_status.hide_progress()
-            
-            # Update UI
-            self._clear_map_cache()
-            self.update_map()
-            
             spectra_count = len(self.map_data.spectra)
-            self.statusBar().showMessage(f"PKL map loaded: {spectra_count:,} spectra")
+
+            def finish_pkl_load():
+                self.statusBar().showMessage(f"PKL map loaded: {spectra_count:,} spectra")
+
+            self._schedule_map_display_after_load(post_update_callback=finish_pkl_load)
             
         except Exception as e:
             self.progress_status.hide_progress()
@@ -10080,6 +10106,32 @@ The map is now ready for analysis!"""
                 self.microplastic_tab.log_status(
                     "   Using peak-based detection instead. Load database or use 'Peak-based (Fast)' method."
                 )
+            
+            n_spectra = len(self.map_data.spectra)
+            if n_spectra > self.LARGE_MAP_SPECTRA_THRESHOLD and 'Template Matching' in params['method']:
+                baseline_method = params.get('baseline', {}).get('method', 'als')
+                if baseline_method == 'rolling_ball':
+                    est_min = max(5, n_spectra // 4000)
+                else:
+                    est_min = max(10, n_spectra // 2000)
+                reply = QMessageBox.question(
+                    self,
+                    "Large Map — Template Matching",
+                    f"This map has {n_spectra:,} spectra.\n\n"
+                    f"Template Matching may take approximately {est_min}–{est_min * 2} minutes "
+                    f"depending on your CPU.\n\n"
+                    f"Tips for faster results:\n"
+                    f"• Enable map cropping to test a smaller region first\n"
+                    f"• Use 'Rolling Ball (Fast)' baseline correction\n"
+                    f"• Switch to 'Peak-based (Fast)' or 'Hybrid' method\n\n"
+                    f"Continue with Template Matching?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    self.microplastic_tab.log_status("Detection cancelled by user.")
+                    self.microplastic_tab.reset_buttons()
+                    return
             
             self.microplastic_tab.update_progress(20, "Preparing spectra...")
             

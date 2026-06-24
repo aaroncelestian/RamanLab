@@ -68,6 +68,7 @@ class MicroplasticDetectionWorker(QThread):
                 if not plastic_types:
                     plastic_types = None  # Use default types
                 
+                baseline_params = self.params.get('baseline', {})
                 results = self.detector.scan_map_with_templates(
                     wavenumbers=self.wavenumbers,
                     intensity_map=self.intensities,
@@ -76,7 +77,11 @@ class MicroplasticDetectionWorker(QThread):
                     threshold=self.params['threshold'],
                     progress_callback=progress_callback,
                     n_jobs=-1,  # Will be capped at 16 cores in detector
-                    max_templates_per_type=5
+                    max_templates_per_type=5,
+                    baseline_method=baseline_params.get('method', 'als'),
+                    lam=baseline_params.get('lam', 1e6),
+                    p=baseline_params.get('p', 0.001),
+                    niter=baseline_params.get('niter', 10),
                 )
                 
                 if self._is_running:
