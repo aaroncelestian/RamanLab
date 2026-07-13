@@ -4972,6 +4972,47 @@ class RamanAnalysisAppQt6(QMainWindow):
                 f"Failed to launch chemical strain analysis:\n{str(e)}"
             )
     
+    def launch_general_chemical_strain_analysis(self):
+        """Launch the general chemical strain analysis window."""
+        try:
+            from chemical_strain_gui_qt6 import GeneralChemicalStrainWindow
+
+            self.general_chemical_strain_window = GeneralChemicalStrainWindow(parent=self)
+
+            if self.current_wavenumbers is not None and self.current_intensities is not None:
+                intensities = (
+                    self.processed_intensities
+                    if self.processed_intensities is not None
+                    else self.current_intensities
+                )
+                name = self.spectrum_file_path or "Current Spectrum"
+                self.general_chemical_strain_window.load_spectrum(
+                    self.current_wavenumbers, intensities, name=name
+                )
+                self.statusBar().showMessage(
+                    "General Chemical Strain Analysis launched with current spectrum"
+                )
+            else:
+                self.statusBar().showMessage(
+                    "General Chemical Strain Analysis launched — run example or load a spectrum"
+                )
+
+            self.general_chemical_strain_window.show()
+
+        except ImportError as e:
+            QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import general chemical strain analysis module:\n{e}\n\n"
+                "Please ensure chemical_strain_gui_qt6.py is in the RamanLab directory.",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Chemical Strain Analysis Error",
+                f"Failed to launch general chemical strain analysis:\n{e}",
+            )
+
     def launch_limn2o4_strain_analysis(self):
         """Launch LiMn2O4 battery strain analysis tool."""
         try:
