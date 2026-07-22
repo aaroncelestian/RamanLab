@@ -10067,38 +10067,67 @@ The map is now ready for analysis!"""
     
     def run_microplastic_detection(self):
         """Run microplastic detection on loaded map data using worker thread."""
+        from PySide6.QtWidgets import QProgressDialog, QApplication
+        from PySide6.QtCore import Qt
+
         if self.map_data is None:
             QMessageBox.warning(self, "No Data", "Load map data first.")
+            self.microplastic_tab.reset_buttons()
             return
-        
+
+        # Close any leftover dialog from a previous run
+        self._close_microplastic_progress_dialog()
+
         try:
             from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
             from map_analysis_2d.workers.microplastic_worker import MicroplasticDetectionWorker
             import numpy as np
-            
-            # Get detection parameters
+
             params = self.microplastic_tab.get_detection_parameters()
-            
-            self.microplastic_tab.log_status("🔬 Initializing microplastic detector...")
-            self.microplastic_tab.update_progress(10, "Loading data...")
-            
-            # Create detector
+            n_spectra = len(self.map_data.spectra)
+
+            # Visible progress dialog (status log alone is easy to miss)
+            self._microplastic_progress_dialog = QProgressDialog(
+                "Initializing microplastic detector...",
+                "Cancel",
+                0,
+                100,
+                self,
+            )
+            dlg = self._microplastic_progress_dialog
+            dlg.setWindowTitle("Microplastic Detection")
+            dlg.setWindowModality(Qt.WindowModal)
+            dlg.setMinimumDuration(0)
+            dlg.setValue(0)
+            dlg.setMinimumWidth(420)
+            dlg.setAutoClose(False)
+            dlg.setAutoReset(False)
+            dlg.canceled.connect(self.stop_microplastic_detection)
+            dlg.show()
+            QApplication.processEvents()
+
+            self._update_microplastic_progress(
+                5, f"Initializing detector for {n_spectra:,} spectra..."
+            )
+
             detector = MicroplasticDetector()
-            
-            # Load plastic references from database if available
+
             n_refs = 0
             if hasattr(self, 'database') and self.database:
                 n_refs = detector.load_plastic_references(self.database, 'Plastic')
                 if n_refs > 0:
-                    self.microplastic_tab.log_status(f"✓ Loaded {n_refs} plastic reference spectra")
+                    self._update_microplastic_progress(
+                        10, f"Loaded {n_refs} plastic reference spectra"
+                    )
                 else:
-                    self.microplastic_tab.log_status("ℹ️ No plastic references in database - using peak-based detection")
-                    self.microplastic_tab.log_status("   (Built-in signatures: PE, PP, PS, PET, PVC, PMMA, PA)")
+                    self._update_microplastic_progress(
+                        10, "No plastic references — using peak-based detection"
+                    )
             else:
-                self.microplastic_tab.log_status("ℹ️ No database available - using peak-based detection")
-                self.microplastic_tab.log_status("   (Built-in signatures: PE, PP, PS, PET, PVC, PMMA, PA)")
-            
-            # Warn if using database correlation without references
+                self._update_microplastic_progress(
+                    10, "No database — using peak-based detection"
+                )
+
             if params['method'] == 'Database Correlation (Accurate)' and n_refs == 0:
                 self.microplastic_tab.log_status(
                     "⚠️ WARNING: Database Correlation selected but no plastic references loaded!"
@@ -10106,111 +10135,199 @@ The map is now ready for analysis!"""
                 self.microplastic_tab.log_status(
                     "   Using peak-based detection instead. Load database or use 'Peak-based (Fast)' method."
                 )
-            
-            n_spectra = len(self.map_data.spectra)
+
             if n_spectra > self.LARGE_MAP_SPECTRA_THRESHOLD and 'Template Matching' in params['method']:
-                baseline_method = params.get('baseline', {}).get('method', 'als')
-                if baseline_method == 'rolling_ball':
-                    est_min = max(5, n_spectra // 4000)
+                baseline_method = params.get('baseline', {}).get('method', 'rolling_ball')
+                if baseline_method in ('none', 'skip'):
+                    est_min = max(1, n_spectra // 100000)
+                elif baseline_method == 'rolling_ball':
+                    est_min = max(1, n_spectra // 30000)
+                elif baseline_method == 'snip':
+                    est_min = max(2, n_spectra // 20000)
                 else:
-                    est_min = max(10, n_spectra // 2000)
+                    est_min = max(5, n_spectra // 8000)
+                # Hide progress briefly so the question dialog is not obscured
+                dlg.hide()
                 reply = QMessageBox.question(
                     self,
                     "Large Map — Template Matching",
                     f"This map has {n_spectra:,} spectra.\n\n"
-                    f"Template Matching may take approximately {est_min}–{est_min * 2} minutes "
-                    f"depending on your CPU.\n\n"
+                    f"Vectorized template correlation typically takes about "
+                    f"{est_min}–{max(est_min + 1, est_min * 2)} minutes "
+                    f"(mostly baseline, if enabled).\n\n"
                     f"Tips for faster results:\n"
-                    f"• Enable map cropping to test a smaller region first\n"
-                    f"• Use 'Rolling Ball (Fast)' baseline correction\n"
-                    f"• Switch to 'Peak-based (Fast)' or 'Hybrid' method\n\n"
+                    f"• Use 'None (already corrected)' if spectra are already background-subtracted\n"
+                    f"• Prefer 'Rolling Ball (Fast)' over ALS for first-pass baseline\n"
+                    f"• Enable map cropping to test a smaller region first\n\n"
                     f"Continue with Template Matching?",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.Yes,
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     self.microplastic_tab.log_status("Detection cancelled by user.")
+                    self._close_microplastic_progress_dialog()
                     self.microplastic_tab.reset_buttons()
                     return
-            
-            self.microplastic_tab.update_progress(20, "Preparing spectra...")
-            
-            # Get map data - handle both RamanMapData and SingleFileRamanMapData objects
+                dlg.show()
+                QApplication.processEvents()
+
+            if dlg.wasCanceled():
+                self._close_microplastic_progress_dialog()
+                self.microplastic_tab.reset_buttons()
+                return
+
+            self._update_microplastic_progress(
+                15, f"Building spectrum matrix ({n_spectra:,} spectra)..."
+            )
+            QApplication.processEvents()
+
             wavenumbers = self.map_data.target_wavenumbers
-            intensities = self.map_data.get_processed_data_matrix()  # Shape: (n_spectra, n_wavenumbers)
-            
-            # Apply map cropping if enabled
+            intensities = self.map_data.get_processed_data_matrix()
+
+            if dlg.wasCanceled():
+                self.microplastic_tab.log_status("Detection cancelled by user.")
+                self._close_microplastic_progress_dialog()
+                self.microplastic_tab.reset_buttons()
+                return
+
+            if intensities is None or len(intensities) == 0:
+                raise ValueError("Processed spectrum matrix is empty — check that map data loaded correctly.")
+
+            positions, x_coords, y_coords = self.microplastic_tab.ordered_map_positions(self.map_data)
+            if len(positions) != len(intensities):
+                raise ValueError(
+                    f"Spectrum/position mismatch: {len(intensities)} spectra vs "
+                    f"{len(positions)} positions"
+                )
+
+            # Apply map cropping if enabled (indices must match matrix order)
             if self.microplastic_tab.crop_enabled_check.isChecked():
                 x_min = self.microplastic_tab.crop_x_min.value()
                 x_max = self.microplastic_tab.crop_x_max.value()
                 y_min = self.microplastic_tab.crop_y_min.value()
                 y_max = self.microplastic_tab.crop_y_max.value()
-                
-                # Get all positions and filter
-                all_positions = [(spec.x_pos, spec.y_pos) for spec in self.map_data.spectra.values()]
-                unique_x = sorted(set(pos[0] for pos in all_positions))
-                unique_y = sorted(set(pos[1] for pos in all_positions))
-                
-                # Get actual coordinate ranges
-                x_coords_to_keep = unique_x[x_min:x_max]
-                y_coords_to_keep = unique_y[y_min:y_max]
-                
-                # Filter spectra
-                cropped_indices = []
-                for idx, (x, y) in enumerate(all_positions):
-                    if x in x_coords_to_keep and y in y_coords_to_keep:
-                        cropped_indices.append(idx)
-                
+
+                x_coords_to_keep = set(x_coords[x_min:x_max])
+                y_coords_to_keep = set(y_coords[y_min:y_max])
+
+                cropped_indices = [
+                    idx for idx, (x, y) in enumerate(positions)
+                    if x in x_coords_to_keep and y in y_coords_to_keep
+                ]
+
                 if len(cropped_indices) > 0:
                     intensities = intensities[cropped_indices]
+                    positions = [positions[i] for i in cropped_indices]
+                    x_coords = [x for x in x_coords if x in x_coords_to_keep]
+                    y_coords = [y for y in y_coords if y in y_coords_to_keep]
                     self.microplastic_tab.log_status(
                         f"✂️ Map cropped: X[{x_min}:{x_max}], Y[{y_min}:{y_max}] → "
-                        f"{len(cropped_indices):,} spectra (from {len(all_positions):,})"
+                        f"{len(cropped_indices):,} spectra (from {n_spectra:,})"
                     )
                 else:
                     self.microplastic_tab.log_status("⚠️ Crop region is empty, using full map")
-            
-            self.microplastic_tab.log_status(f"📊 Processing {len(intensities):,} spectra...")
-            self.microplastic_tab.update_progress(30, "Starting detection...")
-            
-            # Create and configure worker thread
-            # Pass database for template matching mode
+
+            self.microplastic_tab.set_scan_geometry(positions, x_coords, y_coords)
+
+            self._update_microplastic_progress(
+                25,
+                f"Starting {params['method']} on {len(intensities):,} spectra..."
+            )
+
             database = self.database if hasattr(self, 'database') else None
             self.detection_worker = MicroplasticDetectionWorker(
                 detector, wavenumbers, intensities, params, database=database
             )
-            
-            # Connect signals
+
             self.detection_worker.progress_updated.connect(self._on_detection_progress)
             self.detection_worker.detection_complete.connect(self._on_detection_complete)
             self.detection_worker.detection_failed.connect(self._on_detection_failed)
             self.detection_worker.finished.connect(self._on_worker_finished)
-            
-            # Start detection in background thread
+
             self.detection_worker.start()
-            
+            self.microplastic_tab.log_status(
+                f"▶ Worker started ({len(intensities):,} spectra, method={params['method']})"
+            )
+
         except Exception as e:
             self.microplastic_tab.log_status(f"❌ Detection failed: {str(e)}")
+            self._close_microplastic_progress_dialog()
             self.microplastic_tab.reset_buttons()
             QMessageBox.critical(self, "Detection Error", f"Error during microplastic detection:\n{str(e)}")
             logger.error(f"Microplastic detection error: {e}")
             import traceback
             traceback.print_exc()
-    
+
+    def _update_microplastic_progress(self, percent: int, message: str):
+        """Update tab status/progress and the modal progress dialog."""
+        from PySide6.QtWidgets import QApplication
+
+        percent = int(max(0, min(100, percent)))
+        self.microplastic_tab.update_progress(percent, message)
+        dlg = getattr(self, '_microplastic_progress_dialog', None)
+        if dlg is not None:
+            dlg.setValue(percent)
+            dlg.setLabelText(message)
+            QApplication.processEvents()
+
+    def _close_microplastic_progress_dialog(self):
+        """Close and clear the microplastic progress dialog if open."""
+        dlg = getattr(self, '_microplastic_progress_dialog', None)
+        if dlg is not None:
+            try:
+                dlg.canceled.disconnect(self.stop_microplastic_detection)
+            except Exception:
+                pass
+            dlg.close()
+            dlg.deleteLater()
+        self._microplastic_progress_dialog = None
+
     def _on_detection_progress(self, current, total, message):
         """Handle progress updates from worker thread."""
-        progress = 30 + int((current / total) * 60)  # 30-90% range
-        self.microplastic_tab.update_progress(progress, message)
-    
+        total = max(int(total), 1)
+        # Worker reports its own 0-100 phase; map into overall 30-95% after setup
+        worker_frac = max(0.0, min(1.0, float(current) / float(total)))
+        progress = 30 + int(worker_frac * 65)
+        self._update_microplastic_progress(progress, message)
+
     def _on_detection_complete(self, results):
         """Handle detection completion."""
         import numpy as np
-        
-        self.microplastic_tab.update_progress(90, "Generating visualizations...")
-        
-        # Get map dimensions for proper reshaping
-        # If cropping was enabled, use cropped dimensions
-        if self.microplastic_tab.crop_enabled_check.isChecked():
+
+        self._update_microplastic_progress(96, "Generating visualizations...")
+
+        # Persist baseline-corrected spectra so later scans can use "None (already corrected)"
+        corrected = results.pop('_corrected_intensities', None)
+        cropped = self.microplastic_tab.crop_enabled_check.isChecked()
+        if (
+            corrected is not None
+            and self.map_data is not None
+            and not cropped
+            and hasattr(self.map_data, 'spectra')
+        ):
+            try:
+                idx = 0
+                for y in sorted(self.map_data.y_positions):
+                    for x in sorted(self.map_data.x_positions):
+                        if (x, y) in self.map_data.spectra and idx < len(corrected):
+                            self.map_data.spectra[(x, y)].processed_intensities = (
+                                np.asarray(corrected[idx], dtype=float).copy()
+                            )
+                            idx += 1
+                self.microplastic_tab.log_status(
+                    "💾 Saved baseline-corrected spectra to map "
+                    "(use Baseline: 'None (already corrected)' next time)"
+                )
+            except Exception as e:
+                logger.warning(f"Could not save corrected intensities back to map: {e}")
+
+        # Get map dimensions for proper reshaping / sparse grid placement
+        positions = getattr(self.microplastic_tab, '_scan_positions', None)
+        x_coords = getattr(self.microplastic_tab, '_scan_x_coords', None)
+        y_coords = getattr(self.microplastic_tab, '_scan_y_coords', None)
+        if positions and x_coords and y_coords:
+            map_shape = (len(y_coords), len(x_coords))
+        elif cropped:
             x_min = self.microplastic_tab.crop_x_min.value()
             x_max = self.microplastic_tab.crop_x_max.value()
             y_min = self.microplastic_tab.crop_y_min.value()
@@ -10218,18 +10335,20 @@ The map is now ready for analysis!"""
             map_shape = (y_max - y_min, x_max - x_min)
         else:
             map_shape = (len(self.map_data.y_positions), len(self.map_data.x_positions))
-        
+
         # Display results with map dimensions
         self.microplastic_tab.display_results(results, map_shape=map_shape)
-        
-        self.microplastic_tab.update_progress(100, "✅ Detection complete!")
-        
+
+        self._update_microplastic_progress(100, "✅ Detection complete!")
+        self._close_microplastic_progress_dialog()
+        self.microplastic_tab.reset_buttons()
+
         # Get parameters for threshold
         params = self.microplastic_tab.get_detection_parameters()
-        
+
         # Get background statistics
         background_stats = results.get('_background_stats', {})
-        
+
         # Summary statistics with adaptive thresholds
         total_detections = 0
         for plastic_type, score_map in results.items():
@@ -10241,7 +10360,7 @@ The map is now ready for analysis!"""
                 self.microplastic_tab.log_status(
                     f"  • {plastic_type}: {n_detected:,} locations (max score: {np.max(score_map):.3f})"
                 )
-        
+
         # Display background analysis
         if background_stats:
             self.microplastic_tab.log_status("\n📊 Background Analysis:")
@@ -10253,11 +10372,11 @@ The map is now ready for analysis!"""
                 f"  • Your threshold {params['threshold']:.3f} = "
                 f"{background_stats['user_zscore']:.1f}σ above background"
             )
-            
+
             # Suggest adaptive thresholds
             adaptive_3sigma = background_stats['adaptive_threshold_3sigma']
             adaptive_95plus = background_stats['adaptive_threshold_95plus']
-            
+
             self.microplastic_tab.log_status("\n💡 Adaptive Thresholds:")
             self.microplastic_tab.log_status(
                 f"  • 3σ threshold: {adaptive_3sigma:.3f} "
@@ -10269,7 +10388,7 @@ The map is now ready for analysis!"""
                 f"({background_stats['n_detections_95plus']:,} detections, "
                 f"{background_stats['detection_rate_95plus']*100:.1f}% of data)"
             )
-            
+
             # Check if user threshold is too low
             if background_stats['detection_rate_user'] > 0.10:  # >10% detection rate
                 self.microplastic_tab.log_status(
@@ -10277,7 +10396,7 @@ The map is now ready for analysis!"""
                     "\n  • Using 3σ threshold for fewer false positives"
                     "\n  • Checking if fluorescence is causing high correlations"
                 )
-        
+
         if total_detections == 0:
             self.microplastic_tab.log_status(
                 "\n⚠️ No microplastics detected above threshold. Try:"
@@ -10291,34 +10410,33 @@ The map is now ready for analysis!"""
                 f"\n🎯 Total: {total_detections:,} potential microplastics "
                 f"({detection_rate*100:.1f}% of {background_stats.get('n_total_spectra', 0):,} spectra)"
             )
-    
+
     def _on_detection_failed(self, error_msg):
         """Handle detection failure."""
         self.microplastic_tab.log_status(f"❌ Detection failed: {error_msg}")
+        self._close_microplastic_progress_dialog()
         self.microplastic_tab.reset_buttons()
         QMessageBox.critical(self, "Detection Error", f"Error during microplastic detection:\n{error_msg}")
         logger.error(f"Microplastic detection error: {error_msg}")
-    
+
     def stop_microplastic_detection(self):
         """Stop the running microplastic detection worker."""
-        if hasattr(self, 'detection_worker') and self.detection_worker is not None:
-            if self.detection_worker.isRunning():
-                self.microplastic_tab.log_status("⏹ Stopping worker thread...")
-                self.detection_worker.stop()
-                # Wait for thread to finish (with timeout)
-                if not self.detection_worker.wait(5000):  # 5 second timeout
-                    self.microplastic_tab.log_status("⚠️ Worker thread did not stop gracefully, terminating...")
-                    self.detection_worker.terminate()
-                    self.detection_worker.wait()
-                self.microplastic_tab.log_status("✓ Detection stopped")
-                self.microplastic_tab.reset_buttons()
-            else:
-                self.microplastic_tab.log_status("⚠️ No detection running")
-                self.microplastic_tab.reset_buttons()
-    
+        self.microplastic_tab.log_status("⏹ Stopping detection...")
+        worker = getattr(self, 'detection_worker', None)
+        if worker is not None and worker.isRunning():
+            worker.stop()
+            if not worker.wait(5000):
+                self.microplastic_tab.log_status(
+                    "⚠️ Worker thread did not stop gracefully, terminating..."
+                )
+                worker.terminate()
+                worker.wait()
+            self.microplastic_tab.log_status("✓ Detection stopped")
+        self._close_microplastic_progress_dialog()
+        self.microplastic_tab.reset_buttons()
+
     def _on_worker_finished(self):
         """Handle worker thread finishing (cleanup)."""
-        # Clean up worker reference
-        if hasattr(self, 'detection_worker'):
+        if hasattr(self, 'detection_worker') and self.detection_worker is not None:
             self.detection_worker.deleteLater()
             self.detection_worker = None

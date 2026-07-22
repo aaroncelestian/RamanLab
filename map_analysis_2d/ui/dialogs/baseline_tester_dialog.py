@@ -94,6 +94,9 @@ class BaselineTesterDialog(QDialog):
         self.method_combo = QComboBox()
         self.method_combo.addItems([
             "Rolling Ball (Fast)",
+            "SNIP (Fast)",
+            "SNIP (Moderate)",
+            "Custom SNIP",
             "ALS (Fast)",
             "ALS (Moderate)",
             "ALS (Aggressive)",
@@ -113,8 +116,20 @@ class BaselineTesterDialog(QDialog):
         self.rb_window_spin.valueChanged.connect(self.update_correction)
         layout.addWidget(self.rb_window_spin, 1, 1)
         
+        # SNIP iterations
+        layout.addWidget(QLabel("SNIP Iterations:"), 2, 0)
+        self.snip_iter_spin = QSpinBox()
+        self.snip_iter_spin.setRange(1, 200)
+        self.snip_iter_spin.setValue(40)
+        self.snip_iter_spin.setToolTip(
+            "Clipping window iterations (higher = broader baseline features removed; "
+            "too high can erode wide peaks)"
+        )
+        self.snip_iter_spin.valueChanged.connect(self.update_correction)
+        layout.addWidget(self.snip_iter_spin, 2, 1)
+        
         # ALS Lambda parameter
-        layout.addWidget(QLabel("ALS Lambda (λ):"), 2, 0)
+        layout.addWidget(QLabel("ALS Lambda (λ):"), 3, 0)
         self.als_lambda_spin = QDoubleSpinBox()
         self.als_lambda_spin.setRange(1e3, 1e9)
         self.als_lambda_spin.setValue(1e6)
@@ -122,10 +137,10 @@ class BaselineTesterDialog(QDialog):
         self.als_lambda_spin.setSingleStep(1e5)
         self.als_lambda_spin.setToolTip("Smoothness parameter (higher = smoother baseline)")
         self.als_lambda_spin.valueChanged.connect(self.update_correction)
-        layout.addWidget(self.als_lambda_spin, 2, 1)
+        layout.addWidget(self.als_lambda_spin, 3, 1)
         
         # ALS p parameter
-        layout.addWidget(QLabel("ALS p:"), 3, 0)
+        layout.addWidget(QLabel("ALS p:"), 4, 0)
         self.als_p_spin = QDoubleSpinBox()
         self.als_p_spin.setRange(0.0001, 0.1)
         self.als_p_spin.setValue(0.001)
@@ -133,21 +148,21 @@ class BaselineTesterDialog(QDialog):
         self.als_p_spin.setSingleStep(0.001)
         self.als_p_spin.setToolTip("Asymmetry parameter (lower = more aggressive removal)")
         self.als_p_spin.valueChanged.connect(self.update_correction)
-        layout.addWidget(self.als_p_spin, 3, 1)
+        layout.addWidget(self.als_p_spin, 4, 1)
         
         # ALS iterations
-        layout.addWidget(QLabel("ALS Iterations:"), 4, 0)
+        layout.addWidget(QLabel("ALS Iterations:"), 5, 0)
         self.als_iter_spin = QSpinBox()
         self.als_iter_spin.setRange(1, 50)
         self.als_iter_spin.setValue(10)
         self.als_iter_spin.valueChanged.connect(self.update_correction)
-        layout.addWidget(self.als_iter_spin, 4, 1)
+        layout.addWidget(self.als_iter_spin, 5, 1)
         
         # Info label
         self.info_label = QLabel()
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet("QLabel { color: #666; font-style: italic; }")
-        layout.addWidget(self.info_label, 5, 0, 1, 3)
+        layout.addWidget(self.info_label, 6, 0, 1, 3)
         
         self.on_method_changed(self.method_combo.currentText())
         
@@ -174,16 +189,28 @@ class BaselineTesterDialog(QDialog):
     def on_method_changed(self, method):
         """Handle method selection change."""
         is_rolling_ball = "Rolling Ball" in method
+        is_snip = "SNIP" in method
+        is_als = "ALS" in method
         is_custom_als = method == "Custom ALS"
+        is_custom_snip = method == "Custom SNIP"
         
         # Enable/disable controls based on method
         self.rb_window_spin.setEnabled(is_rolling_ball)
-        self.als_lambda_spin.setEnabled(not is_rolling_ball)
-        self.als_p_spin.setEnabled(not is_rolling_ball)
-        self.als_iter_spin.setEnabled(not is_rolling_ball)
+        self.snip_iter_spin.setEnabled(is_snip)
+        self.als_lambda_spin.setEnabled(is_als)
+        self.als_p_spin.setEnabled(is_als)
+        self.als_iter_spin.setEnabled(is_als)
         
         # Set preset values for non-custom methods
-        if not is_custom_als and not is_rolling_ball:
+        if is_snip and not is_custom_snip:
+            snip_presets = {
+                "SNIP (Fast)": 20,
+                "SNIP (Moderate)": 40,
+            }
+            if method in snip_presets:
+                self.snip_iter_spin.setValue(snip_presets[method])
+        
+        if is_als and not is_custom_als:
             presets = {
                 "ALS (Fast)": (1e5, 0.01, 5),
                 "ALS (Moderate)": (1e5, 0.01, 10),
@@ -199,9 +226,18 @@ class BaselineTesterDialog(QDialog):
         
         # Update info label
         if is_rolling_ball:
-            self.info_label.setText("Rolling Ball: Fast method using minimum filter. Good for broad fluorescence backgrounds.")
+            self.info_label.setText(
+                "Rolling Ball: Fast method using minimum filter. Good for broad fluorescence backgrounds."
+            )
+        elif is_snip:
+            self.info_label.setText(
+                "SNIP: Statistics-sensitive Non-linear Iterative Peak-clipping. "
+                "Fast on large maps; higher iterations remove broader background."
+            )
         else:
-            self.info_label.setText("ALS: Asymmetric Least Squares. Higher λ = smoother, lower p = more aggressive.")
+            self.info_label.setText(
+                "ALS: Asymmetric Least Squares. Higher λ = smoother, lower p = more aggressive."
+            )
         
         self.update_correction()
         
@@ -210,14 +246,19 @@ class BaselineTesterDialog(QDialog):
         method = self.method_combo.currentText()
         
         if "Rolling Ball" in method:
-            # Rolling ball baseline correction
             window = self.rb_window_spin.value()
             baseline = minimum_filter1d(self.raw_intensities, size=window, mode='nearest')
             self.corrected_intensities = self.raw_intensities - baseline
             self.selected_method = "rolling_ball"
             self.selected_params = {"window": window}
+        elif "SNIP" in method:
+            iterations = self.snip_iter_spin.value()
+            self.corrected_intensities = self.baseline_snip(
+                self.raw_intensities, iterations=iterations
+            )
+            self.selected_method = "snip"
+            self.selected_params = {"iterations": iterations}
         else:
-            # ALS baseline correction
             lam = self.als_lambda_spin.value()
             p = self.als_p_spin.value()
             niter = self.als_iter_spin.value()
@@ -226,6 +267,34 @@ class BaselineTesterDialog(QDialog):
             self.selected_params = {"lam": lam, "p": p, "niter": niter}
         
         self.update_plot()
+        
+    @staticmethod
+    def baseline_snip(intensities, iterations=40, decreasing=True):
+        """
+        SNIP (Statistics-sensitive Non-linear Iterative Peak-clipping) baseline.
+        
+        Uses an LLS transform for improved clipping on Raman-like spectra.
+        Returns baseline-corrected intensities.
+        """
+        y = np.asarray(intensities, dtype=np.float64)
+        n = y.size
+        if n < 3 or iterations < 1:
+            return y.copy()
+        
+        iterations = min(int(iterations), max(1, n // 2 - 1))
+        
+        # LLS transform (safe for zeros / small negatives)
+        offset = max(0.0, -float(np.min(y))) + 1.0
+        z = np.log(np.log(np.sqrt(y + offset) + 1.0) + 1.0)
+        
+        window_sizes = (
+            range(iterations, 0, -1) if decreasing else range(1, iterations + 1)
+        )
+        for p in window_sizes:
+            z[p:-p] = np.minimum(z[p:-p], 0.5 * (z[:-2 * p] + z[2 * p:]))
+        
+        baseline = (np.exp(np.exp(z) - 1.0) - 1.0) ** 2 - offset
+        return y - baseline
         
     @staticmethod
     def baseline_als(intensities, lam=1e6, p=0.001, niter=10):
@@ -276,8 +345,14 @@ class BaselineTesterDialog(QDialog):
         if self.selected_params:
             if self.selected_method == "rolling_ball":
                 method_text += f"\nWindow: {self.selected_params.get('window', 100)}"
+            elif self.selected_method == "snip":
+                method_text += f"\nIterations: {self.selected_params.get('iterations', 40)}"
             else:
-                method_text += f"\nλ={self.selected_params.get('lam', 1e6):.0e}, p={self.selected_params.get('p', 0.001):.4f}, iter={self.selected_params.get('niter', 10)}"
+                method_text += (
+                    f"\nλ={self.selected_params.get('lam', 1e6):.0e}, "
+                    f"p={self.selected_params.get('p', 0.001):.4f}, "
+                    f"iter={self.selected_params.get('niter', 10)}"
+                )
         
         self.ax.text(0.02, 0.98, method_text, transform=self.ax.transAxes,
                     verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),

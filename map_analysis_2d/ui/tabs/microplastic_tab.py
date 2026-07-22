@@ -40,6 +40,7 @@ class MicroplasticDetectionTab(QWidget):
         super().__init__(parent)
         self.parent_window = parent
         self.detection_results = None
+        self._custom_baseline_params = None
         self.setup_ui()
         
     def setup_ui(self):
@@ -160,7 +161,10 @@ class MicroplasticDetectionTab(QWidget):
         params_layout.addWidget(QLabel("Baseline Correction:"), 1, 0)
         self.baseline_preset_combo = QComboBox()
         self.baseline_preset_combo.addItems([
+            "None (already corrected)",
             "Rolling Ball (Fast) - Recommended",
+            "SNIP (Fast)",
+            "SNIP (Moderate)",
             "ALS (Fast)",
             "ALS (Moderate)",
             "ALS (Aggressive)",
@@ -171,14 +175,14 @@ class MicroplasticDetectionTab(QWidget):
         self.baseline_preset_combo.setCurrentText("Rolling Ball (Fast) - Recommended")  # Default
         self.baseline_preset_combo.setToolTip(
             "Baseline correction methods:\n"
-            "• Rolling Ball (Fast): Very fast, good for fluorescence (~30 sec for 82k spectra)\n"
-            "• ALS (Fast): λ=1e5, p=0.01, 5 iter - Quick ALS (~2-5 min)\n"
-            "• ALS (Moderate): λ=1e5, p=0.01, 10 iter - Standard (~4-8 min)\n"
-            "• ALS (Aggressive): λ=1e4, p=0.05, 15 iter - Strong removal (~6-12 min)\n"
-            "• ALS (Balanced): λ=5e5, p=0.02, 12 iter - Middle ground (~5-10 min)\n"
-            "• ALS (Conservative): λ=1e6, p=0.001, 10 iter - Gentle (~4-8 min)\n"
-            "• ALS (Ultra Smooth): λ=1e7, p=0.002, 20 iter - Very smooth (~8-15 min)"
+            "• None: Skip baseline — use already background-corrected / processed spectra\n"
+            "• Rolling Ball (Fast): Very fast, good for fluorescence\n"
+            "• SNIP (Fast/Moderate): Clip-based baseline for large maps\n"
+            "• ALS presets: Asymmetric least squares (slower, stronger fluorescence removal)\n"
+            "Tip: After one baseline pass during plastic scan, corrected spectra are saved\n"
+            "to the map so later scans can use 'None (already corrected)'."
         )
+        self.baseline_preset_combo.currentTextChanged.connect(self._on_baseline_preset_changed)
         params_layout.addWidget(self.baseline_preset_combo, 1, 1)
         
         # Test Baseline button
@@ -188,13 +192,17 @@ class MicroplasticDetectionTab(QWidget):
         self.test_baseline_btn.setMaximumWidth(80)
         params_layout.addWidget(self.test_baseline_btn, 1, 2)
         
-        # Peak enhancement
-        params_layout.addWidget(QLabel("Peak Enhancement:"), 2, 0)
+        # Smoothing for correlation matching
+        params_layout.addWidget(QLabel("Smoothing Window:"), 2, 0)
         self.enhancement_spin = QSpinBox()
-        self.enhancement_spin.setRange(5, 21)
+        self.enhancement_spin.setRange(0, 21)
         self.enhancement_spin.setValue(11)
         self.enhancement_spin.setSingleStep(2)
-        self.enhancement_spin.setToolTip("Smoothing window size (odd numbers only)")
+        self.enhancement_spin.setSpecialValueText("Off")
+        self.enhancement_spin.setToolTip(
+            "Savitzky–Golay smoothing before correlation (odd numbers).\n"
+            "Helps noisy map spectra match templates. Set to Off (0) to disable."
+        )
         params_layout.addWidget(self.enhancement_spin, 2, 1, 1, 2)
         
         # Detection method
@@ -211,7 +219,7 @@ class MicroplasticDetectionTab(QWidget):
             "Peak-based: Fast, uses characteristic peaks\n"
             "Database: Slower, matches against reference spectra\n"
             "Hybrid: Uses both methods\n"
-            "Template Matching: Uses curated plastic spectra from database (best for noisy data)"
+            "Template Matching: Vectorized correlation vs curated DB plastics (recommended)"
         )
         params_layout.addWidget(self.method_combo, 3, 1, 1, 2)
         
@@ -456,7 +464,8 @@ class MicroplasticDetectionTab(QWidget):
         # Status text
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
-        self.status_text.setMaximumHeight(100)
+        self.status_text.setMinimumHeight(140)
+        self.status_text.setMaximumHeight(220)
         self.status_text.setPlaceholderText("Status messages will appear here...")
         layout.addWidget(self.status_text)
         
@@ -527,11 +536,18 @@ class MicroplasticDetectionTab(QWidget):
         value = self.threshold_slider.value() / 100.0
         self.threshold_label.setText(f"{value:.2f}")
     
+    def _on_baseline_preset_changed(self, _text=None):
+        """Clear custom baseline override when a preset is chosen from the combo."""
+        self._custom_baseline_params = None
+
     def get_detection_parameters(self):
         """Get current detection parameters."""
         # Baseline correction presets
         baseline_presets = {
+            "None (already corrected)": {"method": "none"},
             "Rolling Ball (Fast) - Recommended": {"method": "rolling_ball", "window": 100},
+            "SNIP (Fast)": {"method": "snip", "iterations": 20},
+            "SNIP (Moderate)": {"method": "snip", "iterations": 40},
             "ALS (Fast)": {"method": "als", "lam": 1e5, "p": 0.01, "niter": 5},
             "ALS (Moderate)": {"method": "als", "lam": 1e5, "p": 0.01, "niter": 10},
             "ALS (Aggressive)": {"method": "als", "lam": 1e4, "p": 0.05, "niter": 15},
@@ -540,8 +556,13 @@ class MicroplasticDetectionTab(QWidget):
             "ALS (Ultra Smooth)": {"method": "als", "lam": 1e7, "p": 0.002, "niter": 20}
         }
         
-        selected_preset = self.baseline_preset_combo.currentText()
-        baseline_params = baseline_presets.get(selected_preset, baseline_presets["Rolling Ball (Fast) - Recommended"])
+        if self._custom_baseline_params is not None:
+            baseline_params = dict(self._custom_baseline_params)
+        else:
+            selected_preset = self.baseline_preset_combo.currentText()
+            baseline_params = baseline_presets.get(
+                selected_preset, baseline_presets["Rolling Ball (Fast) - Recommended"]
+            )
         
         return {
             'plastic_types': self.get_selected_plastics(),
@@ -555,6 +576,27 @@ class MicroplasticDetectionTab(QWidget):
         """Start microplastic detection."""
         # Update database status before starting
         self.update_database_status()
+
+        selected = self.get_selected_plastics()
+        if not selected:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                "No Plastic Types Selected",
+                "Select at least one plastic type (or use Conservative Mode) before scanning.",
+            )
+            return
+
+        params = self.get_detection_parameters()
+        self.log_status("────────────────────────────────────")
+        self.log_status("🔍 Starting microplastic scan...")
+        self.log_status(f"  • Method: {params['method']}")
+        self.log_status(f"  • Types: {', '.join(selected)}")
+        self.log_status(f"  • Threshold: {params['threshold']:.2f}")
+        self.log_status(
+            f"  • Baseline: {params['baseline'].get('method', 'unknown')}"
+        )
+        self.log_status(f"  • Smoothing window: {params['enhancement_window']}")
         
         # Enable stop button, disable start button
         self.scan_btn.setEnabled(False)
@@ -562,10 +604,14 @@ class MicroplasticDetectionTab(QWidget):
         self.export_btn.setEnabled(False)
         self.stats_btn.setEnabled(False)
         self.refine_btn.setEnabled(False)
+        self.progress_bar.setValue(0)
         
         # This will be connected to the parent window's detection method
         if hasattr(self.parent_window, 'run_microplastic_detection'):
             self.parent_window.run_microplastic_detection()
+        else:
+            self.log_status("❌ Internal error: parent window has no detection runner")
+            self.reset_buttons()
     
     def stop_detection(self):
         """Stop ongoing detection."""
@@ -576,7 +622,7 @@ class MicroplasticDetectionTab(QWidget):
     
     def update_progress(self, value, message=""):
         """Update progress bar and status."""
-        self.progress_bar.setValue(value)
+        self.progress_bar.setValue(int(value))
         if message:
             self.log_status(message)
     
@@ -591,13 +637,82 @@ class MicroplasticDetectionTab(QWidget):
         """Reset button states after detection completes or fails."""
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self.export_btn.setEnabled(self.detection_results is not None)
+        self.stats_btn.setEnabled(self.detection_results is not None)
+        self.refine_btn.setEnabled(self.detection_results is not None)
+
+    @staticmethod
+    def ordered_map_positions(map_data):
+        """Return spectrum positions in the same (y, x) order as get_processed_data_matrix."""
+        x_coords = sorted(map_data.x_positions)
+        y_coords = sorted(map_data.y_positions)
+        positions = []
+        for y in y_coords:
+            for x in x_coords:
+                if (x, y) in map_data.spectra:
+                    positions.append((x, y))
+        return positions, x_coords, y_coords
+
+    @staticmethod
+    def scores_to_2d_grid(scores, positions, x_coords, y_coords, fill_value=np.nan):
+        """
+        Place 1D scores onto a full (n_y, n_x) grid.
+
+        Missing map positions stay as fill_value so incomplete grids
+        (n_spectra < n_x * n_y) display correctly instead of crashing on reshape.
+        """
+        scores = np.asarray(scores, dtype=float).ravel()
+        grid = np.full((len(y_coords), len(x_coords)), fill_value, dtype=float)
+        if len(scores) == 0 or len(positions) == 0:
+            return grid
+
+        x_index = {x: i for i, x in enumerate(x_coords)}
+        y_index = {y: j for j, y in enumerate(y_coords)}
+        n = min(len(scores), len(positions))
+        for score, (x, y) in zip(scores[:n], positions[:n]):
+            grid[y_index[y], x_index[x]] = score
+        return grid
+
+    def set_scan_geometry(self, positions, x_coords, y_coords):
+        """Remember the geometry used for the latest scan / crop."""
+        self._scan_positions = list(positions)
+        self._scan_x_coords = list(x_coords)
+        self._scan_y_coords = list(y_coords)
+
+    def _resolve_score_grid(self, score_map, map_shape=None):
+        """Convert a 1D score vector to 2D using stored scan geometry when needed."""
+        score_map = np.asarray(score_map)
+        if score_map.ndim == 2:
+            return score_map
+
+        positions = getattr(self, '_scan_positions', None)
+        x_coords = getattr(self, '_scan_x_coords', None)
+        y_coords = getattr(self, '_scan_y_coords', None)
+
+        if positions and x_coords and y_coords and len(positions) == len(score_map):
+            return self.scores_to_2d_grid(score_map, positions, x_coords, y_coords)
+
+        # Fallback: try parent map_data full grid
+        if hasattr(self.parent_window, 'map_data') and self.parent_window.map_data is not None:
+            positions, x_coords, y_coords = self.ordered_map_positions(self.parent_window.map_data)
+            if len(positions) == len(score_map):
+                return self.scores_to_2d_grid(score_map, positions, x_coords, y_coords)
+
+        if map_shape is not None and int(np.prod(map_shape)) == len(score_map):
+            return score_map.reshape(map_shape)
+
+        size = int(np.sqrt(len(score_map)))
+        if size * size == len(score_map):
+            return score_map.reshape(size, size)
+
+        return None
         
     def display_results(self, results: Dict[str, np.ndarray], map_shape: tuple = None):
         """Display detection results in the visualization panel.
         
         Args:
             results: Dictionary of plastic type -> score map arrays
-            map_shape: Tuple of (n_rows, n_cols) for reshaping 1D arrays into 2D maps
+            map_shape: Optional (n_rows, n_cols); used only if geometry is unavailable
         """
         from map_analysis_2d.analysis.microplastic_detector import MicroplasticDetector
         
@@ -633,30 +748,28 @@ class MicroplasticDetectionTab(QWidget):
             # Get plastic info
             plastic_info = detector.PLASTIC_SIGNATURES.get(plastic_type, {})
             plastic_name = plastic_info.get('name', plastic_type)
-            plastic_color = plastic_info.get('color', '#FF6B6B')
             
-            # Reshape if needed using actual map dimensions
-            if score_map.ndim == 1:
-                if map_shape is not None:
-                    # Use provided map dimensions
-                    score_map = score_map.reshape(map_shape)
-                else:
-                    # Fallback to square assumption
-                    size = int(np.sqrt(len(score_map)))
-                    if size * size == len(score_map):
-                        score_map = score_map.reshape(size, size)
-                    else:
-                        self.log_status(f"⚠️ Warning: Cannot reshape {plastic_type} map (size={len(score_map)})")
-                        continue
+            score_map_2d = self._resolve_score_grid(score_map, map_shape=map_shape)
+            if score_map_2d is None:
+                self.log_status(
+                    f"⚠️ Warning: Cannot map {plastic_type} scores to 2D "
+                    f"(n={len(np.asarray(score_map).ravel())})"
+                )
+                continue
+
+            # Mask missing pixels and below-threshold scores for display
+            masked_map = np.array(score_map_2d, dtype=float, copy=True)
+            missing = ~np.isfinite(masked_map)
+            below = np.isfinite(masked_map) & (masked_map < threshold)
+            masked_map[below] = 0.0
+            plot_map = np.ma.array(masked_map, mask=missing)
             
-            # Mask out scores below threshold for clearer visualization
-            masked_map = np.copy(score_map)
-            masked_map[masked_map < threshold] = 0
+            n_detections = int(np.sum(np.isfinite(score_map_2d) & (score_map_2d > threshold)))
             
             # Plot heatmap
-            im = ax.imshow(masked_map, cmap='hot', interpolation='nearest',
+            im = ax.imshow(plot_map, cmap='hot', interpolation='nearest',
                           vmin=0, vmax=1, aspect='auto')
-            ax.set_title(f'{plastic_name}\n({np.sum(score_map > threshold)} detections)',
+            ax.set_title(f'{plastic_name}\n({n_detections} detections)',
                         fontweight='bold')
             ax.set_xlabel('X Position')
             ax.set_ylabel('Y Position')
@@ -676,9 +789,15 @@ class MicroplasticDetectionTab(QWidget):
         self.stop_btn.setEnabled(False)
         
         # Log summary
-        total_detections = sum(np.sum(score_map > threshold) for score_map in score_maps.values())
-        self.log_status(f"✅ Detection complete! Found {total_detections} potential microplastic locations (threshold: {threshold:.2f})")
-    
+        total_detections = 0
+        for score_map in score_maps.values():
+            grid = self._resolve_score_grid(score_map, map_shape=map_shape)
+            if grid is not None:
+                total_detections += int(np.sum(np.isfinite(grid) & (grid > threshold)))
+        self.log_status(
+            f"✅ Detection complete! Found {total_detections} potential microplastic "
+            f"locations (threshold: {threshold:.2f})"
+        )    
     def show_statistics(self):
         """Show comprehensive statistics dialog."""
         if self.detection_results is None:
@@ -863,13 +982,18 @@ class MicroplasticDetectionTab(QWidget):
         baseline_params = params.get('baseline', {})
         
         # Apply baseline correction
-        if baseline_params.get('method') == 'rolling_ball':
-            # Use fast rolling ball
+        method = baseline_params.get('method', 'als')
+        if method == 'rolling_ball':
             from scipy.ndimage import minimum_filter1d
-            baseline = minimum_filter1d(intensities, size=100, mode='nearest')
+            window = baseline_params.get('window', 100)
+            baseline = minimum_filter1d(intensities, size=window, mode='nearest')
             intensities = intensities - baseline
+        elif method == 'snip':
+            intensities = MicroplasticDetector.baseline_snip(
+                intensities,
+                iterations=baseline_params.get('iterations', 40),
+            )
         else:
-            # Use ALS
             intensities = MicroplasticDetector.baseline_als(
                 intensities,
                 lam=baseline_params.get('lam', 1e6),
@@ -1164,33 +1288,19 @@ class MicroplasticDetectionTab(QWidget):
                 refined_results[plastic_type] = score_map
                 continue
             
-            # Ensure score_map is 2D
-            original_shape = score_map.shape
+            # Ensure score_map is 2D (handles incomplete / non-rectangular maps)
             if score_map.ndim == 1:
-                # Try to reshape to 2D - assume square or get from map_data
-                if hasattr(self.parent_window, 'map_data'):
-                    map_data = self.parent_window.map_data
-                    all_positions = [(spec.x_pos, spec.y_pos) for spec in map_data.spectra.values()]
-                    unique_x = sorted(set(pos[0] for pos in all_positions))
-                    unique_y = sorted(set(pos[1] for pos in all_positions))
-                    n_rows, n_cols = len(unique_y), len(unique_x)
-                    if n_rows * n_cols == len(score_map):
-                        score_map_2d = score_map.reshape(n_rows, n_cols)
-                    else:
-                        # Can't reshape properly, skip refinement for this type
-                        self.log_status(f"⚠️ Cannot reshape {plastic_type} score map for spatial filtering")
-                        refined_results[plastic_type] = score_map
-                        continue
-                else:
-                    # Assume square
-                    side = int(np.sqrt(len(score_map)))
-                    if side * side == len(score_map):
-                        score_map_2d = score_map.reshape(side, side)
-                    else:
-                        refined_results[plastic_type] = score_map
-                        continue
+                score_map_2d = self._resolve_score_grid(score_map)
+                if score_map_2d is None:
+                    self.log_status(f"⚠️ Cannot reshape {plastic_type} score map for spatial filtering")
+                    refined_results[plastic_type] = score_map
+                    continue
             else:
                 score_map_2d = score_map
+
+            # Treat missing pixels as non-detections
+            score_map_2d = np.array(score_map_2d, dtype=float, copy=True)
+            score_map_2d[~np.isfinite(score_map_2d)] = 0.0
             
             # Create binary detection mask
             detection_mask = score_map_2d > threshold
@@ -1338,9 +1448,23 @@ class MicroplasticDetectionTab(QWidget):
             refined_scores = score_map_2d.copy()
             refined_scores[~refined_mask] = 0
             
-            # Reshape back to original if needed
+            # Convert back to original 1D spectrum order (not a full-rectangle flatten)
             if score_map.ndim == 1:
-                refined_scores = refined_scores.flatten()
+                positions = getattr(self, '_scan_positions', None)
+                x_coords = getattr(self, '_scan_x_coords', None)
+                y_coords = getattr(self, '_scan_y_coords', None)
+                if positions and x_coords and y_coords and len(positions) == len(score_map):
+                    x_index = {x: i for i, x in enumerate(x_coords)}
+                    y_index = {y: j for j, y in enumerate(y_coords)}
+                    refined_scores = np.array(
+                        [refined_scores[y_index[y], x_index[x]] for (x, y) in positions],
+                        dtype=float,
+                    )
+                elif refined_scores.size == len(score_map):
+                    refined_scores = refined_scores.ravel()
+                else:
+                    # Keep 2D; display_results can plot it directly
+                    pass
             
             refined_results[plastic_type] = refined_scores
             total_after += np.sum(refined_mask)
@@ -1350,9 +1474,13 @@ class MicroplasticDetectionTab(QWidget):
         # Update results
         self.detection_results = refined_results
         
-        # Get map shape for proper visualization
+        # Redisplay using stored scan geometry
         map_shape = None
-        if hasattr(self.parent_window, 'map_data'):
+        x_coords = getattr(self, '_scan_x_coords', None)
+        y_coords = getattr(self, '_scan_y_coords', None)
+        if x_coords and y_coords:
+            map_shape = (len(y_coords), len(x_coords))
+        elif hasattr(self.parent_window, 'map_data') and self.parent_window.map_data is not None:
             map_data = self.parent_window.map_data
             map_shape = (len(map_data.y_positions), len(map_data.x_positions))
         
@@ -1416,6 +1544,8 @@ class MicroplasticDetectionTab(QWidget):
                         # Update the baseline preset combo to match
                         method_map = {
                             ("rolling_ball", 100): "Rolling Ball (Fast) - Recommended",
+                            ("snip", 20): "SNIP (Fast)",
+                            ("snip", 40): "SNIP (Moderate)",
                             ("als", (1e5, 0.01, 5)): "ALS (Fast)",
                             ("als", (1e5, 0.01, 10)): "ALS (Moderate)",
                             ("als", (1e6, 0.01, 10)): "ALS (Aggressive)",
@@ -1427,23 +1557,33 @@ class MicroplasticDetectionTab(QWidget):
                         matched = False
                         if method == "rolling_ball":
                             key = (method, params.get("window", 100))
+                        elif method == "snip":
+                            key = (method, params.get("iterations", 40))
                         else:
                             key = (method, (params.get("lam", 1e6), params.get("p", 0.001), params.get("niter", 10)))
                         
                         if key in method_map:
+                            # Block signal so selecting the preset doesn't clear the match
+                            self.baseline_preset_combo.blockSignals(True)
                             self.baseline_preset_combo.setCurrentText(method_map[key])
+                            self.baseline_preset_combo.blockSignals(False)
+                            self._custom_baseline_params = None
                             matched = True
                         
                         if matched:
                             self.log_status(f"✓ Baseline method updated to: {self.baseline_preset_combo.currentText()}")
                         else:
+                            # Store custom parameters for detection
+                            custom = {"method": method}
+                            custom.update(params or {})
+                            self._custom_baseline_params = custom
                             self.log_status(f"✓ Custom baseline parameters set: {method} with {params}")
                             QMessageBox.information(
                                 self, "Custom Parameters",
                                 f"Custom baseline parameters selected:\n"
                                 f"Method: {method}\n"
                                 f"Parameters: {params}\n\n"
-                                f"Note: These custom parameters will be used for detection."
+                                f"These custom parameters will be used for detection."
                             )
                 
                 except ImportError as e:

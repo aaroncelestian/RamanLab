@@ -76,12 +76,14 @@ class MicroplasticDetectionWorker(QThread):
                     plastic_types=plastic_types,
                     threshold=self.params['threshold'],
                     progress_callback=progress_callback,
-                    n_jobs=-1,  # Will be capped at 16 cores in detector
+                    n_jobs=-1,  # Used for baseline batching; correlation uses BLAS multi-core
                     max_templates_per_type=5,
-                    baseline_method=baseline_params.get('method', 'als'),
+                    baseline_method=baseline_params.get('method', 'rolling_ball'),
                     lam=baseline_params.get('lam', 1e6),
                     p=baseline_params.get('p', 0.001),
                     niter=baseline_params.get('niter', 10),
+                    snip_iterations=baseline_params.get('iterations', 40),
+                    smoothing_window=self.params.get('enhancement_window', 11),
                 )
                 
                 if self._is_running:
@@ -92,20 +94,6 @@ class MicroplasticDetectionWorker(QThread):
             baseline_params = self.params.get('baseline', {})
             baseline_method = baseline_params.get('method', 'rolling_ball')
             
-            # Choose mode based on baseline method
-            # fast_mode=True: Uses fast rolling ball baseline (very fast, ~30 sec for 82k)
-            # fast_mode=False: Uses full ALS baseline per-spectrum (slow, minutes for 82k)
-            if baseline_method == 'rolling_ball':
-                # Use original fast rolling ball method
-                use_fast_mode = True
-                lam, p, niter = 1e6, 0.001, 10  # Dummy values, not used in fast mode
-            else:
-                # Use ALS with specified parameters
-                use_fast_mode = True  # Still use fast mode but with ALS in pre-processing
-                lam = baseline_params.get('lam', 1e6)
-                p = baseline_params.get('p', 0.001)
-                niter = baseline_params.get('niter', 10)
-            
             results = self.detector.scan_map_for_plastics(
                 wavenumbers=self.wavenumbers,
                 intensity_map=self.intensities,
@@ -113,10 +101,12 @@ class MicroplasticDetectionWorker(QThread):
                 threshold=self.params['threshold'],
                 progress_callback=progress_callback,
                 n_jobs=-1,  # Will be capped appropriately in detector
-                fast_mode=use_fast_mode,
-                lam=lam,
-                p=p,
-                niter=niter
+                fast_mode=True,
+                baseline_method=baseline_method,
+                lam=baseline_params.get('lam', 1e6),
+                p=baseline_params.get('p', 0.001),
+                niter=baseline_params.get('niter', 10),
+                snip_iterations=baseline_params.get('iterations', 40),
             )
             
             if self._is_running:

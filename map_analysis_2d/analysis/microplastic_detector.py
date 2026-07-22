@@ -196,6 +196,43 @@ class MicroplasticDetector:
             w = p * (intensities > z) + (1 - p) * (intensities < z)
         
         return intensities - z
+
+    @staticmethod
+    def baseline_snip(intensities: np.ndarray, iterations: int = 40,
+                      decreasing: bool = True) -> np.ndarray:
+        """
+        SNIP (Statistics-sensitive Non-linear Iterative Peak-clipping) baseline.
+        
+        Fast clipping-based baseline estimator suited to large Raman maps.
+        Uses an LLS transform for more stable clipping on spectroscopic data.
+        
+        Args:
+            intensities: Raw intensity array
+            iterations: Max half-window / clipping iterations (typical 15–60)
+            decreasing: If True, clip from large to small windows (classic SNIP)
+            
+        Returns:
+            Baseline-corrected intensities
+        """
+        y = np.asarray(intensities, dtype=np.float64)
+        n = y.size
+        if n < 3 or iterations < 1:
+            return y.copy()
+
+        iterations = min(int(iterations), max(1, n // 2 - 1))
+
+        # LLS transform (safe for zeros / small negatives)
+        offset = max(0.0, -float(np.min(y))) + 1.0
+        z = np.log(np.log(np.sqrt(y + offset) + 1.0) + 1.0)
+
+        window_sizes = (
+            range(iterations, 0, -1) if decreasing else range(1, iterations + 1)
+        )
+        for p in window_sizes:
+            z[p:-p] = np.minimum(z[p:-p], 0.5 * (z[:-2 * p] + z[2 * p:]))
+
+        baseline = (np.exp(np.exp(z) - 1.0) - 1.0) ** 2 - offset
+        return y - baseline
     
     @staticmethod
     def enhance_peaks(intensities: np.ndarray, window_length: int = 11, 
@@ -1258,6 +1295,8 @@ class MicroplasticDetector:
                              lam: float = 1e6,
                              p: float = 0.001,
                              niter: int = 10,
+                             baseline_method: str = 'rolling_ball',
+                             snip_iterations: int = 40,
                              use_peak_fitting: bool = False,
                              min_snr: float = 1.5,
                              min_r_squared: float = 0.25,
@@ -1273,10 +1312,12 @@ class MicroplasticDetector:
             threshold: Minimum score threshold for detection
             progress_callback: Optional callback function(current, total, message)
             n_jobs: Number of parallel jobs (-1 = all cores)
-            fast_mode: If True, uses simple baseline removal instead of ALS (much faster)
-            lam: ALS lambda parameter (smoothness) - used when fast_mode=False
-            p: ALS p parameter (asymmetry) - used when fast_mode=False
-            niter: ALS iterations - used when fast_mode=False
+            fast_mode: If True, applies batch baseline removal before detection
+            lam: ALS lambda parameter (smoothness)
+            p: ALS p parameter (asymmetry)
+            niter: ALS iterations
+            baseline_method: 'rolling_ball', 'snip', or 'als'
+            snip_iterations: SNIP clipping iterations when baseline_method='snip'
             use_peak_fitting: If True, use curve fitting (SLOW - only for small datasets)
             min_snr: Minimum SNR for peak detection (lower = more sensitive)
             min_r_squared: Minimum R² for peak fit quality
@@ -1319,77 +1360,26 @@ class MicroplasticDetector:
             
             # Pre-process: Apply baseline correction if in fast mode
             if fast_mode:
-                # Determine which baseline method to use based on parameters
-                # If lam is very high and p is very low, use fast rolling ball
-                # Otherwise use ALS
-                use_rolling_ball = (lam >= 1e6 and p <= 0.001 and niter == 10)
-                
-                if use_rolling_ball:
-                    # Fast rolling ball baseline (original fast method)
-                    if progress_callback:
-                        progress_callback(0, n_spectra, "Fast baseline removal (Rolling Ball)...")
-                    
-                    from scipy.ndimage import minimum_filter1d
-                    
-                    def remove_baseline_batch(indices):
-                        """Remove baseline from a batch of spectra using rolling ball."""
-                        for i in indices:
-                            baseline = minimum_filter1d(intensity_map[i], size=100, mode='nearest')
-                            intensity_map[i] = intensity_map[i] - baseline
-                else:
-                    # ALS baseline removal
-                    if progress_callback:
-                        progress_callback(0, n_spectra, f"ALS baseline removal (λ={lam:.0e}, p={p:.3f})...")
-                    
-                    def remove_baseline_batch(indices):
-                        """Remove baseline from a batch of spectra using ALS."""
-                        for i in indices:
-                            # Apply ALS baseline correction
-                            intensity_map[i] = MicroplasticDetector.baseline_als(
-                                intensity_map[i], lam=lam, p=p, niter=niter
-                            )
-                
-                # Create batches for baseline removal
-                baseline_batch_size = max(100, n_spectra // (n_cores * 4))
-                baseline_batches = [list(range(i, min(i + baseline_batch_size, n_spectra))) 
-                                  for i in range(0, n_spectra, baseline_batch_size)]
-                
-                logger.info(f"Removing baseline from {n_spectra} spectra in {len(baseline_batches)} batches")
-                
-                # Initial progress message
-                if progress_callback:
-                    progress_callback(0, len(baseline_batches), 
-                                    f"Starting ALS baseline on {n_spectra:,} spectra with {n_cores} cores...")
-                
-                # Process baseline removal in parallel
-                completed_baseline = [0]
-                baseline_lock = Lock()
-                
-                def baseline_with_progress(batch):
-                    remove_baseline_batch(batch)
-                    with baseline_lock:
-                        completed_baseline[0] += 1
-                        # Update every 5% or every 10 batches, whichever is more frequent
-                        update_interval = max(1, min(10, len(baseline_batches) // 20))
-                        if progress_callback and completed_baseline[0] % update_interval == 0:
-                            prog = int((completed_baseline[0] / len(baseline_batches)) * 100)
-                            spectra_done = completed_baseline[0] * baseline_batch_size
-                            progress_callback(completed_baseline[0], len(baseline_batches), 
-                                            f"ALS baseline: {prog}% ({spectra_done:,}/{n_spectra:,} spectra)")
-                
-                Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
-                    delayed(baseline_with_progress)(batch) for batch in baseline_batches
+                method = baseline_method if baseline_method in ('rolling_ball', 'snip', 'als') else 'als'
+                self._batch_apply_baseline_parallel(
+                    intensity_map,
+                    n_cores,
+                    progress_callback=progress_callback,
+                    phase_start=0,
+                    phase_end=100,
+                    method=method,
+                    lam=lam,
+                    p=p,
+                    niter=niter,
+                    snip_iterations=snip_iterations,
                 )
-                
-                if progress_callback:
-                    progress_callback(len(baseline_batches), len(baseline_batches), 
-                                    "Baseline removal complete!")
             
             if progress_callback:
                 progress_callback(0, len(batches), f"Detecting plastics in {len(batches)} batches using {n_cores} cores...")
             
             # Process batches in parallel using threading backend
             # Threading avoids pickling large arrays, preventing disk space issues
+            # skip_baseline=True when batch baseline was already applied (fast_mode)
             batch_results = Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
                 delayed(self._process_spectrum_batch)(
                     batch, wavenumbers, intensity_map, plastic_types, 
@@ -1428,9 +1418,20 @@ class MicroplasticDetector:
             
             # Process using the 2D method
             flat_scores = self.scan_map_for_plastics(
-                wavenumbers, flat_map, plastic_types, threshold, 
-                progress_callback, n_jobs, fast_mode, lam, p, niter,
-                use_peak_fitting, min_snr, min_r_squared, use_ensemble, smoothing
+                wavenumbers, flat_map, plastic_types, threshold,
+                progress_callback=progress_callback,
+                n_jobs=n_jobs,
+                fast_mode=fast_mode,
+                lam=lam,
+                p=p,
+                niter=niter,
+                baseline_method=baseline_method,
+                snip_iterations=snip_iterations,
+                use_peak_fitting=use_peak_fitting,
+                min_snr=min_snr,
+                min_r_squared=min_r_squared,
+                use_ensemble=use_ensemble,
+                smoothing=smoothing,
             )
             
             # Reshape back to 3D
@@ -1474,6 +1475,7 @@ class MicroplasticDetector:
         logger.info(f"Looking for plastic types: {plastic_types}")
         
         self.plastic_templates = {}
+        self._template_cache = None
         
         for ptype in plastic_types:
             self.plastic_templates[ptype] = []
@@ -1548,6 +1550,8 @@ class MicroplasticDetector:
         lam: float = 1e6,
         p: float = 0.001,
         niter: int = 10,
+        snip_iterations: int = 40,
+        window: int = 100,
     ) -> None:
         """Apply baseline correction to all spectra in-place using parallel batches."""
         from threading import Lock
@@ -1555,6 +1559,10 @@ class MicroplasticDetector:
 
         n_spectra = intensity_map.shape[0]
         if n_spectra == 0:
+            return
+        if method in ('none', 'skip', None):
+            if progress_callback:
+                progress_callback(phase_end, 100, "Baseline skipped (already corrected)")
             return
 
         batch_size = max(100, n_spectra // max(n_cores * 4, 1))
@@ -1572,10 +1580,25 @@ class MicroplasticDetector:
 
             def remove_baseline_batch(indices):
                 for i in indices:
-                    baseline = minimum_filter1d(intensity_map[i], size=100, mode='nearest')
+                    baseline = minimum_filter1d(intensity_map[i], size=window, mode='nearest')
                     intensity_map[i] = intensity_map[i] - baseline
 
             method_label = "Rolling ball"
+        elif method == 'snip':
+            if progress_callback:
+                progress_callback(
+                    phase_start, 100,
+                    f"SNIP baseline on {n_spectra:,} spectra "
+                    f"({snip_iterations} iterations, {n_cores} cores)..."
+                )
+
+            def remove_baseline_batch(indices):
+                for i in indices:
+                    intensity_map[i] = self.baseline_snip(
+                        intensity_map[i], iterations=snip_iterations
+                    )
+
+            method_label = "SNIP"
         else:
             if progress_callback:
                 progress_callback(
@@ -1619,187 +1642,153 @@ class MicroplasticDetector:
         if progress_callback:
             progress_callback(phase_end, 100, f"{method_label} baseline complete")
 
-    def template_match_spectrum(self, wavenumbers: np.ndarray, 
+    @staticmethod
+    def _row_normalize_for_correlation(matrix: np.ndarray) -> np.ndarray:
+        """Zero-mean and unit-L2-normalize each row for Pearson correlation via matmul."""
+        out = np.asarray(matrix, dtype=np.float64).copy()
+        out[~np.isfinite(out)] = 0.0
+        out -= out.mean(axis=1, keepdims=True)
+        norms = np.linalg.norm(out, axis=1, keepdims=True)
+        norms = np.maximum(norms, 1e-12)
+        out /= norms
+        return out
+
+    @staticmethod
+    def _odd_window(window: int, n_points: int) -> int:
+        """Clamp Savitzky–Golay window to a valid odd length."""
+        if window is None or window < 5 or n_points < 5:
+            return 0
+        w = int(window)
+        if w % 2 == 0:
+            w += 1
+        w = min(w, n_points if n_points % 2 == 1 else n_points - 1)
+        if w % 2 == 0:
+            w -= 1
+        return w if w >= 5 else 0
+
+    def cache_templates_on_grid(self, wavenumbers: np.ndarray) -> int:
+        """
+        Resample plastic templates onto the map wavenumber grid and cache norms.
+
+        Builds a (n_templates, n_wavenumbers) matrix of zero-mean / unit-norm
+        vectors so map matching is a single matrix multiply.
+        """
+        if not getattr(self, 'plastic_templates', None):
+            self._template_cache = None
+            return 0
+
+        wn = np.asarray(wavenumbers, dtype=np.float64)
+        rows = []
+        names = []
+        ptypes = []
+        ptype_to_indices: Dict[str, List[int]] = {}
+
+        for ptype, templates in self.plastic_templates.items():
+            for template_wn, template_int, template_name in templates:
+                tw = np.asarray(template_wn, dtype=np.float64)
+                ti = np.asarray(template_int, dtype=np.float64)
+                if tw.size < 2 or ti.size < 2:
+                    continue
+
+                order = np.argsort(tw)
+                tw = tw[order]
+                ti = ti[order]
+                interp = np.interp(wn, tw, ti, left=0.0, right=0.0)
+
+                interp = interp - np.min(interp)
+                max_val = np.max(interp)
+                if max_val > 0:
+                    interp = interp / max_val
+
+                idx = len(rows)
+                rows.append(interp)
+                names.append(template_name)
+                ptypes.append(ptype)
+                ptype_to_indices.setdefault(ptype, []).append(idx)
+
+        if not rows:
+            self._template_cache = None
+            return 0
+
+        matrix = np.vstack(rows)
+        matrix_norm = self._row_normalize_for_correlation(matrix)
+        centered = matrix - matrix.mean(axis=1, keepdims=True)
+        norms = np.linalg.norm(centered, axis=1)
+
+        self._template_cache = {
+            'wavenumbers': wn.copy(),
+            'matrix': matrix,
+            'matrix_norm': matrix_norm,
+            'norms': norms,
+            'names': names,
+            'ptypes': ptypes,
+            'ptype_to_indices': {
+                ptype: np.asarray(idxs, dtype=np.int64)
+                for ptype, idxs in ptype_to_indices.items()
+            },
+        }
+        logger.info(
+            f"Cached {len(rows)} templates on map grid "
+            f"({len(ptype_to_indices)} plastic types)"
+        )
+        return len(rows)
+
+    def template_match_spectrum(self, wavenumbers: np.ndarray,
                                 intensities: np.ndarray,
                                 baseline_correct: bool = True,
                                 smooth: bool = True,
                                 smoothing_window: int = 7) -> Dict[str, Dict]:
         """
-        Match a spectrum against all loaded plastic templates.
-        
-        Uses non-negative least squares fitting to find the best template match.
-        
-        Args:
-            wavenumbers: Wavenumber array
-            intensities: Intensity array
-            baseline_correct: Apply baseline correction before matching
-            smooth: Apply smoothing before matching
-            smoothing_window: Savitzky-Golay smoothing window
-        
-        Returns:
-            Dictionary with match results for each plastic type:
-            {
-                'Polyethylene': {
-                    'best_match': 'Polyethylene 1. Blue Sphere',
-                    'correlation': 0.85,
-                    'residual': 0.15,
-                    'coefficient': 1.2
-                },
-                ...
-            }
+        Match a single spectrum against cached plastic templates via correlation.
+
+        For map scans, prefer scan_map_with_templates (fully vectorized).
         """
-        if not hasattr(self, 'plastic_templates') or not self.plastic_templates:
-            logger.warning("No plastic templates loaded. Call load_plastic_templates_from_database first.")
+        if not getattr(self, 'plastic_templates', None):
+            logger.warning(
+                "No plastic templates loaded. Call load_plastic_templates_from_database first."
+            )
             return {}
-        
-        # Preprocess spectrum
+
+        intensities = np.asarray(intensities, dtype=np.float64).copy()
         if baseline_correct:
             intensities = self.baseline_als(intensities)
-        
-        if smooth and len(intensities) > smoothing_window:
-            window = smoothing_window if smoothing_window % 2 == 1 else smoothing_window + 1
+
+        window = self._odd_window(smoothing_window, len(intensities)) if smooth else 0
+        if window:
             intensities = signal.savgol_filter(intensities, window, 3)
-        
-        # Check for invalid values (inf/NaN) and clean them
-        if not np.all(np.isfinite(intensities)):
-            # Replace inf with max finite value, NaN with 0
-            intensities = np.nan_to_num(intensities, nan=0.0, posinf=0.0, neginf=0.0)
-        
-        # Normalize
-        intensities = intensities - np.min(intensities)
-        max_val = np.max(intensities)
-        if max_val > 0 and np.isfinite(max_val):
-            intensities = intensities / max_val
-        else:
-            # If max is 0 or invalid, return empty results
+
+        cache = getattr(self, '_template_cache', None)
+        wn = np.asarray(wavenumbers, dtype=np.float64)
+        if (
+            cache is None
+            or cache['wavenumbers'].shape != wn.shape
+            or not np.allclose(cache['wavenumbers'], wn)
+        ):
+            self.cache_templates_on_grid(wn)
+            cache = self._template_cache
+        if cache is None:
             return {}
-        
+
+        spec_norm = self._row_normalize_for_correlation(intensities.reshape(1, -1))[0]
+        corr_vec = cache['matrix_norm'] @ spec_norm
+        corr_vec = np.clip(corr_vec, -1.0, 1.0)
+
         results = {}
-        
-        for ptype, templates in self.plastic_templates.items():
-            best_corr = -1
-            best_match = None
-            best_residual = float('inf')
-            best_coeff = 0
-            
-            for template_wn, template_int, template_name in templates:
-                # Interpolate template to match spectrum wavenumbers
-                # Find overlapping range
-                wn_min = max(wavenumbers.min(), template_wn.min())
-                wn_max = min(wavenumbers.max(), template_wn.max())
-                
-                if wn_max <= wn_min:
-                    continue
-                
-                # Create common wavenumber grid
-                mask = (wavenumbers >= wn_min) & (wavenumbers <= wn_max)
-                common_wn = wavenumbers[mask]
-                
-                if len(common_wn) < 50:
-                    continue
-                
-                # Interpolate both to common grid
-                spec_interp = np.interp(common_wn, wavenumbers, intensities)
-                template_interp = np.interp(common_wn, template_wn, template_int)
-                
-                # Use multiple metrics for robust matching with STRINGENT requirements
-                
-                # 1. Spectral Angle Mapper (SAM) - measures angle between vectors
-                # More robust than correlation for spectral matching
-                dot_product = np.dot(spec_interp, template_interp)
-                norm_spec = np.linalg.norm(spec_interp)
-                norm_template = np.linalg.norm(template_interp)
-                
-                if norm_spec > 1e-10 and norm_template > 1e-10:
-                    cos_angle = dot_product / (norm_spec * norm_template)
-                    cos_angle = np.clip(cos_angle, -1, 1)  # Numerical stability
-                    sam_score = cos_angle  # 1 = perfect match, 0 = orthogonal, -1 = opposite
-                else:
-                    sam_score = 0
-                
-                # 2. Normalized cross-correlation (more stringent than Pearson)
-                spec_centered = spec_interp - np.mean(spec_interp)
-                template_centered = template_interp - np.mean(template_interp)
-                
-                if np.std(spec_centered) > 1e-10 and np.std(template_centered) > 1e-10:
-                    ncc = np.sum(spec_centered * template_centered) / (
-                        np.sqrt(np.sum(spec_centered**2)) * np.sqrt(np.sum(template_centered**2))
-                    )
-                    ncc = max(0, ncc)  # Only positive correlations
-                else:
-                    ncc = 0
-                
-                # 3. Peak position matching - do the peaks align?
-                # Find peaks in both spectra
-                from scipy.signal import find_peaks
-                spec_peaks, _ = find_peaks(spec_interp, prominence=0.1 * np.max(spec_interp))
-                template_peaks, _ = find_peaks(template_interp, prominence=0.1 * np.max(template_interp))
-                
-                # Calculate peak overlap score
-                if len(spec_peaks) > 0 and len(template_peaks) > 0:
-                    # For each template peak, find closest spectrum peak
-                    peak_distances = []
-                    for tp in template_peaks:
-                        if len(spec_peaks) > 0:
-                            closest_dist = np.min(np.abs(spec_peaks - tp))
-                            # Normalize by wavenumber range
-                            peak_distances.append(closest_dist / len(common_wn))
-                    
-                    # Peak score: 1 if peaks align perfectly, 0 if far apart
-                    avg_peak_dist = np.mean(peak_distances) if peak_distances else 1.0
-                    peak_score = np.exp(-20 * avg_peak_dist)  # Strict penalty for misaligned peaks
-                else:
-                    peak_score = 0.0  # No peaks found
-                
-                # 4. Residual penalty - how well does template fit?
-                if np.sum(template_interp**2) > 0:
-                    scale = np.dot(spec_interp, template_interp) / np.sum(template_interp**2)
-                    scale = max(0, scale)
-                    fitted = scale * template_interp
-                    residual_norm = np.sqrt(np.mean((spec_interp - fitted)**2))
-                    # Convert to similarity score (0 = bad fit, 1 = perfect fit)
-                    # Increased penalty from -5 to -10 for stricter matching
-                    residual_score = np.exp(-10 * residual_norm)
-                else:
-                    residual_score = 0
-                
-                # Combined score with STRICT requirements:
-                # SAM (30%) + NCC (25%) + Peak matching (25%) + Residual fit (20%)
-                # All metrics must be reasonably high for a good match
-                corr = 0.30 * max(0, sam_score) + 0.25 * ncc + 0.25 * peak_score + 0.20 * residual_score
-                
-                # Additional penalty: if any individual metric is too low, reduce overall score
-                # This prevents cases where one high metric compensates for very low others
-                min_metric = min(max(0, sam_score), ncc, peak_score, residual_score)
-                if min_metric < 0.3:  # If any metric is below 0.3, apply penalty
-                    corr *= (min_metric / 0.3)  # Scale down the score
-                
-                # Calculate residual (how well template fits)
-                if np.sum(template_interp**2) > 0:
-                    coeff = np.sum(spec_interp * template_interp) / np.sum(template_interp**2)
-                    coeff = max(0, coeff)  # Non-negative
-                    fitted = coeff * template_interp
-                    residual = np.sqrt(np.mean((spec_interp - fitted)**2))
-                else:
-                    coeff = 0
-                    residual = float('inf')
-                
-                if corr > best_corr:
-                    best_corr = corr
-                    best_match = template_name
-                    best_residual = residual
-                    best_coeff = coeff
-            
-            if best_match is not None:
-                results[ptype] = {
-                    'best_match': best_match,
-                    'correlation': best_corr,
-                    'residual': best_residual,
-                    'coefficient': best_coeff
-                }
-        
+        for ptype, indices in cache['ptype_to_indices'].items():
+            local = corr_vec[indices]
+            best_local = int(np.argmax(local))
+            best_corr = float(local[best_local])
+            if best_corr <= 0:
+                continue
+            global_idx = int(indices[best_local])
+            results[ptype] = {
+                'best_match': cache['names'][global_idx],
+                'correlation': best_corr,
+                'residual': float(max(0.0, 1.0 - best_corr)),
+                'coefficient': best_corr,
+            }
         return results
-    
+
     def scan_map_with_templates(self, wavenumbers: np.ndarray,
                                 intensity_map: np.ndarray,
                                 database: Dict,
@@ -1811,161 +1800,141 @@ class MicroplasticDetector:
                                 baseline_method: str = 'als',
                                 lam: float = 1e6,
                                 p: float = 0.001,
-                                niter: int = 10) -> Dict[str, np.ndarray]:
+                                niter: int = 10,
+                                snip_iterations: int = 40,
+                                smoothing_window: int = 11) -> Dict[str, np.ndarray]:
         """
-        Scan entire map using template matching against database plastic spectra.
-        
-        Baseline correction is applied once in parallel batches before matching,
-        rather than per-spectrum inside template_match_spectrum.
-        
-        Args:
-            wavenumbers: Wavenumber array
-            intensity_map: 2D array (n_spectra, n_wavenumbers)
-            database: RamanLab database dictionary
-            plastic_types: List of plastic types to detect (None = common types)
-            threshold: Minimum correlation threshold for detection
-            progress_callback: Optional callback function(current, total, message)
-            n_jobs: Number of parallel jobs (-1 = all cores)
-            max_templates_per_type: Max reference spectra per plastic type
-            baseline_method: 'als' or 'rolling_ball' for batch pre-processing
-            lam: ALS smoothness parameter
-            p: ALS asymmetry parameter
-            niter: ALS iterations
-        
-        Returns:
-            Dictionary mapping plastic type to 2D correlation score map
-        """
-        from threading import Lock
+        Scan entire map with vectorized correlation against plastic templates.
 
-        # Load templates if not already loaded
-        if not hasattr(self, 'plastic_templates') or not self.plastic_templates:
+        Pipeline:
+          1. Load / cache templates on the map wavenumber grid (once)
+          2. Optional batch baseline (skipped when method is 'none')
+          3. Optional Savitzky–Golay smoothing along the spectral axis
+          4. Pearson correlation via BLAS matrix multiply (multi-core)
+
+        Args:
+            baseline_method: 'als', 'rolling_ball', 'snip', or 'none'
+            smoothing_window: Savitzky–Golay window (0 disables smoothing)
+        """
+        if not getattr(self, 'plastic_templates', None):
             if progress_callback:
                 progress_callback(0, 100, "Loading plastic templates from database...")
-            self.load_plastic_templates_from_database(database, plastic_types, max_templates_per_type)
-        
+            self.load_plastic_templates_from_database(
+                database, plastic_types, max_templates_per_type
+            )
+
         if not self.plastic_templates:
             logger.error("No plastic templates available")
             return {}
-        
-        n_spectra = intensity_map.shape[0]
-        n_templates = sum(len(v) for v in self.plastic_templates.values())
+
+        n_spectra, n_points = intensity_map.shape
         if n_jobs == -1:
             n_cores = min(multiprocessing.cpu_count(), 16)
         else:
             n_cores = n_jobs
-        
-        logger.info(
-            f"Template matching {n_spectra:,} spectra against {n_templates} templates "
-            f"using {n_cores} cores (batch baseline: {baseline_method})"
-        )
-        
+
+        skip_baseline = baseline_method in ('none', 'skip', None)
+
         if progress_callback:
-            progress_callback(
-                5, 100,
-                f"Preparing {n_spectra:,} spectra (batch baseline + template matching)..."
+            progress_callback(5, 100, "Caching templates on map wavenumber grid...")
+        n_templates = self.cache_templates_on_grid(wavenumbers)
+        if n_templates == 0:
+            logger.error("Failed to cache plastic templates on map grid")
+            return {}
+
+        cache = self._template_cache
+        logger.info(
+            f"Vectorized template matching: {n_spectra:,} spectra × "
+            f"{n_templates} templates (baseline={baseline_method}, "
+            f"smooth={smoothing_window})"
+        )
+
+        working_map = np.array(intensity_map, dtype=np.float64, copy=True)
+        corrected_for_save = None
+
+        if skip_baseline:
+            if progress_callback:
+                progress_callback(
+                    40, 100,
+                    "Skipping baseline (using already-corrected spectra)..."
+                )
+        else:
+            self._batch_apply_baseline_parallel(
+                working_map,
+                n_cores,
+                progress_callback=progress_callback,
+                phase_start=5,
+                phase_end=40,
+                method=baseline_method,
+                lam=lam,
+                p=p,
+                niter=niter,
+                snip_iterations=snip_iterations,
+            )
+            # Persist pre-smooth baseline so later "None" runs can re-smooth cleanly
+            corrected_for_save = working_map.copy()
+
+        window = self._odd_window(smoothing_window, n_points)
+        if window:
+            if progress_callback:
+                progress_callback(
+                    45, 100,
+                    f"Smoothing {n_spectra:,} spectra (Savitzky–Golay, window={window})..."
+                )
+            polyorder = min(3, window - 1)
+            working_map = signal.savgol_filter(
+                working_map, window_length=window, polyorder=polyorder, axis=1
             )
 
-        # Batch baseline correction once (in-place on intensity_map copy)
-        working_map = np.array(intensity_map, copy=True)
-        self._batch_apply_baseline_parallel(
-            working_map,
-            n_cores,
-            progress_callback=progress_callback,
-            phase_start=5,
-            phase_end=45,
-            method=baseline_method,
-            lam=lam,
-            p=p,
-            niter=niter,
-        )
-        
-        score_maps = {ptype: np.zeros(n_spectra) for ptype in self.plastic_templates.keys()}
-        match_info = {}
-        
-        batch_size = max(100, n_spectra // max(n_cores * 4, 1))
-        batches = [
-            list(range(i, min(i + batch_size, n_spectra)))
-            for i in range(0, n_spectra, batch_size)
-        ]
-        
         if progress_callback:
             progress_callback(
-                45, 100,
-                f"Template matching {n_spectra:,} spectra against {n_templates} references..."
+                55, 100,
+                f"Vectorized correlation: {n_spectra:,} × {n_templates} (BLAS multi-core)..."
             )
-        
-        def process_batch(batch_indices):
-            """Process a batch of spectra (baseline already applied)."""
-            batch_results = []
-            for idx in batch_indices:
-                try:
-                    spectrum = working_map[idx]
-                    if not np.all(np.isfinite(spectrum)):
-                        batch_results.append((idx, {}))
-                        continue
-                    matches = self.template_match_spectrum(
-                        wavenumbers, spectrum, baseline_correct=False
-                    )
-                    batch_results.append((idx, matches))
-                except Exception as e:
-                    logger.warning(f"Error processing spectrum {idx}: {e}")
-                    batch_results.append((idx, {}))
-            return batch_results
-        
-        completed = [0]
-        match_lock = Lock()
-        update_interval = max(1, len(batches) // 20)
-        
-        def process_batch_with_progress(batch_indices):
-            result = process_batch(batch_indices)
-            with match_lock:
-                completed[0] += 1
-                if progress_callback and (
-                    completed[0] % update_interval == 0 or completed[0] == len(batches)
-                ):
-                    frac = completed[0] / len(batches)
-                    pct = 45 + int(frac * 45)  # 45-90%
-                    spectra_done = min(completed[0] * batch_size, n_spectra)
-                    progress_callback(
-                        pct, 100,
-                        f"Template matching: {int(frac * 100)}% "
-                        f"({spectra_done:,}/{n_spectra:,} spectra)"
-                    )
-            return result
-        
-        all_results = Parallel(n_jobs=n_cores, backend='threading', verbose=0)(
-            delayed(process_batch_with_progress)(batch) for batch in batches
-        )
-        
+
+        spectra_norm = self._row_normalize_for_correlation(working_map)
+        # Pearson correlation for every spectrum–template pair; BLAS uses multi-core
+        corr_all = spectra_norm @ cache['matrix_norm'].T
+        corr_all = np.clip(corr_all, -1.0, 1.0)
+
         if progress_callback:
-            progress_callback(90, 100, "Combining results...")
-        
-        # Combine results
-        for batch_results in all_results:
-            for idx, matches in batch_results:
-                for ptype, match_data in matches.items():
-                    corr = match_data['correlation']
-                    score_maps[ptype][idx] = max(0, corr)  # Use correlation as score
-                    
-                    if corr >= threshold:
-                        if idx not in match_info or corr > match_info[idx].get('correlation', 0):
-                            match_info[idx] = {
-                                'plastic_type': ptype,
-                                'best_match': match_data['best_match'],
-                                'correlation': corr,
-                                'residual': match_data['residual']
-                            }
-        
-        # Add match info to results
+            progress_callback(85, 100, "Selecting best matches per plastic type...")
+
+        score_maps: Dict[str, np.ndarray] = {}
+        match_info: Dict[int, Dict] = {}
+        spectrum_ids = np.arange(n_spectra)
+
+        for ptype, indices in cache['ptype_to_indices'].items():
+            sub = corr_all[:, indices]
+            best_local = np.argmax(sub, axis=1)
+            best_corr = sub[spectrum_ids, best_local]
+            score_maps[ptype] = np.maximum(0.0, best_corr)
+
+            above = best_corr >= threshold
+            if not np.any(above):
+                continue
+            for idx in np.flatnonzero(above):
+                corr = float(best_corr[idx])
+                global_idx = int(indices[best_local[idx]])
+                if idx not in match_info or corr > match_info[idx].get('correlation', 0):
+                    match_info[idx] = {
+                        'plastic_type': ptype,
+                        'best_match': cache['names'][global_idx],
+                        'correlation': corr,
+                        'residual': float(max(0.0, 1.0 - corr)),
+                    }
+
         score_maps['_match_info'] = match_info
-        
-        # Calculate detection statistics
-        for ptype in self.plastic_templates.keys():
-            detected = np.sum(score_maps[ptype] >= threshold)
-            pct = 100 * detected / n_spectra
+        if corrected_for_save is not None:
+            # Caller can write these back so subsequent runs use baseline_method='none'
+            score_maps['_corrected_intensities'] = corrected_for_save
+
+        for ptype in cache['ptype_to_indices']:
+            detected = int(np.sum(score_maps[ptype] >= threshold))
+            pct = 100.0 * detected / n_spectra
             logger.info(f"{ptype}: {detected:,} detections ({pct:.2f}%)")
-        
+
         if progress_callback:
-            progress_callback(100, 100, "✅ Template matching complete!")
-        
+            progress_callback(100, 100, "✅ Vectorized template matching complete!")
+
         return score_maps
