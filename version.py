@@ -8,7 +8,7 @@ __version_info__ = (1, 5, 0)
 
 # Build number — increment manually with each notable push within a version.
 # Reset to 1 when the version number changes.
-__build__ = 3
+__build__ = 4
 
 __author__ = "Aaron J. Celestian Ph.D."
 __maintainer__ = "Aaron J. Celestian Ph.D."
