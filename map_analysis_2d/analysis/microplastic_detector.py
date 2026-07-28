@@ -251,7 +251,9 @@ class MicroplasticDetector:
         if window_length % 2 == 0:
             window_length += 1
         
-        return signal.savgol_filter(intensities, window_length, polyorder)
+        return MicroplasticDetector._safe_savgol(
+            intensities, window_length, polyorder
+        )
     
     @staticmethod
     def gaussian(x: np.ndarray, amplitude: float, center: float, 
@@ -727,7 +729,7 @@ class MicroplasticDetector:
             window += 1
         
         try:
-            second_deriv = signal.savgol_filter(smoothed, window, 3, deriv=2)
+            second_deriv = self._safe_savgol(smoothed, window, 3, deriv=2)
         except ValueError:
             # Fallback to simple second derivative
             second_deriv = np.gradient(np.gradient(smoothed))
@@ -1071,7 +1073,7 @@ class MicroplasticDetector:
             window = smoothing if smoothing % 2 == 1 else smoothing + 1  # Must be odd
             window = max(5, min(window, 21))  # Clamp to reasonable range
             if len(intensities) > window:
-                intensities = signal.savgol_filter(intensities, window, 3)
+                intensities = self._safe_savgol(intensities, window, 3)
         
         # Use multi-window correlation if reference available
         # Try to find a matching reference spectrum by plastic type
@@ -1666,6 +1668,44 @@ class MicroplasticDetector:
             w -= 1
         return w if w >= 5 else 0
 
+    @staticmethod
+    def _safe_savgol(
+        data: np.ndarray,
+        window_length: int,
+        polyorder: int = 3,
+        axis: int = -1,
+        deriv: int = 0,
+    ) -> np.ndarray:
+        """
+        Savitzky–Golay filter that avoids MKL DGELSD failures on Windows.
+
+        Default scipy mode 'interp' fits edge polynomials via np.linalg.lstsq /
+        DGELSD, which can raise LinAlgError ("SVD did not converge") or emit
+        "Intel MKL ERROR: Parameter 6 was incorrect on entry to DGELSD" on
+        some Miniconda/MKL builds. mode='nearest' uses convolution only.
+        """
+        out = np.asarray(data, dtype=np.float64, order='C')
+        if not np.all(np.isfinite(out)):
+            out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+        polyorder = min(int(polyorder), int(window_length) - 1)
+        if polyorder < 0:
+            return out
+        try:
+            return signal.savgol_filter(
+                out,
+                window_length=window_length,
+                polyorder=polyorder,
+                deriv=deriv,
+                axis=axis,
+                mode='nearest',
+            )
+        except np.linalg.LinAlgError as exc:
+            logger.warning(
+                "Savitzky–Golay failed (%s); continuing without this smooth step",
+                exc,
+            )
+            return out
+
     def cache_templates_on_grid(self, wavenumbers: np.ndarray) -> int:
         """
         Resample plastic templates onto the map wavenumber grid and cache norms.
@@ -1755,7 +1795,7 @@ class MicroplasticDetector:
 
         window = self._odd_window(smoothing_window, len(intensities)) if smooth else 0
         if window:
-            intensities = signal.savgol_filter(intensities, window, 3)
+            intensities = self._safe_savgol(intensities, window, 3)
 
         cache = getattr(self, '_template_cache', None)
         wn = np.asarray(wavenumbers, dtype=np.float64)
@@ -1882,7 +1922,7 @@ class MicroplasticDetector:
                     f"Smoothing {n_spectra:,} spectra (Savitzky–Golay, window={window})..."
                 )
             polyorder = min(3, window - 1)
-            working_map = signal.savgol_filter(
+            working_map = self._safe_savgol(
                 working_map, window_length=window, polyorder=polyorder, axis=1
             )
 
