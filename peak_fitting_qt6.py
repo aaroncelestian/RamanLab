@@ -8299,105 +8299,302 @@ class SpectralDeconvolutionQt6(QDialog):
             QMessageBox.critical(self, "Error", f"Failed to remove peak: {str(e)}")
     
     # ==================== BATCH PROCESSING METHODS ====================
-    
+
+    BATCH_SPECTRUM_EXTENSIONS = ['.txt', '.csv', '.dat', '.asc', '.spc', '.xy', '.tsv', '.l6s', '.l6m']
+    BATCH_FILE_FILTER = (
+        "Spectrum Files (*.txt *.csv *.dat *.asc *.spc *.xy *.tsv *.l6s *.l6m);;"
+        "LabSpec6 Spectra (*.l6s);;"
+        "LabSpec6 Maps as Spectra (*.l6m);;"
+        "All Files (*)"
+    )
+
+    def _ensure_l6m_batch_cache(self):
+        """Ensure the in-memory .l6m cache dict exists."""
+        if not hasattr(self, '_l6m_batch_cache') or self._l6m_batch_cache is None:
+            self._l6m_batch_cache = {}
+
+    def _batch_entry_key(self, entry):
+        """Return a unique key for a batch list entry (path string or .l6m spectrum ref)."""
+        if isinstance(entry, dict) and entry.get('type') == 'l6m_spectrum':
+            return f"{entry['filepath']}#y{entry['i_y']}_x{entry['i_x']}"
+        return str(entry)
+
+    def _batch_entry_display_name(self, entry):
+        """Display name for a batch list entry."""
+        if isinstance(entry, dict) and entry.get('type') == 'l6m_spectrum':
+            return entry.get('filename', Path(entry['filepath']).name)
+        return Path(str(entry)).name
+
+    def _get_existing_batch_keys(self):
+        """Set of keys already present in the batch file list."""
+        return {
+            self._batch_entry_key(self.batch_file_list.item(i).data(Qt.UserRole))
+            for i in range(self.batch_file_list.count())
+        }
+
+    def _add_batch_list_item(self, entry, existing_keys=None):
+        """Add a batch list item if not already present. Returns True if added."""
+        if existing_keys is None:
+            existing_keys = self._get_existing_batch_keys()
+        key = self._batch_entry_key(entry)
+        if key in existing_keys:
+            return False
+        item = QListWidgetItem(self._batch_entry_display_name(entry))
+        item.setData(Qt.UserRole, entry)
+        if isinstance(entry, dict) and entry.get('type') == 'l6m_spectrum':
+            item.setToolTip(
+                f"{entry['filepath']}\n"
+                f"Map pixel (y={entry['i_y']}, x={entry['i_x']})  "
+                f"pos=({entry.get('y_pos', 0):.3f}, {entry.get('x_pos', 0):.3f}) µm"
+            )
+        else:
+            item.setToolTip(str(entry))
+        self.batch_file_list.addItem(item)
+        existing_keys.add(key)
+        return True
+
+    def _cache_l6m_map(self, file_path):
+        """
+        Load and cache a .l6m map for batch use.
+
+        Returns:
+            (wavenumbers, x_coords, y_coords, cube, metadata) or raises on failure.
+        """
+        self._ensure_l6m_batch_cache()
+        file_path = str(file_path)
+        if file_path in self._l6m_batch_cache:
+            return self._l6m_batch_cache[file_path]
+
+        from utils.labspec6_map_parser import load_labspec6_map
+        wavenumbers, x_coords, y_coords, cube, metadata = load_labspec6_map(file_path)
+        if wavenumbers is None or cube is None:
+            raise Exception(metadata.get('error', 'Failed to load .l6m map'))
+
+        self._l6m_batch_cache[file_path] = (wavenumbers, x_coords, y_coords, cube, metadata)
+        return self._l6m_batch_cache[file_path]
+
+    def _expand_l6m_into_batch(self, file_path, existing_keys=None, confirm=True):
+        """
+        Expand a .l6m map into individual spectrum entries in the batch list.
+
+        Returns:
+            Number of spectra added.
+        """
+        file_path = str(file_path)
+        try:
+            wavenumbers, x_coords, y_coords, cube, metadata = self._cache_l6m_map(file_path)
+        except Exception as e:
+            QMessageBox.warning(self, "LabSpec6 Map Error",
+                                f"Could not load {Path(file_path).name}:\n{e}")
+            return 0
+
+        n_y, n_x, n_pts = cube.shape
+        n_spectra = n_x * n_y
+
+        if confirm:
+            reply = QMessageBox.question(
+                self, "Import LabSpec6 Map as Spectra",
+                f"File: {Path(file_path).name}\n"
+                f"Sample: {metadata.get('sample_name', 'N/A')}\n"
+                f"Map size: {n_x} × {n_y} = {n_spectra:,} spectra\n"
+                f"Wavenumber range: {wavenumbers[0]:.1f} – {wavenumbers[-1]:.1f} cm⁻¹ "
+                f"({n_pts} points)\n\n"
+                f"Add all {n_spectra:,} spectra to the batch list?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply != QMessageBox.Yes:
+                # Drop unused cache entry if nothing was added from this file yet
+                return 0
+
+        if existing_keys is None:
+            existing_keys = self._get_existing_batch_keys()
+
+        stem = Path(file_path).stem
+        added = 0
+        for i_y in range(n_y):
+            for i_x in range(n_x):
+                entry = {
+                    'type': 'l6m_spectrum',
+                    'filepath': file_path,
+                    'i_y': i_y,
+                    'i_x': i_x,
+                    'x_pos': float(x_coords[i_x]),
+                    'y_pos': float(y_coords[i_y]),
+                    'filename': f"{stem}_y{i_y:03d}_x{i_x:03d}.l6m",
+                }
+                if self._add_batch_list_item(entry, existing_keys):
+                    added += 1
+        return added
+
+    def _add_path_to_batch(self, file_path, existing_keys=None, confirm_l6m=True):
+        """
+        Add a single path to the batch list (.l6m maps are expanded to spectra).
+
+        Returns:
+            Number of entries added.
+        """
+        file_path = str(file_path)
+        suffix = Path(file_path).suffix.lower()
+        if suffix == '.l6m':
+            return self._expand_l6m_into_batch(file_path, existing_keys=existing_keys,
+                                              confirm=confirm_l6m)
+        if existing_keys is None:
+            existing_keys = self._get_existing_batch_keys()
+        return 1 if self._add_batch_list_item(file_path, existing_keys) else 0
+
+    def _load_batch_spectrum_data(self, entry):
+        """
+        Load wavenumbers/intensities for a batch list entry.
+
+        Returns:
+            (wavenumbers, intensities, metadata, filename, filepath)
+        """
+        if isinstance(entry, dict) and entry.get('type') == 'l6m_spectrum':
+            file_path = entry['filepath']
+            wavenumbers, x_coords, y_coords, cube, map_meta = self._cache_l6m_map(file_path)
+            intensities = np.asarray(cube[entry['i_y'], entry['i_x'], :], dtype=float).copy()
+            filename = entry.get('filename', Path(file_path).name)
+            metadata = {
+                'filename': filename,
+                'filepath': file_path,
+                'format': 'LabSpec6 Map Spectrum',
+                'i_y': entry['i_y'],
+                'i_x': entry['i_x'],
+                'x_pos': entry.get('x_pos'),
+                'y_pos': entry.get('y_pos'),
+                'sample_name': map_meta.get('sample_name'),
+                'data_points': len(wavenumbers),
+            }
+            return wavenumbers, intensities, metadata, filename, file_path
+
+        file_path = str(entry)
+        if FILE_LOADING_AVAILABLE:
+            wavenumbers, intensities, metadata = load_spectrum_file(file_path)
+            if wavenumbers is None or intensities is None:
+                error_msg = metadata.get("error", "Unknown error occurred")
+                raise Exception(f"Failed to load spectrum: {error_msg}")
+        else:
+            data = np.loadtxt(file_path)
+            if data.ndim == 1 or data.shape[1] < 2:
+                raise Exception("File must contain at least 2 columns (wavenumbers and intensities)")
+            wavenumbers = data[:, 0]
+            intensities = data[:, 1]
+            metadata = {}
+        return wavenumbers, intensities, metadata, Path(file_path).name, file_path
+
     def add_batch_files(self):
         """Add files to the batch processing list."""
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Select Spectrum Files", "", 
-            "Spectrum Files (*.txt *.csv *.dat *.asc *.spc *.xy *.tsv);;All Files (*)"
+            self, "Select Spectrum Files", "",
+            self.BATCH_FILE_FILTER
         )
-        
+
+        existing_keys = self._get_existing_batch_keys()
+        added_count = 0
         for file_path in files:
-            if file_path not in [self.batch_file_list.item(i).data(Qt.UserRole) 
-                                for i in range(self.batch_file_list.count())]:
-                item = QListWidgetItem(Path(file_path).name)
-                item.setData(Qt.UserRole, file_path)
-                self.batch_file_list.addItem(item)
-    
+            added_count += self._add_path_to_batch(file_path, existing_keys=existing_keys,
+                                                  confirm_l6m=True)
+
+        if added_count:
+            QMessageBox.information(self, "Files Added",
+                                    f"Added {added_count} spectrum entr{'y' if added_count == 1 else 'ies'}.")
+
     def add_batch_folder(self):
         """Add all spectrum files from a folder to the batch processing list."""
         folder = QFileDialog.getExistingDirectory(self, "Select Folder with Spectrum Files")
         if not folder:
             return
-        
-        # Find supported spectrum files
-        supported_extensions = ['.txt', '.csv', '.dat', '.asc', '.spc', '.xy', '.tsv']
+
         files = []
-        for ext in supported_extensions:
-            files.extend(Path(folder).glob(f"*{ext}"))
-        
+        for ext in self.BATCH_SPECTRUM_EXTENSIONS:
+            files.extend(sorted(Path(folder).glob(f"*{ext}")))
+
+        existing_keys = self._get_existing_batch_keys()
         added_count = 0
-        for file_path in files:
-            file_str = str(file_path)
-            if file_str not in [self.batch_file_list.item(i).data(Qt.UserRole) 
-                               for i in range(self.batch_file_list.count())]:
-                item = QListWidgetItem(file_path.name)
-                item.setData(Qt.UserRole, file_str)
-                self.batch_file_list.addItem(item)
-                added_count += 1
-        
-        QMessageBox.information(self, "Files Added", f"Added {added_count} files from {folder}")
-    
+        l6m_files = [f for f in files if f.suffix.lower() == '.l6m']
+        other_files = [f for f in files if f.suffix.lower() != '.l6m']
+
+        for file_path in other_files:
+            added_count += self._add_path_to_batch(str(file_path), existing_keys=existing_keys,
+                                                  confirm_l6m=False)
+
+        # Confirm once per .l6m map when expanding from a folder
+        for file_path in l6m_files:
+            added_count += self._add_path_to_batch(str(file_path), existing_keys=existing_keys,
+                                                  confirm_l6m=True)
+
+        QMessageBox.information(self, "Files Added",
+                                f"Added {added_count} spectrum entr{'y' if added_count == 1 else 'ies'} from {folder}")
+
     def clear_batch_files(self):
-        """Clear the batch file list."""
+        """Clear the batch file list and any cached .l6m map data."""
         self.batch_file_list.clear()
-    
+        self._l6m_batch_cache = {}
+
     def on_batch_file_double_click(self, item):
         """Handle double-click on a batch file to show it in the main plot."""
         try:
-            # Get the file path from the item
-            file_path = item.data(Qt.UserRole)
-            if not file_path:
+            # Get the file path / spectrum ref from the item
+            entry = item.data(Qt.UserRole)
+            if not entry:
                 return
-            
+
+            display_name = self._batch_entry_display_name(entry)
+
             # Check if we have batch results for this file
-            batch_result = self._find_batch_result_for_file(file_path)
-            
+            batch_result = self._find_batch_result_for_file(entry)
+
             if batch_result:
                 # Display the fitted spectrum with peaks and background
-                self._display_batch_result(batch_result, file_path)
+                self._display_batch_result(batch_result, entry)
             else:
                 # Load and display the raw spectrum
-                self._load_and_display_raw_spectrum(file_path)
-            
+                self._load_and_display_raw_spectrum(entry)
+
             # Switch to the Current Spectrum tab to show the plot
             self.visualization_tabs.setCurrentIndex(0)
-            
+
         except Exception as e:
-            QMessageBox.warning(self, "Display Error", 
+            QMessageBox.warning(self, "Display Error",
                               f"Error displaying spectrum:\n{str(e)}")
-    
+
     def _find_batch_result_for_file(self, file_path):
-        """Find the batch result for a given file path."""
+        """Find the batch result for a given file path or .l6m spectrum entry."""
         if not hasattr(self, 'batch_results') or not self.batch_results:
             return None
-        
-        filename = Path(file_path).name
-        
+
+        filename = self._batch_entry_display_name(file_path)
+        filepath_str = (file_path.get('filepath') if isinstance(file_path, dict)
+                        else str(file_path))
+
         # Handle both old and new batch result formats
         if isinstance(self.batch_results, dict) and 'spectra_dict' in self.batch_results:
             # New pandas format - look in spectra_dict
             spectra_dict = self.batch_results['spectra_dict']
-            
+
             # Try exact filename match first
             if filename in spectra_dict:
                 return spectra_dict[filename]
-            
+
             # Try matching by stored filename field
             for spectrum_key, spectrum_data in spectra_dict.items():
                 if isinstance(spectrum_data, dict):
                     stored_filename = spectrum_data.get('filename', '')
                     if stored_filename == filename:
                         return spectrum_data
-            
+
             return None
-            
+
         elif isinstance(self.batch_results, list):
             # Old format - list of file results
+            # Prefer unique filename match (.l6m pixels share one filepath)
             for result in self.batch_results:
-                if result.get('filename') == filename or result.get('filepath') == file_path:
+                if result.get('filename') == filename:
                     return result
-            
+            for result in self.batch_results:
+                if result.get('filepath') == filepath_str:
+                    return result
             return None
         
         return None
@@ -8405,6 +8602,8 @@ class SpectralDeconvolutionQt6(QDialog):
     def _display_batch_result(self, batch_result, file_path):
         """Display a batch result with fitted peaks and background."""
         try:
+            display_name = self._batch_entry_display_name(file_path)
+
             # Handle both old and new batch result formats
             if isinstance(batch_result, dict) and 'regions' in batch_result:
                 # Old format with regions
@@ -8421,7 +8620,7 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.processed_intensities = first_region.get('corrected_intensities', self.original_intensities)
                 self.background = first_region.get('background', None)
                 self.peaks = first_region.get('peaks', np.array([]))
-                self.current_file = file_path
+                self.current_file = display_name
                 
                 # Set fitted peaks and results
                 self.fit_params = first_region.get('fit_params', [])
@@ -8430,7 +8629,7 @@ class SpectralDeconvolutionQt6(QDialog):
                 # Show status message
                 region_text = f"{first_region.get('region_start', 0):.0f}-{first_region.get('region_end', 0):.0f} cm⁻¹"
                 peaks_count = len(self.peaks) if self.peaks is not None else 0
-                status_msg = f"Displaying batch result: {Path(file_path).name} (Region: {region_text}, {peaks_count} peaks fitted)"
+                status_msg = f"Displaying batch result: {display_name} (Region: {region_text}, {peaks_count} peaks fitted)"
                 
                 # Get R² value for display
                 r_squared = first_region.get('total_r2', 0.0)
@@ -8442,7 +8641,7 @@ class SpectralDeconvolutionQt6(QDialog):
                 self.original_intensities = batch_result.get('original_intensities', np.array([]))
                 self.processed_intensities = batch_result.get('intensities', self.original_intensities)
                 self.background = batch_result.get('background', None)
-                self.current_file = file_path
+                self.current_file = display_name
                 
                 # For peaks, we'll need to extract from the fitted_peaks data if available
                 self.fit_params = []  # Will be populated if we can extract from fitted peaks
@@ -8459,7 +8658,7 @@ class SpectralDeconvolutionQt6(QDialog):
                 
                 # Show status message
                 region_text = f"{batch_result.get('region_start', 0):.0f}-{batch_result.get('region_end', 0):.0f} cm⁻¹"
-                status_msg = f"Displaying batch result: {Path(file_path).name} (Region: {region_text}, fitted data)"
+                status_msg = f"Displaying batch result: {display_name} (Region: {region_text}, fitted data)"
                 
                 # Get R² value for display - not directly available in new format
                 r_squared = 0.0  # Will be calculated if needed
@@ -8493,43 +8692,29 @@ class SpectralDeconvolutionQt6(QDialog):
             self._load_and_display_raw_spectrum(file_path)
     
     def _load_and_display_raw_spectrum(self, file_path):
-        """Load and display a raw spectrum file."""
+        """Load and display a raw spectrum file or .l6m map pixel."""
         try:
-            # Try to load using the existing load method
-            if hasattr(self, 'spectrum_loader') and self.spectrum_loader:
-                wavenumbers, intensities, metadata = self.spectrum_loader.load_spectrum(file_path)
-                
-                if wavenumbers is None or intensities is None:
-                    error_msg = metadata.get("error", "Unknown error occurred")
-                    raise Exception(f"Failed to load spectrum: {error_msg}")
-            else:
-                # Fallback loading
-                data = np.loadtxt(file_path)
-                if data.ndim == 1:
-                    raise Exception("File must contain at least 2 columns")
-                elif data.shape[1] < 2:
-                    raise Exception("File must contain at least 2 columns")
-                wavenumbers = data[:, 0]
-                intensities = data[:, 1]
-            
+            wavenumbers, intensities, metadata, display_name, source_path = \
+                self._load_batch_spectrum_data(file_path)
+
             # Update spectrum data
             self.wavenumbers = wavenumbers
             self.original_intensities = intensities
             self.processed_intensities = self.original_intensities.copy()
-            self.current_file = file_path
-            
+            self.current_file = display_name
+
             # Reset analysis state
             self.reset_analysis_state()
-            
+
             # Update UI
             self.update_window_title()
             self.update_status_bar()
             self.update_plot()
-            
+
             # Show status message
-            self.status_bar.showMessage(f"Loaded raw spectrum: {Path(file_path).name} "
+            self.status_bar.showMessage(f"Loaded raw spectrum: {display_name} "
                                        f"({len(wavenumbers)} points)")
-            
+
         except Exception as e:
             raise Exception(f"Error loading spectrum file: {str(e)}")
     
@@ -8628,31 +8813,19 @@ class SpectralDeconvolutionQt6(QDialog):
                     break
                     
                 item = self.batch_file_list.item(i)
-                file_path = item.data(Qt.UserRole)
-                
+                entry = item.data(Qt.UserRole)
+                display_name = self._batch_entry_display_name(entry)
+
                 # Update monitor progress
-                self.batch_monitor.update_progress(i, self.batch_file_list.count(), file_path)
-                
+                self.batch_monitor.update_progress(i, self.batch_file_list.count(), display_name)
+
                 try:
                     start_time = time.time()
-                    
-                    # Load spectrum
-                    if FILE_LOADING_AVAILABLE:
-                        wavenumbers, intensities, metadata = load_spectrum_file(file_path)
-                        # Check if loading was successful
-                        if wavenumbers is None or intensities is None:
-                            error_msg = metadata.get("error", "Unknown error occurred")
-                            raise Exception(f"Failed to load spectrum: {error_msg}")
-                    else:
-                        # Fallback loading
-                        data = np.loadtxt(file_path)
-                        if data.ndim == 1:
-                            raise Exception("File must contain at least 2 columns (wavenumbers and intensities)")
-                        elif data.shape[1] < 2:
-                            raise Exception("File must contain at least 2 columns (wavenumbers and intensities)")
-                        wavenumbers = data[:, 0]
-                        intensities = data[:, 1]
-                    
+
+                    # Load spectrum (.l6s via SpectrumLoader; .l6m pixels from cached map)
+                    wavenumbers, intensities, metadata, filename, file_path = \
+                        self._load_batch_spectrum_data(entry)
+
                     # Set default region based on first file if no regions specified
                     if regions is None and not default_region_calculated:
                         min_wave, max_wave = self.update_region_ranges_from_data(wavenumbers)
@@ -8662,13 +8835,20 @@ class SpectralDeconvolutionQt6(QDialog):
                             print(f"Auto-detected spectrum range: {min_wave:.1f} - {max_wave:.1f} cm⁻¹")
                         else:
                             regions = [(0, 4000)]  # Fallback if range detection fails
-                    
+
                     # Process each region
                     file_results = {
-                        'filename': Path(file_path).name,
+                        'filename': filename,
                         'filepath': file_path,
                         'regions': []
                     }
+                    if isinstance(entry, dict) and entry.get('type') == 'l6m_spectrum':
+                        file_results['l6m_pixel'] = {
+                            'i_y': entry['i_y'],
+                            'i_x': entry['i_x'],
+                            'x_pos': entry.get('x_pos'),
+                            'y_pos': entry.get('y_pos'),
+                        }
                     
                     file_peaks_count = 0
                     
@@ -8700,9 +8880,9 @@ class SpectralDeconvolutionQt6(QDialog):
                         try:
                             background = self._calculate_background_for_batch(region_int, method, bg_params, wavenumbers=region_wave)
                             region_int = region_int - background
-                            print(f"✅ Applied {method} background correction to {Path(file_path).name}")
+                            print(f"✅ Applied {method} background correction to {filename}")
                         except Exception as e:
-                            print(f"⚠️ Background correction failed for {Path(file_path).name}: {str(e)}")
+                            print(f"⚠️ Background correction failed for {filename}: {str(e)}")
                             # Fall back to ALS if the selected method fails
                             baseline_fitter = self._get_baseline_fitter()
                             background = baseline_fitter.baseline_als(
@@ -8751,7 +8931,7 @@ class SpectralDeconvolutionQt6(QDialog):
                                 if manual_peaks_in_region:
                                     peaks = np.array(manual_peaks_in_region, dtype=int)
                                     use_manual_peaks = True
-                                    print(f"📍 Using {len(peaks)} manual peaks in {Path(file_path).name}")
+                                    print(f"📍 Using {len(peaks)} manual peaks in {filename}")
                                 else:
                                     print(f"⚠️ No manual peaks found in region {start}-{end} cm⁻¹")
                                     
@@ -8792,7 +8972,7 @@ class SpectralDeconvolutionQt6(QDialog):
                                 if found_peaks_in_region:
                                     peaks = np.array(found_peaks_in_region, dtype=int)
                                     use_found_peaks = True
-                                    print(f"📍 Using {len(peaks)} found peaks in {Path(file_path).name}")
+                                    print(f"📍 Using {len(peaks)} found peaks in {filename}")
                                 else:
                                     print(f"⚠️ No found peaks in region {start}-{end} cm⁻¹")
                                     

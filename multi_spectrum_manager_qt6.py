@@ -1231,47 +1231,59 @@ class MultiSpectrumManagerQt6(QMainWindow):
             
             wavenumbers = None
             intensities = None
-            
-            # Try different delimiters with pandas (handles headers automatically)
-            delimiters = ['\t', ',', ';', ' ', '|']
-            
-            for delimiter in delimiters:
+
+            # LabSpec6 binary spectrum files
+            if Path(file_path).suffix.lower() == '.l6s':
                 try:
-                    # Read with pandas, skip comments and handle headers
-                    df = pd.read_csv(file_path, delimiter=delimiter, comment='#', 
-                                   skipinitialspace=True, on_bad_lines='skip')
-                    
-                    if df.shape[1] >= 2:
-                        # Convert to numeric, coercing errors (headers become NaN)
-                        wn = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
-                        inten = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
+                    from utils.labspec6_parser import load_labspec6_spectrum
+                    wavenumbers, intensities, metadata = load_labspec6_spectrum(file_path)
+                    if wavenumbers is None or intensities is None:
+                        raise ValueError(metadata.get('error', 'Failed to parse LabSpec6 file'))
+                    wavenumbers = np.asarray(wavenumbers, dtype=np.float64)
+                    intensities = np.asarray(intensities, dtype=np.float64)
+                except ImportError:
+                    raise ValueError("LabSpec6 parser not available. Please check installation.")
+            else:
+                # Try different delimiters with pandas (handles headers automatically)
+                delimiters = ['\t', ',', ';', ' ', '|']
+                
+                for delimiter in delimiters:
+                    try:
+                        # Read with pandas, skip comments and handle headers
+                        df = pd.read_csv(file_path, delimiter=delimiter, comment='#', 
+                                       skipinitialspace=True, on_bad_lines='skip')
                         
-                        # Remove NaN values (from header rows)
-                        valid_mask = ~(np.isnan(wn) | np.isnan(inten))
-                        wn = wn[valid_mask]
-                        inten = inten[valid_mask]
-                        
-                        # Check if we got valid data
-                        if len(wn) > 10 and len(inten) > 10:
-                            wavenumbers = wn.astype(np.float64)
-                            intensities = inten.astype(np.float64)
-                            break
-                except:
-                    continue
-            
-            # Fallback to numpy loadtxt if pandas fails
-            if wavenumbers is None:
-                try:
-                    data = np.loadtxt(file_path)
-                    if data.ndim == 2 and data.shape[1] >= 2:
-                        wavenumbers = data[:, 0].astype(np.float64)
-                        intensities = data[:, 1].astype(np.float64)
-                except:
-                    pass
-            
-            # Validate we got data
-            if wavenumbers is None or intensities is None:
-                raise ValueError("Could not parse file - no valid numeric data found")
+                        if df.shape[1] >= 2:
+                            # Convert to numeric, coercing errors (headers become NaN)
+                            wn = pd.to_numeric(df.iloc[:, 0], errors='coerce').values
+                            inten = pd.to_numeric(df.iloc[:, 1], errors='coerce').values
+                            
+                            # Remove NaN values (from header rows)
+                            valid_mask = ~(np.isnan(wn) | np.isnan(inten))
+                            wn = wn[valid_mask]
+                            inten = inten[valid_mask]
+                            
+                            # Check if we got valid data
+                            if len(wn) > 10 and len(inten) > 10:
+                                wavenumbers = wn.astype(np.float64)
+                                intensities = inten.astype(np.float64)
+                                break
+                    except Exception:
+                        continue
+                
+                # Fallback to numpy loadtxt if pandas fails
+                if wavenumbers is None:
+                    try:
+                        data = np.loadtxt(file_path)
+                        if data.ndim == 2 and data.shape[1] >= 2:
+                            wavenumbers = data[:, 0].astype(np.float64)
+                            intensities = data[:, 1].astype(np.float64)
+                    except Exception:
+                        pass
+                
+                # Validate we got data
+                if wavenumbers is None or intensities is None:
+                    raise ValueError("Could not parse file - no valid numeric data found")
             
             if len(wavenumbers) == 0 or len(intensities) == 0:
                 raise ValueError("File contains no data points")
@@ -1312,7 +1324,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self,
             "Import Multiple Raman Spectra",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
-            "Text files (*.txt *.csv *.dat);;All files (*.*)"
+            "Spectrum files (*.txt *.csv *.dat *.asc *.l6s);;LabSpec6 Binary (*.l6s);;All files (*.*)"
         )
         
         if not file_paths:
@@ -1379,7 +1391,7 @@ class MultiSpectrumManagerQt6(QMainWindow):
             self,
             "Import Raman Spectrum",
             QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation),
-            "Text files (*.txt *.csv *.dat);;All files (*.*)"
+            "Spectrum files (*.txt *.csv *.dat *.asc *.l6s);;LabSpec6 Binary (*.l6s);;All files (*.*)"
         )
         
         if file_path:

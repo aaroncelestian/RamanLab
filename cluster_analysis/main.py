@@ -1081,7 +1081,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             import os
             
             # Get file patterns to search for
-            patterns = ['*.txt', '*.csv', '*.dat', '*.asc']
+            patterns = ['*.txt', '*.csv', '*.dat', '*.asc', '*.l6s']
             files = []
             print(f"DEBUG: Searching for files with patterns: {patterns}")
             for pattern in patterns:
@@ -1237,7 +1237,27 @@ class RamanClusterAnalysisQt6(QMainWindow):
     def _read_spectrum_file(self, file_path):
         """Read a spectrum file with intelligent format detection."""
         try:
+            from pathlib import Path
             import pandas as pd
+
+            # LabSpec6 binary spectrum files
+            if Path(file_path).suffix.lower() == '.l6s':
+                try:
+                    from utils.labspec6_parser import load_labspec6_spectrum
+                    wavenumbers, intensities, metadata = load_labspec6_spectrum(file_path)
+                    if wavenumbers is None or intensities is None:
+                        print(f"Error reading LabSpec6 file {file_path}: "
+                              f"{metadata.get('error', 'Failed to parse')}")
+                        return None
+                    if len(wavenumbers) <= 10 or len(intensities) <= 10:
+                        return None
+                    return {
+                        'wavenumbers': np.asarray(wavenumbers, dtype=np.float64),
+                        'intensities': np.asarray(intensities, dtype=np.float64)
+                    }
+                except ImportError:
+                    print(f"LabSpec6 parser not available for {file_path}")
+                    return None
             
             # Try different delimiters and configurations
             delimiters = [',', '\t', ';', ' ', '|']
@@ -1314,7 +1334,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
                     return
                 
                 # Get files
-                patterns = ['*.txt', '*.csv', '*.dat', '*.asc']
+                patterns = ['*.txt', '*.csv', '*.dat', '*.asc', '*.l6s']
                 files = []
                 for pattern in patterns:
                     files.extend(glob.glob(os.path.join(folder, pattern)))
@@ -1326,7 +1346,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             else:
                 # Select individual files
                 files, _ = QFileDialog.getOpenFileNames(self, "Select Spectrum Files",
-                                                      filter="Spectrum files (*.txt *.csv *.dat *.asc)")
+                                                      filter="Spectrum files (*.txt *.csv *.dat *.asc *.l6s);;LabSpec6 Binary (*.l6s)")
                 if not files:
                     return
             

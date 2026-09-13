@@ -3409,7 +3409,7 @@ class RamanClusterAnalysisQt6(QMainWindow):
             
         try:
             # Get file patterns to search for
-            patterns = ['*.txt', '*.csv', '*.dat', '*.asc']
+            patterns = ['*.txt', '*.csv', '*.dat', '*.asc', '*.l6s']
             files = []
             for pattern in patterns:
                 files.extend(glob.glob(os.path.join(self.selected_folder, pattern)))
@@ -3543,6 +3543,18 @@ class RamanClusterAnalysisQt6(QMainWindow):
         metadata = {}
         
         file_extension = Path(file_path).suffix.lower()
+
+        # Handle LabSpec6 binary files
+        if file_extension == '.l6s':
+            from utils.labspec6_parser import load_labspec6_spectrum
+            wavenumbers, intensities, metadata = load_labspec6_spectrum(file_path)
+            if wavenumbers is None or intensities is None:
+                raise ValueError(metadata.get('error', 'Failed to parse LabSpec6 file'))
+            metadata = dict(metadata) if metadata else {}
+            metadata['file_path'] = str(file_path)
+            metadata['file_extension'] = file_extension
+            metadata['n_points'] = len(wavenumbers)
+            return wavenumbers, intensities, metadata
         
         try:
             with open(file_path, 'r', encoding='utf-8') as file:

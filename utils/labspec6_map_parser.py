@@ -321,5 +321,34 @@ def load_labspec6_map(file_path: str) -> Tuple[Optional[np.ndarray], Optional[np
     return parser.load_map(file_path)
 
 
+def load_labspec6_map_as_spectra(file_path: str):
+    """
+    Load a LabSpec6 .l6m file as a flat array of spectra (row-major: y then x).
+
+    Returns:
+        Tuple of (wavenumbers, spectra, metadata) where spectra is a list of dicts:
+        {'intensities', 'i_y', 'i_x', 'x_pos', 'y_pos', 'filename'}
+        On failure returns (None, None, metadata_with_error).
+    """
+    wavenumbers, x_coords, y_coords, cube, metadata = load_labspec6_map(file_path)
+    if wavenumbers is None or cube is None:
+        return None, None, metadata
+
+    stem = Path(file_path).stem
+    n_y, n_x, _ = cube.shape
+    spectra = []
+    for i_y in range(n_y):
+        for i_x in range(n_x):
+            spectra.append({
+                'intensities': cube[i_y, i_x, :],
+                'i_y': i_y,
+                'i_x': i_x,
+                'x_pos': float(x_coords[i_x]),
+                'y_pos': float(y_coords[i_y]),
+                'filename': f"{stem}_y{i_y:03d}_x{i_x:03d}.l6m",
+            })
+    return wavenumbers, spectra, metadata
+
+
 # Export main classes and functions
-__all__ = ['LabSpec6MapParser', 'load_labspec6_map']
+__all__ = ['LabSpec6MapParser', 'load_labspec6_map', 'load_labspec6_map_as_spectra']
