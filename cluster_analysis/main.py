@@ -54,6 +54,63 @@ from .ui.tabs.advanced_tabs import (TimeSeriesTab, KineticsTab, StructuralAnalys
                                    ValidationTab, AdvancedStatisticsTab)
 
 
+# Spectrum extensions. Matching is case-insensitive so .TXT counts as .txt.
+_SPECTRUM_EXTENSIONS = {'.txt', '.text', '.csv', '.dat', '.asc', '.l6s'}
+
+
+def _is_spectrum_filename(name):
+    """True for a spectrum file, skipping hidden and macOS AppleDouble files."""
+    if not name or name.startswith('.'):
+        return False
+    return os.path.splitext(name)[1].lower() in _SPECTRUM_EXTENSIONS
+
+
+def find_spectrum_files(folder):
+    """Find spectrum files in a folder and its subfolders.
+
+    Uses a directory walk instead of glob so extensions match regardless of
+    case, and folder names that contain glob characters such as [] are
+    treated literally.
+    """
+    folder = os.path.abspath(os.path.expanduser(folder))
+    if not os.path.isdir(folder):
+        return []
+
+    files = []
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        for name in filenames:
+            if _is_spectrum_filename(name):
+                files.append(os.path.join(dirpath, name))
+    return sorted(files)
+
+
+def _folder_contents_hint(folder):
+    """Describe what is in a folder when no spectrum files were found."""
+    try:
+        names = [name for name in os.listdir(folder) if not name.startswith('.')]
+    except OSError as exc:
+        return f"Could not read the folder:\n{exc}"
+
+    if not names:
+        return "The folder is empty."
+
+    extensions = sorted({
+        os.path.splitext(name)[1].lower() or "(no extension)"
+        for name in names
+    })
+    sample = ", ".join(names[:8])
+    if len(names) > 8:
+        sample += f" (+{len(names) - 8} more)"
+    supported = ", ".join(sorted(_SPECTRUM_EXTENSIONS))
+    return (
+        f"Found {len(names)} item(s) in the folder, but no supported "
+        f"spectrum files ({supported}), including in subfolders.\n\n"
+        f"Extensions in this folder: {', '.join(extensions)}\n"
+        f"Examples: {sample}"
+    )
+
+
 class RamanClusterAnalysisQt6(QMainWindow):
     """Qt6 Window for Raman cluster analysis with hierarchical clustering."""
     
@@ -1077,25 +1134,23 @@ class RamanClusterAnalysisQt6(QMainWindow):
             return
             
         try:
-            import glob
             import os
-            
-            # Get file patterns to search for
-            patterns = ['*.txt', '*.csv', '*.dat', '*.asc', '*.l6s']
-            files = []
-            print(f"DEBUG: Searching for files with patterns: {patterns}")
-            for pattern in patterns:
-                pattern_files = glob.glob(os.path.join(self.selected_folder, pattern))
-                print(f"DEBUG: Pattern '{pattern}' found {len(pattern_files)} files")
-                files.extend(pattern_files)
-            
+
+            print(f"DEBUG: Searching for spectrum files in: {self.selected_folder}")
+            files = find_spectrum_files(self.selected_folder)
+
             print(f"DEBUG: Total files found: {len(files)}")
             if files:
                 print(f"DEBUG: First few files: {files[:3]}")
-            
+
             if not files:
                 print("DEBUG: ERROR - No files found!")
-                QMessageBox.warning(self, "No Files", "No spectrum files found in selected folder.")
+                QMessageBox.warning(
+                    self,
+                    "No Files",
+                    "No spectrum files found in the selected folder.\n\n"
+                    + _folder_contents_hint(self.selected_folder),
+                )
                 return
             
             # Initialize progress
@@ -1311,9 +1366,6 @@ class RamanClusterAnalysisQt6(QMainWindow):
     def append_data(self):
         """Append additional spectra to existing dataset."""
         try:
-            import glob
-            import os
-            
             # Check if we have existing data
             if (self.cluster_data.get('intensities') is None or 
                 self.cluster_data.get('wavenumbers') is None):
@@ -1332,15 +1384,16 @@ class RamanClusterAnalysisQt6(QMainWindow):
                 folder = QFileDialog.getExistingDirectory(self, "Select Folder with Additional Spectra")
                 if not folder:
                     return
-                
-                # Get files
-                patterns = ['*.txt', '*.csv', '*.dat', '*.asc', '*.l6s']
-                files = []
-                for pattern in patterns:
-                    files.extend(glob.glob(os.path.join(folder, pattern)))
-                
+
+                files = find_spectrum_files(folder)
+
                 if not files:
-                    QMessageBox.warning(self, "No Files", "No spectrum files found in selected folder.")
+                    QMessageBox.warning(
+                        self,
+                        "No Files",
+                        "No spectrum files found in the selected folder.\n\n"
+                        + _folder_contents_hint(folder),
+                    )
                     return
                     
             else:

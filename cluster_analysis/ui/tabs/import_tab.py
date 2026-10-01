@@ -94,7 +94,8 @@ class ImportTab(QWidget):
         info_label = QLabel("Files will be automatically parsed using intelligent format detection:\n"
                            "• Automatic delimiter detection (comma, tab, space)\n"
                            "• Header and metadata extraction\n"
-                           "• Multiple file format support (.txt, .csv, .dat, .asc)")
+                           "• Multiple file format support (.txt, .csv, .dat, .asc), any letter case\n"
+                           "• Files in subfolders are included")
         info_label.setWordWrap(True)
         info_label.setStyleSheet("color: #666; font-size: 10px; padding: 8px; background-color: #f0f0f0; border-radius: 4px;")
         config_layout.addWidget(info_label)
