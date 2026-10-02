@@ -1348,7 +1348,12 @@ class SpectralDeconvolutionQt6(QDialog):
             'waterfall_colormap': 'black',
             'heatmap_colormap': 'viridis',
             'heatmap_interpolation': 'nearest',
-            'heatmap_aspect': 'auto'
+            'heatmap_aspect': 'auto',
+            'diff_peak_a': 1,
+            'diff_peak_b': 2,
+            'diff_relative': False,
+            'corr_peak': 1,
+            'corr_y': 'FWHM',
         }
         
         self.setup_ui()
@@ -1815,7 +1820,7 @@ class SpectralDeconvolutionQt6(QDialog):
         
         # Left panel: Plot controls
         plot_controls_panel = QWidget()
-        plot_controls_panel.setMaximumWidth(300)
+        plot_controls_panel.setMaximumWidth(340)
         plot_controls_layout = QVBoxLayout(plot_controls_panel)
         
         # Plot type selection
@@ -1840,6 +1845,20 @@ class SpectralDeconvolutionQt6(QDialog):
         self.heatmap_plot_btn.setCheckable(True)
         self.heatmap_plot_btn.setToolTip("2D intensity heatmap of all spectra")
         self.plot_type_buttons.addButton(self.heatmap_plot_btn, 2)
+
+        self.difference_plot_btn = QPushButton("Position Difference")
+        self.difference_plot_btn.setCheckable(True)
+        self.difference_plot_btn.setToolTip(
+            "How one fitted peak moves relative to another across the series"
+        )
+        self.plot_type_buttons.addButton(self.difference_plot_btn, 3)
+
+        self.correlation_plot_btn = QPushButton("Position vs Width")
+        self.correlation_plot_btn.setCheckable(True)
+        self.correlation_plot_btn.setToolTip(
+            "Peak position against FWHM or amplitude, colored by spectrum order"
+        )
+        self.plot_type_buttons.addButton(self.correlation_plot_btn, 4)
         
         # Style the buttons
         button_style = """
@@ -1863,12 +1882,15 @@ class SpectralDeconvolutionQt6(QDialog):
             }
         """
         
-        for btn in [self.grid_plot_btn, self.waterfall_plot_btn, self.heatmap_plot_btn]:
+        for btn in [self.grid_plot_btn, self.waterfall_plot_btn, self.heatmap_plot_btn,
+                    self.difference_plot_btn, self.correlation_plot_btn]:
             btn.setStyleSheet(button_style)
         
         plot_type_layout.addWidget(self.grid_plot_btn)
         plot_type_layout.addWidget(self.waterfall_plot_btn)
         plot_type_layout.addWidget(self.heatmap_plot_btn)
+        plot_type_layout.addWidget(self.difference_plot_btn)
+        plot_type_layout.addWidget(self.correlation_plot_btn)
         
         plot_controls_layout.addWidget(plot_type_group)
         
@@ -1887,6 +1909,8 @@ class SpectralDeconvolutionQt6(QDialog):
         data_source_layout.addWidget(refresh_btn)
         
         plot_controls_layout.addWidget(data_source_group)
+
+        self._add_si_standard_controls(plot_controls_layout)
         
         # Plot-specific controls (will be populated dynamically)
         self.plot_controls_group = QGroupBox("⚙️ Plot Controls")
@@ -1906,11 +1930,15 @@ class SpectralDeconvolutionQt6(QDialog):
         self.grid_plot_widget = self.create_grid_plot_widget()
         self.waterfall_plot_widget = self.create_waterfall_plot_widget()
         self.heatmap_plot_widget = self.create_heatmap_plot_widget()
+        self.difference_plot_widget = self.create_difference_plot_widget()
+        self.correlation_plot_widget = self.create_correlation_plot_widget()
         
         # Add to stack
         self.analysis_plots_stack.addWidget(self.grid_plot_widget)
         self.analysis_plots_stack.addWidget(self.waterfall_plot_widget)
         self.analysis_plots_stack.addWidget(self.heatmap_plot_widget)
+        self.analysis_plots_stack.addWidget(self.difference_plot_widget)
+        self.analysis_plots_stack.addWidget(self.correlation_plot_widget)
         
         plotting_panel_layout.addWidget(self.analysis_plots_stack)
         
@@ -3078,7 +3106,10 @@ class SpectralDeconvolutionQt6(QDialog):
         <b>Available Plot Types:</b><br>
         • <b>Peak Features Grid:</b> 2×2 plots showing amplitude, position, FWHM, and R² trends<br>
         • <b>Waterfall Plot:</b> Stacked spectra with customizable colors and offsets<br>
-        • <b>Heatmap Plot:</b> 2D intensity visualization with multiple colormaps<br><br>
+        • <b>Heatmap Plot:</b> 2D intensity visualization with multiple colormaps<br>
+        • <b>Position Difference:</b> peak A minus peak B across the series<br>
+        • <b>Position vs Width:</b> position against FWHM or amplitude, colored by spectrum order<br>
+        • <b>Si internal standard:</b> shift every fitted peak so the Si line sits at 520.7 cm⁻¹<br><br>
         
         <b>How to Use:</b><br>
         1. Load data using one of the buttons above<br>
@@ -3515,6 +3546,100 @@ class SpectralDeconvolutionQt6(QDialog):
         self.heatmap_figure.tight_layout()
         self.heatmap_canvas.draw()
 
+    def create_difference_plot_widget(self):
+        """Create the peak-position difference plot."""
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        from core.matplotlib_config import CompactNavigationToolbar, configure_compact_ui
+
+        configure_compact_ui()
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self.difference_figure = Figure(figsize=(12, 8))
+        self.difference_canvas = FigureCanvas(self.difference_figure)
+        self.difference_ax_pos, self.difference_ax_delta = self.difference_figure.subplots(
+            2, 1, sharex=True
+        )
+        toolbar = CompactNavigationToolbar(self.difference_canvas, widget)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(self.difference_canvas)
+        self.setup_empty_difference_plot()
+        return widget
+
+    def create_correlation_plot_widget(self):
+        """Create the position-versus-width scatter plot."""
+        from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+        from matplotlib.figure import Figure
+        from core.matplotlib_config import CompactNavigationToolbar, configure_compact_ui
+
+        configure_compact_ui()
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        self.correlation_figure = Figure(figsize=(12, 8))
+        self.correlation_canvas = FigureCanvas(self.correlation_figure)
+        self.correlation_ax = self.correlation_figure.add_subplot(111)
+        self.correlation_colorbar = None
+        toolbar = CompactNavigationToolbar(self.correlation_canvas, widget)
+
+        layout.addWidget(toolbar)
+        layout.addWidget(self.correlation_canvas)
+        self.setup_empty_correlation_plot()
+        return widget
+
+    def setup_empty_difference_plot(self):
+        """Setup an empty position-difference figure."""
+        self.difference_ax_pos.clear()
+        self.difference_ax_delta.clear()
+        self.difference_ax_pos.set_title('Peak Positions', fontweight='bold')
+        self.difference_ax_pos.set_ylabel('Position (cm⁻¹)')
+        self.difference_ax_delta.set_title('Position Difference', fontweight='bold')
+        self.difference_ax_delta.set_xlabel('Spectrum Index')
+        self.difference_ax_delta.set_ylabel('Δ Position (cm⁻¹)')
+        self.difference_ax_pos.text(
+            0.5, 0.5, 'No data available\nRun batch processing first',
+            transform=self.difference_ax_pos.transAxes, ha='center', va='center',
+            fontsize=12, color='gray', style='italic',
+        )
+        self.difference_figure.tight_layout()
+        self.difference_canvas.draw()
+
+    def setup_empty_correlation_plot(self):
+        """Setup an empty position-versus-width figure."""
+        self._clear_correlation_colorbar()
+        self.correlation_ax.clear()
+        self.correlation_ax.set_title('Position vs Width', fontweight='bold')
+        self.correlation_ax.set_xlabel('Position (cm⁻¹)')
+        self.correlation_ax.set_ylabel('FWHM (cm⁻¹)')
+        self.correlation_ax.text(
+            0.5, 0.5, 'No data available\nRun batch processing first',
+            transform=self.correlation_ax.transAxes, ha='center', va='center',
+            fontsize=12, color='gray', style='italic',
+        )
+        self.correlation_figure.tight_layout()
+        self.correlation_canvas.draw()
+
+    def _clear_correlation_colorbar(self):
+        """Remove a previous position-vs-width colorbar before redrawing."""
+        colorbar = getattr(self, 'correlation_colorbar', None)
+        if colorbar is not None:
+            try:
+                colorbar.remove()
+            except Exception:
+                pass
+            self.correlation_colorbar = None
+        if hasattr(self, 'correlation_figure') and hasattr(self, 'correlation_ax'):
+            for axis in list(self.correlation_figure.axes):
+                if axis is not self.correlation_ax:
+                    try:
+                        self.correlation_figure.delaxes(axis)
+                    except Exception:
+                        pass
+
     def on_plot_type_changed(self, button):
         """Handle plot type button changes."""
         plot_index = self.plot_type_buttons.id(button)
@@ -3535,6 +3660,10 @@ class SpectralDeconvolutionQt6(QDialog):
             self.setup_waterfall_plot_controls()
         elif current_plot == 2:  # Heatmap plot
             self.setup_heatmap_plot_controls()
+        elif current_plot == 3:  # Position difference
+            self.setup_difference_plot_controls()
+        elif current_plot == 4:  # Position vs width
+            self.setup_correlation_plot_controls()
     
     def clear_plot_controls(self):
         """Completely clear all plot controls from the layout."""
@@ -3793,6 +3922,124 @@ class SpectralDeconvolutionQt6(QDialog):
         # Refresh the plot
         self.refresh_current_plot()
 
+    def setup_difference_plot_controls(self):
+        """Controls for the peak-position difference plot."""
+        form = QFormLayout()
+
+        self.diff_peak_a_combo = QComboBox()
+        self._populate_peak_combo(self.diff_peak_a_combo, self.persistent_plot_settings['diff_peak_a'], 0)
+        self.diff_peak_a_combo.setToolTip("First peak in the difference (position A − position B)")
+        self.diff_peak_a_combo.currentIndexChanged.connect(self._update_difference_setting_and_plot)
+        form.addRow("Peak A:", self.diff_peak_a_combo)
+
+        self.diff_peak_b_combo = QComboBox()
+        self._populate_peak_combo(self.diff_peak_b_combo, self.persistent_plot_settings['diff_peak_b'], 1)
+        self.diff_peak_b_combo.setToolTip("Reference peak subtracted from peak A")
+        self.diff_peak_b_combo.currentIndexChanged.connect(self._update_difference_setting_and_plot)
+        form.addRow("Peak B:", self.diff_peak_b_combo)
+
+        self.diff_relative_check = QCheckBox("Change from first spectrum")
+        self.diff_relative_check.setChecked(bool(self.persistent_plot_settings['diff_relative']))
+        self.diff_relative_check.setToolTip(
+            "Subtract the first spectrum so the separation starts at zero. "
+            "This is how much peak A has moved relative to peak B."
+        )
+        self.diff_relative_check.toggled.connect(self._update_difference_setting_and_plot)
+        form.addRow(self.diff_relative_check)
+
+        hint = QLabel("Δ = position A − position B. A shift shared by both peaks, such as Si drift, cancels.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #555; font-size: 11px;")
+        form.addRow(hint)
+        self.plot_controls_layout.addLayout(form)
+
+    def setup_correlation_plot_controls(self):
+        """Controls for the position-versus-width plot."""
+        form = QFormLayout()
+
+        self.corr_peak_combo = QComboBox()
+        self._populate_peak_combo(self.corr_peak_combo, self.persistent_plot_settings['corr_peak'], 0)
+        self.corr_peak_combo.currentIndexChanged.connect(self._update_correlation_setting_and_plot)
+        form.addRow("Peak:", self.corr_peak_combo)
+
+        self.corr_y_combo = QComboBox()
+        self.corr_y_combo.addItems(["FWHM", "Amplitude"])
+        saved_y = self.persistent_plot_settings.get('corr_y', 'FWHM')
+        if saved_y in ("FWHM", "Amplitude"):
+            self.corr_y_combo.setCurrentText(saved_y)
+        self.corr_y_combo.setToolTip("FWHM shows broadening against position. Amplitude shows intensity against position.")
+        self.corr_y_combo.currentTextChanged.connect(self._update_correlation_setting_and_plot)
+        form.addRow("Y axis:", self.corr_y_combo)
+
+        hint = QLabel("Each point is one spectrum. Color runs from the first spectrum to the last.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #555; font-size: 11px;")
+        form.addRow(hint)
+        self.plot_controls_layout.addLayout(form)
+
+    def _populate_peak_combo(self, combo, selected_number, fallback_index=0):
+        """Fill a peak combo from the loaded fits and restore a selection."""
+        import numpy as np
+
+        frame = self._ordered_peak_frame()
+        combo.blockSignals(True)
+        combo.clear()
+        numbers = []
+        if frame is not None and 'peak_number' in frame.columns:
+            numbers = [int(n) for n in sorted(frame['peak_number'].unique())]
+        if not numbers:
+            numbers = [1, 2, 3]
+        for number in numbers:
+            label = f"Peak {number}"
+            if frame is not None:
+                centers = frame.loc[frame['peak_number'] == number, 'peak_center'].dropna().astype(float)
+                if len(centers) and np.isfinite(float(centers.mean())):
+                    label += f" (~{float(centers.mean()):.0f})"
+            combo.addItem(label, number)
+        chosen = min(max(fallback_index, 0), combo.count() - 1)
+        if selected_number is not None:
+            for index in range(combo.count()):
+                if combo.itemData(index) == int(selected_number):
+                    chosen = index
+                    break
+        combo.setCurrentIndex(chosen)
+        combo.blockSignals(False)
+
+    def _refresh_comparison_peak_combos(self):
+        """Rebuild comparison peak lists when the loaded fits change."""
+        if not hasattr(self, 'analysis_plots_stack'):
+            return
+        current = self.analysis_plots_stack.currentIndex()
+        if current == 3 and hasattr(self, 'diff_peak_a_combo'):
+            self._populate_peak_combo(
+                self.diff_peak_a_combo, self.diff_peak_a_combo.currentData(), 0
+            )
+            self._populate_peak_combo(
+                self.diff_peak_b_combo, self.diff_peak_b_combo.currentData(), 1
+            )
+        elif current == 4 and hasattr(self, 'corr_peak_combo'):
+            self._populate_peak_combo(
+                self.corr_peak_combo, self.corr_peak_combo.currentData(), 0
+            )
+
+    def _update_difference_setting_and_plot(self, *_args):
+        """Store position-difference settings and redraw."""
+        if hasattr(self, 'diff_peak_a_combo') and self.diff_peak_a_combo.currentData() is not None:
+            self.persistent_plot_settings['diff_peak_a'] = int(self.diff_peak_a_combo.currentData())
+        if hasattr(self, 'diff_peak_b_combo') and self.diff_peak_b_combo.currentData() is not None:
+            self.persistent_plot_settings['diff_peak_b'] = int(self.diff_peak_b_combo.currentData())
+        if hasattr(self, 'diff_relative_check'):
+            self.persistent_plot_settings['diff_relative'] = self.diff_relative_check.isChecked()
+        self.refresh_current_plot()
+
+    def _update_correlation_setting_and_plot(self, *_args):
+        """Store position-vs-width settings and redraw."""
+        if hasattr(self, 'corr_peak_combo') and self.corr_peak_combo.currentData() is not None:
+            self.persistent_plot_settings['corr_peak'] = int(self.corr_peak_combo.currentData())
+        if hasattr(self, 'corr_y_combo'):
+            self.persistent_plot_settings['corr_y'] = self.corr_y_combo.currentText()
+        self.refresh_current_plot()
+
     def update_data_source_info(self):
         """Update data source information display."""
         # Check for analysis data first, then fall back to batch results
@@ -3846,11 +4093,198 @@ class SpectralDeconvolutionQt6(QDialog):
             self.data_source_label.setText("No batch results available")
             self.data_source_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
 
+    def _add_si_standard_controls(self, layout):
+        """Controls that register fitted peaks to the Si 520 cm⁻¹ internal standard."""
+        group = QGroupBox("Si Internal Standard")
+        form = QFormLayout(group)
+
+        self.si_correct_check = QCheckBox("Correct peak positions")
+        self.si_correct_check.setToolTip(
+            "Shift every fitted peak so the Si line in that spectrum sits on the reference.\n"
+            "shift = reference − measured Si\n"
+            "corrected position = fitted position + shift\n"
+            "The same shift is applied to the waterfall and heatmap wavenumber axis."
+        )
+        self.si_correct_check.toggled.connect(self._on_si_correction_settings_changed)
+        form.addRow(self.si_correct_check)
+
+        self.si_reference_spin = QDoubleSpinBox()
+        self.si_reference_spin.setRange(0.0, 4000.0)
+        self.si_reference_spin.setDecimals(2)
+        self.si_reference_spin.setSingleStep(0.1)
+        self.si_reference_spin.setValue(520.70)
+        self.si_reference_spin.setSuffix(" cm⁻¹")
+        self.si_reference_spin.setToolTip(
+            "Crystalline silicon is 520.7 cm⁻¹ at room temperature. "
+            "Set 520.0 if that is the reference you want."
+        )
+        self.si_reference_spin.valueChanged.connect(self._on_si_correction_settings_changed)
+        form.addRow("Reference:", self.si_reference_spin)
+
+        self.si_window_spin = QDoubleSpinBox()
+        self.si_window_spin.setRange(0.5, 200.0)
+        self.si_window_spin.setDecimals(1)
+        self.si_window_spin.setSingleStep(1.0)
+        self.si_window_spin.setValue(15.0)
+        self.si_window_spin.setPrefix("± ")
+        self.si_window_spin.setSuffix(" cm⁻¹")
+        self.si_window_spin.setToolTip(
+            "Used when Si is chosen as the peak nearest the reference. "
+            "Widen this if the Si line drifts outside the window."
+        )
+        self.si_window_spin.valueChanged.connect(self._on_si_correction_settings_changed)
+        form.addRow("Search:", self.si_window_spin)
+
+        self.si_peak_combo = QComboBox()
+        self.si_peak_combo.addItem("Nearest in window", None)
+        self.si_peak_combo.setToolTip(
+            "Which fitted peak is silicon. Nearest-in-window finds it in any fit region "
+            "of the same file. Pick a peak number when you know which component is Si."
+        )
+        self.si_peak_combo.currentIndexChanged.connect(self._on_si_correction_settings_changed)
+        form.addRow("Si peak:", self.si_peak_combo)
+
+        self.si_status_label = QLabel("Off. Fitted positions are unchanged.")
+        self.si_status_label.setWordWrap(True)
+        self.si_status_label.setStyleSheet("color: #555; font-size: 11px;")
+        form.addRow(self.si_status_label)
+
+        self._si_shift_cache = None
+        layout.addWidget(group)
+
+    def _si_correction_enabled(self):
+        """True when the Plotting Analysis Si correction checkbox is on."""
+        return hasattr(self, 'si_correct_check') and self.si_correct_check.isChecked()
+
+    def _analysis_data_source(self):
+        """Batch results currently feeding Plotting Analysis."""
+        if hasattr(self, 'analysis_batch_results') and self.analysis_batch_results:
+            return self.analysis_batch_results
+        if hasattr(self, 'batch_results') and self.batch_results:
+            return self.batch_results
+        return None
+
+    def _analysis_peaks_frame(self):
+        """Fitted-peak table for the active analysis data, or None."""
+        data_source = self._analysis_data_source()
+        if not data_source:
+            return None
+        try:
+            from deconvolution_pkl_loader import normalize_deconvolution_data
+            peaks_df = normalize_deconvolution_data(data_source).get('peaks_df')
+        except Exception:
+            return None
+        if peaks_df is None or getattr(peaks_df, 'empty', True):
+            return None
+        if 'peak_center' not in peaks_df.columns:
+            return None
+        return peaks_df
+
+    def _set_si_status(self, text, level="idle"):
+        """Update the Si-correction status line."""
+        if not hasattr(self, 'si_status_label'):
+            return
+        colors = {"idle": "#555", "ok": "#1b5e20", "warn": "#e65100"}
+        self.si_status_label.setText(text)
+        self.si_status_label.setStyleSheet(
+            f"color: {colors.get(level, '#555')}; font-size: 11px;"
+        )
+
+    def _update_si_peak_combo(self):
+        """Refresh the Si-peak list from the loaded fits."""
+        if not hasattr(self, 'si_peak_combo'):
+            return
+        import numpy as np
+
+        current = self.si_peak_combo.currentData()
+        peaks_df = self._analysis_peaks_frame()
+        self.si_peak_combo.blockSignals(True)
+        self.si_peak_combo.clear()
+        self.si_peak_combo.addItem("Nearest in window", None)
+        if peaks_df is not None and 'peak_number' in peaks_df.columns:
+            numbers = sorted(int(v) for v in peaks_df['peak_number'].dropna().unique())
+            for number in numbers:
+                centers = peaks_df.loc[peaks_df['peak_number'] == number, 'peak_center']
+                centers = centers.dropna().astype(float)
+                label = f"Peak {number}"
+                if len(centers) and np.isfinite(centers.mean()):
+                    label += f" (~{centers.mean():.0f})"
+                self.si_peak_combo.addItem(label, number)
+        restore = 0
+        if current is not None:
+            for index in range(self.si_peak_combo.count()):
+                if self.si_peak_combo.itemData(index) == current:
+                    restore = index
+                    break
+        self.si_peak_combo.setCurrentIndex(restore)
+        self.si_peak_combo.blockSignals(False)
+
+    def compute_si_shifts(self):
+        """Filename → additive cm⁻¹ shift that places Si on the reference.
+
+        An empty dict means positions stay as fitted. Results are cached until
+        the controls or the loaded data change.
+        """
+        cached = getattr(self, '_si_shift_cache', None)
+        if cached is not None:
+            return cached
+
+        if not self._si_correction_enabled():
+            self._set_si_status("Off. Fitted positions are unchanged.", "idle")
+            self._si_shift_cache = {}
+            return self._si_shift_cache
+
+        from deconvolution_pkl_loader import silicon_internal_standard_shifts
+
+        reference = self.si_reference_spin.value() if hasattr(self, 'si_reference_spin') else 520.7
+        window = self.si_window_spin.value() if hasattr(self, 'si_window_spin') else 15.0
+        peak_number = self.si_peak_combo.currentData() if hasattr(self, 'si_peak_combo') else None
+        info = silicon_internal_standard_shifts(
+            self._analysis_peaks_frame(),
+            reference=reference,
+            half_window=window,
+            peak_number=peak_number,
+        )
+        if info["n_spectra"] == 0:
+            self._set_si_status("No fitted peaks loaded.", "warn")
+        elif info["n_corrected"] == 0:
+            if peak_number is None:
+                self._set_si_status(
+                    f"No Si peak within ±{window:.1f} cm⁻¹ of {reference:.2f}.",
+                    "warn",
+                )
+            else:
+                self._set_si_status(f"Peak {peak_number} was not found in these fits.", "warn")
+        else:
+            text = (
+                f"Corrected {info['n_corrected']}/{info['n_spectra']} spectra.\n"
+                f"Si measured {info['si_min']:.2f}–{info['si_max']:.2f} cm⁻¹.\n"
+                f"Shift {info['shift_min']:+.2f} to {info['shift_max']:+.2f} cm⁻¹."
+            )
+            if info["n_missing"]:
+                text += f"\n{info['n_missing']} spectra had no Si peak."
+            self._set_si_status(text, "ok" if not info["n_missing"] else "warn")
+
+        self._si_shift_cache = info["shifts"]
+        return self._si_shift_cache
+
+    def _on_si_correction_settings_changed(self, *_args):
+        """Recompute Si shifts and redraw the current analysis plot."""
+        if hasattr(self, 'si_window_spin') and hasattr(self, 'si_peak_combo'):
+            self.si_window_spin.setEnabled(self.si_peak_combo.currentData() is None)
+        self._si_shift_cache = None
+        self.compute_si_shifts()
+        self._refresh_comparison_peak_combos()
+        self.refresh_current_plot()
+
     def refresh_analysis_plots(self):
         """Refresh all analysis plots with current data."""
+        self._si_shift_cache = None
         self.update_data_source_info()
         # Update peak selection dropdown when data changes
         self._update_peak_selection_dropdown()
+        self._update_si_peak_combo()
+        self._refresh_comparison_peak_combos()
         self.refresh_current_plot()
 
     def refresh_current_plot(self):
@@ -3873,6 +4307,10 @@ class SpectralDeconvolutionQt6(QDialog):
             self.update_waterfall_plot()
         elif current_plot == 2:  # Heatmap plot
             self.update_heatmap_plot()
+        elif current_plot == 3:  # Position difference
+            self.update_difference_plot()
+        elif current_plot == 4:  # Position vs width
+            self.update_correlation_plot()
 
     def extract_peak_features_data(self):
         """Extract peak features data from batch results."""
@@ -4015,6 +4453,13 @@ class SpectralDeconvolutionQt6(QDialog):
                     
                     spectrum_index += 1
         
+        if data['filenames'] and self._si_correction_enabled():
+            shifts = self.compute_si_shifts()
+            data['positions'] = [
+                float(pos) + float(shifts.get(Path(str(name)).name, 0.0))
+                for name, pos in zip(data['filenames'], data['positions'])
+            ]
+
         return data if data['filenames'] else None
 
     def extract_spectral_data(self):
@@ -4077,6 +4522,13 @@ class SpectralDeconvolutionQt6(QDialog):
                         })
                         filenames.append(filename)
         
+        if spectra_data and self._si_correction_enabled():
+            shifts = self.compute_si_shifts()
+            for spectrum in spectra_data:
+                shift = float(shifts.get(Path(str(spectrum.get('filename', ''))).name, 0.0))
+                if shift:
+                    spectrum['wavenumbers'] = np.asarray(spectrum['wavenumbers'], dtype=float) + shift
+
         return spectra_data if spectra_data else None
 
     def update_grid_plot(self):
@@ -4106,6 +4558,9 @@ class SpectralDeconvolutionQt6(QDialog):
             titles = ['Peak Amplitude', 'Peak Position', 'FWHM', 'R² Values']
             ylabels = ['Amplitude (a.u.)', 'Position (cm⁻¹)', 'FWHM (cm⁻¹)', 'R² Value']
             plot_data = [data['amplitudes'], data['positions'], data['fwhms'], data['r2_values']]
+
+        if self._si_correction_enabled():
+            titles[1] = 'Peak Position (Si-corrected)'
         
         x_data = data['spectrum_indices']
         
@@ -4221,7 +4676,10 @@ class SpectralDeconvolutionQt6(QDialog):
                                   label=f'{i}: {filename}')
         
         # Customize plot
-        self.waterfall_ax.set_title('Waterfall Plot - Stacked Spectra', fontweight='bold')
+        waterfall_title = 'Waterfall Plot - Stacked Spectra'
+        if self._si_correction_enabled():
+            waterfall_title += ' (Si-corrected)'
+        self.waterfall_ax.set_title(waterfall_title, fontweight='bold')
         self.waterfall_ax.set_xlabel('Wavenumber (cm⁻¹)')
         self.waterfall_ax.set_ylabel('Intensity + Offset')
         self.waterfall_ax.grid(True, alpha=0.3)
@@ -4343,7 +4801,10 @@ class SpectralDeconvolutionQt6(QDialog):
         self.heatmap_colorbar = add_colorbar_no_shrink(self.heatmap_figure, im, self.heatmap_ax, label='Intensity')
         
         # Customize plot
-        self.heatmap_ax.set_title('Heatmap - Spectral Intensity Map', fontweight='bold')
+        heatmap_title = 'Heatmap - Spectral Intensity Map'
+        if self._si_correction_enabled():
+            heatmap_title += ' (Si-corrected)'
+        self.heatmap_ax.set_title(heatmap_title, fontweight='bold')
         self.heatmap_ax.set_xlabel('Wavenumber (cm⁻¹)')
         self.heatmap_ax.set_ylabel('Spectrum Index')
         
@@ -4362,6 +4823,248 @@ class SpectralDeconvolutionQt6(QDialog):
         
         self.heatmap_figure.tight_layout()
         self.heatmap_canvas.draw()
+
+    def _ordered_peak_frame(self):
+        """Fitted peaks, one row per file and peak number, in spectrum order.
+
+        Positions include the Si internal-standard shift when that correction is on.
+        """
+        import numpy as np
+        import pandas as pd
+
+        peaks_df = self._analysis_peaks_frame()
+        if peaks_df is None or 'filename' not in peaks_df.columns:
+            return None
+        frame = peaks_df.dropna(subset=['peak_center', 'peak_number']).copy()
+        if frame.empty:
+            return None
+
+        frame['peak_number'] = frame['peak_number'].astype(int)
+        frame['peak_center'] = frame['peak_center'].astype(float)
+        frame['filename'] = frame['filename'].map(lambda name: Path(str(name)).name)
+        if 'scan_index' in frame.columns:
+            frame['_order'] = pd.to_numeric(frame['scan_index'], errors='coerce')
+        elif 'file_index' in frame.columns:
+            frame['_order'] = pd.to_numeric(frame['file_index'], errors='coerce')
+        else:
+            frame['_order'] = np.arange(len(frame), dtype=float)
+
+        if 'fwhm' not in frame.columns:
+            frame['fwhm'] = np.nan
+        else:
+            frame['fwhm'] = pd.to_numeric(frame['fwhm'], errors='coerce')
+        if 'FWHM_Left' in frame.columns and 'FWHM_Right' in frame.columns:
+            left = pd.to_numeric(frame['FWHM_Left'], errors='coerce')
+            right = pd.to_numeric(frame['FWHM_Right'], errors='coerce')
+            asymmetric = (left + right) / 2.0
+            use_asymmetric = asymmetric.notna()
+            frame.loc[use_asymmetric, 'fwhm'] = asymmetric[use_asymmetric]
+        if 'amplitude' not in frame.columns:
+            frame['amplitude'] = np.nan
+        else:
+            frame['amplitude'] = pd.to_numeric(frame['amplitude'], errors='coerce')
+
+        if self._si_correction_enabled():
+            shifts = self.compute_si_shifts()
+            frame['peak_center'] = [
+                float(center) + float(shifts.get(name, 0.0))
+                for name, center in zip(frame['filename'], frame['peak_center'])
+            ]
+
+        frame = frame.sort_values(['_order', 'peak_number'])
+        frame = frame.drop_duplicates(subset=['filename', 'peak_number'], keep='first')
+        file_order = frame.groupby('filename', sort=False)['_order'].min().sort_values()
+        rank = {name: index for index, name in enumerate(file_order.index)}
+        frame['spectrum_index'] = frame['filename'].map(rank)
+        return frame
+
+    def _paired_peak_series(self, peak_a, peak_b):
+        """Spectra where both peak numbers were fit, in spectrum order."""
+        frame = self._ordered_peak_frame()
+        if frame is None:
+            return None
+        left = frame.loc[
+            frame['peak_number'] == int(peak_a),
+            ['filename', 'spectrum_index', 'peak_center'],
+        ].rename(columns={'peak_center': 'pos_a'})
+        right = frame.loc[
+            frame['peak_number'] == int(peak_b),
+            ['filename', 'peak_center'],
+        ].rename(columns={'peak_center': 'pos_b'})
+        paired = left.merge(right, on='filename', how='inner')
+        if paired.empty:
+            return None
+        return paired.sort_values('spectrum_index')
+
+    def _annotate_plot_stats(self, ax, text):
+        """Corner statistics box used by the comparison plots."""
+        ax.text(
+            0.02, 0.98, text, transform=ax.transAxes, va='top', ha='left', fontsize=8,
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.85),
+        )
+
+    def update_difference_plot(self):
+        """Plot two peak positions and how their separation changes."""
+        import numpy as np
+
+        if not hasattr(self, 'difference_ax_pos'):
+            return
+
+        peak_a = int(self.persistent_plot_settings.get('diff_peak_a', 1))
+        peak_b = int(self.persistent_plot_settings.get('diff_peak_b', 2))
+        relative = bool(self.persistent_plot_settings.get('diff_relative', False))
+        if hasattr(self, 'diff_peak_a_combo') and self.diff_peak_a_combo.currentData() is not None:
+            peak_a = int(self.diff_peak_a_combo.currentData())
+        if hasattr(self, 'diff_peak_b_combo') and self.diff_peak_b_combo.currentData() is not None:
+            peak_b = int(self.diff_peak_b_combo.currentData())
+        if hasattr(self, 'diff_relative_check'):
+            relative = self.diff_relative_check.isChecked()
+
+        self.difference_ax_pos.clear()
+        self.difference_ax_delta.clear()
+
+        def _finish_empty(message):
+            self.difference_ax_pos.set_title('Peak Positions', fontweight='bold')
+            self.difference_ax_delta.set_xlabel('Spectrum Index')
+            self.difference_ax_pos.text(
+                0.5, 0.5, message, transform=self.difference_ax_pos.transAxes,
+                ha='center', va='center', fontsize=11, color='gray', style='italic',
+            )
+            self.difference_figure.tight_layout()
+            self.difference_canvas.draw()
+
+        if peak_a == peak_b:
+            _finish_empty("Choose two different peaks")
+            return
+
+        paired = self._paired_peak_series(peak_a, peak_b)
+        if paired is None or paired.empty:
+            _finish_empty("These two peaks are not both fit\nin any spectrum")
+            return
+
+        x_values = paired['spectrum_index'].to_numpy(dtype=float)
+        pos_a = paired['pos_a'].to_numpy(dtype=float)
+        pos_b = paired['pos_b'].to_numpy(dtype=float)
+        delta = pos_a - pos_b
+
+        self.difference_ax_pos.plot(x_values, pos_a, 'o-', label=f"Peak {peak_a}", markersize=5)
+        self.difference_ax_pos.plot(x_values, pos_b, 's-', label=f"Peak {peak_b}", markersize=5)
+        self.difference_ax_pos.legend(fontsize=8, loc='upper right')
+        self.difference_ax_pos.set_ylabel('Position (cm⁻¹)')
+        position_title = 'Peak Positions'
+        if self._si_correction_enabled():
+            position_title += ' (Si-corrected)'
+        self.difference_ax_pos.set_title(position_title, fontweight='bold')
+        self.difference_ax_pos.grid(True, alpha=0.3)
+
+        if relative:
+            y_values = delta - delta[0]
+            y_label = 'Change in separation (cm⁻¹)'
+            delta_title = f"Change in Peak {peak_a} − Peak {peak_b}"
+            reference = 0.0
+        else:
+            y_values = delta
+            y_label = f"Peak {peak_a} − Peak {peak_b} (cm⁻¹)"
+            delta_title = f"Peak {peak_a} − Peak {peak_b}"
+            reference = float(delta[0])
+
+        self.difference_ax_delta.plot(x_values, y_values, 'o-', color='#d62728', markersize=5)
+        self.difference_ax_delta.axhline(reference, color='gray', linestyle='--', linewidth=1, label='First spectrum')
+        self.difference_ax_delta.legend(fontsize=8, loc='upper right')
+        self.difference_ax_delta.set_xlabel('Spectrum Index')
+        self.difference_ax_delta.set_ylabel(y_label)
+        self.difference_ax_delta.set_title(delta_title, fontweight='bold')
+        self.difference_ax_delta.grid(True, alpha=0.3)
+
+        stats = (
+            f"n = {len(delta)}\n"
+            f"Mean separation {np.mean(delta):.2f} cm⁻¹\n"
+            f"Range {np.min(delta):.2f} to {np.max(delta):.2f}"
+        )
+        if len(y_values) >= 2 and np.std(x_values) > 0:
+            slope = float(np.polyfit(x_values, y_values, 1)[0])
+            stats += f"\nSlope {slope:+.3f} cm⁻¹ / spectrum"
+        if relative:
+            stats += f"\nFrom first {y_values[-1]:+.2f} cm⁻¹"
+        self._annotate_plot_stats(self.difference_ax_delta, stats)
+
+        self.difference_figure.tight_layout()
+        self.difference_canvas.draw()
+
+    def update_correlation_plot(self):
+        """Scatter peak position against width or amplitude, colored by spectrum order."""
+        import numpy as np
+        from core.matplotlib_config import add_colorbar_no_shrink
+
+        if not hasattr(self, 'correlation_ax'):
+            return
+
+        peak_number = int(self.persistent_plot_settings.get('corr_peak', 1))
+        y_mode = self.persistent_plot_settings.get('corr_y', 'FWHM')
+        if hasattr(self, 'corr_peak_combo') and self.corr_peak_combo.currentData() is not None:
+            peak_number = int(self.corr_peak_combo.currentData())
+        if hasattr(self, 'corr_y_combo'):
+            y_mode = self.corr_y_combo.currentText() or y_mode
+
+        self._clear_correlation_colorbar()
+        self.correlation_ax.clear()
+
+        y_column = 'amplitude' if y_mode == 'Amplitude' else 'fwhm'
+        y_label = 'Amplitude (a.u.)' if y_column == 'amplitude' else 'FWHM (cm⁻¹)'
+        x_label = 'Position (cm⁻¹)'
+        if self._si_correction_enabled():
+            x_label = 'Position (cm⁻¹), Si-corrected'
+
+        frame = self._ordered_peak_frame()
+        subset = None
+        if frame is not None:
+            subset = frame.loc[frame['peak_number'] == peak_number].dropna(subset=['peak_center', y_column])
+            subset = subset.sort_values('spectrum_index')
+
+        if subset is None or subset.empty:
+            self.correlation_ax.set_title(f"Position vs {y_mode}", fontweight='bold')
+            self.correlation_ax.set_xlabel(x_label)
+            self.correlation_ax.set_ylabel(y_label)
+            message = 'No data available\nRun batch processing first'
+            if frame is not None:
+                message = f"No {y_mode.lower()} values for peak {peak_number}"
+            self.correlation_ax.text(
+                0.5, 0.5, message, transform=self.correlation_ax.transAxes,
+                ha='center', va='center', fontsize=11, color='gray', style='italic',
+            )
+            self.correlation_figure.tight_layout()
+            self.correlation_canvas.draw()
+            return
+
+        x_values = subset['peak_center'].to_numpy(dtype=float)
+        y_values = subset[y_column].to_numpy(dtype=float)
+        spectrum_index = subset['spectrum_index'].to_numpy(dtype=float)
+        collection = self.correlation_ax.scatter(
+            x_values, y_values, c=spectrum_index, cmap='viridis', s=42,
+            edgecolors='black', linewidths=0.3,
+        )
+        self.correlation_colorbar = add_colorbar_no_shrink(
+            self.correlation_figure, collection, self.correlation_ax, label='Spectrum index'
+        )
+
+        stats = f"n = {len(x_values)}"
+        if len(x_values) >= 3 and np.std(x_values) > 0 and np.std(y_values) > 0:
+            slope, intercept = np.polyfit(x_values, y_values, 1)
+            x_line = np.linspace(float(np.min(x_values)), float(np.max(x_values)), 40)
+            self.correlation_ax.plot(
+                x_line, slope * x_line + intercept, '--', color='0.25', linewidth=1, label='Linear fit'
+            )
+            correlation = float(np.corrcoef(x_values, y_values)[0, 1])
+            stats += f"\nr = {correlation:.2f}"
+            self.correlation_ax.legend(fontsize=8, loc='best')
+
+        self._annotate_plot_stats(self.correlation_ax, stats)
+        self.correlation_ax.set_title(f"Position vs {y_mode} — Peak {peak_number}", fontweight='bold')
+        self.correlation_ax.set_xlabel(x_label)
+        self.correlation_ax.set_ylabel(y_label)
+        self.correlation_ax.grid(True, alpha=0.3)
+        self.correlation_figure.tight_layout()
+        self.correlation_canvas.draw()
 
     def create_batch_tab(self):
         """Create batch processing tab for processing multiple spectra."""

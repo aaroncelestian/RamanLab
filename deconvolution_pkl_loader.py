@@ -284,6 +284,75 @@ def apply_internal_standard_correction(
     return corrected_evo
 
 
+def silicon_internal_standard_shifts(
+    peaks_df: pd.DataFrame,
+    reference: float = 520.7,
+    half_window: float = 15.0,
+    peak_number: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Per-file shifts that place the Si internal standard on ``reference``.
+
+    Files are grouped by filename, so a Si peak fit in any region of a file
+    corrects every fitted peak from that file:
+
+        shift = reference − measured_Si
+        corrected_center = measured_center + shift
+
+    ``peak_number`` forces a specific fitted peak to be the standard. Otherwise
+    the peak closest to ``reference`` inside ±``half_window`` is used.
+    """
+    result: Dict[str, Any] = {
+        "shifts": {},
+        "n_spectra": 0,
+        "n_corrected": 0,
+        "n_missing": 0,
+        "si_min": None,
+        "si_max": None,
+        "shift_min": None,
+        "shift_max": None,
+        "reference": float(reference),
+    }
+    if peaks_df is None or not isinstance(peaks_df, pd.DataFrame) or peaks_df.empty:
+        return result
+    if "filename" not in peaks_df.columns or "peak_center" not in peaks_df.columns:
+        return result
+
+    frame = peaks_df.dropna(subset=["peak_center"]).copy()
+    if frame.empty:
+        return result
+    frame["peak_center"] = frame["peak_center"].astype(float)
+    frame["filename"] = frame["filename"].map(lambda name: Path(str(name)).name)
+
+    filenames = list(dict.fromkeys(frame["filename"].tolist()))
+    result["n_spectra"] = len(filenames)
+    measured: List[float] = []
+
+    for filename in filenames:
+        group = frame[frame["filename"] == filename]
+        if peak_number is not None and "peak_number" in group.columns:
+            candidates = group[group["peak_number"] == int(peak_number)]
+        else:
+            distance = (group["peak_center"] - float(reference)).abs()
+            candidates = group[distance <= float(half_window)]
+        if candidates.empty:
+            result["n_missing"] += 1
+            continue
+        centers = candidates["peak_center"].astype(float)
+        si_center = float(centers.loc[(centers - float(reference)).abs().idxmin()])
+        result["shifts"][filename] = float(reference) - si_center
+        measured.append(si_center)
+
+    result["n_corrected"] = len(measured)
+    if measured:
+        si = np.asarray(measured, dtype=float)
+        applied = float(reference) - si
+        result["si_min"] = float(si.min())
+        result["si_max"] = float(si.max())
+        result["shift_min"] = float(applied.min())
+        result["shift_max"] = float(applied.max())
+    return result
+
+
 def reference_wavenumber_last_n(positions: np.ndarray, last_n: int) -> float:
     """Mean wavenumber of the last N points (crystallized end-state reference)."""
     positions = np.asarray(positions, dtype=float)
