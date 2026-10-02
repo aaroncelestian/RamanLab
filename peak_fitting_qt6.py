@@ -36,10 +36,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from core.matplotlib_config import CompactNavigationToolbar as NavigationToolbar, apply_theme
 
 # Scientific computing
-from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
-from scipy.optimize import curve_fit
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 from scipy.sparse import csc_matrix
@@ -1256,6 +1254,106 @@ class StackedTabWidget(QWidget):
             self.current_index = index
             self.tabs[index].show()
             self.buttons[index].setChecked(True)
+
+def _canonical_peak_model(model_name):
+    """Map UI model names onto the layouts the fitter actually stores."""
+    key = str(model_name or "gaussian").strip().lower().replace("_", " ").replace("-", " ")
+    if "asymmetric" in key:
+        return "asymmetric"
+    if "pseudo" in key:
+        return "pseudo-voigt"
+    if "lorentz" in key:
+        return "lorentzian"
+    return "gaussian"
+
+
+def _fast_peak_curve(x, params, kind):
+    """Sum of fitted peaks. Vectorized so one residual evaluation is a single pass."""
+    x = np.asarray(x, dtype=float)
+    params = np.asarray(params, dtype=float)
+    step = 5 if kind == "asymmetric" else 3
+    offset = 0.0
+    if len(params) >= step and len(params) % step == 1:
+        offset = float(params[-1])
+        params = params[:-1]
+    if params.size < step:
+        return np.full(x.shape, offset)
+    if kind == "asymmetric":
+        amp = params[0::5]
+        cen = params[1::5]
+        left = np.maximum(np.abs(params[2::5]), 1e-8)
+        right = np.maximum(np.abs(params[3::5]), 1e-8)
+        eta = np.clip(params[4::5], 0.0, 1.0)
+        dx = x[:, None] - cen
+        width = np.where(dx <= 0.0, left, right)
+        z = dx / width
+        gauss = np.exp(-0.5 * z * z)
+        lorentz = (width * width) / (dx * dx + width * width)
+        mix = (1.0 - eta) * gauss + eta * lorentz
+        return (amp * mix).sum(axis=1) + offset
+    amp = params[0::3]
+    cen = params[1::3]
+    width = np.maximum(np.abs(params[2::3]), 1e-8)
+    dx = x[:, None] - cen
+    z = dx / width
+    gauss = np.exp(-0.5 * z * z)
+    if kind == "gaussian":
+        return (amp * gauss).sum(axis=1) + offset
+    lorentz = (width * width) / (dx * dx + width * width)
+    if kind == "lorentzian":
+        return (amp * lorentz).sum(axis=1) + offset
+    return (amp * (0.5 * gauss + 0.5 * lorentz)).sum(axis=1) + offset
+
+
+def _fast_peak_jacobian(x, params, kind):
+    """Analytic derivatives for the 3-parameter models. None for asymmetric Voigt."""
+    if kind == "asymmetric":
+        return None
+    x = np.asarray(x, dtype=float)
+    params = np.asarray(params, dtype=float)
+    step = 3
+    has_offset = len(params) >= step and len(params) % step == 1
+    peak_params = params[:-1] if has_offset else params
+    n_peaks = peak_params.size // step
+    jacobian = np.zeros((x.size, params.size))
+    amp_col = np.arange(n_peaks) * 3
+    center_col = amp_col + 1
+    width_col = amp_col + 2
+    if n_peaks == 0:
+        if has_offset:
+            jacobian[:, -1] = 1.0
+        return jacobian
+    amp = peak_params[0::3]
+    cen = peak_params[1::3]
+    width = np.maximum(np.abs(peak_params[2::3]), 1e-8)
+    dx = x[:, None] - cen
+    z = dx / width
+    gauss = np.exp(-0.5 * z * z)
+    denom = dx * dx + width * width
+    lorentz = (width * width) / denom
+    if kind == "gaussian":
+        jacobian[:, amp_col] = gauss
+        scaled = amp * gauss
+        jacobian[:, center_col] = scaled * z / width
+        jacobian[:, width_col] = scaled * (z * z) / width
+    elif kind == "lorentzian":
+        jacobian[:, amp_col] = lorentz
+        jacobian[:, center_col] = amp * (2.0 * dx * width * width) / (denom * denom)
+        jacobian[:, width_col] = amp * (2.0 * width * dx * dx) / (denom * denom)
+    else:
+        d_mix_d_center = 0.5 * (
+            gauss * z / width + (2.0 * dx * width * width) / (denom * denom)
+        )
+        d_mix_d_width = 0.5 * (
+            gauss * (z * z) / width + (2.0 * width * dx * dx) / (denom * denom)
+        )
+        jacobian[:, amp_col] = 0.5 * (gauss + lorentz)
+        jacobian[:, center_col] = amp * d_mix_d_center
+        jacobian[:, width_col] = amp * d_mix_d_width
+    if has_offset:
+        jacobian[:, -1] = 1.0
+    return jacobian
+
 
 class SpectralDeconvolutionQt6(QDialog):
     """Enhanced spectral deconvolution window with advanced analysis capabilities."""
@@ -2751,6 +2849,30 @@ class SpectralDeconvolutionQt6(QDialog):
             }
         """)
         fit_layout.addWidget(fit_btn)
+
+        self.hold_centers_check = QCheckBox("Hold centers on their starting positions")
+        self.hold_centers_check.setChecked(True)
+        self.hold_centers_check.setToolTip(
+            "Keep each peak within Max shift of the position you marked. "
+            "A peak that is not in the spectrum yet can fall to zero amplitude "
+            "instead of sliding onto another band, so it is still there when it appears."
+        )
+        self.hold_centers_check.toggled.connect(self._on_hold_centers_toggled)
+        fit_layout.addWidget(self.hold_centers_check)
+
+        center_window_row = QHBoxLayout()
+        center_window_row.addWidget(QLabel("Max shift:"))
+        self.center_window_spin = QDoubleSpinBox()
+        self.center_window_spin.setRange(1.0, 200.0)
+        self.center_window_spin.setDecimals(1)
+        self.center_window_spin.setValue(15.0)
+        self.center_window_spin.setPrefix("± ")
+        self.center_window_spin.setSuffix(" cm⁻¹")
+        self.center_window_spin.setToolTip(
+            "How far a fitted center may move from the marked position."
+        )
+        center_window_row.addWidget(self.center_window_spin)
+        fit_layout.addLayout(center_window_row)
         
         # Results
         self.results_text = QTextEdit()
@@ -5185,6 +5307,15 @@ class SpectralDeconvolutionQt6(QDialog):
         radio_layout.addWidget(self.batch_manual_peaks_radio)
         
         peak_source_layout.addLayout(radio_layout)
+
+        self.refine_from_previous_check = QCheckBox("Refine from the previous spectrum")
+        self.refine_from_previous_check.setChecked(True)
+        self.refine_from_previous_check.setToolTip(
+            "Start the next spectrum from the last fit. Centers stay inside "
+            "Max shift of the original marks, so a peak that shows up later "
+            "is still waiting at that position."
+        )
+        peak_source_layout.addWidget(self.refine_from_previous_check)
         
         # Update manual peaks radio button state initially
         self.update_manual_peaks_radio_state()
@@ -6137,9 +6268,13 @@ class SpectralDeconvolutionQt6(QDialog):
         self.ax_main.set_ylabel('Intensity')
         self.ax_main.set_title('Spectrum and Peak Analysis')
         
-        # Show/hide legend based on checkbox
+        # Show/hide legend based on checkbox. Two columns once there are
+        # enough components that a single column would run off the axes.
         if hasattr(self, 'show_legend_check') and self.show_legend_check.isChecked():
-            self.ax_main.legend()
+            n_components = len(self.individual_peak_lines)
+            ncol = 2 if n_components > 8 else 1
+            fontsize = 7 if n_components > 8 else 8
+            self.ax_main.legend(loc='upper right', fontsize=fontsize, ncol=ncol, framealpha=0.92)
         
         # Show/hide grid based on checkbox
         if hasattr(self, 'show_grid_check'):
@@ -6204,6 +6339,16 @@ class SpectralDeconvolutionQt6(QDialog):
         
         return np.array(valid_peaks, dtype=int)
 
+    def _fitted_params_per_peak(self):
+        """Parameter count stored by the fitter for the current model.
+
+        multi_peak_model and fit_peaks use 5 values for asymmetric Voigt
+        and 3 (amplitude, center, width) for Gaussian, Lorentzian, and Pseudo-Voigt.
+        """
+        if getattr(self, 'current_model', '') == "Asymmetric Voigt":
+            return 5
+        return 3
+
     def plot_individual_peaks(self):
         """Plot individual fitted peaks with different colors and R² values."""
         # Check if we have fit parameters and any peaks to plot
@@ -6225,13 +6370,8 @@ class SpectralDeconvolutionQt6(QDialog):
         n_peaks = len(validated_peaks)
         model = self.current_model
         
-        # Determine parameters per peak based on model
-        if model == "Asymmetric Voigt":
-            params_per_peak = 5
-        elif model in ("Pseudo-Voigt", "Voigt"):
-            params_per_peak = 4
-        else:
-            params_per_peak = 3
+        # Must match multi_peak_model: 5 for asymmetric Voigt, 3 for every other model.
+        params_per_peak = self._fitted_params_per_peak()
         
         # Define a color palette for individual peaks
         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
@@ -6239,6 +6379,11 @@ class SpectralDeconvolutionQt6(QDialog):
         
         # Calculate individual R² values for each peak
         individual_r2_values = self.calculate_individual_r2_values()
+        placed_labels = []
+        wn_min = float(np.min(self.wavenumbers))
+        wn_max = float(np.max(self.wavenumbers))
+        y_step = float(np.max(self.processed_intensities)) * 0.055
+        x_tol = (wn_max - wn_min) * 0.035
         
         for i in range(n_peaks):
             start_idx = i * params_per_peak
@@ -6271,7 +6416,7 @@ class SpectralDeconvolutionQt6(QDialog):
                     amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
                 elif model == "Pseudo-Voigt":
-                    amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
                 else:
                     amp, cen, wid = self.fit_params[start_idx:start_idx+3]
@@ -6292,27 +6437,34 @@ class SpectralDeconvolutionQt6(QDialog):
                                         label=label)
                 self.individual_peak_lines.append(line)
                 
-                # Add peak position label on the plot
-                peak_max_idx = np.argmax(peak_curve)
-                peak_max_intensity = peak_curve[peak_max_idx]
-                
-                # Offset label slightly above the peak
-                label_y = peak_max_intensity + np.max(self.processed_intensities) * 0.05
-                
-                self.ax_main.annotate(f'{cen:.1f}', 
-                                    xy=(cen, peak_max_intensity),
-                                    xytext=(cen, label_y),
-                                    ha='center', va='bottom',
-                                    fontsize=9, fontweight='bold',
-                                    color=color,
-                                    bbox=dict(boxstyle='round,pad=0.2', 
-                                            facecolor='white', 
-                                            edgecolor=color, 
-                                            alpha=0.8),
-                                    arrowprops=dict(arrowstyle='->', 
-                                                  color=color, 
-                                                  alpha=0.6, 
-                                                  lw=1))
+                # Label the fitted center, using the component height there.
+                # argmax of the curve walks off to the window edge for a broad
+                # or out-of-range component and parks the label in the wrong place.
+                if wn_min <= cen <= wn_max:
+                    nearest = int(np.argmin(np.abs(self.wavenumbers - cen)))
+                    height = float(peak_curve[nearest])
+                    label_y = height + y_step * 0.65
+                    for prev_x, prev_y in placed_labels:
+                        if abs(cen - prev_x) < x_tol and abs(label_y - prev_y) < y_step:
+                            label_y = prev_y + y_step
+                    placed_labels.append((cen, label_y))
+                    self.ax_main.annotate(
+                        f'{cen:.1f}',
+                        xy=(cen, height),
+                        xytext=(cen, label_y),
+                        ha='center', va='bottom',
+                        fontsize=8, fontweight='bold',
+                        color=color,
+                        annotation_clip=True,
+                        bbox=dict(boxstyle='round,pad=0.2',
+                                  facecolor='white',
+                                  edgecolor=color,
+                                  alpha=0.85),
+                        arrowprops=dict(arrowstyle='->',
+                                        color=color,
+                                        alpha=0.6,
+                                        lw=1),
+                    )
     
     def calculate_individual_r2_values(self):
         """Calculate R² values for individual peaks using a straightforward regional method."""
@@ -6334,14 +6486,9 @@ class SpectralDeconvolutionQt6(QDialog):
         # Generate total fit for reference
         total_fit = self.multi_peak_model(self.wavenumbers, *self.fit_params)
         
-        # Calculate R² for each peak in its local region
-        # Determine parameters per peak based on model
-        if model == "Asymmetric Voigt":
-            params_per_peak = 5
-        elif model in ("Pseudo-Voigt", "Voigt"):
-            params_per_peak = 4
-        else:
-            params_per_peak = 3
+        # Calculate R² for each peak in its local region.
+        # Same layout as the fit: 5 parameters only for asymmetric Voigt.
+        params_per_peak = self._fitted_params_per_peak()
         
         for i in range(n_peaks):
             start_idx = i * params_per_peak
@@ -6374,7 +6521,7 @@ class SpectralDeconvolutionQt6(QDialog):
                     amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.lorentzian(self.wavenumbers, amp, cen, wid)
                 elif model == "Pseudo-Voigt":
-                    amp, cen, wid, eta = self.fit_params[start_idx:start_idx+4]
+                    amp, cen, wid = self.fit_params[start_idx:start_idx+3]
                     peak_curve = self.pseudo_voigt(self.wavenumbers, amp, cen, wid)
                 else:
                     amp, cen, wid = self.fit_params[start_idx:start_idx+3]
@@ -6997,6 +7144,117 @@ class SpectralDeconvolutionQt6(QDialog):
 
         return model
     
+    def _on_hold_centers_toggled(self, checked):
+        """Enable the center window only while centers are held."""
+        if hasattr(self, 'center_window_spin'):
+            self.center_window_spin.setEnabled(bool(checked))
+
+    def _center_hold_half_width(self):
+        """Half-width of the allowed center window, or None when centers are free."""
+        if hasattr(self, 'hold_centers_check') and not self.hold_centers_check.isChecked():
+            return None
+        if hasattr(self, 'center_window_spin'):
+            return float(self.center_window_spin.value())
+        return 15.0
+
+    def _compose_one_peak(self, amp, cen, wid, asymmetric, intensity_ceiling):
+        """Initial guess and bounds for one peak.
+
+        When center hold is on, the center stays within Max shift of the marked
+        position and the amplitude may fall to zero. That parks an absent peak
+        instead of letting it walk onto another band.
+        """
+        wid = max(abs(float(wid)), 1.0)
+        cen = float(cen)
+        hold = self._center_hold_half_width()
+        half = float(hold) if hold is not None else wid * 2.0
+        center_lo, center_hi = cen - half, cen + half
+        if hold is not None:
+            amp_p0 = max(float(amp), 0.0)
+            amp_lo = 0.0
+            amp_hi = max(amp_p0 * 10.0, float(intensity_ceiling) * 0.05, 1.0)
+        else:
+            amp_p0 = max(float(amp), 1.0)
+            amp_lo = amp_p0 * 0.1
+            amp_hi = amp_p0 * 10.0
+        if asymmetric:
+            guess = [amp_p0, cen, wid * 0.8, wid * 1.2, 0.5]
+            lower = [amp_lo, center_lo, wid * 0.2, wid * 0.2, 0.0]
+            upper = [amp_hi, center_hi, wid * 5.0, wid * 5.0, 1.0]
+        else:
+            guess = [amp_p0, cen, wid]
+            lower = [amp_lo, center_lo, max(wid * 0.3, 0.5)]
+            upper = [amp_hi, center_hi, wid * 3.0]
+        p0, lo_out, hi_out = [], [], []
+        for value, lo, hi in zip(guess, lower, upper):
+            if hi <= lo:
+                hi = lo + 1.0
+            span = hi - lo
+            p0.append(min(max(float(value), lo + span * 1e-4), hi - span * 1e-4))
+            lo_out.append(float(lo))
+            hi_out.append(float(hi))
+        return p0, lo_out, hi_out
+
+    def _seed_peak_params(self, initial, previous, lower, upper, params_per_peak):
+        """Copy center and width from the previous spectrum, clipped to this spectrum's bounds.
+
+        Amplitude stays at this spectrum's own guess, so a peak that has just
+        appeared is not started from zero.
+        """
+        seeded = list(initial)
+        n_full = (min(len(initial), len(previous)) // params_per_peak) * params_per_peak
+        for index in range(0, n_full, params_per_peak):
+            for offset in range(1, params_per_peak):
+                lo = float(lower[index + offset])
+                hi = float(upper[index + offset])
+                value = float(previous[index + offset])
+                if hi > lo:
+                    span = hi - lo
+                    value = min(max(value, lo + span * 1e-4), hi - span * 1e-4)
+                seeded[index + offset] = value
+        return seeded
+
+    def _run_bounded_peak_fit(self, x, y, p0, lower, upper, model_name, max_nfev=120):
+        """Fit peaks with bounds, an analytic slope, and a practical stopping tolerance.
+
+        curve_fit was spending most of its time on finite-difference slopes and on
+        chasing a very tight tolerance. least_squares with the analytic Jacobian
+        reaches the same centers in a handful of steps.
+        """
+        from scipy.optimize import least_squares
+
+        kind = _canonical_peak_model(model_name)
+        x = np.asarray(x, dtype=float)
+        y = np.asarray(y, dtype=float)
+        p0 = np.asarray(p0, dtype=float)
+        lower = np.asarray(lower, dtype=float)
+        upper = np.asarray(upper, dtype=float)
+        span = np.maximum(upper - lower, 1e-6)
+        p0 = np.clip(p0, lower + span * 1e-4, upper - span * 1e-4)
+
+        def residual(params):
+            return _fast_peak_curve(x, params, kind) - y
+
+        jacobian = None if kind == "asymmetric" else (lambda params: _fast_peak_jacobian(x, params, kind))
+        solution = least_squares(
+            residual,
+            p0,
+            jac=jacobian if jacobian is not None else "2-point",
+            bounds=(lower, upper),
+            method="trf",
+            ftol=1e-4,
+            xtol=1e-4,
+            gtol=1e-4,
+            max_nfev=int(max_nfev),
+        )
+        fitted = _fast_peak_curve(x, solution.x, kind)
+        residual_values = y - fitted
+        ss_res = float(np.dot(residual_values, residual_values))
+        centered = y - np.mean(y)
+        ss_tot = float(np.dot(centered, centered))
+        r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+        return fitted, solution.x, r_squared, residual_values
+
     def fit_peaks(self):
         """Fit peaks to the spectrum (uses combined automatic and manual peaks)."""
         try:
@@ -7031,7 +7289,6 @@ class SpectralDeconvolutionQt6(QDialog):
                     # Amplitude: Use intensity above floor when no subtraction mode
                     raw_amp = self.processed_intensities[peak_idx]
                     amp = raw_amp - floor_estimate if no_sub else raw_amp
-                    amp = max(amp, 1.0)
 
                     # Center: Use wavenumber at peak
                     cen = self.wavenumbers[peak_idx]
@@ -7039,24 +7296,14 @@ class SpectralDeconvolutionQt6(QDialog):
                     # Width: Estimate from local curvature
                     wid = self.estimate_peak_width(peak_idx)
                     
-                    if self.current_model == "Asymmetric Voigt":
-                        # For asymmetric Voigt: amp, center, left_width, right_width, eta
-                        left_wid = wid * 0.8  # Slightly narrower left side
-                        right_wid = wid * 1.2  # Slightly wider right side
-                        eta = 0.5  # Default mixing parameter
-                        
-                        initial_params.extend([amp, cen, left_wid, right_wid, eta])
-                        
-                        # Set reasonable bounds for asymmetric model
-                        bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.2, wid * 0.2, 0.0])
-                        bounds_upper.extend([amp * 10, cen + wid * 2, wid * 5, wid * 5, 1.0])
-                    else:
-                        # For symmetric models: amp, center, width
-                        initial_params.extend([amp, cen, wid])
-                        
-                        # Set reasonable bounds
-                        bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
-                        bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
+                    asymmetric = self.current_model == "Asymmetric Voigt"
+                    ceiling = float(np.max(self.processed_intensities))
+                    guess, lower, upper = self._compose_one_peak(
+                        amp, cen, wid, asymmetric, ceiling
+                    )
+                    initial_params.extend(guess)
+                    bounds_lower.extend(lower)
+                    bounds_upper.extend(upper)
 
             # Append offset parameter when no background subtracted
             if no_sub:
@@ -7068,85 +7315,24 @@ class SpectralDeconvolutionQt6(QDialog):
                 QMessageBox.warning(self, "Invalid Peaks", "No valid peak parameters could be estimated.")
                 return
             
-            # Prepare bounds
-            bounds = (bounds_lower, bounds_upper)
-            
-            # Define fitting strategies with different approaches
-            strategies = [
-                # Strategy 1: Standard fitting
-                {
-                    'p0': initial_params,
-                    'bounds': bounds,
-                    'method': 'trf',
-                    'max_nfev': 2000
-                },
-                # Strategy 2: Relaxed bounds
-                {
-                    'p0': initial_params,
-                    'bounds': ([b * 0.5 for b in bounds_lower], [b * 1.5 for b in bounds_upper]),
-                    'method': 'lm',
-                    'max_nfev': 1000
-                },
-                # Strategy 3: No bounds (if others fail)
-                {
-                    'p0': initial_params,
-                    'method': 'lm',
-                    'max_nfev': 3000
-                }
-            ]
-            
-            fit_success = False
-            best_params = None
-            best_r_squared = -1
-            
-            for i, strategy in enumerate(strategies):
-                try:
-                    # Apply strategy
-                    if 'bounds' in strategy:
-                        popt, pcov = curve_fit(
-                            self.multi_peak_model, 
-                            self.wavenumbers, 
-                            self.processed_intensities,
-                            p0=strategy['p0'],
-                            bounds=strategy['bounds'],
-                            method=strategy['method'],
-                            max_nfev=strategy['max_nfev']
-                        )
-                    else:
-                        popt, pcov = curve_fit(
-                            self.multi_peak_model, 
-                            self.wavenumbers, 
-                            self.processed_intensities,
-                            p0=strategy['p0'],
-                            method=strategy['method'],
-                            max_nfev=strategy['max_nfev']
-                        )
-                    
-                    # Calculate R-squared
-                    fitted_y = self.multi_peak_model(self.wavenumbers, *popt)
-                    ss_res = np.sum((self.processed_intensities - fitted_y) ** 2)
-                    ss_tot = np.sum((self.processed_intensities - np.mean(self.processed_intensities)) ** 2)
-                    r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                    
-                    # Check if this is the best fit so far
-                    if r_squared > best_r_squared:
-                        best_params = popt
-                        best_r_squared = r_squared
-                        fit_success = True
-                    
-                    break  # If we reach here, fitting was successful
-                    
-                except Exception as e:
-                    continue  # Try next strategy
+            # One bounded fit. A seeded refinement needs only a short budget.
+            fitted_curve, best_params, best_r_squared, fit_residuals = self._run_bounded_peak_fit(
+                self.wavenumbers,
+                self.processed_intensities,
+                initial_params,
+                bounds_lower,
+                bounds_upper,
+                self.current_model,
+                max_nfev=160,
+            )
+            fit_success = best_params is not None and np.all(np.isfinite(best_params))
             
             if fit_success:
                 # Store the best results
                 self.fit_params = best_params
                 self.fit_result = True
                 
-                # Calculate residuals properly
-                fitted_curve = self.multi_peak_model(self.wavenumbers, *best_params)
-                self.residuals = self.processed_intensities - fitted_curve
+                self.residuals = fit_residuals
                 
                 # Update displays
                 self.update_plot()
@@ -9501,6 +9687,9 @@ class SpectralDeconvolutionQt6(QDialog):
             self.batch_monitor.processing_cancelled.connect(self._on_batch_cancelled)
             self.batch_monitor.save_results_requested.connect(self.export_batch_results)
             
+            # Each batch starts from the marked positions, then may refine forward.
+            self._batch_seed_params = None
+
             # Show progress
             self.batch_progress_bar.setVisible(True)
             self.batch_progress_bar.setMaximum(self.batch_file_list.count())
@@ -9731,11 +9920,8 @@ class SpectralDeconvolutionQt6(QDialog):
                             fit_params=fit_params, total_r2=total_r2, model=current_model
                         )
                         
-                        # Allow GUI to update
+                        # Keep the window responsive without pausing between spectra.
                         QApplication.processEvents()
-                        
-                        # Small delay to see the visualization
-                        time.sleep(0.1)
                         
                         region_result = {
                             'start': start,
@@ -9853,86 +10039,54 @@ class SpectralDeconvolutionQt6(QDialog):
                 # Width: Estimate from local curvature
                 wid = self._estimate_peak_width_for_batch(wavenumbers, intensities, peak_idx)
                 
-                if current_model.lower() == 'asymmetric voigt':
-                    # For asymmetric Voigt: amp, center, left_width, right_width, eta
-                    left_wid = wid * 0.8  # Slightly narrower left side
-                    right_wid = wid * 1.2  # Slightly wider right side
-                    eta = 0.5  # Default mixing parameter
-                    
-                    initial_params.extend([amp, cen, left_wid, right_wid, eta])
-                    
-                    # Set reasonable bounds for asymmetric model
-                    bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.2, wid * 0.2, 0.0])
-                    bounds_upper.extend([amp * 10, cen + wid * 2, wid * 5, wid * 5, 1.0])
-                else:
-                    # For symmetric models: amp, center, width
-                    initial_params.extend([amp, cen, wid])
-                    
-                    # Set reasonable bounds
-                    bounds_lower.extend([amp * 0.1, cen - wid * 2, wid * 0.3])
-                    bounds_upper.extend([amp * 10, cen + wid * 2, wid * 3])
+                asymmetric = current_model.lower() == 'asymmetric voigt'
+                ceiling = float(np.max(intensities)) if len(intensities) else 1.0
+                guess, lower, upper = self._compose_one_peak(
+                    amp, cen, wid, asymmetric, ceiling
+                )
+                initial_params.extend(guess)
+                bounds_lower.extend(lower)
+                bounds_upper.extend(upper)
         
         if not initial_params:
             return None, None, None, intensities.copy()
+
+        params_per_peak = 5 if current_model.lower() == 'asymmetric voigt' else 3
+        previous = getattr(self, '_batch_seed_params', None)
+        use_previous = (
+            previous is not None
+            and hasattr(self, 'refine_from_previous_check')
+            and self.refine_from_previous_check.isChecked()
+            and self._center_hold_half_width() is not None
+            and len(previous) == len(initial_params)
+        )
+        if previous is not None and len(previous) != len(initial_params):
+            self._batch_seed_params = None
+        if use_previous:
+            initial_params = self._seed_peak_params(
+                initial_params, previous, bounds_lower, bounds_upper, params_per_peak
+            )
         
-        # Define fitting strategies
-        strategies = [
-            {
-                'p0': initial_params,
-                'bounds': (bounds_lower, bounds_upper),
-                'method': 'trf',
-                'max_nfev': 1000
-            },
-            {
-                'p0': initial_params,
-                'bounds': ([b * 0.5 for b in bounds_lower], [b * 1.5 for b in bounds_upper]),
-                'method': 'lm',
-                'max_nfev': 500
-            },
-            {
-                'p0': initial_params,
-                'method': 'lm',
-                'max_nfev': 1000
-            }
-        ]
-        
-        # Try fitting with different strategies
-        for strategy in strategies:
-            try:
-                if 'bounds' in strategy:
-                    popt, pcov = curve_fit(
-                        lambda x, *params: self._multi_peak_model_for_batch(x, params, current_model),
-                        wavenumbers, intensities,
-                        p0=strategy['p0'],
-                        bounds=strategy['bounds'],
-                        method=strategy['method'],
-                        max_nfev=strategy['max_nfev']
-                    )
-                else:
-                    popt, pcov = curve_fit(
-                        lambda x, *params: self._multi_peak_model_for_batch(x, params, current_model),
-                        wavenumbers, intensities,
-                        p0=strategy['p0'],
-                        method=strategy['method'],
-                        max_nfev=strategy['max_nfev']
-                    )
-                
-                # Calculate fitted curve and residuals
-                fitted_curve = self._multi_peak_model_for_batch(wavenumbers, popt, current_model)
-                residuals = intensities - fitted_curve
-                
-                # Calculate R-squared
-                ss_res = np.sum(residuals ** 2)
-                ss_tot = np.sum((intensities - np.mean(intensities)) ** 2)
-                total_r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-                
-                return fitted_curve, popt, total_r2, residuals
-                
-            except Exception as e:
-                continue
-        
-        # If all strategies failed, return None
-        return None, None, None, intensities.copy()
+        # A spectrum that starts from the previous fit only needs a short polish.
+        max_nfev = 40 if use_previous else 120
+        try:
+            fitted_curve, popt, total_r2, residuals = self._run_bounded_peak_fit(
+                wavenumbers, intensities, initial_params, bounds_lower, bounds_upper,
+                current_model, max_nfev=max_nfev,
+            )
+        except Exception as exc:
+            print(f"Peak fit failed: {exc}")
+            return None, None, None, intensities.copy()
+
+        if popt is None or not np.all(np.isfinite(popt)):
+            return None, None, None, intensities.copy()
+
+        # Park this result for the next spectrum. Centers were already
+        # clipped to the original marks, so a quiet peak stays put.
+        if self._center_hold_half_width() is not None:
+            self._batch_seed_params = np.array(popt, dtype=float)
+
+        return fitted_curve, popt, total_r2, residuals
     
     def _multi_peak_model_for_batch(self, x, params, model='gaussian'):
         """Multi-peak model for batch processing."""
@@ -10155,9 +10309,9 @@ class SpectralDeconvolutionQt6(QDialog):
                         peak_model = region_result.get('peak_params', {}).get('model', 'gaussian')
                         if peak_model in ('asymmetric voigt', 'Asymmetric Voigt'):
                             params_per_peak = 5
-                        elif peak_model in ('pseudo-voigt', 'Pseudo-Voigt', 'voigt', 'Voigt'):
-                            params_per_peak = 4
                         else:
+                            # Gaussian, Lorentzian, and Pseudo-Voigt are stored as
+                            # amplitude, center, width. Pseudo-Voigt's eta is fixed.
                             params_per_peak = 3
                         n_peaks_fit = len(peaks)
                         peak_rows = []

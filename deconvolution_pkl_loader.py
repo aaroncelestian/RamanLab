@@ -113,9 +113,10 @@ def _legacy_list_to_dataframes(file_results: List[dict]) -> tuple:
             if peaks is not None and fit_params is not None:
                 peak_params = region_result.get("peak_params", {})
                 model = peak_params.get("model", "gaussian") if isinstance(peak_params, dict) else "gaussian"
-                params_per_peak = 5 if str(model).lower() == "asymmetric voigt" else (
-                    4 if str(model).lower() in ("pseudo-voigt", "voigt") else 3
-                )
+                # Spectral deconvolution stores amplitude, center, and width for
+                # Gaussian, Lorentzian, and Pseudo-Voigt. Only asymmetric Voigt
+                # uses five parameters.
+                params_per_peak = 5 if str(model).lower() == "asymmetric voigt" else 3
 
                 for i in range(len(peaks)):
                     base = i * params_per_peak
